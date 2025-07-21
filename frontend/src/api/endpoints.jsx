@@ -90,10 +90,7 @@ api.interceptors.response.use(
       originalRequest.url.includes('token/refresh') ||
       originalRequest._retry
     ) {
-      if (error.response?.status === 401) {
-        // Очищаем токены или куки, если хранишь вручную (необязательно)
-        window.location = '/prisijungti/';
-      }
+      // Просто пробрасываем ошибку, ничего не делаем!
       return Promise.reject(error);
     }
 
@@ -105,11 +102,9 @@ api.interceptors.response.use(
       if (didRefresh) {
         console.log('Token was refreshed, retrying original request');
         return api(originalRequest);
-      } else {
-        // refresh_token() вернул false, надо разлогинить
-        window.location = '/prisijungti/';
-        return Promise.reject(error);
       }
+      // refresh_token() вернул false, просто пробрасываем ошибку!
+      return Promise.reject(error);
     }
 
     // Любой другой случай — пробрасываем ошибку
