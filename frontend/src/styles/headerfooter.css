@@ -1,0 +1,75 @@
+.header-container {
+    background-color: #1E2329;
+    display: flex;
+    align-items: center; /* Выравнивание по вертикали */
+    justify-content: flex-start; /* Логотип будет слева */
+    padding: 5px; /* Добавьте отступы для удобства */
+    height: 60px;
+  }
+  
+  /* Стиль для логотипа */
+  .logo-container {
+    display: flex; /* Flexbox для выравнивания */
+    align-items: center; /* Вертикальное выравнивание */
+    justify-content: flex-start; /* Слева по умолчанию */
+    padding-top: 20px;
+    padding-left: 20px; /* Отступы */
+    width: 100%; /* Контейнер занимает всю ширину */
+  }
+  
+  .logo-container img {
+    max-height: 40px; /* Ограничение максимальной высоты логотипа */
+    width: auto; /* Автоматическое изменение ширины */
+  }
+  
+  @media (max-width: 768px) { /* Настройки для мобильных устройств */
+    .logo-container {
+        justify-content: center; /* Центрируем логотип на мобильных */
+        padding-top: 20px;
+        padding-left: 0px;
+    }
+  }
+  
+  
+  
+  
+  /* Стильi для footera */
+  .footer-container {
+    display: flex;
+    justify-content: space-between;
+    padding: 20px;
+    background-color: #FAFAFA;
+    border-top: 1px solid #ddd;
+    font-family: Arial, sans-serif;
+  }
+  
+  .footer-left {
+    font-size: 14px;
+    color: #52525B;
+    max-width: 50%;
+    padding-right: 15px;
+  }
+  
+  .footer-right {
+    display: flex;
+    align-items: center;
+  }
+  
+  .footer-links {
+    list-style: none;
+    display: flex;
+    gap: 15px;
+    margin: 0;
+    padding: 0;
+  }
+  
+  .footer-links li a {
+    color: #52525B;
+    text-decoration: none;
+    font-size: 14px;
+  }
+  
+  .footer-links li a:hover {
+    text-decoration: none;
+    color: #333;
+  }

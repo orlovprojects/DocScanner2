@@ -1,0 +1,27 @@
+# Виртуальное окружение
+venv/
+.venv/
+env/
+
+node_modules/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Секреты и переменные окружения
+.env
+
+# Базы данных (если SQLite)
+*.sqlite3
+
+# Логи и временные файлы
+*.log
+
+# Статические и медиа-файлы (если большие)
+staticfiles/
+media/
+
+backend/backend/settings.py
+
+backend/backend/keys/*.json

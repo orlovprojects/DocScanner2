@@ -1,0 +1,39 @@
+/* .main-container {
+    min-height: 600px;
+    margin: 0 auto; 
+    padding: 20px; 
+    box-sizing: border-box; 
+    background-color: #A1A3A9;
+    font-family: Arial, sans-serif;
+} */
+
+.main-container h1, .main-container p, .info-page h2, .info-page h3 {
+    padding-top: 10px;
+    padding-left: 20px;
+    color: #f5be0d; /* Цвет заголовков */
+    font-family: Arial, sans-serif; /* Шрифт для заголовков */
+}
+
+.main-container p {
+    padding-top: 10px;
+    padding-left: 20px;
+    color: #fff; /* Цвет текста */
+    font-family: Arial, sans-serif; /* Шрифт для текста */
+    line-height: 1.6; /* Межстрочный интервал */
+}
+
+.main-container a {
+    color: #4A90E2; /* Цвет ссылок */
+    text-decoration: none; /* Без подчеркивания */
+}
+
+.main-container a:hover {
+    text-decoration: underline; /* Подчеркивание при наведении */
+}
+
+/* Пример для мобильных устройств */
+@media (max-width: 600px) {
+    .info-page {
+        padding: 10px; /* Уменьшаем отступы на мобильных */
+    }
+}

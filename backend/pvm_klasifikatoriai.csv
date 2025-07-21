@@ -1,0 +1,55 @@
+kodas;aprasymas;tarifas
+PVM1;Šalies teritorijoje patiektos prekės ir / ar suteiktos paslaugos (Lietuvos Respublikos pridėtinės vertės mokesčio įstatymo (toliau - PVMĮ) 19 str. 1 dalis);21
+PVM2;Šalies teritorijoje patiektos prekės ir / ar suteiktos paslaugos (PVMĮ 19 str. 3 dalis);9
+PVM3;Šalies teritorijoje patiektos prekės ir / ar suteiktos paslaugos (PVMĮ 19 str. 4 dalis);5
+PVM25;Atvejai, kai pirkėjas išskaito ir sumoka PVM už jam tiekiamas prekes ar teikiamas paslaugas (PVMĮ 96 straipsnis);21
+PVM26;Atvejai, kai pirkėjas išskaito ir sumoka PVM už jam tiekiamas prekes ar teikiamas paslaugas (PVMĮ 96 straipsnis);9
+PVM27;Atvejai, kai pirkėjas išskaito ir sumoka PVM už jam tiekiamas prekes ar teikiamas paslaugas (PVMĮ 96 straipsnis);5
+PVM5;Atvejai, kai prekių tiekimas ir paslaugų teikimas neapmokestinamas PVM (PVMĮ 20–33 ir 112 straipsniai);-
+PVM6;Atvejai, kai prekės (paslaugos) yra suvartotos PVM mokėtojo privatiems poreikiams tenkinti (PVMĮ 5 ir 8 straipsniai);21
+PVM7;Atvejai, kai prekės (paslaugos) yra suvartotos PVM mokėtojo privatiems poreikiams tenkinti (PVMĮ 5 ir 8 straipsniai);9
+PVM8;Atvejai, kai prekės (paslaugos) yra suvartotos PVM mokėtojo privatiems poreikiams tenkinti (PVMĮ 5 ir 8 straipsniai);5
+PVM28;Atvejai, kai prekės (paslaugos) yra suvartotos PVM mokėtojo privatiems poreikiams tenkinti (PVMĮ 5 ir 8 straipsniai);0
+PVM29;Atvejai, kai prekės (paslaugos) yra suvartotos PVM mokėtojo privatiems poreikiams tenkinti (PVMĮ 5 ir 8 straipsniai);-
+PVM9;PVM mokėtojo ilgalaikio materialiojo turto pasigaminimas ir nuosavybės teise priklausančio ar nepriklausančio pastato (statinio) esminis pagerinimas (PVMĮ 6 straipsnis);21
+PVM30;PVM mokėtojo ilgalaikio materialiojo turto pasigaminimas ir nuosavybės teise priklausančio ar nepriklausančio pastato (statinio) esminis pagerinimas (PVMĮ 6 straipsnis);9
+PVM31;PVM mokėtojo ilgalaikio materialiojo turto pasigaminimas ir nuosavybės teise priklausančio ar nepriklausančio pastato (statinio) esminis pagerinimas (PVMĮ 6 straipsnis);5
+PVM32;Atvejai, kai sandoriams taikoma speciali apmokestinimo schema (marža) (PVMĮ II, III skirsniai);21
+PVM33;Atvejai, kai sandoriams taikoma speciali apmokestinimo schema (marža) (PVMĮ II, III skirsniai);0
+PVM12;Prekių eksportas (PVMĮ 41 straipsnis);0
+PVM13;ES PVM mokėtojams patiektos prekės (PVMĮ 49 straipsnio 1, 2, 4 dalys), išskyrus tiekimus, deklaruojamus PVM50 mokesčio kodu;0
+PVM14;Kiti sandoriai (PVMĮ 42, 43, 44, 45, 46, 47, 48 straipsniai, 49 straipsnio 2 (išskyrus ES PVM mokėtojams tiekiamas naujas transporto priemones) ir 3 dalys, 51, 52 straipsniai, 53 straipsnio 1, 5, 6, 10 dalys);0
+PVM15;Už Lietuvos ribų patiektos prekės ir/ar suteiktos paslaugos (atvejai, kai PVM neskaičiuojamas, nes prekių tiekimas ir / ar paslaugų teikimas laikomas įvykusiu už Lietuvos ribų ir yra ne PVM objektas Lietuvoje, bet PVM atskaita galima pagal PVMĮ 58 str. 1 dalies 2 punkto nuostatas);-
+PVM34;Už Lietuvos ribų patiektos prekės ir/ar suteiktos paslaugos (atvejai, kai PVM neskaičiuojamas, nes prekių tiekimas ir / ar paslaugų teikimas laikomas įvykusiu už Lietuvos ribų ir yra ne PVM objektas Lietuvoje, o PVM atskaita atsižvelgiant į PVMĮ 58 str. nuostatas negalima);-
+PVM16;Atvejai, kai iš kitų valstybių narių prekių įsigijimas laikomas įvykusiu šalies teritorijoje (PVMĮ 41 ir 122 straipsniai);21
+PVM17;Atvejai, kai iš kitų valstybių narių prekių įsigijimas laikomas įvykusiu šalies teritorijoje (PVMĮ 41 ir 122 straipsniai);9
+PVM18;Atvejai, kai iš kitų valstybių narių prekių įsigijimas laikomas įvykusiu šalies teritorijoje (PVMĮ 41 ir 122 straipsniai);5
+PVM35;Atvejai, kai iš kitų valstybių narių prekių įsigijimas laikomas įvykusiu šalies teritorijoje (PVMĮ 41 ir 122 straipsniai);0
+PVM36;Atvejai, kai iš kitų valstybių narių prekių įsigijimas laikomas įvykusiu šalies teritorijoje (PVMĮ 41 ir 122 straipsniai);-
+PVM19;Atvejai, kai Lietuvos Respublikos PVM mokėtojo, trikampėje prekyboje esančio tarpininkaujančia šalimi (antrasis asmuo), iš vienos valstybės narės PVM mokėtojo įsigytos prekės iš karto buvo nugabentos į kitą valstybę narę, kurioje patiektos tos kitos valstybės narės PVM mokėtojui (PVMĮ 122 straipsnio 3 dalis);-
+PVM20;Iš užsienio valstybių (išskyrus iš ES PVM mokėtojų) įsigytos paslaugos, kurių pardavimo PVM apskaičiuoja pirkėjas (PVMĮ 95 str. 2 dalis);21
+PVM37;Iš užsienio valstybių (išskyrus iš ES PVM mokėtojų) įsigytos paslaugos, kurių pardavimo PVM apskaičiuoja pirkėjas (PVMĮ 95 str. 2 dalis);5
+PVM38;Iš užsienio valstybių (išskyrus iš ES PVM mokėtojų) įsigytos paslaugos, kurių pardavimo PVM pirkėjas neskaičiuoja (PVMĮ 95 str. 1 dalies 3 punktas);0
+PVM39;Iš užsienio valstybių (išskyrus iš ES PVM mokėtojų) įsigytos paslaugos, kurių pardavimo PVM pirkėjas neapskaičiuoja (PVMĮ 95 str. 1 dalies 2 punktas);-
+PVM21;Iš ES PVM mokėtojų įsigytos paslaugos, kurių pardavimo PVM apskaičiuoja pirkėjas (PVMĮ 95 str. 2 dalis);21
+PVM40;Iš ES PVM mokėtojų įsigytos paslaugos, kurių pardavimo PVM apskaičiuoja pirkėjas (PVMĮ 95 str. 2 dalis);5
+PVM41;Iš ES PVM mokėtojų įsigytos paslaugos, kurių pardavimo PVM pirkėjas neapskaičiuoja (PVMĮ 95 str. 1 dalies 3 punktas);0
+PVM42;Iš ES PVM mokėtojų įsigytos paslaugos, kurių pardavimo PVM pirkėjas neapskaičiuoja (PVMĮ 95 str. 1 dalies 2 punktas);-
+PVM43;Atvejai, kai už šalies teritorijoje neįsikūrusio užsienio apmokestinamojo asmens šalies teritorijoje tiekiamas prekes ir / ar teikiamas paslaugas PVM apskaičiuoja ir sumoka pirkėjas (PVMĮ 95 str. 3, 4 ir 5 dalys);21
+PVM44;Atvejai, kai už šalies teritorijoje neįsikūrusio užsienio apmokestinamojo asmens šalies teritorijoje tiekiamas prekes ir / ar teikiamas paslaugas PVM apskaičiuoja ir sumoka pirkėjas (PVMĮ 95 str. 3, 4 ir 5 dalys);9
+PVM45;Atvejai, kai už šalies teritorijoje neįsikūrusio užsienio apmokestinamojo asmens šalies teritorijoje tiekiamas prekes ir / ar teikiamas paslaugas PVM apskaičiuoja ir sumoka pirkėjas (PVMĮ 95 str. 3, 4 ir 5 dalys);5
+PVM46;Atvejai, kai už šalies teritorijoje neįsikūrusio užsienio apmokestinamojo asmens šalies teritorijoje tiekiamas prekes ir / ar teikiamas kitas paslaugas PVM pirkėjas neapskaičiuoja (PVMĮ 95 str. 3, 4 ir 5 dalys);0
+PVM47;Atvejai, kai už šalies teritorijoje neįsikūrusio užsienio apmokestinamojo asmens šalies teritorijoje tiekiamas prekes ir / ar teikiamas kitas paslaugas PVM apskaičiuoja ir sumoka pirkėjas (PVMĮ 95 str. 3, 4 ir 5 dalys);-
+PVM23;Sumokėtas importo PVM;21,9,5
+PVM24;Importo PVM, kurio įskaitymą kontroliuoja VMI;21,9,5
+PVM48;Už Lietuvos ribų įsigytos prekės ir/ar paslaugos (įskaitant atvejus, kai apskaičiuotas užsienio šalies PVM ir atvejus, kai prekės importuojamos vidaus vartojimui);-
+PVM49;Atvejai, kai žemės ūkio produkcija ir paslaugos įsigytos iš ūkininkų, kuriems taikoma kompensacinio PVM tarifo schema;6
+PVM100;Kiti atvejai;-
+PVM50;ES PVM mokėtojams patiektos prekės, kurios buvo pristatytos tiekti pagal pareikalavimą, PVM įstatymo 42 straipsnyje nurodytomis sąlygomis (PVMĮ 49 straipsnio 1, 4 dalys);0
+PVM51;Sandoriai, apmokestinami taikant PVMĮ 19 straipsnio 5 dalies 2 ir 3 punktus (visi atvejai, įskaitant, pvz., PVMĮ 5 straipsnį);0
+PVM52;Atvejai, kai sandoriams taikoma speciali apmokestinimo schema (marža) (PVMĮ II, III skirsniai);9
+PVM53;Atvejai, kai sandoriams taikoma speciali apmokestinimo schema (marža) (PVMĮ II, III skirsniai);5
+PVM54;Iš užsienio valstybių (išskyrus iš ES PVM mokėtojų) įsigytos paslaugos, kurių pardavimo PVM apskaičiuoja pirkėjas (PVMĮ 95 str. 2 dalis);9
+PVM55;PVMĮ 501 straipsnio 1 ir 4 dalyse nurodyti sandoriai;0
+PVM56;PVMĮ 501 straipsnio 2 dalyje nurodyti sandoriai;-
+PVM57;Iš ES PVM mokėtojų įsigytos paslaugos, kurių pardavimo PVM apskaičiuoja pirkėjas (PVMĮ 95 str. 2 dalis);9

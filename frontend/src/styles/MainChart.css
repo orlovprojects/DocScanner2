@@ -1,0 +1,147 @@
+/* Reset default margin, padding, and box sizing */
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+/* Master container that wraps the entire content */
+/* .master-container {
+    width: 100%;
+    background-color: #1E2329; 
+    min-height: 700px;
+    display: flex; 
+    justify-content: space-between; 
+    align-items: flex-start; 
+    /* padding: 20px; 
+} */
+
+
+/* .chart-container {
+    flex: 1; 
+    min-height: 450px; 
+    width: 70%; 
+    padding: 10px; 
+    background-color: #fff; 
+    margin-right: 20px; 
+} */
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+/* * {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+.master-container {
+    width: 100%;
+    background-color: #1E2329;
+    min-height: 700px;
+    display: flex;
+}
+
+
+
+.chart-container {
+    min-height: 450px; 
+    width: 70%;
+    padding: 10px;
+    padding-top: 20px;
+    margin: 20px;
+}
+
+.metrics {
+    color: #fff;
+}
+
+
+.select-wrapper, .range-wrapper {
+    margin: 10px 0;
+}
+
+label {
+    font-size: 14px;
+    font-weight: bold;
+}
+
+select, input[type="range"] {
+    margin-left: 10px;
+}
+
+input[type="range"] {
+    width: 200px;
+}
+
+span {
+    margin-left: 10px;
+    font-size: 14px;
+} */
+
+
+
+
+
+/* dlia backtestera */
+
+/* .select-wrapper,
+.range-wrapper {
+    margin-bottom: 20px;
+}
+
+.metrics,
+.backtester-data {
+    margin-top: 20px;
+}
+
+.metrics ul {
+    list-style-type: none;
+    padding: 0;
+}
+
+.metrics li {
+    margin: 5px 0;
+}
+
+table {
+    width: 80%;
+    border-collapse: collapse;
+    margin-top: 10px;
+}
+
+th,
+td {
+    border: 1px solid #ddd;
+    padding: 8px;
+    text-align: center;
+}
+
+th {
+    background-color: #f4f4f4;
+}
+
+.chart-container {
+    width: 60%;
+    height: 400px;
+}
+
+.metrics {
+    width: 60%;
+    padding-left: 20px;
+} */
