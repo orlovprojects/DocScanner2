@@ -41,7 +41,7 @@ function App() {
             <Header /> {/* Добавляем Header сюда */}
             <Routes>
                 <Route path="/" element={<AtlyginimoSkaiciuokle />} />
-                <Route path="/dokskenas" element={<Dokskenas />} />
+                {/* <Route path="/dokskenas" element={<Dokskenas />} /> */}
                 <Route path="/suvestine" element={<PrivateRoute><UploadPage /></PrivateRoute>} />
                 <Route path="/prisijungti" element={<RedirectIfAuthenticated><Login /></RedirectIfAuthenticated>} />
                 <Route path="/registruotis" element={<RedirectIfAuthenticated><Register /></RedirectIfAuthenticated>} />
