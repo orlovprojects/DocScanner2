@@ -3,6 +3,8 @@ venv/
 .venv/
 env/
 
+.vscode/
+
 node_modules/
 
 # Python cache
@@ -21,7 +23,5 @@ __pycache__/
 # Статические и медиа-файлы (если большие)
 staticfiles/
 media/
-
-backend/backend/settings.py
 
 backend/backend/keys/*.json

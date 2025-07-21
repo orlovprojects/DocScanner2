@@ -55,28 +55,64 @@ api.interceptors.request.use((config) => {
 });
 
 // Интерсептор, который ловит 401, пробует обновить токен один раз и ретраит запрос
+// api.interceptors.response.use(
+//   response => response,
+//   async error => {
+//     const originalRequest = error.config;
+//     if (
+//       originalRequest.url.includes('token/refresh') ||
+//       originalRequest._retry
+//     ) {
+//       if (error.response?.status === 401) {
+//         window.location = '/prisijungti/';
+//       }
+//       return Promise.reject(error);
+//     }
+//     if (error.response?.status === 401) {
+//       console.log('Interceptor caught 401, attempting refresh…');
+//       originalRequest._retry = true;
+//       const didRefresh = await refresh_token();
+//       if (didRefresh) {
+//         console.log('Token was refreshed, retrying original request');
+//         return api(originalRequest);
+//       }
+//     }
+//     return Promise.reject(error);
+//   }
+// );
 api.interceptors.response.use(
   response => response,
   async error => {
     const originalRequest = error.config;
+
+    // Если refresh токен уже был использован или это попытка обновить сам refresh
     if (
       originalRequest.url.includes('token/refresh') ||
       originalRequest._retry
     ) {
       if (error.response?.status === 401) {
+        // Очищаем токены или куки, если хранишь вручную (необязательно)
         window.location = '/prisijungti/';
       }
       return Promise.reject(error);
     }
-    if (error.response?.status === 401) {
+
+    // Только одна попытка refresh per запрос
+    if (error.response?.status === 401 && !originalRequest._retry) {
       console.log('Interceptor caught 401, attempting refresh…');
       originalRequest._retry = true;
       const didRefresh = await refresh_token();
       if (didRefresh) {
         console.log('Token was refreshed, retrying original request');
         return api(originalRequest);
+      } else {
+        // refresh_token() вернул false, надо разлогинить
+        window.location = '/prisijungti/';
+        return Promise.reject(error);
       }
     }
+
+    // Любой другой случай — пробрасываем ошибку
     return Promise.reject(error);
   }
 );
