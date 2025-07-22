@@ -30,6 +30,8 @@ SITE_URL_BACKEND = os.getenv("SITE_URL_BACKEND", "http://localhost:8000")
 # Медиафайлы
 MEDIA_URL = '/media/'
 MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
+DATA_UPLOAD_MAX_MEMORY_SIZE = 200 * 1024 * 1024  # 200 MB
+
 
 # Poppler (оставь пустым, если на сервере не нужен или путь другой)
 POPPLER_PATH = os.getenv("POPPLER_PATH", "")
