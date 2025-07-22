@@ -20,17 +20,35 @@ def vat_to_int_str(val):
     except Exception:
         return "0"
 
+def get_price_or_zero(val):
+    try:
+        if val is None or str(val).strip() == "":
+            return "0.00"
+        val_f = float(val)
+        if val_f == 0:
+            return "0.00"
+        return f"{val_f:.2f}"
+    except Exception:
+        return "0.00"
+
+def tostring_with_full_tags(elem):
+    # Генерирует XML с раскрытыми тегами
+    raw = ET.tostring(elem, encoding="utf-8")
+    # Преобразуем <tag/> в <tag></tag>
+    # Это покрывает все пустые теги (даже если пробелы внутри <tag />)
+    import re
+    return re.sub(b'<(\w+)([^>]*)/>', b'<\\1\\2></\\1>', raw)
+
 def export_document_to_centras_xml(document: ScannedDocument, orig_path: str = "") -> bytes:
     root = ET.Element('root')
     dok = ET.SubElement(root, 'dokumentas')
 
-    # Определяем, какие поля использовать
     if document.pirkimas_pardavimas == 'pirkimas':
         party_prefix = 'seller'
     elif document.pirkimas_pardavimas == 'pardavimas':
         party_prefix = 'buyer'
     else:
-        party_prefix = 'seller'  # по умолчанию
+        party_prefix = 'seller'
 
     ET.SubElement(dok, 'kontrah').text         = smart_str(getattr(document, f"{party_prefix}_name", "") or "")
     ET.SubElement(dok, 'kontrah_kodas').text   = smart_str(getattr(document, f"{party_prefix}_id_programoje", "") or "")
@@ -47,11 +65,11 @@ def export_document_to_centras_xml(document: ScannedDocument, orig_path: str = "
     apsk_data = getattr(document, "operation_date", None) or invoice_date
 
     ET.SubElement(dok, 'data').text        = format_date(invoice_date)
-    ET.SubElement(dok, 'dok_suma').text    = str(document.amount_with_vat or "")
+    ET.SubElement(dok, 'dok_suma').text    = get_price_or_zero(document.amount_with_vat)
     ET.SubElement(dok, 'dok_num').text     = smart_str(document.document_number or "")
     ET.SubElement(dok, 'apmok_iki').text   = format_date(due_date)
-    ET.SubElement(dok, 'pvm_suma').text    = str(document.vat_amount if document.vat_amount is not None else "0")
-    ET.SubElement(dok, 'bepvm_suma').text  = str(document.amount_wo_vat or "")
+    ET.SubElement(dok, 'pvm_suma').text    = get_price_or_zero(document.vat_amount)
+    ET.SubElement(dok, 'bepvm_suma').text  = get_price_or_zero(document.amount_wo_vat)
     ET.SubElement(dok, 'orig_nuoroda').text= smart_str(document.preview_url or orig_path or "")
     ET.SubElement(dok, 'isaf').text        = "taip"
     ET.SubElement(dok, 'reg_data').text    = format_date(reg_data)
@@ -62,42 +80,38 @@ def export_document_to_centras_xml(document: ScannedDocument, orig_path: str = "
     if line_items and hasattr(line_items, 'all') and line_items.exists():
         for item in line_items.all():
             eilute = ET.SubElement(dok, "eilute")
-            ET.SubElement(eilute, "kodas").text        = smart_str(item.prekes_kodas or "PREKES")
-            ET.SubElement(eilute, "pavadinimas").text  = smart_str(item.prekes_pavadinimas or "PIRKIMAS")
-            ET.SubElement(eilute, "matovnt").text      = item.unit or "d.v."
-            ET.SubElement(eilute, "kiekis").text       = str(item.quantity or "1")
-            ET.SubElement(eilute, "kaina").text        = str(item.price or "")
-            ET.SubElement(eilute, "pvmtar").text       = vat_to_int_str(item.vat_percent)
-            ET.SubElement(eilute, "mok_kodas").text    = smart_str(item.pvm_kodas or "")
-            ET.SubElement(eilute, "sandelis").text     = smart_str(item.sandelio_kodas or "")
+            ET.SubElement(eilute, "kodas").text        = smart_str(getattr(item, "prekes_kodas", None) or "PREKES")
+            ET.SubElement(eilute, "pavadinimas").text  = smart_str(getattr(item, "prekes_pavadinimas", None) or "PIRKIMAS")
+            ET.SubElement(eilute, "matovnt").text      = getattr(item, "unit", None) or "d.v."
+            ET.SubElement(eilute, "kiekis").text       = str(getattr(item, "quantity", None) or "1")
+            ET.SubElement(eilute, "kaina").text        = get_price_or_zero(getattr(item, "price", None))
+            ET.SubElement(eilute, "pvmtar").text       = vat_to_int_str(getattr(item, "vat_percent", None))
+            ET.SubElement(eilute, "mok_kodas").text    = smart_str(getattr(item, "pvm_kodas", None) or "")
+            ET.SubElement(eilute, "sandelis").text     = smart_str(getattr(item, "sandelio_kodas", None) or "")
     else:
         # Если нет line_items — только одна строка
         eilute = ET.SubElement(dok, "eilute")
-        ET.SubElement(eilute, "kodas").text        = smart_str(document.prekes_kodas or "PREKES")
-        ET.SubElement(eilute, "pavadinimas").text  = smart_str(document.prekes_pavadinimas or "PIRKIMAS")
+        ET.SubElement(eilute, "kodas").text        = smart_str(getattr(document, "prekes_kodas", None) or "PREKES")
+        ET.SubElement(eilute, "pavadinimas").text  = smart_str(getattr(document, "prekes_pavadinimas", None) or "PIRKIMAS")
         ET.SubElement(eilute, "matovnt").text      = "d.v."
         ET.SubElement(eilute, "kiekis").text       = "1"
-        ET.SubElement(eilute, "kaina").text        = str(document.amount_wo_vat or "")
-        ET.SubElement(eilute, "pvmtar").text       = vat_to_int_str(document.vat_percent)
-        ET.SubElement(eilute, "mok_kodas").text    = smart_str(document.pvm_kodas or "")
-        ET.SubElement(eilute, "sandelis").text     = smart_str(document.sandelio_kodas or "")
+        ET.SubElement(eilute, "kaina").text        = get_price_or_zero(getattr(document, "amount_wo_vat", None))
+        ET.SubElement(eilute, "pvmtar").text       = vat_to_int_str(getattr(document, "vat_percent", None))
+        ET.SubElement(eilute, "mok_kodas").text    = smart_str(getattr(document, "pvm_kodas", None) or "")
+        ET.SubElement(eilute, "sandelis").text     = smart_str(getattr(document, "sandelio_kodas", None) or "")
 
-    # Компактный XML
-    xml_bytes = ET.tostring(root, encoding="utf-8")
+    xml_bytes = tostring_with_full_tags(root)
     return xml_bytes
 
 def export_documents_group_to_centras_xml(documents):
-    """
-    Собирает несколько документов в один XML и возвращает результат как bytes (utf-8)
-    """
     root = ET.Element('root')
     for doc in documents:
         xml_bytes = export_document_to_centras_xml(doc)
         doc_tree = ET.fromstring(xml_bytes)
         dokumentas = doc_tree.find('dokumentas')
         root.append(dokumentas)
+    compact_bytes = tostring_with_full_tags(root)
     # Красивый формат (с отступами)
-    compact_bytes = ET.tostring(root, encoding="utf-8")
     pretty_bytes = minidom.parseString(compact_bytes).toprettyxml(indent="  ").encode('utf-8')
     return pretty_bytes
 
@@ -106,18 +120,10 @@ def export_selected_docs_view(request):
     ids = request.GET.getlist('ids[]') or request.POST.getlist('ids[]')
     documents = ScannedDocument.objects.filter(pk__in=ids)
 
-    # Группируем
     pirkimai = [doc for doc in documents if getattr(doc, 'pirkimas_pardavimas', None) == 'pirkimas']
     pardavimai = [doc for doc in documents if getattr(doc, 'pirkimas_pardavimas', None) == 'pardavimas']
 
-    print("DEBUG: Всего документов:", len(documents))
-    for d in documents:
-        print(f"id={d.pk}, type={getattr(d, 'pirkimas_pardavimas', None)}")
-    print("pirkimai:", len(pirkimai), "pardavimai:", len(pardavimai))
-
-    # Определяем, есть ли оба типа документов
     if pirkimai and pardavimai:
-        # Оба типа: ZIP
         files_to_export = []
         xml_bytes = export_documents_group_to_centras_xml(pirkimai)
         files_to_export.append((f"{today_str}_pirkimai.xml", xml_bytes))
@@ -132,14 +138,12 @@ def export_selected_docs_view(request):
         response['Content-Disposition'] = f'attachment; filename={today_str}_importui.zip'
         return response
     elif pirkimai:
-        # Только покупки: один xml
         xml_bytes = export_documents_group_to_centras_xml(pirkimai)
         filename = f"{today_str}_pirkimai.xml"
         response = HttpResponse(xml_bytes, content_type='application/xml')
         response['Content-Disposition'] = f'attachment; filename={filename}'
         return response
     elif pardavimai:
-        # Только продажи: один xml
         xml_bytes = export_documents_group_to_centras_xml(pardavimai)
         filename = f"{today_str}_pardavimai.xml"
         response = HttpResponse(xml_bytes, content_type='application/xml')
