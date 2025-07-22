@@ -32,11 +32,19 @@ def get_price_or_zero(val):
     except Exception:
         return "0.00"
 
-def tostring_with_full_tags(elem):
-    # Генерирует XML c раскрытием всех <tag/> в <tag></tag>
-    raw = ET.tostring(elem, encoding="utf-8")
-    # Преобразуем все самозакрывающиеся теги
-    return re.sub(br'<(\w+)([^>]*)\s*/>', br'<\1\2></\1>', raw)
+def expand_empty_tags(xml_bytes):
+    # Преобразует <tag/> и <tag /> в <tag></tag> во всём XML (включая namespace)
+    # Работает и с юникод-строкой, и с байтовой строкой
+    if isinstance(xml_bytes, bytes):
+        xml_str = xml_bytes.decode('utf-8')
+    else:
+        xml_str = xml_bytes
+
+    # Поддержка тегов с namespace и атрибутами!
+    pattern = r'<([a-zA-Z0-9:_\-]+)([^>]*)\s*/>'
+    repl = r'<\1\2></\1>'
+    xml_str = re.sub(pattern, repl, xml_str)
+    return xml_str.encode('utf-8')
 
 def export_document_to_centras_xml(document: ScannedDocument, orig_path: str = "") -> bytes:
     root = ET.Element('root')
@@ -99,7 +107,7 @@ def export_document_to_centras_xml(document: ScannedDocument, orig_path: str = "
         ET.SubElement(eilute, "mok_kodas").text    = smart_str(getattr(document, "pvm_kodas", None) or "")
         ET.SubElement(eilute, "sandelis").text     = smart_str(getattr(document, "sandelio_kodas", None) or "")
 
-    xml_bytes = tostring_with_full_tags(root)
+    xml_bytes = ET.tostring(root, encoding="utf-8")
     return xml_bytes
 
 def export_documents_group_to_centras_xml(documents):
@@ -109,10 +117,12 @@ def export_documents_group_to_centras_xml(documents):
         doc_tree = ET.fromstring(xml_bytes)
         dokumentas = doc_tree.find('dokumentas')
         root.append(dokumentas)
-    compact_bytes = tostring_with_full_tags(root)
+    compact_bytes = ET.tostring(root, encoding="utf-8")
     # Красивый формат (с отступами)
     pretty_bytes = minidom.parseString(compact_bytes).toprettyxml(indent="  ").encode('utf-8')
-    return pretty_bytes
+    # Вот здесь, после всех манипуляций, превращаем <tag/> в <tag></tag>
+    final_bytes = expand_empty_tags(pretty_bytes)
+    return final_bytes
 
 def export_selected_docs_view(request):
     today_str = date.today().strftime('%Y-%m-%d')
