@@ -18,9 +18,9 @@ export default function DocumentsTable({
   filtered,
   loading,
   selectedRows,
-  isRowExportable,
   handleSelectRow,
   handleSelectAll,
+  isRowExportable,
 }) {
   // Проверка на ошибку суммы
   const hasSumValidationError = (d) =>
@@ -34,6 +34,9 @@ export default function DocumentsTable({
     isRowExportable(d) &&
     !!d.pirkimas_pardavimas &&
     d.pirkimas_pardavimas.toLowerCase() !== "nezinoma";
+
+  // Только экспортируемые строки
+  const exportableRows = filtered.filter(canExport);
 
   // Статус документа
   const statusLabel = (d) => {
@@ -60,11 +63,11 @@ export default function DocumentsTable({
               <Checkbox
                 indeterminate={
                   selectedRows.length > 0 &&
-                  selectedRows.length < filtered.filter(canExport).length
+                  selectedRows.length < exportableRows.length
                 }
                 checked={
-                  filtered.filter(canExport).length > 0 &&
-                  selectedRows.length === filtered.filter(canExport).length
+                  exportableRows.length > 0 &&
+                  selectedRows.length === exportableRows.length
                 }
                 onChange={handleSelectAll}
                 inputProps={{ "aria-label": "select all exportable" }}
@@ -148,7 +151,9 @@ export default function DocumentsTable({
       </Table>
     </TableContainer>
   );
-};
+}
+
+
 
 
 

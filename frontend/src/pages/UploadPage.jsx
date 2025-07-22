@@ -168,15 +168,25 @@ export default function UploadPage() {
   const isRowExportable = (row) => row.status === "completed" || row.status === "exported";
 
   const handleSelectRow = (id) => (e) => {
-    if (!isRowExportable(tableData.find((d) => d.id === id))) return;
+    const row = filtered.find((d) => d.id === id);
+    if (!canExport(row)) return;
     setSelectedRows((prev) =>
       e.target.checked ? [...prev, id] : prev.filter((rowId) => rowId !== id)
     );
   };
 
+// Функция canExport только с валидным pirkimas_pardavimas
+  const canExport = (d) =>
+    isRowExportable(d) &&
+    !!d.pirkimas_pardavimas &&
+    d.pirkimas_pardavimas.toLowerCase() !== "nezinoma";
+
+  // exportableRows — на основе filtered!
+  const exportableRows = filtered.filter(canExport);
+
   const handleSelectAll = (e) => {
     if (e.target.checked) {
-      setSelectedRows(tableData.filter(isRowExportable).map((d) => d.id));
+      setSelectedRows(exportableRows.map((d) => d.id));
     } else {
       setSelectedRows([]);
     }
@@ -290,15 +300,15 @@ export default function UploadPage() {
 
       <Box display="flex" alignItems="center" justifyContent="space-between" mb={2}>
         <Typography variant="h5">Saskaitų faktūrų suvestinė</Typography>
-        <Button
-          variant="outlined"
-          color="primary"
-          sx={{ ml: 2 }}
-          onClick={handleExport}
-          disabled={selectedRows.length === 0 || !isCompanyReady}
-        >
-          Eksportuoti į {programLabel}
-        </Button>
+          <Button
+            variant="outlined"
+            color="primary"
+            sx={{ ml: 2 }}
+            onClick={handleExport}
+            disabled={selectedRows.length === 0 || !isCompanyReady}
+          >
+            Eksportuoti{selectedRows.filter(id => exportableRows.some(row => row.id === id)).length ? ` (${selectedRows.filter(id => exportableRows.some(row => row.id === id)).length})` : ''} į {programLabel}
+          </Button>
       </Box>
 
       <Box mb={2} display="flex" alignItems="center" gap={2}>
@@ -334,6 +344,8 @@ export default function UploadPage() {
         filtered={tableData}
         selectedRows={selectedRows}
         isRowExportable={isRowExportable}
+        canExport={canExport}
+        exportableRows={exportableRows}
         handleSelectRow={handleSelectRow}
         handleSelectAll={handleSelectAll}
       />
