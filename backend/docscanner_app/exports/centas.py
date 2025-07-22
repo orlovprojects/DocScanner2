@@ -6,6 +6,7 @@ from django.utils.encoding import smart_str
 from django.http import HttpResponse
 from datetime import date
 from ..models import ScannedDocument
+import re
 
 def format_date(date_obj):
     return date_obj.strftime("%Y.%m.%d") if date_obj else ""
@@ -32,12 +33,10 @@ def get_price_or_zero(val):
         return "0.00"
 
 def tostring_with_full_tags(elem):
-    # Генерирует XML с раскрытыми тегами
+    # Генерирует XML c раскрытием всех <tag/> в <tag></tag>
     raw = ET.tostring(elem, encoding="utf-8")
-    # Преобразуем <tag/> в <tag></tag>
-    # Это покрывает все пустые теги (даже если пробелы внутри <tag />)
-    import re
-    return re.sub(b'<(\w+)([^>]*)/>', b'<\\1\\2></\\1>', raw)
+    # Преобразуем все самозакрывающиеся теги
+    return re.sub(br'<(\w+)([^>]*)\s*/>', br'<\1\2></\1>', raw)
 
 def export_document_to_centras_xml(document: ScannedDocument, orig_path: str = "") -> bytes:
     root = ET.Element('root')
