@@ -27,6 +27,8 @@ os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = str(BASE_DIR / GOOGLE_CREDENTIALS
 SITE_URL_FRONTEND = os.getenv("SITE_URL_FRONTEND", "http://localhost:5173")
 SITE_URL_BACKEND = os.getenv("SITE_URL_BACKEND", "http://localhost:8000")
 
+WAGTAILADMIN_BASE_URL = os.environ.get('WAGTAILADMIN_BASE_URL')
+
 # Медиафайлы
 MEDIA_URL = '/media/'
 MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
@@ -248,5 +250,3 @@ LOGGING = {
         "level": "ERROR",
     },
 }
-
-logging.config.dictConfig(LOGGING)

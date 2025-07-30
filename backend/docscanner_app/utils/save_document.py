@@ -7,6 +7,19 @@ from ..validators.amount_validator import (
 )
 from ..validators.default_currency import set_default_currency
 from ..validators.vat_klas import auto_select_pvm_code
+from decimal import Decimal
+
+import logging
+logger = logging.getLogger("celery")
+
+def convert_decimals(obj):
+    if isinstance(obj, list):
+        return [convert_decimals(x) for x in obj]
+    elif isinstance(obj, dict):
+        return {k: convert_decimals(v) for k, v in obj.items()}
+    elif isinstance(obj, Decimal):
+        return float(obj)
+    return obj
 
 def update_scanned_document(
     db_doc, doc_struct, raw_text, preview_url,
@@ -35,7 +48,7 @@ def update_scanned_document(
             pass
 
     db_doc.raw_text = raw_text
-    db_doc.structured_json = doc_struct
+    db_doc.structured_json = convert_decimals(doc_struct)
     db_doc.status = 'completed'
     db_doc.preview_url = preview_url
 
@@ -65,6 +78,8 @@ def update_scanned_document(
         db_doc.document_number = doc_struct.get("document_number")
         db_doc.order_number = doc_struct.get("order_number")
         db_doc.amount_wo_vat = parse_decimal_lit(doc_struct.get("amount_wo_vat"))
+        db_doc.invoice_discount_with_vat=parse_decimal_lit(doc_struct.get("invoice_discount_with_vat"))
+        db_doc.invoice_discount_wo_vat=parse_decimal_lit(doc_struct.get("invoice_discount_wo_vat"))
         db_doc.vat_amount = parse_decimal_lit(doc_struct.get("vat_amount"))
         db_doc.vat_percent = parse_percent_int(doc_struct.get("vat_percent"))
         db_doc.amount_with_vat = parse_decimal_lit(doc_struct.get("amount_with_vat"))
@@ -211,6 +226,8 @@ def update_scanned_document(
                 vat=parse_decimal_lit(item.get("vat", "")),
                 vat_percent=vat_percent,
                 total=parse_decimal_lit(item.get("total", "")),
+                discount_with_vat=parse_decimal_lit(item.get("discount_with_vat", "")),
+                discount_wo_vat=parse_decimal_lit(item.get("discount_wo_vat", "")),
                 sandelio_kodas=item.get("sandelio_kodas", ""),
                 sandelio_pavadinimas=item.get("sandelio_pavadinimas", ""),
                 objekto_kodas=item.get("objekto_kodas", ""),

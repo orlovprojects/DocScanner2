@@ -1,6 +1,8 @@
 import re
 from datetime import datetime
 from decimal import Decimal
+import logging
+logger = logging.getLogger("celery")
 
 def parse_date_lit(s: str):
     if not s:
@@ -15,15 +17,13 @@ def parse_date_lit(s: str):
 def parse_decimal_lit(s: str):
     if s is None:
         return None
-    # 👇 Добавь эту строку:
     if not isinstance(s, str):
         s = str(s)
-    cleaned = re.sub(r"[^\d,\.\-]", "", s)
     cleaned = re.sub(r"[^\d,\.\-]", "", s)
     normalized = cleaned.replace(",", ".")
     try:
         return Decimal(normalized)
-    except:
+    except Exception:
         return None
 
 def parse_percent_int(s):

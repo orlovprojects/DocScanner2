@@ -21,6 +21,9 @@ class LineItemSerializer(serializers.ModelSerializer):
             'vat',
             'vat_percent',
             'total',
+            'discount_wo_vat',
+            'discount_with_vat',
+
             # product autocomplete fields
             'sandelio_kodas',
             'sandelio_pavadinimas',
@@ -103,6 +106,8 @@ class ScannedDocumentSerializer(serializers.ModelSerializer):
             'amount_wo_vat',
             'vat_amount',
             'vat_percent',
+            'invoice_discount_with_vat',
+            'invoice_discount_wo_vat',
             'amount_with_vat',
             'separate_vat',
             'currency',

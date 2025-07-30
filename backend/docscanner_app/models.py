@@ -87,11 +87,12 @@ class ScannedDocument(models.Model):
     document_series = models.CharField(max_length=50, blank=True, null=True)
     document_number = models.CharField(max_length=100, blank=True, null=True)
     order_number = models.CharField(max_length=100, blank=True, null=True)
-    amount_wo_vat = models.DecimalField(max_digits=10, decimal_places=2, blank=True, null=True)
-    vat_amount = models.DecimalField(max_digits=10, decimal_places=2, blank=True, null=True)
+    amount_wo_vat = models.DecimalField(max_digits=10, decimal_places=4, blank=True, null=True)
+    vat_amount = models.DecimalField(max_digits=10, decimal_places=4, blank=True, null=True)
     vat_percent = models.DecimalField(max_digits=5, decimal_places=2, blank=True, null=True)
-    # vat_percent = models.PositiveSmallIntegerField(blank=True, null=True)
-    amount_with_vat = models.DecimalField(max_digits=10, decimal_places=2, blank=True, null=True)
+    amount_with_vat = models.DecimalField(max_digits=10, decimal_places=4, blank=True, null=True)
+    invoice_discount_with_vat = models.DecimalField(max_digits=10, decimal_places=4, blank=True, null=True)
+    invoice_discount_wo_vat = models.DecimalField(max_digits=10, decimal_places=4, blank=True, null=True)
     separate_vat = models.BooleanField(blank=True, null=True)
     currency = models.CharField(max_length=20, blank=True, null=True)
     with_receipt = models.BooleanField(blank=True, null=True)
@@ -174,11 +175,14 @@ class LineItem(models.Model):
     prekes_tipas = models.CharField("Prekės tipas", max_length=128, blank=True)
     unit = models.CharField(max_length=50, blank=True, null=True)               # <matovnt> / unit
     quantity = models.DecimalField(max_digits=10, decimal_places=2, blank=True, null=True)  # <kiekis>
-    price = models.DecimalField(max_digits=10, decimal_places=2, blank=True, null=True)     # <kaina> / price
-    subtotal = models.DecimalField(max_digits=10, decimal_places=2, blank=True, null=True)  # <suma_v> / subtotal
-    vat = models.DecimalField(max_digits=10, decimal_places=2, blank=True, null=True)       # <suma_pvmv> / vat
+    price = models.DecimalField(max_digits=10, decimal_places=4, blank=True, null=True)     # <kaina> / price
+    subtotal = models.DecimalField(max_digits=10, decimal_places=4, blank=True, null=True)  # <suma_v> / subtotal
+    vat = models.DecimalField(max_digits=10, decimal_places=4, blank=True, null=True)       # <suma_pvmv> / vat
     vat_percent = models.DecimalField(max_digits=5, decimal_places=2, blank=True, null=True) # <pvm_proc> / vatpercent
-    total = models.DecimalField(max_digits=10, decimal_places=2, blank=True, null=True)     # <total>
+    total = models.DecimalField(max_digits=10, decimal_places=4, blank=True, null=True)     # <total>
+
+    discount_with_vat = models.DecimalField(max_digits=10, decimal_places=4, blank=True, null=True)
+    discount_wo_vat = models.DecimalField(max_digits=10, decimal_places=4, blank=True, null=True)
 
     # ДОБАВЛЕННЫЕ поля для product autocomplete (те же как в ProductAutocomplete)
 

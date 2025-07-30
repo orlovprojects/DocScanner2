@@ -2,7 +2,7 @@ from celery import shared_task
 from .models import ScannedDocument, CustomUser
 from .utils.ocr import get_ocr_text
 from .utils.doc_type import detect_doc_type
-from .utils.gpt import ask_gpt, DEFAULT_PROMPT, DETAILED_PROMPT
+from .utils.gpt import ask_gpt_with_retry, DEFAULT_PROMPT, DETAILED_PROMPT
 from .utils.similarity import calculate_max_similarity_percent
 from .utils.save_document import update_scanned_document
 from .validators.company_matcher import update_seller_buyer_info
@@ -14,7 +14,10 @@ import os
 import re
 import json
 import logging
+import logging.config
 from django.conf import settings
+
+logging.config.dictConfig(settings.LOGGING)
 
 logger = logging.getLogger('celery')
 
@@ -26,9 +29,6 @@ def process_uploaded_file_task(user_id, doc_id, scan_type):
 
         file_path = doc.file.path
         original_filename = doc.original_filename
-
-        with open("C:\\Temp\\celery-task-start.txt", "a") as f:
-            f.write(f"STARTED: {original_filename}\n")
 
         logger.info(f"[TASK] Starting for doc_id={doc_id}, file={original_filename}, path={file_path}")
         logger.info(f"[TASK] File exists at start? {os.path.exists(file_path)}")
@@ -135,7 +135,9 @@ def process_uploaded_file_task(user_id, doc_id, scan_type):
 
         # --- GPT ---
         gpt_prompt = DETAILED_PROMPT if scan_type == "detaliai" else DEFAULT_PROMPT
-        gpt_resp = ask_gpt(raw_text, prompt=gpt_prompt)
+        gpt_resp = ask_gpt_with_retry(raw_text, prompt=gpt_prompt)
+        logger.info(f"[TASK] GPT response for {original_filename}: {gpt_resp[:500]}...")  # log first 500 chars
+
         gpt_resp_clean = re.sub(r"^```json\s*|^```\s*|```$", "", gpt_resp.strip(), flags=re.MULTILINE)
         try:
             structured = json.loads(gpt_resp_clean) if isinstance(gpt_resp_clean, str) else gpt_resp_clean or {}

@@ -24,7 +24,7 @@ export default function DocumentsTable({
 }) {
   // Проверка на ошибку суммы
   const hasSumValidationError = (d) =>
-    d.val_ar_sutapo === false ||
+    // d.val_ar_sutapo === false ||
     d.val_subtotal_match === false ||
     d.val_vat_match === false ||
     d.val_total_match === false;

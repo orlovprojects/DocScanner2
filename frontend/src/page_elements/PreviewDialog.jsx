@@ -102,6 +102,23 @@ export default function PreviewDialog({
     );
   };
 
+  function formatNumberPreview(value) {
+    if (value === null || value === undefined || value === "") return "—";
+    let num = Number(value);
+    if (isNaN(num)) return value;
+
+    // Получаем дробную часть
+    let [int, dec = ""] = num.toFixed(4).split(".");
+    if (dec.length < 4) dec = dec.padEnd(4, "0");
+
+    // Если 3-й и 4-й нули — выводим 2 знака
+    if (dec[2] === "0" && dec[3] === "0") {
+      return `${int}.${dec.slice(0, 2)}`;
+    }
+    // Иначе показываем все 4 знака (даже если заканчиваются на нули)
+    return `${int}.${dec}`;
+  }
+
   const handleClientClear = (type) => async () => {
     const data = type === "buyer"
       ? { buyer_name: "", buyer_id: "", buyer_vat_code: "" }
@@ -396,11 +413,13 @@ export default function PreviewDialog({
                 <Typography>Sąskaitos serija: <b>{selected.document_series || "—"}</b></Typography>
                 <Typography>Sąskaitos numeris: <b>{selected.document_number || "—"}</b></Typography>
                 <Typography>Užsakymo numeris: <b>{selected.order_number || "—"}</b></Typography>
-                <Typography>Suma (be PVM): <b>{selected.amount_wo_vat || "—"}</b></Typography>
-                <Typography>PVM: <b>{selected.vat_amount || "—"}</b></Typography>
-                <Typography>PVM %: <b>{selected.vat_percent || "—"}</b></Typography>
+                <Typography>Nuolaida sąskaitai (be PVM): <b>{formatNumberPreview(selected.invoice_discount_wo_vat)}</b></Typography>
+                <Typography>Nuolaida sąskaitai (su PVM): <b>{formatNumberPreview(selected.invoice_discount_with_vat)}</b></Typography>
+                <Typography>Suma (be PVM): <b>{formatNumberPreview(selected.amount_wo_vat)}</b></Typography>
+                <Typography>PVM: <b>{formatNumberPreview(selected.vat_amount)}</b></Typography>
+                <Typography>PVM %: <b>{formatNumberPreview(selected.vat_percent)}</b></Typography>
                 <Typography>PVM klasė: <b>{selected.pvm_kodas || "—"}</b></Typography>
-                <Typography>Suma (su PVM): <b>{selected.amount_with_vat || "—"}</b></Typography>
+                <Typography>Suma (su PVM): <b>{formatNumberPreview(selected.amount_with_vat)}</b></Typography>
                 <Typography>Valiuta: <b>{selected.currency || "—"}</b></Typography>
                 {selected.scan_type === "sumiskai" && (
                   <Grid2 container spacing={2} sx={{ mb: 2 }}>
@@ -489,13 +508,15 @@ export default function PreviewDialog({
                           <Typography>Prekės barkodas: <b>{item.prekes_barkodas || "—"}</b></Typography>
                           <Typography>Prekės pavadinimas: <b>{item.prekes_pavadinimas || item.product_name || "—"}</b></Typography> */}
                           <Typography>Mato vnt: <b>{item.unit || "—"}</b></Typography>
-                          <Typography>Kiekis: <b>{item.quantity || "—"}</b></Typography>
-                          <Typography>Kaina: <b>{item.price || "—"}</b></Typography>
-                          <Typography>Suma (be PVM): <b>{item.subtotal || "—"}</b></Typography>
-                          <Typography>PVM: <b>{item.vat || "—"}</b></Typography>
-                          <Typography>PVM %: <b>{item.vat_percent || "—"}</b></Typography>
+                          <Typography>Kiekis: <b>{formatNumberPreview(item.quantity)}</b></Typography>
+                          <Typography>Kaina: <b>{formatNumberPreview(item.price)}</b></Typography>
+                          <Typography>Suma (be PVM): <b>{formatNumberPreview(item.subtotal)}</b></Typography>
+                          <Typography>PVM: <b>{formatNumberPreview(item.vat)}</b></Typography>
+                          <Typography>PVM %: <b>{formatNumberPreview(item.vat_percent)}</b></Typography>
                           <Typography>PVM klasė: <b>{item.pvm_kodas || item.vat_class || "—"}</b></Typography>
-                          <Typography>Suma (su PVM): <b>{item.total || "—"}</b></Typography>
+                          <Typography>Suma (su PVM): <b>{formatNumberPreview(item.total)}</b></Typography>
+                          <Typography>Nuolaida (be PVM): <b>{formatNumberPreview(item.discount_wo_vat)}</b></Typography>
+                          <Typography>Nuolaida (su PVM): <b>{formatNumberPreview(item.discount_with_vat)}</b></Typography>
                         </Stack>
                       </Box>
                     ))}
