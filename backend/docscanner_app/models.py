@@ -45,6 +45,7 @@ class ScannedDocument(models.Model):
 
     # OCR и JSON-результаты
     raw_text = models.TextField(blank=True, null=True)
+    gpt_raw_json = models.JSONField(blank=True, null=True)
     structured_json = models.JSONField(blank=True, null=True)
 
     # Поля из структурированных данных (для фильтрации/поиска)

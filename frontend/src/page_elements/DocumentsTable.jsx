@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import { api } from "../api/endpoints";
 import {
   TableContainer,
@@ -14,6 +14,7 @@ import {
   IconButton,
   Menu,
   MenuItem,
+  Box,
 } from "@mui/material";
 import WarningIcon from '@mui/icons-material/Warning';
 import HelpOutlineIcon from '@mui/icons-material/HelpOutline';
@@ -160,24 +161,20 @@ export default function DocumentsTable({
                   <TableCell>
                     {tipasValue}
                   </TableCell>
-                  <TableCell
-                    sx={{
-                      verticalAlign: "middle",
-                      display: "flex",
-                      alignItems: "center",
-                      minHeight: 44,
-                    }}
-                  >
-                    {iconForStatus(d)}&nbsp;{statusLabel(d)}
-                    {hasSumValidationError(d) && (
-                      <Tooltip title="Patikrinkite sumas">
-                        <WarningIcon
-                          color="warning"
-                          fontSize="small"
-                          sx={{ ml: 1, verticalAlign: 'middle', cursor: 'pointer' }}
-                        />
-                      </Tooltip>
-                    )}
+                  {/* Исправленный Statusas */}
+                  <TableCell sx={{ verticalAlign: "middle", minHeight: 44 }}>
+                    <Box display="flex" alignItems="center">
+                      {iconForStatus(d)}&nbsp;{statusLabel(d)}
+                      {hasSumValidationError(d) && (
+                        <Tooltip title="Patikrinkite sumas">
+                          <WarningIcon
+                            color="warning"
+                            fontSize="small"
+                            sx={{ ml: 1, verticalAlign: 'middle', cursor: 'pointer' }}
+                          />
+                        </Tooltip>
+                      )}
+                    </Box>
                   </TableCell>
                   <TableCell>{d.fmt(d.uploaded_at)}</TableCell>
                   <TableCell align="right">
