@@ -5,10 +5,6 @@ import os
 import uuid
 import hashlib
 from django.conf import settings
-from wagtail.models import Page
-
-class HomePage(Page):
-    pass
 
 
 

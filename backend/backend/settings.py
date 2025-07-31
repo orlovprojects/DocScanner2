@@ -2,8 +2,6 @@ import os
 from pathlib import Path
 from dotenv import load_dotenv
 from datetime import timedelta
-import logging
-import logging.config
 
 # Базовый путь
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -46,21 +44,6 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
-    
-    # Wagtail приложения
-    # "wagtail.contrib.forms",
-    # "wagtail.contrib.redirects", 
-    # "wagtail.embeds",
-    # "wagtail.sites",
-    # "wagtail.users",
-    # "wagtail.snippets",
-    # "wagtail.documents",
-    # "wagtail.images",
-    # "wagtail.search",
-    # "wagtail.admin",
-    # "wagtail",
-    # "modelcluster",
-    # "taggit",
     
     # Ваши приложения
     "docscanner_app",
