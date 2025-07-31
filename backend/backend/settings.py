@@ -46,13 +46,10 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
-    "docscanner_app",
-    "corsheaders",
-    "rest_framework",
-    "rest_framework_simplejwt",
-
+    
+    # Wagtail приложения
     "wagtail.contrib.forms",
-    "wagtail.contrib.redirects",
+    "wagtail.contrib.redirects", 
     "wagtail.embeds",
     "wagtail.sites",
     "wagtail.users",
@@ -64,6 +61,12 @@ INSTALLED_APPS = [
     "wagtail",
     "modelcluster",
     "taggit",
+    
+    # Ваши приложения
+    "docscanner_app",
+    "corsheaders",
+    "rest_framework",
+    "rest_framework_simplejwt",
 ]
 
 WAGTAIL_SITE_NAME = "AtlyginimoSkaiciuokle"
