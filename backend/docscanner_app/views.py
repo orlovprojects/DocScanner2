@@ -232,7 +232,18 @@ def update_own_company_details(request):
 
 
 
+# Udaliajet zapisi s dashboard i BD
 
+@api_view(['DELETE'])
+@permission_classes([IsAuthenticated])
+def bulk_delete_documents(request):
+    ids = request.data.get('ids', [])
+    if not ids:
+        return Response({'error': 'No IDs provided'}, status=status.HTTP_400_BAD_REQUEST)
+    # Удаляем только документы текущего пользователя
+    queryset = ScannedDocument.objects.filter(id__in=ids, user=request.user)
+    deleted, _ = queryset.delete()
+    return Response({'deleted': deleted}, status=status.HTTP_200_OK)
 
 
 

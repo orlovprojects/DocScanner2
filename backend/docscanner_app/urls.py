@@ -11,6 +11,7 @@ from .views import (
     update_lineitem_fields,
     import_clients_view,
     import_products_view,
+    bulk_delete_documents,
 )
 
 from docscanner_app.views import export_documents_to_xml_zip
@@ -22,6 +23,7 @@ urlpatterns = [
 
     path('documents/', get_user_documents, name='get_user_documents'),
     path('documents/<int:pk>/', get_document_detail, name='get_document_detail'),
+    path('documents/bulk-delete/', bulk_delete_documents, name='bulk_delete_documents'),
 
 
     path('documents/export_xml/', export_documents_to_xml_zip, name='export_documents_to_xml_zip'),
