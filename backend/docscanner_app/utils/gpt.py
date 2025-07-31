@@ -214,6 +214,8 @@ All boolean fields (seller_is_person, buyer_is_person, with_receipt, separate_va
 
 - If you see “Transaction credit” or any line with a negative amount (such as “-$0.02”), **do not create a separate line item** for it. Instead, treat it as a discount (“nuolaida”).
 
+- If line item doesn't clearly show total, don't use it for that line item. 
+
 
 **Return the result as a valid JSON object with this structure:**
 {
@@ -330,7 +332,7 @@ def ask_gpt(text: str, prompt: str) -> str:
     full_prompt = prompt + "\n\n" + text
 
     response = client.chat.completions.create(
-        model="gpt-4.1",
+        model="gpt-4.1-mini",
         messages=[
             {"role": "system", "content": "You are a helpful assistant that extracts and structures data from documents. The input text contains positional coordinates for each text block in the format [x1,y1; x2,y2; x3,y3; x4,y4]. Use these coordinates to accurately identify and extract fields, especially when similar fields appear more than once."},
             {"role": "user", "content": full_prompt}
