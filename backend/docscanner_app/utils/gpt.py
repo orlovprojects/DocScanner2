@@ -332,7 +332,7 @@ def ask_gpt(text: str, prompt: str) -> str:
     full_prompt = prompt + "\n\n" + text
 
     response = client.chat.completions.create(
-        model="gpt-4.1-mini",
+        model="gpt-4.1",
         messages=[
             {"role": "system", "content": "You are a helpful assistant that extracts and structures data from documents. The input text contains positional coordinates for each text block in the format [x1,y1; x2,y2; x3,y3; x4,y4]. Use these coordinates to accurately identify and extract fields, especially when similar fields appear more than once."},
             {"role": "user", "content": full_prompt}

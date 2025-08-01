@@ -178,6 +178,119 @@ def validate_and_calculate_lineitem_amounts(item):
     return item
 
 
+def global_validate_and_correct(doc_struct):
+    """
+    Глобальная валидация и коррекция документа и lineitems:
+    - Сравнивает суммы между lineitems и документом,
+    - Корректирует vat_percent и vat в lineitems,
+    - Ставит флаги успешности, ведёт подробный лог.
+    """
+    logs = []  # Для накопления этапных логов
+    doc_changed = False
+
+    line_items = doc_struct.get("line_items", [])
+    if not line_items:
+        logs.append("Нет line_items для проверки.")
+        doc_struct["_global_validation_log"] = logs
+        return doc_struct
+
+    # 1. Проверяем subtotal
+    sum_subtotal = sum(Decimal(str(item.get("subtotal") or "0")) for item in line_items)
+    doc_subtotal = Decimal(str(doc_struct.get("amount_wo_vat") or "0"))
+    diff_subtotal = (sum_subtotal - doc_subtotal).quantize(Decimal("1.0000"))
+    logs.append(f"Subtotal: lineitems={sum_subtotal}, doc={doc_subtotal}, diff={diff_subtotal}")
+    if abs(diff_subtotal) > Decimal("0.05"):
+        logs.append(f"❗Subtotal не совпадает. Заменяем subtotal документа на сумму по lineitems.")
+        doc_struct["amount_wo_vat"] = sum_subtotal
+        doc_changed = True
+    else:
+        logs.append("✔ Subtotal совпадает или незначительно отличается.")
+
+    # 2. Проверяем vat_percent во всех lineitems (если не separate_vat)
+    vat_percent_doc = doc_struct.get("vat_percent")
+    if not doc_struct.get("separate_vat", False) and vat_percent_doc not in [None, "", 0, "0"]:
+        vat_percent_doc = Decimal(str(vat_percent_doc))
+        n_updated = 0
+        for item in line_items:
+            vp = Decimal(str(item.get("vat_percent") or "0"))
+            if vp != vat_percent_doc:
+                item["vat_percent"] = vat_percent_doc
+                n_updated += 1
+        if n_updated > 0:
+            logs.append(f"Обновили vat_percent в {n_updated} lineitems до {vat_percent_doc}")
+        else:
+            logs.append("✔ Все vat_percent в lineitems уже совпадают с документом.")
+    else:
+        logs.append("skip vat_percent sync (separate_vat=True или нет vat_percent в документе)")
+
+    # 3. Пересчитываем vat для всех lineitems по формуле (subtotal * vat_percent / 100)
+    n_vat_recalculated = 0
+    for item in line_items:
+        subtotal = Decimal(str(item.get("subtotal") or "0"))
+        vat_percent = Decimal(str(item.get("vat_percent") or "0"))
+        vat_new = (subtotal * vat_percent / Decimal("100")).quantize(Decimal("1.0000"))
+        old_vat = Decimal(str(item.get("vat") or "0"))
+        if abs(old_vat - vat_new) > Decimal("0.01"):
+            logs.append(f"Пересчитываем vat: было {old_vat} → стало {vat_new} (subtotal={subtotal}, vat_percent={vat_percent})")
+            item["vat"] = vat_new
+            n_vat_recalculated += 1
+    if n_vat_recalculated == 0:
+        logs.append("✔ Все vat в lineitems актуальны.")
+    else:
+        logs.append(f"Обновлено vat в {n_vat_recalculated} lineitems.")
+
+    # 4. Проверяем общую сумму vat
+    sum_vat = sum(Decimal(str(item.get("vat") or "0")) for item in line_items)
+    doc_vat = Decimal(str(doc_struct.get("vat_amount") or "0"))
+    diff_vat = (sum_vat - doc_vat).quantize(Decimal("1.0000"))
+    logs.append(f"VAT: lineitems={sum_vat}, doc={doc_vat}, diff={diff_vat}")
+    if abs(diff_vat) > Decimal("0.05"):
+        logs.append(f"❗VAT документа не совпадает с суммой lineitems. Заменяем vat_amount документа на сумму по lineitems.")
+        doc_struct["vat_amount"] = sum_vat
+        doc_changed = True
+    else:
+        logs.append("✔ VAT совпадает или незначительно отличается.")
+
+    # 5. Пересчитываем total для всех lineitems (subtotal + vat)
+    n_total_recalculated = 0
+    for item in line_items:
+        subtotal = Decimal(str(item.get("subtotal") or "0"))
+        vat = Decimal(str(item.get("vat") or "0"))
+        total_new = (subtotal + vat).quantize(Decimal("1.0000"))
+        old_total = Decimal(str(item.get("total") or "0"))
+        if abs(old_total - total_new) > Decimal("0.01"):
+            logs.append(f"Пересчитываем total: было {old_total} → стало {total_new} (subtotal={subtotal}, vat={vat})")
+            item["total"] = total_new
+            n_total_recalculated += 1
+    if n_total_recalculated == 0:
+        logs.append("✔ Все total в lineitems актуальны.")
+    else:
+        logs.append(f"Обновлено total в {n_total_recalculated} lineitems.")
+
+    # 6. Проверяем общую сумму total
+    sum_total = sum(Decimal(str(item.get("total") or "0")) for item in line_items)
+    doc_total = Decimal(str(doc_struct.get("amount_with_vat") or "0"))
+    diff_total = (sum_total - doc_total).quantize(Decimal("1.0000"))
+    logs.append(f"Total: lineitems={sum_total}, doc={doc_total}, diff={diff_total}")
+    if abs(diff_total) > Decimal("0.05"):
+        logs.append(f"❗Total документа не совпадает с суммой lineitems. Заменяем amount_with_vat документа на сумму по lineitems.")
+        doc_struct["amount_with_vat"] = sum_total
+        doc_changed = True
+    else:
+        logs.append("✔ Total совпадает или незначительно отличается.")
+
+    # 7. Финальный статус
+    if doc_changed:
+        logs.append("Документ был скорректирован для соответствия lineitems.")
+    else:
+        logs.append("Документ уже был согласован с lineitems.")
+
+    doc_struct["_global_validation_log"] = logs
+    logger.info("\n".join([f"[global_validator] {line}" for line in logs]))
+    return doc_struct
+
+
+
 def compare_lineitems_with_main_totals(doc_struct):
     """
     Проверяет, совпадают ли суммы по line_items с основными суммами документа.

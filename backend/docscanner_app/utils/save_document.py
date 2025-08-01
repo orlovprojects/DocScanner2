@@ -4,6 +4,7 @@ from ..validators.amount_validator import (
     validate_and_calculate_main_amounts,
     validate_and_calculate_lineitem_amounts,
     compare_lineitems_with_main_totals,
+    global_validate_and_correct,
 )
 from ..validators.default_currency import set_default_currency
 from ..validators.vat_klas import auto_select_pvm_code
@@ -36,16 +37,38 @@ def update_scanned_document(
         db_doc.val_total_match = None
     elif scan_type == "detaliai":
         line_items = doc_struct.get("line_items", [])
+        # 1. Валидация line items
         doc_struct["line_items"] = [
             validate_and_calculate_lineitem_amounts(item) for item in line_items
         ]
+
+        # 2. Глобальная коррекция документа и line items
+        doc_struct = global_validate_and_correct(doc_struct)  # <-- ДОБАВЬ ЭТО!
+
+        # 3. Итоговое сравнение для флагов
         compare_result = compare_lineitems_with_main_totals(doc_struct)
         db_doc.val_subtotal_match = compare_result["subtotal_match"]
         db_doc.val_vat_match = compare_result["vat_match"]
         db_doc.val_total_match = compare_result["total_match"]
-        # Можно тут реагировать на не-совпадение, если нужно
+
+        # 4. Можно реагировать на ошибки (например, выводить логи в UI)
         if not (compare_result["subtotal_match"] and compare_result["vat_match"] and compare_result["total_match"]):
-            pass
+            # например, положить логи глобальной проверки в error_message или отдельное поле
+            db_doc.error_message = "\n".join(doc_struct.get("_global_validation_log", []))   
+
+
+    # elif scan_type == "detaliai":
+    #     line_items = doc_struct.get("line_items", [])
+    #     doc_struct["line_items"] = [
+    #         validate_and_calculate_lineitem_amounts(item) for item in line_items
+    #     ]
+    #     compare_result = compare_lineitems_with_main_totals(doc_struct)
+    #     db_doc.val_subtotal_match = compare_result["subtotal_match"]
+    #     db_doc.val_vat_match = compare_result["vat_match"]
+    #     db_doc.val_total_match = compare_result["total_match"]
+    #     # Можно тут реагировать на не-совпадение, если нужно
+    #     if not (compare_result["subtotal_match"] and compare_result["vat_match"] and compare_result["total_match"]):
+    #         pass
 
     db_doc.raw_text = raw_text
     db_doc.structured_json = convert_decimals(doc_struct)

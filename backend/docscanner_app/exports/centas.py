@@ -73,7 +73,17 @@ def export_document_to_centras_xml(document: ScannedDocument, orig_path: str = "
 
     ET.SubElement(dok, 'data').text        = format_date(invoice_date)
     ET.SubElement(dok, 'dok_suma').text    = get_price_or_zero(document.amount_with_vat)
-    ET.SubElement(dok, 'dok_num').text     = smart_str(document.document_number or "")
+    
+    # ====== Обновлённая логика для dok_num ======
+    series = smart_str(document.document_series or "")
+    number = smart_str(document.document_number or "")
+    if series and not number.startswith(series):
+        dok_num = f"{series}{number}"
+    else:
+        dok_num = number
+    ET.SubElement(dok, 'dok_num').text     = dok_num
+    # ============================================
+
     ET.SubElement(dok, 'apmok_iki').text   = format_date(due_date)
     ET.SubElement(dok, 'pvm_suma').text    = get_price_or_zero(document.vat_amount)
     ET.SubElement(dok, 'bepvm_suma').text  = get_price_or_zero(document.amount_wo_vat)
@@ -109,6 +119,7 @@ def export_document_to_centras_xml(document: ScannedDocument, orig_path: str = "
 
     xml_bytes = ET.tostring(root, encoding="utf-8")
     return xml_bytes
+
 
 def export_documents_group_to_centras_xml(documents):
     root = ET.Element('root')
