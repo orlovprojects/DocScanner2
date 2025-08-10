@@ -4,7 +4,7 @@ from datetime import timedelta
 from django.utils import timezone
 from .serializers import CustomUserSerializer
 from rest_framework.decorators import api_view, permission_classes, authentication_classes
-from rest_framework.permissions import IsAuthenticated, AllowAny
+from rest_framework.permissions import IsAuthenticated, AllowAny, IsAdminUser
 from rest_framework.response import Response
 from django.db.models import Q
 from rest_framework_simplejwt.views import (
@@ -16,6 +16,8 @@ from datetime import date
 from django.shortcuts import get_object_or_404
 from rest_framework import status
 from .utils.pirkimas_pardavimas import determine_pirkimas_pardavimas
+from .utils.update_currency_rates import update_currency_rates
+from rest_framework.views import APIView
 
 from .data_import.data_import_from_buh import import_products_from_xlsx, import_clients_from_xlsx
 
@@ -24,7 +26,6 @@ from .models import ScannedDocument, ProductAutocomplete, ClientAutocomplete, Li
 
 from django.conf import settings
 import io
-import sys
 import zipfile
 from .tasks import process_uploaded_file_task
 
@@ -37,67 +38,321 @@ from .serializers import ScannedDocumentListSerializer, ScannedDocumentDetailSer
 
 from django.http import HttpResponse
 from .exports.centas  import export_documents_group_to_centras_xml
+from .exports.rivile import (
+    export_clients_group_to_rivile,
+    export_pirkimai_group_to_rivile,
+    export_pardavimai_group_to_rivile,
+    export_prekes_and_paslaugos_group_to_rivile
+)
+from .exports.rivile_erp import export_clients_to_rivile_erp_xlsx, export_prekes_and_paslaugos_to_rivile_erp_xlsx, export_documents_to_rivile_erp_xlsx
+from docscanner_app.utils.prekes_kodas import assign_random_prekes_kodai
+import tempfile
+
 
 
 
 logger = logging.getLogger('docscanner_app')
 site_url = settings.SITE_URL_FRONTEND  # берём из settings.py
 
+
+
+
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
-def export_documents_to_xml_zip(request):
+def export_documents(request):
     ids = request.data.get('ids', [])
     if not ids:
         return Response({"error": "No document ids provided"}, status=400)
 
+    user = request.user
+    export_type = request.data.get('export_type')
+    if not export_type:
+        export_type = getattr(user, 'default_accounting_program', 'centras')
+    export_type = export_type.lower()
+
     today_str = date.today().strftime('%Y-%m-%d')
-    documents = ScannedDocument.objects.filter(pk__in=ids, user=request.user)
+    documents = ScannedDocument.objects.filter(pk__in=ids, user=user)
     if not documents:
         return Response({"error": "No documents found"}, status=404)
 
     # Группируем по типу
-    pirkimai = [doc for doc in documents if getattr(doc, "pirkimas_pardavimas", None) == 'pirkimas']
-    pardavimai = [doc for doc in documents if getattr(doc, "pirkimas_pardavimas", None) == 'pardavimas']
-
-    print(f"DEBUG: pirkimai={len(pirkimai)}, pardavimai={len(pardavimai)}, всего документов={len(documents)}", file=sys.stderr)
-    sys.stderr.flush()
+    pirkimai = [doc for doc in documents if doc.pirkimas_pardavimas == 'pirkimas']
+    pardavimai = [doc for doc in documents if doc.pirkimas_pardavimas == 'pardavimas']
 
     files_to_export = []
 
-    if pirkimai:
-        xml_bytes = export_documents_group_to_centras_xml(pirkimai)
-        if isinstance(xml_bytes, str):
-            xml_bytes = xml_bytes.encode("utf-8")
-        files_to_export.append((f"{today_str}_pirkimai.xml", xml_bytes))
-    if pardavimai:
-        xml_bytes = export_documents_group_to_centras_xml(pardavimai)
-        if isinstance(xml_bytes, str):
-            xml_bytes = xml_bytes.encode("utf-8")
-        files_to_export.append((f"{today_str}_pardavimai.xml", xml_bytes))
+    if export_type == 'centras':
+        assign_random_prekes_kodai(documents)
+        # ... твой код экспорта Centras (оставь как есть)
+        if pirkimai:
+            xml_bytes = export_documents_group_to_centras_xml(pirkimai)
+            files_to_export.append((f"{today_str}_pirkimai.xml", xml_bytes))
+        if pardavimai:
+            xml_bytes = export_documents_group_to_centras_xml(pardavimai)
+            files_to_export.append((f"{today_str}_pardavimai.xml", xml_bytes))
+        if len(files_to_export) > 1:
+            zip_buffer = io.BytesIO()
+            with zipfile.ZipFile(zip_buffer, "w") as zf:
+                for filename, xml_content in files_to_export:
+                    zf.writestr(filename, xml_content)
+            zip_buffer.seek(0)
+            response = HttpResponse(zip_buffer.read(), content_type='application/zip')
+            response['Content-Disposition'] = f'attachment; filename={today_str}_importui.zip'
+            return response
+        elif len(files_to_export) == 1:
+            filename, xml_content = files_to_export[0]
+            response = HttpResponse(xml_content, content_type='application/xml')
+            response['Content-Disposition'] = f'attachment; filename={filename}'
+            return response
 
-    print(f"DEBUG: files_to_export = {files_to_export}", file=sys.stderr)
-    sys.stderr.flush()
+    elif export_type == 'rivile':
+        assign_random_prekes_kodai(documents)
 
-    # --------- ВАЖНО: Статус экспортированных документов ---------
-    documents.update(status="exported")
+        klientai = []
+        seen = set()
+        for doc in documents:
+            if doc.pirkimas_pardavimas == 'pirkimas':
+                is_person = doc.seller_is_person
+                klient_type = 'pirkimas'
+                client = {
+                    'id': doc.seller_id or "",
+                    'vat': doc.seller_vat_code or "",
+                    'name': doc.seller_name or "",
+                    'address': doc.seller_address or "",
+                    'country_iso': doc.seller_country_iso or "",
+                    'currency': doc.currency or "EUR",
+                    'kodas_ds': 'PT001',
+                    'type': klient_type,
+                    'is_person': is_person,
+                    'iban': doc.seller_iban or "",
+                }
+            elif doc.pirkimas_pardavimas == 'pardavimas':
+                is_person = doc.buyer_is_person
+                klient_type = 'pardavimas'
+                client = {
+                    'id': doc.buyer_id or "",
+                    'vat': doc.buyer_vat_code or "",
+                    'name': doc.buyer_name or "",
+                    'address': doc.buyer_address or "",
+                    'country_iso': doc.buyer_country_iso or "",
+                    'currency': doc.currency or "EUR",
+                    'kodas_ds': 'PT001',
+                    'type': klient_type,
+                    'is_person': is_person,
+                    'iban': doc.buyer_iban or "",
+                }
+            else:
+                continue
+            client_key = (client['id'], client['vat'], client['name'], client['type'])
+            if client['id'] and client_key not in seen:
+                klientai.append(client)
+                seen.add(client_key)
 
-    if len(files_to_export) > 1:
-        # Экспортируем zip если больше одного файла
-        zip_buffer = io.BytesIO()
-        with zipfile.ZipFile(zip_buffer, "w") as zf:
-            for filename, xml_content in files_to_export:
-                zf.writestr(filename, xml_content)
-        zip_buffer.seek(0)
-        response = HttpResponse(zip_buffer.read(), content_type='application/zip')
-        response['Content-Disposition'] = f'attachment; filename={today_str}_importui.zip'
-        return response
-    elif len(files_to_export) == 1:
-        filename, xml_content = files_to_export[0]
-        response = HttpResponse(xml_content, content_type='application/xml')
-        response['Content-Disposition'] = f'attachment; filename={filename}'
-        return response
+        if klientai:
+            klientai_xml = export_clients_group_to_rivile(klientai)
+            files_to_export.append(('klientai.eip', klientai_xml))
+        if pirkimai:
+            pirkimai_xml = export_pirkimai_group_to_rivile(pirkimai)
+            files_to_export.append(('pirkimai.eip', pirkimai_xml))
+        if pardavimai:
+            pardavimai_xml = export_pardavimai_group_to_rivile(pardavimai)
+            files_to_export.append(('pardavimai.eip', pardavimai_xml))
+
+        # -------- ДОБАВЬ ЭКСПОРТ ПРЕКЕС ---------
+        prekes_xml, paslaugos_xml = export_prekes_and_paslaugos_group_to_rivile(documents)
+        if prekes_xml:
+            files_to_export.append(('prekes.eip', prekes_xml))
+        if paslaugos_xml:
+            files_to_export.append(('paslaugos.eip', paslaugos_xml))
+        # -------- КОНЕЦ ---------
+
+        if files_to_export:
+            zip_buffer = io.BytesIO()
+            with zipfile.ZipFile(zip_buffer, "w") as zf:
+                for filename, xml_content in files_to_export:
+                    zf.writestr(filename, xml_content)
+            zip_buffer.seek(0)
+            response = HttpResponse(zip_buffer.read(), content_type='application/zip')
+            response['Content-Disposition'] = f'attachment; filename={today_str}_rivile_eip.zip'
+            documents.update(status="exported")
+            return response
+
+
+    elif export_type == 'rivile_erp':
+        assign_random_prekes_kodai(documents)
+        klientai = []
+        seen = set()
+        for doc in documents:
+            if doc.pirkimas_pardavimas == 'pirkimas':
+                is_person = doc.seller_is_person
+                klient_type = 'pirkimas'
+                client = {
+                    'id': doc.seller_id or "",
+                    'vat': doc.seller_vat_code or "",
+                    'name': doc.seller_name or "",
+                    'address': doc.seller_address or "",
+                    'country_iso': doc.seller_country_iso or "",
+                    'currency': doc.currency or "EUR",
+                    'kodas_ds': 'PT001',
+                    'type': klient_type,
+                    'is_person': is_person,
+                    'iban': doc.seller_iban or "",
+                }
+            elif doc.pirkimas_pardavimas == 'pardavimas':
+                is_person = doc.buyer_is_person
+                klient_type = 'pardavimas'
+                client = {
+                    'id': doc.buyer_id or "",
+                    'vat': doc.buyer_vat_code or "",
+                    'name': doc.buyer_name or "",
+                    'address': doc.buyer_address or "",
+                    'country_iso': doc.buyer_country_iso or "",
+                    'currency': doc.currency or "EUR",
+                    'kodas_ds': 'PT001',
+                    'type': klient_type,
+                    'is_person': is_person,
+                    'iban': doc.buyer_iban or "",
+                }
+            else:
+                continue
+
+            # === ВАЖНО: Логика для client['id'] ===
+            if not client['id']:
+                client['id'] = client['vat'] or ""
+            if not client['id']:
+                client['id'] = "111111111"
+
+            client_key = (client['id'], client['vat'], client['name'], client['type'])
+            if client['id'] and client_key not in seen:
+                klientai.append(client)
+                seen.add(client_key)
+
+        files_to_export = []
+
+        # --- Экспортируем Klientai.xlsx ---
+        if klientai:
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp:
+                export_clients_to_rivile_erp_xlsx(klientai, tmp.name)
+                tmp.seek(0)
+                klientai_xlsx_bytes = tmp.read()
+            files_to_export.append((f'klientai_{today_str}.xlsx', klientai_xlsx_bytes))
+
+        # --- Экспортируем Prekės, paslaugos.xlsx ---
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp:
+            export_prekes_and_paslaugos_to_rivile_erp_xlsx(documents, tmp.name)
+            tmp.seek(0)
+            prekes_xlsx_bytes = tmp.read()
+        files_to_export.append((f'prekes_paslaugos_{today_str}.xlsx', prekes_xlsx_bytes))
+
+        # --- Экспортируем Pirkimai.xlsx ---
+        pirkimai = [doc for doc in documents if doc.pirkimas_pardavimas == 'pirkimas']
+        if pirkimai:
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp:
+                export_documents_to_rivile_erp_xlsx(pirkimai, tmp.name, doc_type="pirkimai")
+                tmp.seek(0)
+                pirkimai_xlsx_bytes = tmp.read()
+            files_to_export.append((f'pirkimai_{today_str}.xlsx', pirkimai_xlsx_bytes))
+
+        # --- Экспортируем Pardavimai.xlsx ---
+        pardavimai = [doc for doc in documents if doc.pirkimas_pardavimas == 'pardavimas']
+        if pardavimai:
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp:
+                export_documents_to_rivile_erp_xlsx(pardavimai, tmp.name, doc_type="pardavimai")
+                tmp.seek(0)
+                pardavimai_xlsx_bytes = tmp.read()
+            files_to_export.append((f'pardavimai_{today_str}.xlsx', pardavimai_xlsx_bytes))
+
+        # --- ZIP или один файл ---
+        if len(files_to_export) > 1:
+            zip_buffer = io.BytesIO()
+            with zipfile.ZipFile(zip_buffer, "w") as zf:
+                for filename, file_bytes in files_to_export:
+                    zf.writestr(filename, file_bytes)
+            zip_buffer.seek(0)
+            response = HttpResponse(zip_buffer.read(), content_type='application/zip')
+            response['Content-Disposition'] = f'attachment; filename={today_str}_rivile_erp.zip'
+            return response
+        elif len(files_to_export) == 1:
+            filename, file_bytes = files_to_export[0]
+            response = HttpResponse(
+                file_bytes,
+                content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+            )
+            response['Content-Disposition'] = f'attachment; filename={filename}'
+            return response
+        else:
+            return Response({"error": "No clients or products to export"}, status=400)
+
+
+
+
+
+
+
+
     else:
-        return Response({"error": "No documents to export"}, status=400)
+        return Response({"error": "Unknown export type"}, status=400)
+    
+
+    return Response({"error": "No documents to export"}, status=400)
+
+
+
+# @api_view(['POST'])
+# @permission_classes([IsAuthenticated])
+# def export_documents_to_xml_zip(request):
+#     ids = request.data.get('ids', [])
+#     if not ids:
+#         return Response({"error": "No document ids provided"}, status=400)
+
+#     today_str = date.today().strftime('%Y-%m-%d')
+#     documents = ScannedDocument.objects.filter(pk__in=ids, user=request.user)
+#     if not documents:
+#         return Response({"error": "No documents found"}, status=404)
+
+#     # Группируем по типу
+#     pirkimai = [doc for doc in documents if getattr(doc, "pirkimas_pardavimas", None) == 'pirkimas']
+#     pardavimai = [doc for doc in documents if getattr(doc, "pirkimas_pardavimas", None) == 'pardavimas']
+
+#     print(f"DEBUG: pirkimai={len(pirkimai)}, pardavimai={len(pardavimai)}, всего документов={len(documents)}", file=sys.stderr)
+#     sys.stderr.flush()
+
+#     files_to_export = []
+
+#     if pirkimai:
+#         xml_bytes = export_documents_group_to_centras_xml(pirkimai)
+#         if isinstance(xml_bytes, str):
+#             xml_bytes = xml_bytes.encode("utf-8")
+#         files_to_export.append((f"{today_str}_pirkimai.xml", xml_bytes))
+#     if pardavimai:
+#         xml_bytes = export_documents_group_to_centras_xml(pardavimai)
+#         if isinstance(xml_bytes, str):
+#             xml_bytes = xml_bytes.encode("utf-8")
+#         files_to_export.append((f"{today_str}_pardavimai.xml", xml_bytes))
+
+#     print(f"DEBUG: files_to_export = {files_to_export}", file=sys.stderr)
+#     sys.stderr.flush()
+
+#     # --------- ВАЖНО: Статус экспортированных документов ---------
+#     documents.update(status="exported")
+
+#     if len(files_to_export) > 1:
+#         # Экспортируем zip если больше одного файла
+#         zip_buffer = io.BytesIO()
+#         with zipfile.ZipFile(zip_buffer, "w") as zf:
+#             for filename, xml_content in files_to_export:
+#                 zf.writestr(filename, xml_content)
+#         zip_buffer.seek(0)
+#         response = HttpResponse(zip_buffer.read(), content_type='application/zip')
+#         response['Content-Disposition'] = f'attachment; filename={today_str}_importui.zip'
+#         return response
+#     elif len(files_to_export) == 1:
+#         filename, xml_content = files_to_export[0]
+#         response = HttpResponse(xml_content, content_type='application/xml')
+#         response['Content-Disposition'] = f'attachment; filename={filename}'
+#         return response
+#     else:
+#         return Response({"error": "No documents to export"}, status=400)
     
 
 
@@ -528,6 +783,32 @@ def user_profile(request):
 
 
 
+
+
+@api_view(['POST'])
+@permission_classes([IsAdminUser])
+def update_currency_rates_view(request):
+    d = request.data.get('date')
+    if d:
+        try:
+            from datetime import datetime
+            d = datetime.strptime(d, '%Y-%m-%d').date()
+        except Exception:
+            return Response({'error': 'Invalid date'}, status=400)
+    else:
+        d = date.today()
+    count = update_currency_rates(d)
+    return Response({'message': f'Updated {count} currency rates for {d}.'})
+
+
+
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def user_me_view(request):
+    serializer = CustomUserSerializer(request.user)
+    return Response(serializer.data)
 
 
 

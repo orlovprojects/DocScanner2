@@ -105,6 +105,8 @@ class ScannedDocument(models.Model):
     prekes_barkodas = models.CharField("Prekės barkodas", max_length=128, blank=True, null=True)
     prekes_pavadinimas = models.CharField("Prekės pavadinimas", max_length=255, blank=True, null=True)
     prekes_tipas = models.CharField("Prekės tipas", max_length=128, blank=True, null=True)
+    preke_paslauga = models.CharField("Preke_paslauga", max_length=12, blank=True, null=True)
+
 
     sandelio_kodas = models.CharField("Sandėlio kodas", max_length=128, blank=True, null=True)
     sandelio_pavadinimas = models.CharField("Sandėlio pavadinimas", max_length=255, blank=True, null=True)
@@ -177,6 +179,7 @@ class LineItem(models.Model):
     vat = models.DecimalField(max_digits=10, decimal_places=4, blank=True, null=True)       # <suma_pvmv> / vat
     vat_percent = models.DecimalField(max_digits=5, decimal_places=2, blank=True, null=True) # <pvm_proc> / vatpercent
     total = models.DecimalField(max_digits=10, decimal_places=4, blank=True, null=True)     # <total>
+    preke_paslauga = models.CharField("Preke_paslauga", max_length=12, blank=True, null=True)
 
     discount_with_vat = models.DecimalField(max_digits=10, decimal_places=4, blank=True, null=True)
     discount_wo_vat = models.DecimalField(max_digits=10, decimal_places=4, blank=True, null=True)
@@ -270,10 +273,10 @@ class CustomUserManager(BaseUserManager):
     
 
 ACCOUNTING_PROGRAM_CHOICES = [
-    ('rivile', 'Rivilė'),
+    ('rivile', 'Rivilė GAMA'),
+    ('rivile_erp', 'Rivilė ERP'),
     ('bss', 'BSS'),
     ('finvalda', 'Finvalda'),
-    ('centas', 'Centas'),
     ('apskaita5', 'Apskaita5'),
     ('centas', 'Centas'),
     # добавь нужные программы
@@ -424,3 +427,43 @@ class PVMKlasifikatoriai(models.Model):
 
     def __str__(self):
         return f"{self.kodas} ({self.tarifas})"
+    
+
+
+class CurrencyRate(models.Model):
+    currency = models.CharField(max_length=8, db_index=True)   # Например, USD, PLN, GBP
+    date = models.DateField(db_index=True)                     # Дата курса (курс действует на эту дату)
+    rate = models.DecimalField(max_digits=15, decimal_places=8)  # Сколько единиц валюты за 1 EUR (как у Lietuvos bankas)
+    checked_at = models.DateTimeField(auto_now=True)           # Когда курс был проверён или обновлён
+
+    class Meta:
+        unique_together = ('currency', 'date')  # На одну дату и валюту — только одна запись
+        ordering = ['-date', 'currency']
+
+    def __str__(self):
+        return f"{self.currency} {self.date} — {self.rate}"
+    
+
+
+
+class Company(models.Model):
+    im_kodas     = models.CharField(max_length=16, db_index=True, blank=True, null=True)   # Идентификационный код фирмы
+    pavadinimas  = models.CharField(max_length=255, db_index=True, blank=True, null=True)  # Название фирмы
+    ireg_data    = models.DateField(null=True, blank=True)          # Дата регистрации
+    isreg_data   = models.DateField(null=True, blank=True)          # Дата закрытия (если есть)
+    tipas        = models.CharField(max_length=64, blank=True, null=True)      # Тип организации
+    pvm_kodas    = models.CharField(max_length=32, blank=True, null=True)      # PVM/VAT код
+    pvm_ireg     = models.DateField(null=True, blank=True)          # Дата регистрации PVM
+    pvm_isreg    = models.DateField(null=True, blank=True)          # Дата снятия с PVM
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["im_kodas"]),
+            models.Index(fields=["pavadinimas"]),
+            models.Index(fields=["pvm_kodas"]),
+        ]
+        verbose_name = "Company"
+        verbose_name_plural = "Company"
+
+    def __str__(self):
+        return f"{self.pavadinimas} ({self.im_kodas})"

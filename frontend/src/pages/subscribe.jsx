@@ -1,6 +1,6 @@
 import "../styles/infoPage.css";
 import { Helmet } from "react-helmet";
-import React, { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import config from '../config';
 import {
   Box,
@@ -13,10 +13,19 @@ import {
   Stack
 } from '@mui/material';
 import CheckIcon from '@mui/icons-material/Check';
+import { api } from "../api/endpoints"; // поправь путь если нужно
 
 const Subscribe = () => {
   const [message, setMessage] = useState("");
   const [loadingId, setLoadingId] = useState(null);
+  const [credits, setCredits] = useState(null);
+
+  // Получаем кредиты пользователя при монтировании
+  useEffect(() => {
+    api.get("/me/")
+      .then(res => setCredits(res.data.credits))
+      .catch(() => setCredits(null));
+  }, []);
 
   // Показ сообщений об успехе/отмене
   useEffect(() => {
@@ -70,6 +79,21 @@ const Subscribe = () => {
         <title>Pirkti kreditus</title>
         <meta name="description" content="Įsigykite kreditų savo analizėms." />
       </Helmet>
+
+      {/* Показ количества кредитов */}
+      <Typography
+        variant="body1"
+        sx={{
+          textAlign: 'center',
+          fontSize: '18px',
+          mb: 3,
+          color: '#1b1b1b',
+          fontWeight: 500,
+          fontFamily: 'Helvetica',
+        }}
+      >
+        Turite <b>{credits !== null ? credits : "…"}</b> kreditų
+      </Typography>
 
       <Typography
         variant="h1"
@@ -135,7 +159,6 @@ const Subscribe = () => {
               )}
             </Box>
 
-            {/* Буллет-поинты */}
             <List dense sx={{ flexGrow: 1 }}>
               <ListItem disableGutters>
                 <ListItemIcon sx={{ minWidth: 32 }}>
@@ -183,6 +206,225 @@ const Subscribe = () => {
 };
 
 export default Subscribe;
+
+
+
+
+
+
+// import "../styles/infoPage.css";
+// import { Helmet } from "react-helmet";
+// import { useState, useEffect } from "react";
+// import config from '../config';
+// import {
+//   Box,
+//   Typography,
+//   Button,
+//   List,
+//   ListItem,
+//   ListItemIcon,
+//   ListItemText,
+//   Stack
+// } from '@mui/material';
+// import CheckIcon from '@mui/icons-material/Check';
+// import { api } from "../api/endpoints"; // поправь путь к api если нужно
+
+// const Subscribe = () => {
+//   const [message, setMessage] = useState("");
+//   const [loadingId, setLoadingId] = useState(null);
+
+//   // Показ сообщений об успехе/отмене
+//   useEffect(() => {
+//     const query = new URLSearchParams(window.location.search);
+//     if (query.get("success")) {
+//       setMessage("🎉 Mokėjimas pavyko! Kreditai netrukus atsiras Jūsų paskyroje.");
+//     }
+//     if (query.get("canceled")) {
+//       setMessage("❌ Mokėjimas atšauktas. Bandykite dar kartą arba pasirinkite kitą paketą.");
+//     }
+//   }, []);
+
+
+
+//   const UserCredits = () => {
+//   const [credits, setCredits] = useState(null);
+
+//   useEffect(() => {
+//     api.get("/me/")
+//       .then(res => setCredits(res.data.credits))
+//       .catch(() => setCredits(null));
+//   }, []);
+
+
+
+
+//   const handleCheckout = async (priceId) => {
+//     setLoadingId(priceId);
+//     setMessage("");
+
+//     try {
+//       const res = await fetch(
+//         `${config.BASE_API_URL}stripe/credit-checkout/`,
+//         {
+//           method: "POST",
+//           credentials: "include",
+//           headers: { "Content-Type": "application/json" },
+//           body: JSON.stringify({ price_id: priceId }),
+//         }
+//       );
+
+//       if (!res.ok) {
+//         const err = await res.json();
+//         throw new Error(err.error || "Nežinoma klaida");
+//       }
+
+//       const { url } = await res.json();
+//       window.location.href = url;
+//     } catch (err) {
+//       setMessage(`Klaida: ${err.message}`);
+//       setLoadingId(null);
+//     }
+//   };
+
+//   // Три пакета кредитов
+//   const plans = [
+//     { credits: 100, cost: "€18.00",   priceId: "price_1RfxUWIaJDydaLBY6Y3MGrBj", docPrice: "0.18 €" },
+//     { credits: 500, cost: "€85.00",   priceId: "price_1RfxWUIaJDydaLBYJomOA1FD", discount: "-5%", docPrice: "0.17 €" },
+//     { credits: 1000, cost: "€162.00", priceId: "price_1RfxY1IaJDydaLBY4YXDNSAO", discount: "-10%", docPrice: "0.162 €" },
+//   ];
+
+//   return (
+//     <Box sx={{ p: 2, bgcolor: '#f5f5f5', minHeight: '100vh', pb: '70px' }}>
+//       <Helmet>
+//         <title>Pirkti kreditus</title>
+//         <meta name="description" content="Įsigykite kreditų savo analizėms." />
+//       </Helmet>
+//         <Typography
+//         variant="body1"
+//         sx={{
+//           textAlign: 'center',
+//           fontSize: '18px',
+//           mb: 3,
+//           color: '#1b1b1b',
+//           fontWeight: 500,
+//           fontFamily: 'Helvetica',
+//         }}
+//       >
+//         Turite <b>{credits !== null ? credits : "…"}</b> kreditų
+//       </Typography>
+
+//       <Typography
+//         variant="h1"
+//         sx={{ fontSize: '35px', fontWeight: 600, mb: 2, textAlign: 'center' }}
+//       >
+//         Įsigyti kreditų
+//       </Typography>
+//       <Typography
+//         variant="body1"
+//         sx={{ textAlign: 'center', fontSize: '18px', mb: 3 }}
+//       >
+//         Pasirinkite kreditų paketą
+//       </Typography>
+
+//       {message && (
+//         <Typography
+//           variant="body1"
+//           sx={{
+//             textAlign: 'center',
+//             color: message.startsWith('Klaida') ? 'error.main' : 'success.main',
+//             mb: 3,
+//           }}
+//         >
+//           {message}
+//         </Typography>
+//       )}
+
+//       <Stack
+//         direction={{ xs: 'column', md: 'row' }}
+//         spacing={4}
+//         justifyContent="center"
+//       >
+//         {plans.map((plan) => (
+//           <Box
+//             key={plan.credits}
+//             sx={{
+//               width: { xs: '90%', sm: '300px' },
+//               p: 4,
+//               borderRadius: 2,
+//               bgcolor: '#1b1b1b',
+//               color: '#fff',
+//               display: 'flex',
+//               flexDirection: 'column',
+//             }}
+//           >
+//             <Typography variant="h5" sx={{ fontWeight: 'bold', mb: 1 }}>
+//               {plan.credits} kreditų
+//             </Typography>
+//             <Box sx={{ display: 'flex', alignItems: 'baseline', mb: 2 }}>
+//               <Typography
+//                 variant="h3"
+//                 sx={{ fontWeight: 'bold', fontSize: '36px' }}
+//               >
+//                 {plan.cost}
+//               </Typography>
+//               {plan.discount && (
+//                 <Typography
+//                   variant="subtitle2"
+//                   sx={{ ml: 1, color: '#f5cf54' }}
+//                 >
+//                   {plan.discount}
+//                 </Typography>
+//               )}
+//             </Box>
+
+//             {/* Буллет-поинты */}
+//             <List dense sx={{ flexGrow: 1 }}>
+//               <ListItem disableGutters>
+//                 <ListItemIcon sx={{ minWidth: 32 }}>
+//                   <CheckIcon sx={{ color: '#f5cf54' }} />
+//                 </ListItemIcon>
+//                 <ListItemText primary="1 kreditas = 1 dokumentas" />
+//               </ListItem>
+//               <ListItem disableGutters>
+//                 <ListItemIcon sx={{ minWidth: 32 }}>
+//                   <CheckIcon sx={{ color: '#f5cf54' }} />
+//                 </ListItemIcon>
+//                 <ListItemText primary={`Dokumento kaina – ${plan.docPrice}`} />
+//               </ListItem>
+//               <ListItem disableGutters>
+//                 <ListItemIcon sx={{ minWidth: 32 }}>
+//                   <CheckIcon sx={{ color: '#f5cf54' }} />
+//                 </ListItemIcon>
+//                 <ListItemText primary="Galiojimas – neribotas" />
+//               </ListItem>
+//             </List>
+
+//             <Button
+//               variant="contained"
+//               fullWidth
+//               onClick={() => handleCheckout(plan.priceId)}
+//               disabled={loadingId === plan.priceId}
+//               sx={{
+//                 mt: 3,
+//                 bgcolor: "#f5be0d",
+//                 color: "black",
+//                 fontWeight: 'bold',
+//                 py: 1.5,
+//                 "&:hover": { bgcolor: "#d4ae4a" },
+//               }}
+//             >
+//               {loadingId === plan.priceId
+//                 ? "Įkeliama…"
+//                 : `Pirkti ${plan.credits}`}
+//             </Button>
+//           </Box>
+//         ))}
+//       </Stack>
+//     </Box>
+//   );
+// };
+
+// export default Subscribe;
 
 
 

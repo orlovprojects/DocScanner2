@@ -35,12 +35,10 @@ const Header = () => {
 
   // --- ДЛЯ ЛОГО ---
   const isDokskenasLogo = [
-    "/dokskenas",
     "/suvestine",
     "/prisijungti",
     "/registruotis",
     "/papildyti",
-    "/susisiekti",
     "/nustatymai"
   ].includes(location.pathname);
 
@@ -70,27 +68,27 @@ const Header = () => {
     nav("/registruotis");
   };
 
-  const scrollToPricing = () => {
-    const pricingElement = document.getElementById("pricing");
-    if (pricingElement) {
-      pricingElement.scrollIntoView({ behavior: "smooth" });
-    }
-  };
+  // const scrollToPricing = () => {
+  //   const pricingElement = document.getElementById("pricing");
+  //   if (pricingElement) {
+  //     pricingElement.scrollIntoView({ behavior: "smooth" });
+  //   }
+  // };
 
-  const handleDemoClick = () => {
-    if (window.location.pathname === "/") {
-      if (window.location.hash === "#demo") {
-        window.location.hash = "";
-        setTimeout(() => {
-          window.location.hash = "#demo";
-        }, 0);
-      } else {
-        window.location.hash = "#demo";
-      }
-    } else {
-      window.location.href = "/#demo";
-    }
-  };
+  // const handleDemoClick = () => {
+  //   if (window.location.pathname === "/") {
+  //     if (window.location.hash === "#demo") {
+  //       window.location.hash = "";
+  //       setTimeout(() => {
+  //         window.location.hash = "#demo";
+  //       }, 0);
+  //     } else {
+  //       window.location.hash = "#demo";
+  //     }
+  //   } else {
+  //     window.location.href = "/#demo";
+  //   }
+  // };
 
   const menuItemsCenter = isAuthenticated
     ? [
@@ -98,7 +96,7 @@ const Header = () => {
         { text: "Papildyti", onClick: () => nav("/papildyti") },
       ]
     : [
-        { text: "DokSkenas", onClick: () => nav("/dokskenas") },
+        { text: "DokSkenas", onClick: () => nav("/saskaitu-skaitmenizavimas-dokskenas") },
       ];
 
   useEffect(() => {
@@ -118,9 +116,9 @@ const Header = () => {
         }}
       >
         <Toolbar sx={{ minHeight: 64, px: { xs: 2, sm: 4 } }}>
-          {/* Logo */}
+          {/* Логотип */}
           <Box
-            sx={{ display: "flex", alignItems: "center", flexGrow: 0, cursor: "pointer" }}
+            sx={{ display: "flex", alignItems: "center", flex: "1 1 0", cursor: "pointer" }}
             onClick={() => nav("/")}
           >
             <img
@@ -130,98 +128,103 @@ const Header = () => {
             />
           </Box>
 
-          {/* Burger menu for mobile */}
-          {isMobile ? (
+          {/* Центр-меню: только на sm и выше */}
+          <Box
+            sx={{
+              display: { xs: "none", sm: "flex" },
+              alignItems: "center",
+              justifyContent: "center",
+              flex: "1 1 0",
+            }}
+          >
+            {menuItemsCenter.map((item, index) => (
+              <Button
+                key={index}
+                onClick={item.onClick}
+                sx={{
+                  mx: 2,
+                  color: "black",
+                  fontWeight: 700,
+                  fontFamily: "Arial",
+                  background: "none",
+                  textTransform: "none",
+                  fontSize: 16,
+                  '&:hover': { background: "#F5F5F5" },
+                }}
+              >
+                {item.text}
+              </Button>
+            ))}
+          </Box>
+
+          {/* Экшены справа: только на sm и выше */}
+          <Box
+            sx={{
+              display: { xs: "none", sm: "flex" }, // <<< Важно!
+              alignItems: "center",
+              justifyContent: "flex-end",
+              flex: "1 1 0",
+            }}
+          >
+            {!isAuthenticated && (
+              <Button
+                color="inherit"
+                sx={{
+                  mr: 2,
+                  borderColor: "#F5BE0D",
+                  color: "white",
+                  background: "linear-gradient(90deg,rgb(162, 0, 255) 0%,rgb(90, 51, 189) 100%)",
+                  fontWeight: 600,
+                  fontFamily: "Arial",
+                  textTransform: "none",
+                  paddingLeft: 2,
+                  paddingRight: 2,
+                  '&:hover': { background: "linear-gradient(90deg,rgb(90, 51, 189) 0%, rgb(162, 0, 255) 100%)" },
+                }}
+                onClick={handleStartTrial}
+              >
+                Išbandyti nemokamai
+              </Button>
+            )}
+            {isAuthenticated ? (
+              <Tooltip title="Account settings">
+                <IconButton
+                  onClick={handleMenuClick}
+                  size="small"
+                  sx={{ ml: 2, color: 'black' }}
+                  aria-controls={open ? "account-menu" : undefined}
+                  aria-haspopup="true"
+                  aria-expanded={open ? "true" : undefined}
+                >
+                  <AccountCircleIcon sx={{ fontSize: 28, color: 'black' }} />
+                </IconButton>
+              </Tooltip>
+            ) : (
+              <Button
+                color="inherit"
+                startIcon={<LoginIcon />}
+                onClick={() => nav("/prisijungti")}
+                sx={{
+                  fontFamily: "Arial",
+                  textTransform: "none",
+                  fontWeight: 700,
+                }}
+              >
+                Prisijungti
+              </Button>
+            )}
+          </Box>
+
+          {/* Бургер-меню только на мобиле! */}
+          <Box sx={{ display: { xs: "flex", sm: "none" }, alignItems: "center", ml: 1 }}>
             <IconButton
               color="inherit"
               edge="end"
-              onClick={() => setIsDrawerOpen(!isDrawerOpen)}
-              sx={{ marginLeft: "auto" }}
+              onClick={() => setIsDrawerOpen(true)}
             >
               <MenuIcon />
             </IconButton>
-          ) : (
-            <>
-              {/* Centered menu items */}
-              <Box
-                sx={{
-                  display: "flex",
-                  justifyContent: "center",
-                  flexGrow: 2,
-                  fontFamily: "Arial",
-                }}
-              >
-                {menuItemsCenter.map((item, index) => (
-                  <Button
-                    key={index}
-                    onClick={item.onClick}
-                    sx={{
-                      mx: 2,
-                      color: "black",
-                      fontWeight: 700,
-                      fontFamily: "Arial",
-                      background: "none",
-                      textTransform: "none",
-                      fontSize: 16,
-                      '&:hover': { background: "#F5F5F5" },
-                    }}
-                  >
-                    {item.text}
-                  </Button>
-                ))}
-              </Box>
-              {/* Profile Icon with Dropdown */}
-              <Box sx={{ display: "flex", alignItems: "center" }}>
-                {!isAuthenticated && (
-                  <Button
-                    color="inherit"
-                    sx={{
-                      mr: 2,
-                      borderColor: "#F5BE0D",
-                      color: "white",
-                      background: "linear-gradient(90deg,rgb(162, 0, 255) 0%,rgb(90, 51, 189) 100%)",
-                      fontWeight: 600,
-                      fontFamily: "Arial",
-                      textTransform: "none",
-                      paddingLeft: 2,
-                      paddingRight: 2,
-                      '&:hover': { background: "linear-gradient(90deg,rgb(90, 51, 189) 0%, rgb(162, 0, 255) 100%)" },
-                    }}
-                    onClick={handleStartTrial}
-                  >
-                    Išbandyti nemokamai
-                  </Button>
-                )}
-                {isAuthenticated ? (
-                  <Tooltip title="Account settings">
-                    <IconButton
-                      onClick={handleMenuClick}
-                      size="small"
-                      sx={{ ml: 2, color: 'black' }}
-                      aria-controls={open ? "account-menu" : undefined}
-                      aria-haspopup="true"
-                      aria-expanded={open ? "true" : undefined}
-                    >
-                      <AccountCircleIcon sx={{ fontSize: 28, color: 'black' }} />
-                    </IconButton>
-                  </Tooltip>
-                ) : (
-                  <Button
-                    color="inherit"
-                    startIcon={<LoginIcon />}
-                    onClick={() => nav("/prisijungti")}
-                    sx={{
-                      fontFamily: "Arial",
-                      textTransform: "none",
-                      fontWeight: 700,
-                    }}
-                  >
-                    Prisijungti
-                  </Button>
-                )}
-              </Box>
-            </>
-          )}
+          </Box>
         </Toolbar>
       </AppBar>
 
@@ -262,7 +265,7 @@ const Header = () => {
                   button
                   onClick={() => {
                     setIsDrawerOpen(false);
-                    nav("/dokskenas");
+                    nav("/saskaitu-skaitmenizavimas-dokskenas");
                   }}
                 >
                   <ListItemText primary="DokSkenas" />

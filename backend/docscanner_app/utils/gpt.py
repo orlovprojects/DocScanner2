@@ -193,9 +193,7 @@ All boolean fields (seller_is_person, buyer_is_person, with_receipt, separate_va
 - vat_percent
 - discount with VAT (discount_with_vat)
 - total
-- vat_class
-- warehouse
-- object
+- preke_paslauga (if lineitem is product, return preke; if lineitem is service, return paslauga)
 
 **IMPORTANT:**
 - Each document must have a "line_items" field containing an array of line items (may be empty if not found).
@@ -272,9 +270,7 @@ All boolean fields (seller_is_person, buyer_is_person, with_receipt, separate_va
           "vat_percent": "",
           "discount_with_vat": "",
           "total": "",
-          "vat_class": "",
-          "warehouse": "",
-          "object": ""
+          "preke_paslauga": ""
         }
       ]
     }

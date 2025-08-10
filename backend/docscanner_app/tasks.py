@@ -6,8 +6,10 @@ from .utils.gpt import ask_gpt_with_retry, DEFAULT_PROMPT, DETAILED_PROMPT
 from .utils.similarity import calculate_max_similarity_percent
 from .utils.save_document import update_scanned_document
 from .validators.company_matcher import update_seller_buyer_info
+from .validators.verify_lt_company_match import update_seller_buyer_info_from_companies
 from .utils.parsers import parse_date_lit, parse_decimal_lit, parse_percent_int
 from .utils.file_converter import normalize_uploaded_file
+from .utils.update_currency_rates import update_currency_rates
 from django.core.files.base import ContentFile
 from decimal import Decimal
 import os
@@ -16,6 +18,8 @@ import json
 import logging
 import logging.config
 from django.conf import settings
+from datetime import date
+
 
 logging.config.dictConfig(settings.LOGGING)
 
@@ -178,6 +182,7 @@ def process_uploaded_file_task(user_id, doc_id, scan_type):
             parse_date_lit, parse_decimal_lit, parse_percent_int, user, structured
         )
         update_seller_buyer_info(doc)
+        update_seller_buyer_info_from_companies(doc)
 
         doc.status = 'completed'
         doc.save()
@@ -196,6 +201,16 @@ def process_uploaded_file_task(user_id, doc_id, scan_type):
             doc.status = 'rejected'
             doc.error_message = str(e)
             doc.save()
+
+
+
+
+
+@shared_task
+def fetch_daily_currency_rates():
+    count = update_currency_rates(date.today())
+    print(f"Updated {count} currency rates for {date.today()}")
+    return count
 
 
 

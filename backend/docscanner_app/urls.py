@@ -12,9 +12,10 @@ from .views import (
     import_clients_view,
     import_products_view,
     bulk_delete_documents,
+    user_me_view,
 )
 
-from docscanner_app.views import export_documents_to_xml_zip
+from docscanner_app.views import export_documents
 
 
 urlpatterns = [
@@ -25,8 +26,10 @@ urlpatterns = [
     path('documents/<int:pk>/', get_document_detail, name='get_document_detail'),
     path('documents/bulk-delete/', bulk_delete_documents, name='bulk_delete_documents'),
 
+    path('me/', user_me_view),
 
-    path('documents/export_xml/', export_documents_to_xml_zip, name='export_documents_to_xml_zip'),
+
+    path('documents/export_xml/', export_documents, name='export_documents'),
 
     path('profile/', user_profile, name='user_profile'),
 

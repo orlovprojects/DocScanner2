@@ -1,9 +1,6 @@
 from ..models import CustomUser
 from .company_name_normalizer import normalize_company_name
 
-from ..models import CustomUser
-from .company_name_normalizer import normalize_company_name
-
 def update_seller_buyer_info(scanned_doc):
     users = CustomUser.objects.all()
 

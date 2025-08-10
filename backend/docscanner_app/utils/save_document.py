@@ -10,6 +10,7 @@ from ..validators.default_currency import set_default_currency
 from ..validators.vat_klas import auto_select_pvm_code
 from decimal import Decimal
 
+
 import logging
 logger = logging.getLogger("celery")
 
@@ -131,6 +132,7 @@ def update_scanned_document(
             db_doc.prekes_barkodas = first_item.get("prekes_barcode", "")
             db_doc.prekes_pavadinimas = first_item.get("product_name", "")
             db_doc.prekes_tipas = first_item.get("prekes_tipas", "")
+            db_doc.preke_paslauga = first_item.get("preke_paslauga")
             db_doc.sandelio_kodas = first_item.get("sandelio_kodas", "")
             db_doc.sandelio_pavadinimas = first_item.get("sandelio_pavadinimas", "")
             db_doc.objekto_kodas = first_item.get("objekto_kodas", "")
@@ -170,6 +172,7 @@ def update_scanned_document(
             db_doc.prekes_barkodas = ""
             db_doc.prekes_pavadinimas = ""
             db_doc.prekes_tipas = ""
+            db_doc.preke_paslauga = ""
             db_doc.sandelio_kodas = ""
             db_doc.sandelio_pavadinimas = ""
             db_doc.objekto_kodas = ""
@@ -226,12 +229,13 @@ def update_scanned_document(
         vat_percents = []
         for item in line_items:
             vat_percent = parse_percent_int(item.get("vat_percent"))
+            # ВАЖНО: всегда передаём separate_vat=False чтобы не получить "Keli skirtingi PVM" для каждой строки!
             pvm_kodas = auto_select_pvm_code(
                 scan_type=scan_type,
                 vat_percent=vat_percent,
                 buyer_country_iso=db_doc.buyer_country_iso,
                 seller_country_iso=db_doc.seller_country_iso,
-                separate_vat=db_doc.separate_vat,
+                separate_vat=False  # <-- ВАЖНО!
             )
             pvm_codes.append(pvm_kodas)
             vat_percents.append(vat_percent)
@@ -242,6 +246,7 @@ def update_scanned_document(
                 prekes_barkodas=item.get("product_barcode", ""),
                 prekes_pavadinimas=item.get("product_name", ""),
                 prekes_tipas=item.get("prekes_tipas", ""),
+                preke_paslauga=item.get("preke_paslauga"),
                 unit=item.get("unit", ""),
                 quantity=parse_decimal_lit(item.get("quantity", "")),
                 price=parse_decimal_lit(item.get("price", "")),
@@ -309,6 +314,7 @@ def update_scanned_document(
                 separate_vat=db_doc.separate_vat,
             )
         db_doc.save()
+
 
 
 

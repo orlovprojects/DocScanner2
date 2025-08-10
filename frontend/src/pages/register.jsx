@@ -112,9 +112,18 @@ const Register = () => {
                 fontSize: "14px",
               }}
             >
-              Jei jau turi paskyrą, prisijunk!
+              Jei jau turi paskyrą, <b>prisijunk</b>!
             </Link>
           </Box>
+              {/* Текст с условиями */}
+          <Typography
+            variant="caption"
+            sx={{ display: 'block', color: '#555', mt: 0.5, fontFamily: 'Helvetica' }}
+          >
+            Paspausdami Registruotis, jūs sutinkate su{' '}
+            <Link href="/privatumo-politika" underline="hover">Privatumo politika</Link> ir{' '}
+            <Link href="/naudojimo-taisykles" underline="hover">Naudojimo taisyklėmis</Link>.
+          </Typography>
         </Box>
       </Box>
     </Container>

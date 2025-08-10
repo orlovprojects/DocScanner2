@@ -153,7 +153,7 @@ AUTH_PASSWORD_VALIDATORS = [
 
 # Язык и часовой пояс
 LANGUAGE_CODE = "en-us"
-TIME_ZONE = "UTC"
+TIME_ZONE = 'Europe/Vilnius'
 USE_I18N = True
 USE_TZ = True
 
