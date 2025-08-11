@@ -3,6 +3,13 @@ from .models import ScannedDocument, CustomUser
 from .utils.ocr import get_ocr_text
 from .utils.doc_type import detect_doc_type
 from .utils.gpt import ask_gpt_with_retry, DEFAULT_PROMPT, DETAILED_PROMPT
+from .utils.deepseek import (
+    DEEPSEEK_DEFAULT_PROMPT,
+    DEEPSEEK_DETAILED_PROMPT,
+    ask_deepseek_with_retry
+)
+from .utils.gemini import GEMINI_DEFAULT_PROMPT, GEMINI_DETAILED_PROMPT, ask_gemini_with_retry
+
 from .utils.similarity import calculate_max_similarity_percent
 from .utils.save_document import update_scanned_document
 from .validators.company_matcher import update_seller_buyer_info
@@ -138,6 +145,15 @@ def process_uploaded_file_task(user_id, doc_id, scan_type):
             return
 
         # --- GPT ---
+        # Deepseek model
+        # deepseek_prompt = DEEPSEEK_DETAILED_PROMPT if scan_type == "detaliai" else DEEPSEEK_DEFAULT_PROMPT
+        # gpt_resp = ask_deepseek_with_retry(raw_text, prompt=deepseek_prompt)
+
+        # Gemini model
+        # gemini_prompt = GEMINI_DETAILED_PROMPT if scan_type == "detaliai" else GEMINI_DEFAULT_PROMPT
+        # gpt_resp = ask_gemini_with_retry(raw_text, prompt=gemini_prompt, model="gemini-2.5-flash")
+
+        # GPT model
         gpt_prompt = DETAILED_PROMPT if scan_type == "detaliai" else DEFAULT_PROMPT
         gpt_resp = ask_gpt_with_retry(raw_text, prompt=gpt_prompt)
         logger.info(f"[TASK] GPT response for {original_filename}: {gpt_resp[:500]}...")  # log first 500 chars

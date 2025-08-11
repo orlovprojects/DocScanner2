@@ -47,6 +47,10 @@ from .exports.rivile import (
 from .exports.rivile_erp import export_clients_to_rivile_erp_xlsx, export_prekes_and_paslaugos_to_rivile_erp_xlsx, export_documents_to_rivile_erp_xlsx
 from docscanner_app.utils.prekes_kodas import assign_random_prekes_kodai
 import tempfile
+from .models import AdClick
+from .serializers import AdClickSerializer
+from rest_framework import generics, permissions
+
 
 
 
@@ -67,7 +71,7 @@ def export_documents(request):
     user = request.user
     export_type = request.data.get('export_type')
     if not export_type:
-        export_type = getattr(user, 'default_accounting_program', 'centras')
+        export_type = getattr(user, 'default_accounting_program', 'centas')
     export_type = export_type.lower()
 
     today_str = date.today().strftime('%Y-%m-%d')
@@ -81,9 +85,9 @@ def export_documents(request):
 
     files_to_export = []
 
-    if export_type == 'centras':
+    if export_type == 'centas':
         assign_random_prekes_kodai(documents)
-        # ... твой код экспорта Centras (оставь как есть)
+        # ... твой код экспорта Centas (оставь как есть)
         if pirkimai:
             xml_bytes = export_documents_group_to_centras_xml(pirkimai)
             files_to_export.append((f"{today_str}_pirkimai.xml", xml_bytes))
@@ -810,6 +814,24 @@ def user_me_view(request):
     serializer = CustomUserSerializer(request.user)
     return Response(serializer.data)
 
+
+class TrackAdClickView(generics.CreateAPIView):
+    queryset = AdClick.objects.all()
+    serializer_class = AdClickSerializer
+    permission_classes = [permissions.AllowAny]  # даже гости могут
+
+    def create(self, request, *args, **kwargs):
+        user = request.user if request.user.is_authenticated else None
+        ip = request.META.get("REMOTE_ADDR")
+        ua = request.META.get("HTTP_USER_AGENT", "")
+
+        ad_click = AdClick.objects.create(
+            ad_name=request.data.get("ad_name", "Unknown"),
+            user=user,
+            ip_address=ip,
+            user_agent=ua
+        )
+        return Response({"status": "ok"})
 
 
 

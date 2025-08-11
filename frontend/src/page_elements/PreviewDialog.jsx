@@ -59,7 +59,7 @@ export default function PreviewDialog({
 
   // Валидация: если хотя бы одно из полей false — показать warning
   const validationFields = [
-    selected?.val_ar_sutapo,
+    // selected?.val_ar_sutapo,
     selected?.val_subtotal_match,
     selected?.val_vat_match,
     selected?.val_total_match,

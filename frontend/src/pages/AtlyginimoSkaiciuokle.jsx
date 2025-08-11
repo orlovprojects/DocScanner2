@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Helmet } from 'react-helmet';
 import { useNavigate } from "react-router-dom";
+import { publicApi } from "../api/endpoints"; // твой axios instance
 
 import {
   Table, TableBody, TableCell, TableContainer, TableRow, Grid2, Container, FormControl,
@@ -72,10 +73,14 @@ const AtlyginimoSkaiciuokle = () => {
   const employerContribution = grossSalary > 0 ? grossSalary * 0.0177 : 0;
   const totalCost = grossSalary + employerContribution;
 
+
   // Reusable ad block
   const DokskenAd = ({ sx }) => {
     const nav = useNavigate();
-
+    const handleClick = (adName) => {
+      publicApi.post("/api/track-click/", { ad_name: adName })
+        .catch(err => console.error("Tracking error:", err));
+    };
     return (
       <Box
         sx={{
@@ -129,7 +134,8 @@ const AtlyginimoSkaiciuokle = () => {
             >
               <Button
                 variant="contained"
-                onClick={() => nav("/saskaitu-skaitmenizavimas-dokskenas")}
+                href="/saskaitu-skaitmenizavimas-dokskenas"
+                onClick={() => handleClick("AS_suzinoti_daugiau")}
                 sx={{
                   borderRadius: 1,
                   fontWeight: 300,

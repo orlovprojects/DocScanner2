@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from .models import CustomUser
-from .models import ScannedDocument, LineItem, ProductAutocomplete, ClientAutocomplete
+from .models import ScannedDocument, LineItem, ProductAutocomplete, ClientAutocomplete, AdClick
 
 
 
@@ -347,6 +347,14 @@ class CustomUserSerializer(serializers.ModelSerializer):
                 if field in attrs and not attrs[field]:
                     raise serializers.ValidationError({field: 'This field is required.'})
         return attrs
+    
+
+
+class AdClickSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = AdClick
+        fields = "__all__"
+        read_only_fields = ("user", "ip_address", "user_agent", "created_at")
 
 
 

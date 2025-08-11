@@ -16,7 +16,7 @@ from .views import (
 )
 
 from docscanner_app.views import export_documents
-
+from .views import TrackAdClickView
 
 urlpatterns = [
 
@@ -27,6 +27,7 @@ urlpatterns = [
     path('documents/bulk-delete/', bulk_delete_documents, name='bulk_delete_documents'),
 
     path('me/', user_me_view),
+    path("api/track-click/", TrackAdClickView.as_view(), name="TrackAdClickView"),
 
 
     path('documents/export_xml/', export_documents, name='export_documents'),

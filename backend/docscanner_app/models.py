@@ -168,10 +168,10 @@ class ScannedDocument(models.Model):
 class LineItem(models.Model):
     document = models.ForeignKey('ScannedDocument', on_delete=models.CASCADE, related_name='line_items')
     line_id = models.CharField(max_length=100, blank=True, null=True)
-    prekes_kodas = models.CharField("Prekės kodas", max_length=128, blank=True)
-    prekes_barkodas = models.CharField("Prekės barkodas", max_length=128, blank=True)
-    prekes_pavadinimas = models.CharField("Prekės pavadinimas", max_length=255, blank=True)
-    prekes_tipas = models.CharField("Prekės tipas", max_length=128, blank=True)
+    prekes_kodas = models.CharField("Prekės kodas", max_length=128, blank=True, null=True)
+    prekes_barkodas = models.CharField("Prekės barkodas", max_length=128, blank=True, null=True)
+    prekes_pavadinimas = models.CharField("Prekės pavadinimas", max_length=255, blank=True, null=True)
+    prekes_tipas = models.CharField("Prekės tipas", max_length=128, blank=True, null=True)
     unit = models.CharField(max_length=50, blank=True, null=True)               # <matovnt> / unit
     quantity = models.DecimalField(max_digits=10, decimal_places=2, blank=True, null=True)  # <kiekis>
     price = models.DecimalField(max_digits=10, decimal_places=4, blank=True, null=True)     # <kaina> / price
@@ -467,3 +467,15 @@ class Company(models.Model):
 
     def __str__(self):
         return f"{self.pavadinimas} ({self.im_kodas})"
+    
+
+
+class AdClick(models.Model):
+    ad_name = models.CharField(max_length=100)  # например "DokskenAd"
+    user = models.ForeignKey('CustomUser', on_delete=models.SET_NULL, null=True, blank=True)
+    ip_address = models.GenericIPAddressField(null=True, blank=True)
+    user_agent = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.ad_name} - {self.created_at}"
