@@ -3,6 +3,13 @@ from .company_name_normalizer import normalize_company_name
 import re
 
 
+def ensure_lt_prefix(vat_code):
+    vat_code = (vat_code or "").strip()
+    if vat_code and not vat_code.upper().startswith("LT"):
+        return f"LT{vat_code}"
+    return vat_code
+
+
 def shorten_legal_form(name):
     # Уменьшаем юридическую форму в начале или в конце строки
     substitutions = [
@@ -58,7 +65,7 @@ def update_seller_buyer_info_from_companies(scanned_doc):
         if buyer_company:
             scanned_doc.buyer_id = buyer_company.im_kodas
             scanned_doc.buyer_name = shorten_legal_form(buyer_company.pavadinimas)
-            scanned_doc.buyer_vat_code = buyer_company.pvm_kodas
+            scanned_doc.buyer_vat_code = ensure_lt_prefix(buyer_company.pvm_kodas)
         # Если есть хотя бы одно, но не всё — заполняем отсутствующее
         elif any(buyer_fields.values()):
             comp = None
@@ -79,7 +86,7 @@ def update_seller_buyer_info_from_companies(scanned_doc):
                 if not scanned_doc.buyer_name:
                     scanned_doc.buyer_name = shorten_legal_form(comp.pavadinimas)
                 if not scanned_doc.buyer_vat_code:
-                    scanned_doc.buyer_vat_code = comp.pvm_kodas
+                    scanned_doc.buyer_vat_code = ensure_lt_prefix(comp.pvm_kodas)
 
     # === SELLER ===
     seller_country = (scanned_doc.seller_country_iso or "").strip().upper()
@@ -106,7 +113,7 @@ def update_seller_buyer_info_from_companies(scanned_doc):
         if seller_company:
             scanned_doc.seller_id = seller_company.im_kodas
             scanned_doc.seller_name = shorten_legal_form(seller_company.pavadinimas)
-            scanned_doc.seller_vat_code = seller_company.pvm_kodas
+            scanned_doc.seller_vat_code = ensure_lt_prefix(seller_company.pvm_kodas)
         elif any(seller_fields.values()):
             comp = None
             if seller_fields['id']:
@@ -126,6 +133,6 @@ def update_seller_buyer_info_from_companies(scanned_doc):
                 if not scanned_doc.seller_name:
                     scanned_doc.seller_name = shorten_legal_form(comp.pavadinimas)
                 if not scanned_doc.seller_vat_code:
-                    scanned_doc.seller_vat_code = comp.pvm_kodas
+                    scanned_doc.seller_vat_code = ensure_lt_prefix(comp.pvm_kodas)
 
     return scanned_doc

@@ -334,7 +334,7 @@ def ask_gpt(text: str, prompt: str) -> str:
             {"role": "user", "content": full_prompt}
         ],
         temperature=0.3,
-        max_tokens=5048
+        max_tokens=10000
     )
     result = response.choices[0].message.content.strip()
     print("\n===== GPT ответ =====\n", result, "\n=====================\n")

@@ -311,7 +311,7 @@ If you identified > 1 documents, no detailed data is needed, return only this:
 # =========================
 # 3) ОСНОВНЫЕ ФУНКЦИИ
 # =========================
-def ask_gemini(text: str, prompt: str, model: str = "gemini-2.5-flash", temperature: float = 0.3, max_output_tokens: int = 8192) -> str:
+def ask_gemini(text: str, prompt: str, model: str = "gemini-2.5-flash", temperature: float = 0.3, max_output_tokens: int = 12000) -> str:
     """
     Делает один запрос к Gemini API с промптом и OCR-текстом.
     По умолчанию — модель 'gemini-2.5-flash', можно поменять на 'gemini-2.5-pro'.
@@ -338,7 +338,7 @@ def ask_gemini_with_retry(
     max_retries: int = 2,
     wait_seconds: int = 60,
     temperature: float = 0.3,
-    max_output_tokens: int = 8192
+    max_output_tokens: int = 12000
 ) -> str:
     """
     Повторяет запрос при Rate Limit / временных сбоях.
