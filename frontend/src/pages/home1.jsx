@@ -161,7 +161,7 @@ const Home = () => {
                                 {/* Встроенное YouTube-видео */}
                                 <Box
                                     component="iframe"
-                                    src="https://www.youtube.com/embed/dQw4w9WgXcQ" // Замените на вашу ссылку
+                                    src="https://www.youtube.com/embed/falGn4_S_5Y?si=LFmb3RYZCG59JKF8" // Замените на вашу ссылку
                                     title="Demo Video"
                                     width="100%"
                                     height="400px"

@@ -324,7 +324,7 @@ class CustomUserSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         password = validated_data.pop('password')
         user = CustomUser.objects.create_user(password=password, **validated_data)
-        user.credits = 100
+        user.credits = 50
         user.save(update_fields=['credits'])
         return user
 

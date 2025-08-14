@@ -49,6 +49,7 @@ def ask_llm_with_fallback(raw_text: str, scan_type: str, logger):
             text=raw_text,
             prompt=gemini_prompt,
             model="gemini-2.5-flash",
+            logger=logger,
         )
         logger.info("[TASK] Gemini succeeded")
         return resp, "gemini"
@@ -161,8 +162,15 @@ def process_uploaded_file_task(user_id, doc_id, scan_type):
             logger.info(f"[TASK] Rejected due to type: {found_type}")
             return
 
+        doc.raw_text = raw_text
+        doc.preview_url = preview_url
+        doc.status = 'ocr_done'  # (необязательно, но полезно для дебага пайплайна)
+        doc.save(update_fields=['raw_text'])
+
+
         similarity_percent = calculate_max_similarity_percent(raw_text, user, exclude_doc_id=doc.pk)
         doc.similarity_percent = similarity_percent
+        doc.save(update_fields=['similarity_percent'])
         logger.info(f"[TASK] Similarity: {similarity_percent}% for {original_filename}")
 
         if similarity_percent > 95:

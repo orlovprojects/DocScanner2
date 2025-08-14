@@ -1,10 +1,21 @@
 import os
 import time
+import logging
 import openai  # для совместимого RateLimitError
 from dotenv import load_dotenv
 from google import genai
 
+# Попытка импортировать типовые исключения rate limit от Google SDK (если доступно)
+try:
+    from google.api_core.exceptions import ResourceExhausted, TooManyRequests
+    GEMINI_RATE_EXCS = (ResourceExhausted, TooManyRequests)
+except Exception:
+    GEMINI_RATE_EXCS = tuple()
+
 load_dotenv()
+
+# Глобальный логгер модуля (подхватит конфиг из Django settings.LOGGING)
+LOGGER = logging.getLogger("celery")
 
 # =========================
 # 1) КЛИЕНТ GEMINI
@@ -113,8 +124,8 @@ If 2 or more different VAT '%' in doc, separate_vat must be True, otherwise Fals
 
 If the document is a kasos čekis (cash receipt), for example, a fuel (kuro) receipt, buyer info is often at the bottom as a line with company name, company code, and VAT code—extract these as buyer details. For line items, find the quantity and unit next to price (like “50,01 l” for litres). Product name is usually above this line. document_number is usually next to kvitas, ignore long numer below "kasininkas" at the bottom of document but don't ignore date at the bottom.
 
-Return ONLY a valid JSON object according to the provided structure. Do not include any explanations or extra text outside the JSON.
-Do NOT add any markdown formatting (do not use json or ).
+Return ONLY a valid JSON object according to the provided structure. Do NOT include any explanations, comments, or extra text outside the JSON. Do NOT add any markdown formatting (do not wrap in code fences, do not use json or triple backticks). Do NOT wrap the JSON in quotes or escape characters. Do NOT include \n, \" or any other escape sequences — use actual newlines and plain quotes. The output must be valid and directly parsable by JSON.parse().
+
 If you cannot extract any documents, return exactly:
 {
   "docs": 0,
@@ -292,8 +303,8 @@ For unit, try to identify any of these vnt kg g mg kompl t ct m cm mm km l ml m2
 
 If the document is a kasos čekis (cash receipt), for example, a fuel (kuro) receipt, buyer info is often at the bottom as a line with company name, company code, and VAT code—extract these as buyer details. For line items, find the quantity and unit next to price (like “50,01 l” for litres). Product name is usually above this line. document_number is usually next to kvitas, ignore long numer below "kasininkas" at the bottom of document but don't ignore date at the bottom.
 
-Return ONLY a valid JSON object according to the provided structure. Do not include any explanations or extra text outside the JSON.
-Do NOT add any markdown formatting (do not use json or ).
+Return ONLY a valid JSON object according to the provided structure. Do NOT include any explanations, comments, or extra text outside the JSON. Do NOT add any markdown formatting (do not wrap in code fences, do not use json or triple backticks). Do NOT wrap the JSON in quotes or escape characters. Do NOT include \n, \" or any other escape sequences — use actual newlines and plain quotes. The output must be valid and directly parsable by JSON.parse().
+
 
 If you cannot extract any documents, return exactly:
 {
@@ -311,11 +322,21 @@ If you identified > 1 documents, no detailed data is needed, return only this:
 # =========================
 # 3) ОСНОВНЫЕ ФУНКЦИИ
 # =========================
-def ask_gemini(text: str, prompt: str, model: str = "gemini-2.5-flash", temperature: float = 0.3, max_output_tokens: int = 12000) -> str:
+def ask_gemini(
+    text: str,
+    prompt: str,
+    model: str = "gemini-2.5-flash",
+    temperature: float = 0.3,
+    max_output_tokens: int = 12000,
+    logger: logging.Logger | None = None,
+) -> str:
     """
     Делает один запрос к Gemini API с промптом и OCR-текстом.
-    По умолчанию — модель 'gemini-2.5-flash', можно поменять на 'gemini-2.5-pro'.
+    По умолчанию — модель 'gemini-2.5-flash'.
+    Логи пишем через logger (по умолчанию — 'celery').
     """
+    log = logger or LOGGER
+
     full_prompt = prompt + "\n\n" + text
 
     response = gemini_client.models.generate_content(
@@ -326,8 +347,12 @@ def ask_gemini(text: str, prompt: str, model: str = "gemini-2.5-flash", temperat
             "max_output_tokens": max_output_tokens
         }
     )
-    result = response.text.strip()
-    print("\n===== Gemini ответ =====\n", result, "\n=====================\n")
+    result = (getattr(response, "text", "") or "").strip()
+
+    # Не спамим лог большими ответами
+    preview = result[:500].replace("\n", " ")
+    log.info("[Gemini] OK model=%s len=%d preview=%r", model, len(result), preview)
+
     return result
 
 
@@ -338,12 +363,15 @@ def ask_gemini_with_retry(
     max_retries: int = 2,
     wait_seconds: int = 60,
     temperature: float = 0.3,
-    max_output_tokens: int = 12000
+    max_output_tokens: int = 12000,
+    logger: logging.Logger | None = None,
 ) -> str:
     """
-    Повторяет запрос при Rate Limit / временных сбоях.
+    Повторяет запрос при Rate Limit / временных сбоях и логирует все события.
     """
+    log = logger or LOGGER
     last_exc = None
+
     for attempt in range(max_retries + 1):
         try:
             return ask_gemini(
@@ -351,20 +379,53 @@ def ask_gemini_with_retry(
                 prompt=prompt,
                 model=model,
                 temperature=temperature,
-                max_output_tokens=max_output_tokens
+                max_output_tokens=max_output_tokens,
+                logger=log,
             )
-        except openai.RateLimitError as e:
-            print(f"[Gemini] Rate limit. Попытка {attempt + 1}/{max_retries + 1}. Ждём {wait_seconds} сек...")
+
+        # Явные rate-limit исключения Google SDK (если библиотека доступна)
+        except GEMINI_RATE_EXCS as e:
+            log.warning(
+                "[Gemini] Rate limit (%s). attempt=%d/%d wait=%ds",
+                e.__class__.__name__, attempt + 1, max_retries + 1, wait_seconds,
+                exc_info=True,
+            )
             last_exc = e
             if attempt < max_retries:
                 time.sleep(wait_seconds)
+                continue
+            break
+
+        # Совместимость: если используешь OpenAI и хочешь ловить его лимиты тут же
+        except openai.RateLimitError as e:
+            log.warning(
+                "[Gemini/OpenAI] Rate limit (%s). attempt=%d/%d wait=%ds",
+                e.__class__.__name__, attempt + 1, max_retries + 1, wait_seconds,
+                exc_info=True,
+            )
+            last_exc = e
+            if attempt < max_retries:
+                time.sleep(wait_seconds)
+                continue
+            break
+
+        # Прочие ошибки: если по тексту похоже на 429/лимит — тоже как warning
         except Exception as e:
             msg = str(e).lower()
-            if "rate limit" in msg or "429" in msg:
-                print(f"[Gemini] Похоже rate limit. Попытка {attempt + 1}/{max_retries + 1}. Ждём {wait_seconds} сек...")
+            if "rate limit" in msg or "429" in msg or "too many requests" in msg:
+                log.warning(
+                    "[Gemini] Probable rate limit by message. attempt=%d/%d wait=%ds err=%s",
+                    attempt + 1, max_retries + 1, wait_seconds, e,
+                    exc_info=True,
+                )
                 last_exc = e
                 if attempt < max_retries:
                     time.sleep(wait_seconds)
+                    continue
+                break
             else:
+                log.exception("[Gemini] Unexpected error")
                 raise
+
+    log.error("[Gemini] Exhausted retries. Raising last exception: %r", last_exc)
     raise last_exc

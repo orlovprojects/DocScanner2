@@ -44,6 +44,11 @@ from .exports.rivile import (
     export_pardavimai_group_to_rivile,
     export_prekes_and_paslaugos_group_to_rivile
 )
+from .exports.finvalda import (
+    export_pirkimai_group_to_finvalda,
+    export_pardavimai_group_to_finvalda,
+)
+from .exports.apskaita5 import export_documents_group_to_apskaita5
 from .exports.rivile_erp import export_clients_to_rivile_erp_xlsx, export_prekes_and_paslaugos_to_rivile_erp_xlsx, export_documents_to_rivile_erp_xlsx
 from docscanner_app.utils.prekes_kodas import assign_random_prekes_kodai
 import tempfile
@@ -180,6 +185,45 @@ def export_documents(request):
             response['Content-Disposition'] = f'attachment; filename={today_str}_rivile_eip.zip'
             documents.update(status="exported")
             return response
+        
+
+
+    elif export_type == 'finvalda':
+        assign_random_prekes_kodai(documents)
+
+        if pirkimai:
+            xml_bytes = export_pirkimai_group_to_finvalda(pirkimai)
+            files_to_export.append((f"{today_str}_pirkimai_finvalda.xml", xml_bytes))
+        if pardavimai:
+            xml_bytes = export_pardavimai_group_to_finvalda(pardavimai)
+            files_to_export.append((f"{today_str}_pardavimai_finvalda.xml", xml_bytes))
+
+        if len(files_to_export) > 1:
+            zip_buffer = io.BytesIO()
+            with zipfile.ZipFile(zip_buffer, "w") as zf:
+                for filename, xml_content in files_to_export:
+                    zf.writestr(filename, xml_content)
+            zip_buffer.seek(0)
+            response = HttpResponse(zip_buffer.read(), content_type='application/zip')
+            response['Content-Disposition'] = f'attachment; filename={today_str}_finvalda.zip'
+            return response
+        elif len(files_to_export) == 1:
+            filename, xml_content = files_to_export[0]
+            response = HttpResponse(xml_content, content_type='application/xml')
+            response['Content-Disposition'] = f'attachment; filename={filename}'
+            return response
+        else:
+            return Response({"error": "No documents to export"}, status=400)
+
+
+
+    elif export_type == 'apskaita5':
+        assign_random_prekes_kodai(documents)
+        xml_bytes = export_documents_group_to_apskaita5(documents, site_url)
+        response = HttpResponse(xml_bytes, content_type='application/xml')
+        response['Content-Disposition'] = f'attachment; filename={today_str}_apskaita5.xml'
+        return response
+
 
 
     elif export_type == 'rivile_erp':
