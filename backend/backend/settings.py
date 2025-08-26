@@ -221,7 +221,7 @@ LOGGING = {
             "propagate": False,
         },
         "docscanner_app": {
-            "handlers": ["file", "console"],
+            "handlers": ["file", "console", "celery_file"],
             "level": "DEBUG",
             "propagate": False,
         },
