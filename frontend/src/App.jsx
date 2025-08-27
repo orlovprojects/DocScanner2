@@ -8,6 +8,7 @@ import Contact from './pages/contact';
 import Terms from './pages/Terms';
 import Privacy from './pages/Privacy';
 import AtlyginimoSkaiciuokle from './pages/AtlyginimoSkaiciuokle';
+import AtlyginimoSkaiciuokle2026 from './pages/AtlyginimoSkaiciuokle2026';
 
 import AuthProvider from './contexts/useAuth';
 import PrivateRoute from './components/private_route';
@@ -41,6 +42,7 @@ function App() {
             <Header /> {/* Добавляем Header сюда */}
             <Routes>
                 <Route path="/" element={<AtlyginimoSkaiciuokle />} />
+                <Route path="/2026" element={<AtlyginimoSkaiciuokle2026 />} />
                 <Route path="/saskaitu-skaitmenizavimas-dokskenas" element={<Dokskenas />} />
                 <Route path="/suvestine" element={<PrivateRoute><UploadPage /></PrivateRoute>} />
                 <Route path="/prisijungti" element={<RedirectIfAuthenticated><Login /></RedirectIfAuthenticated>} />

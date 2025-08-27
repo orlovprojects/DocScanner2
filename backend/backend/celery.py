@@ -3,25 +3,23 @@ import os
 from celery import Celery
 from celery.schedules import crontab
 
-# 1. Устанавливаем переменную окружения до всего остального!
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'backend.settings')
 
-# 2. Создаём экземпляр Celery
 app = Celery('backend')
-
-# 3. Настраиваем Celery с использованием Django настроек
 app.config_from_object('django.conf:settings', namespace='CELERY')
-
-# 4. Автоматически обнаруживаем задачи
 app.autodiscover_tasks()
 
+# Важно! Таймзона должна быть явно задана:
+app.conf.timezone = 'Europe/Vilnius'
+app.conf.enable_utc = False
 
 app.conf.beat_schedule = {
     'fetch-currency-rates-every-morning': {
         'task': 'docscanner_app.tasks.fetch_daily_currency_rates',
-        'schedule': crontab(hour=13, minute=00),  # Например, каждый день в 13:00
+        'schedule': crontab(hour=16, minute=0),  # Каждый день в 16:00 по Вильнюсу
     },
 }
+
 
 
 
