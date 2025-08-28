@@ -183,7 +183,7 @@ const AtlyginimoSkaiciuokle = () => {
   return (
     <Container maxWidth="lg" sx={{ marginBottom: '100px' }}>
       <Helmet>
-        <title>Atlyginimo Skaičiuoklė 2025 metų - pagal naujausius mokesčių pakeitimus</title>
+        <title>Atlyginimo Skaičiuoklė 2025 metų - DokSkenas</title>
         <meta name="description" content="Patogiai apskaičiuokite savo atlyginimą į rankas arba ant popieriaus. Skaičiuoklė nuolat atnaujinama pagal naujausius mokesčių įstatymus." />
       </Helmet>
 

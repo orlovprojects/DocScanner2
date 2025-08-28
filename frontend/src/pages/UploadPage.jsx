@@ -254,6 +254,11 @@ export default function UploadPage() {
 
   return (
     <Box p={4}>
+      <Helmet>
+        <title>Suvestinė</title>
+        <meta name="description" content="Įkelkite dokumentus skaitmenizavimui" />
+      </Helmet>
+
       {/* Popup прогресса */}
       <Dialog open={progressOpen} maxWidth="xs" fullWidth>
         <DialogTitle>Įkeliami failai</DialogTitle>
