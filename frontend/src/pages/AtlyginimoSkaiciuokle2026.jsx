@@ -158,7 +158,7 @@ const AtlyginimoSkaiciuokle2026 = () => {
   return (
     <Container sx={{maxWidth:'2000px', marginBottom: '100px' }}>
       <Helmet>
-        <title>Atlyginimo Skaičiuoklė 2026 metų - DokSkenas</title>
+        <title>Atlyginimo Skaičiuoklė 2026 metų (Progresinis GPM)</title>
         <meta name="description" content="Apskaičiuokite, kiek uždirbsite 2026 metais, pritaikius progresinį GPM ir kitus mokesčių pakeitimus." />
       </Helmet>
 

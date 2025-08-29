@@ -15,6 +15,7 @@ from ..validators.amount_validator import (
 )
 from ..validators.default_currency import set_default_currency
 from ..validators.vat_klas import auto_select_pvm_code
+from ..validators.currency_converter import to_iso_currency
 
 # Санитайзеры
 from ..utils.parsers import (
@@ -71,7 +72,18 @@ def _apply_top_level_fields(
     db_doc.amount_with_vat = doc_struct.get("amount_with_vat")
 
     db_doc.separate_vat = doc_struct.get("separate_vat")
-    db_doc.currency = set_default_currency(doc_struct.get("currency"))
+
+    # 1) конвертируем символ/префикс → ISO3
+    raw_currency = doc_struct.get("currency")
+    normalized_currency = to_iso_currency(raw_currency)
+
+    # 2) если результат не строгий ISO-4217 (ровно 3 буквы), считаем, что валюты нет
+    if not (isinstance(normalized_currency, str) and len(normalized_currency) == 3 and normalized_currency.isalpha()):
+        normalized_currency = None
+
+    # 3) выставляем дефолт (если None/пусто)
+    db_doc.currency = set_default_currency(normalized_currency)
+
     db_doc.with_receipt = doc_struct.get("with_receipt")
     db_doc.document_type = doc_struct.get("document_type")
 

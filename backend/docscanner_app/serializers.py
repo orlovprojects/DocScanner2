@@ -112,6 +112,7 @@ class ScannedDocumentSerializer(serializers.ModelSerializer):
             'separate_vat',
             'currency',
             'with_receipt',
+            'paid_by_cash',
             'note',
             'report_to_isaf',
             'xml_source',

@@ -79,8 +79,9 @@ Assign the detected type to the field "document_type".
 - separate_vat
 - currency
 - with_receipt
+- paid_by_cash
 
-All boolean fields (seller_is_person, buyer_is_person, with_receipt, separate_vat) must be returned as true/false, not as strings.
+All boolean fields (seller_is_person, buyer_is_person, with_receipt, separate_vat, paid_by_cash) must be returned as true/false, not as strings.
 
 **Return the result as a valid JSON object with this structure:**
 ```json
@@ -118,11 +119,14 @@ All boolean fields (seller_is_person, buyer_is_person, with_receipt, separate_va
       "separate_vat": "",
       "currency": "",
       "with_receipt": "",
+      "paid_by_cash": "",
     }
   ]
 }
 Format dates as yyyy-mm-dd. Delete country from addresses. seller_country and buyer_country must be full country name in language of address provided. country_iso must be 2-letter code.
 If 2 or more different VAT '%' in doc, separate_vat must be True, otherwise False.
+
+If there are any signs of cash payment, for example, 'gryni', 'grąža' or similar, return paid_by_cash as True.
 
 If the document is a kasos čekis (cash receipt), for example, a fuel (kuro) receipt, buyer info is often at the bottom as a line with company name, company code, and VAT code—extract these as buyer details. For line items, find the quantity and unit next to price (like “50,01 l” for litres). Product name is usually above this line. document_number is usually next to kvitas, ignore long numer below "kasininkas" at the bottom of document but don't ignore date at the bottom.
 Extract all lineitems in kuro cekis, if item has units, it must be extracted as lineitem. For lineitems in kuro cekis, prices are usually stated including VAT, while discounts are usually including VAT but with minus symbol (don't extract discounts them as separate lineitems).
@@ -197,8 +201,10 @@ Assign the detected type to the field "document_type".
 - separate_vat
 - currency
 - with_receipt
+- paid_by_cash
 
-All boolean fields (seller_is_person, buyer_is_person, with_receipt, separate_vat) must be returned as true/false, not as strings.
+All boolean fields (seller_is_person, buyer_is_person, with_receipt, separate_vat, paid_by_cash) must be returned as true/false, not as strings.
+If there are any signs of cash payment, for example, 'gryni', 'grąža' or similar, return paid_by_cash as True.
 
 5. For each document, also extract an array of line items (products or services) if present. For each line item, extract the following fields (leave empty if not found):
 
@@ -277,6 +283,7 @@ All boolean fields (seller_is_person, buyer_is_person, with_receipt, separate_va
       "separate_vat": "",
       "currency": "",
       "with_receipt": "",
+      "paid_by_cash": "",
       "line_items": [
         {
           "line_id": "",

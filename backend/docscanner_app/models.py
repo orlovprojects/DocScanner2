@@ -93,6 +93,7 @@ class ScannedDocument(models.Model):
     separate_vat = models.BooleanField(blank=True, null=True)
     currency = models.CharField(max_length=20, blank=True, null=True)
     with_receipt = models.BooleanField(blank=True, null=True)
+    paid_by_cash = models.BooleanField(blank=True, null=True)
 
     note = models.TextField(blank=True, null=True)
     report_to_isaf = models.BooleanField(blank=True, null=True)

@@ -7,6 +7,7 @@ import Autocomplete from "@mui/material/Autocomplete";
 import { api } from "../api/endpoints"; // поправь путь к api если нужно
 import { COUNTRY_OPTIONS } from "../page_elements/Countries";
 import { ACCOUNTING_PROGRAMS } from "../page_elements/AccountingPrograms";
+import { Helmet } from 'react-helmet';
 
 // Новый ImportTab только для xlsx
 function ImportTab({ label, url, templateFileName }) {
