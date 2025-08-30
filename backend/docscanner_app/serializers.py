@@ -72,7 +72,6 @@ class ScannedDocumentSerializer(serializers.ModelSerializer):
             'status',
             'uploaded_at',
             'preview_url',
-            'structured_json',
             'error_message',
             'similarity_percent',
             'scan_type',
@@ -184,12 +183,19 @@ class ScannedDocumentListSerializer(serializers.ModelSerializer):
             # ...и т.п., без тяжелых полей и line_items
         ]
 
-#Dlia Preview - full info
+
 class ScannedDocumentDetailSerializer(serializers.ModelSerializer):
     line_items = LineItemSerializer(many=True, read_only=True)
+
     class Meta:
         model = ScannedDocument
-        fields = '__all__'
+        fields = "__all__"
+        extra_kwargs = {
+            "file": {"write_only": True},
+            "gpt_raw_json": {"write_only": True},
+            "raw_text": {"write_only": True},
+            "structured_json": {"write_only": True},
+        }
 
 
 
