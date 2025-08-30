@@ -421,7 +421,15 @@ export default function PreviewDialog({
                 <Typography>PVM klasė: <b>{selected.pvm_kodas || "—"}</b></Typography>
                 <Typography>Suma (su PVM): <b>{formatNumberPreview(selected.amount_with_vat)}</b></Typography>
                 <Typography>Valiuta: <b>{selected.currency || "—"}</b></Typography>
-                <Typography>Mokėta grynais: <b>{selected.paid_by_cash || "—"}</b></Typography>
+                <Typography>
+                  Mokėta grynais: <b>
+                    {selected.paid_by_cash === true 
+                      ? "Taip" 
+                      : selected.paid_by_cash === false 
+                        ? "Ne" 
+                        : "—"}
+                  </b>
+                </Typography>
                 {selected.scan_type === "sumiskai" && (
                   <Grid2 container spacing={2} sx={{ mb: 2 }}>
                     <Grid2 xs={12}>

@@ -85,6 +85,7 @@ def _apply_top_level_fields(
     db_doc.currency = set_default_currency(normalized_currency)
 
     db_doc.with_receipt = doc_struct.get("with_receipt")
+    db_doc.paid_by_cash = doc_struct.get("paid_by_cash")
     db_doc.document_type = doc_struct.get("document_type")
 
     db_doc.similarity_percent = doc_struct.get("similarity_percent")

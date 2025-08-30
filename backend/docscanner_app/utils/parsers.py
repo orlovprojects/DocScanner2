@@ -104,6 +104,7 @@ DOC_FIELD_PARSERS = {
     "similarity_percent": parse_decimal_lit,
     # booleans
     "with_receipt": coerce_bool,
+    "paid_by_cash": coerce_bool,
     "separate_vat": coerce_bool,
     "seller_is_person": coerce_bool,
     "buyer_is_person": coerce_bool,

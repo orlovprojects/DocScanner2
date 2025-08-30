@@ -432,17 +432,19 @@ class PVMKlasifikatoriai(models.Model):
 
 
 class CurrencyRate(models.Model):
-    currency = models.CharField(max_length=8, db_index=True)   # Например, USD, PLN, GBP
-    date = models.DateField(db_index=True)                     # Дата курса (курс действует на эту дату)
-    rate = models.DecimalField(max_digits=15, decimal_places=8)  # Сколько единиц валюты за 1 EUR (как у Lietuvos bankas)
-    checked_at = models.DateTimeField(auto_now=True)           # Когда курс был проверён или обновлён
+    currency = models.CharField(max_length=8, db_index=True)
+    date = models.DateField(db_index=True)
+    rate = models.DecimalField(max_digits=15, decimal_places=8)
+    checked_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        unique_together = ('currency', 'date')  # На одну дату и валюту — только одна запись
         ordering = ['-date', 'currency']
-
-    def __str__(self):
-        return f"{self.currency} {self.date} — {self.rate}"
+        constraints = [
+            models.UniqueConstraint(
+                fields=['currency', 'date'],
+                name='uniq_currency_date',
+            )
+        ]
     
 
 
