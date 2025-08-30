@@ -16,7 +16,7 @@ app.conf.enable_utc = False
 app.conf.beat_schedule = {
     'fetch-currency-rates-every-morning': {
         'task': 'docscanner_app.tasks.fetch_daily_currency_rates',
-        'schedule': crontab(hour=9, minute=45),  # Каждый день в 13:00 по Вильнюсу
+        'schedule': crontab(hour=10, minute=0),  # Каждый день в 13:00 по Вильнюсу
     },
 }
 
