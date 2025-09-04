@@ -151,14 +151,16 @@ export default function PreviewDialog({
   };
 
   const handleProductClear = async () => {
-    const data = { prekes_kodas: "", prekes_pavadinimas: "", prekes_barkodas: "" };
-    const res = await api.patch(
-      `/scanned-documents/${selected.id}/extra-fields/`,
-      data,
+    if (!selected?.id) return;
+
+    const res = await api.post(
+      `/scanned-documents/${selected.id}/clear-product/`,
+      {},
       { withCredentials: true }
     );
-    setSelected(res.data);
-    setDocs(prev => prev.map(d => d.id === selected.id ? { ...d, ...res.data } : d));
+
+    setSelected(res.data); // сервер вернул весь документ
+    setDocs(prev => prev.map(d => (d.id === res.data.id ? res.data : d)));
   };
 
   // Выбор товара для конкретной строки (по id)
@@ -203,25 +205,29 @@ export default function PreviewDialog({
   ];
 
   const handleLineItemProductClear = (lineItemId) => async () => {
-    const data = { prekes_kodas: "", prekes_pavadinimas: "", prekes_barkodas: "" };
-    const res = await api.patch(
-      `/scanned-documents/${selected.id}/lineitem/${lineItemId}/`,
-      data,
+    if (!selected?.id || !lineItemId) return;
+
+    const res = await api.post(
+      `/scanned-documents/${selected.id}/lineitem/${lineItemId}/clear-product/`,
+      {},
       { withCredentials: true }
     );
+
+    // сервер вернул обновлённый line item
     setSelected(prev => ({
       ...prev,
-      line_items: prev.line_items.map(li =>
-        li.id === lineItemId ? { ...li, ...res.data } : li
-      ),
+      line_items: Array.isArray(prev?.line_items)
+        ? prev.line_items.map(li => (li.id === lineItemId ? { ...li, ...res.data } : li))
+        : [],
     }));
+
     setDocs(prev =>
       prev.map(d =>
         d.id === selected.id
           ? {
               ...d,
               line_items: Array.isArray(d.line_items)
-                ? d.line_items.map(li => li.id === lineItemId ? { ...li, ...res.data } : li)
+                ? d.line_items.map(li => (li.id === lineItemId ? { ...li, ...res.data } : li))
                 : [],
             }
           : d

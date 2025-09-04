@@ -1,4 +1,5 @@
 import logging
+import logging.config
 from .models import CustomUser
 from datetime import timedelta
 from django.utils import timezone
@@ -13,9 +14,11 @@ from rest_framework_simplejwt.views import (
 )
 from decimal import Decimal
 from datetime import date
+from django.db import transaction
 from django.shortcuts import get_object_or_404
 from rest_framework import status
 from .utils.pirkimas_pardavimas import determine_pirkimas_pardavimas
+from .utils.save_document import _apply_sumiskai_defaults_from_user
 from .utils.update_currency_rates import update_currency_rates
 from rest_framework.views import APIView
 
@@ -42,7 +45,7 @@ from .exports.rivile import (
     export_clients_group_to_rivile,
     export_pirkimai_group_to_rivile,
     export_pardavimai_group_to_rivile,
-    export_prekes_and_paslaugos_group_to_rivile
+    export_prekes_paslaugos_kodai_group_to_rivile
 )
 from .exports.finvalda import (
     export_pirkimai_group_to_finvalda,
@@ -60,6 +63,7 @@ from rest_framework import generics, permissions
 
 
 
+logging.config.dictConfig(settings.LOGGING)
 logger = logging.getLogger('docscanner_app')
 site_url = settings.SITE_URL_FRONTEND  # берём из settings.py
 
@@ -167,12 +171,19 @@ def export_documents(request):
             pardavimai_xml = export_pardavimai_group_to_rivile(pardavimai)
             files_to_export.append(('pardavimai.eip', pardavimai_xml))
 
-        # -------- ДОБАВЬ ЭКСПОРТ ПРЕКЕС ---------
-        prekes_xml, paslaugos_xml = export_prekes_and_paslaugos_group_to_rivile(documents)
-        if prekes_xml:
+        # -------- ЭКСПОРТ PREKĖS / PASLAUGOS / KODAI ---------
+        prekes_xml, paslaugos_xml, kodai_xml = export_prekes_paslaugos_kodai_group_to_rivile(documents)
+
+        # Используем .strip(), чтобы не писались файлы из пустых буферов с \n
+        if prekes_xml and prekes_xml.strip():
             files_to_export.append(('prekes.eip', prekes_xml))
-        if paslaugos_xml:
+
+        if paslaugos_xml and paslaugos_xml.strip():
             files_to_export.append(('paslaugos.eip', paslaugos_xml))
+
+        # <-- ЭТОГО НЕ ХВАТАЛО
+        if kodai_xml and kodai_xml.strip():
+            files_to_export.append(('kodai.eip', kodai_xml))
         # -------- КОНЕЦ ---------
 
         if files_to_export:
@@ -468,57 +479,70 @@ def process_image(request):
 
 
 
-@api_view(['PATCH'])
-@permission_classes([IsAuthenticated])
-def update_extra_fields(request, pk):
-    try:
-        doc = ScannedDocument.objects.get(pk=pk, user=request.user)
-    except ScannedDocument.DoesNotExist:
-        return Response({'error': 'Not found'}, status=404)
+# @api_view(['PATCH'])
+# @permission_classes([IsAuthenticated])
+# def update_extra_fields(request, pk):
+#     try:
+#         doc = ScannedDocument.objects.get(pk=pk, user=request.user)
+#     except ScannedDocument.DoesNotExist:
+#         return Response({'error': 'Not found'}, status=404)
 
-    # Обновляем переданные поля (buyer/seller)
-    serializer = ScannedDocumentSerializer(doc, data=request.data, partial=True)
-    if serializer.is_valid():
-        doc = serializer.save()
+#     serializer = ScannedDocumentSerializer(doc, data=request.data, partial=True)
+#     if not serializer.is_valid():
+#         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-        # Пересчитываем pirkimas_pardavimas
-        doc_struct = {
-            "seller_id": doc.seller_id,
-            "seller_vat_code": doc.seller_vat_code,
-            "seller_name": doc.seller_name,
-            "buyer_id": doc.buyer_id,
-            "buyer_vat_code": doc.buyer_vat_code,
-            "buyer_name": doc.buyer_name,
-        }
-        doc.pirkimas_pardavimas = determine_pirkimas_pardavimas(doc_struct, request.user)
+#     with transaction.atomic():
+#         doc = serializer.save()
 
-        # Пересчитываем vat_class для документа
-        doc.vat_class = auto_select_pvm_code(
-            doc.scan_type or "sumiskai",
-            doc.vat_percent or 21,
-            doc.buyer_country_iso or "LT",
-            doc.seller_country_iso or "LT",
-            False
-        )
-        doc.save(update_fields=["pirkimas_pardavimas", "pvm_kodas"])
+#         # 1) Пересчёт pirkimas/pardavimas
+#         doc_struct = {
+#             "seller_id": doc.seller_id,
+#             "seller_vat_code": doc.seller_vat_code,
+#             "seller_name": doc.seller_name,
+#             "buyer_id": doc.buyer_id,
+#             "buyer_vat_code": doc.buyer_vat_code,
+#             "buyer_name": doc.buyer_name,
+#         }
+#         doc.pirkimas_pardavimas = determine_pirkimas_pardavimas(doc_struct, request.user)
 
-        # Если scan_type == "detaliai" — обновим vat_class у строк
-        if doc.scan_type == "detaliai":
-            items = LineItem.objects.filter(document=doc)
-            for item in items:
-                item.vat_class = auto_select_pvm_code(
-                    doc.scan_type,
-                    item.vat_percent or doc.vat_percent or 21,
-                    doc.buyer_country_iso or "LT",
-                    doc.seller_country_iso or "LT",
-                    False
-                )
-                item.save(update_fields=["pvm_kodas"])
+#         # 2) Применяем дефолты сумiškai
+#         changed = False
+#         if doc.scan_type == "sumiskai":
+#             changed = _apply_sumiskai_defaults_from_user(doc, request.user)
 
-        # Возвращаем обновленный документ
-        return Response(ScannedDocumentSerializer(doc).data)
-    else:
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+#         # 3) Пересчёт VAT-класса (как у тебя было)
+#         doc.vat_class = auto_select_pvm_code(
+#             doc.scan_type or "sumiskai",
+#             doc.vat_percent or 21,
+#             doc.buyer_country_iso or "LT",
+#             doc.seller_country_iso or "LT",
+#             False
+#         )
+
+#         # 4) Сохраняем. ВАЖНО: принудительно сохраняем короткие поля,
+#         #    потому что они меняются на самом doc, а не через сериализатор.
+#         fields_to_save = ["pirkimas_pardavimas", "pvm_kodas"]
+#         if doc.scan_type == "sumiskai":
+#             fields_to_save += [
+#                 "prekes_pavadinimas",
+#                 "prekes_kodas",
+#                 "prekes_barkodas",
+#                 "preke_paslauga",
+#             ]
+
+#         # Если хочешь быть совсем строгим — сохраняй только если реально изменилось:
+#         # но для диагностики сейчас сохраняем всегда.
+#         doc.save(update_fields=fields_to_save)
+
+#         # 5) Проверяем, что реально лежит в БД после save()
+#         doc.refresh_from_db(fields=[
+#             "prekes_pavadinimas", "prekes_kodas", "prekes_barkodas",
+#             "preke_paslauga", "pirkimas_pardavimas", "pvm_kodas"
+#         ])
+
+#     return Response(ScannedDocumentSerializer(doc).data)
+
+
 
 
 # Obnovit company details v Nustatymai
@@ -590,32 +614,36 @@ def get_document_detail(request, pk):
 @api_view(['PATCH'])
 @permission_classes([IsAuthenticated])
 def update_scanned_document_extra_fields(request, pk):
+    from django.db import transaction
     from .models import ScannedDocument, LineItem
     from .serializers import ScannedDocumentSerializer
     from .utils.pirkimas_pardavimas import determine_pirkimas_pardavimas
     from .validators.vat_klas import auto_select_pvm_code
+    from .utils.save_document import _apply_sumiskai_defaults_from_user  
 
     doc = ScannedDocument.objects.filter(pk=pk, user=request.user).first()
     if not doc:
         return Response({'error': 'Dokumentas nerastas'}, status=404)
 
-    # Разрешённые поля (добавь нужные, если чего не хватает)
+    # Что можно править PATCH’ем
     ALLOWED_FIELDS = [
         'buyer_id', 'buyer_name', 'buyer_vat_code', 'buyer_iban', 'buyer_address', 'buyer_country_iso',
         'seller_id', 'seller_name', 'seller_vat_code', 'seller_iban', 'seller_address', 'seller_country_iso',
-        'prekes_kodas', 'prekes_barkodas', 'prekes_pavadinimas',
-        # ... (добавь остальные нужные)
+        'prekes_kodas', 'prekes_barkodas', 'prekes_pavadinimas', 'preke_paslauga',
+        'vat_percent', 'scan_type',
     ]
 
-    changed = False
+    fields_to_update = []
     for field in ALLOWED_FIELDS:
         if field in request.data:
             setattr(doc, field, request.data[field])
-            changed = True
-    if changed:
-        doc.save()
+            fields_to_update.append(field)
 
-        # --- Здесь твоя логика для автоопределения ---
+    with transaction.atomic():
+        if fields_to_update:
+            doc.save(update_fields=fields_to_update)
+
+        # 1) Пересчёт pirkimas/pardavimas
         doc_struct = {
             "seller_id": doc.seller_id,
             "seller_vat_code": doc.seller_vat_code,
@@ -625,30 +653,154 @@ def update_scanned_document_extra_fields(request, pk):
             "buyer_name": doc.buyer_name,
         }
         doc.pirkimas_pardavimas = determine_pirkimas_pardavimas(doc_struct, request.user)
-        doc.vat_class = auto_select_pvm_code(
-            doc.scan_type or "sumiskai",
-            doc.vat_percent or 21,
-            doc.buyer_country_iso or "LT",
-            doc.seller_country_iso or "LT",
+
+        # 2) Если sumiskai — подставим дефолты пользователя в пустые поля
+        if (doc.scan_type or "").strip().lower() == "sumiskai":
+            _apply_sumiskai_defaults_from_user(doc, request.user)
+            # гарантированно записать короткие поля, если их заполнили дефолты
+            fields_to_update += ["prekes_pavadinimas", "prekes_kodas", "prekes_barkodas", "preke_paslauga"]
+
+        # 3) Пересчёт PVM kodo (именно pvm_kodas)
+        doc.pvm_kodas = auto_select_pvm_code(
+            (doc.scan_type or "sumiskai"),
+            (doc.vat_percent or 21),
+            (doc.buyer_country_iso or "LT"),
+            (doc.seller_country_iso or "LT"),
             False
         )
-        doc.save(update_fields=["pirkimas_pardavimas", "pvm_kodas"])
 
-        # Если детальные — обновим line items
-        if doc.scan_type == "detaliai":
+        # 4) Сохранить вычисленные поля
+        doc.save(update_fields=list(set(fields_to_update + ["pirkimas_pardavimas", "pvm_kodas"])))
+
+        # 5) Для детальных документов — обновить pvm_kodas в строках
+        if (doc.scan_type or "").strip().lower() == "detaliai":
             items = LineItem.objects.filter(document=doc)
             for item in items:
-                item.vat_class = auto_select_pvm_code(
+                item.pvm_kodas = auto_select_pvm_code(
                     doc.scan_type,
-                    item.vat_percent or doc.vat_percent or 21,
-                    doc.buyer_country_iso or "LT",
-                    doc.seller_country_iso or "LT",
+                    (item.vat_percent or doc.vat_percent or 21),
+                    (doc.buyer_country_iso or "LT"),
+                    (doc.seller_country_iso or "LT"),
                     False
                 )
                 item.save(update_fields=["pvm_kodas"])
 
-    # Возвращаем сериализованный документ
     return Response(ScannedDocumentSerializer(doc).data)
+
+
+
+
+# Udaliajet produkt s doka
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def clear_document_product(request, pk):
+    from .models import ScannedDocument
+    from .serializers import ScannedDocumentSerializer
+
+    doc = ScannedDocument.objects.filter(pk=pk, user=request.user).first()
+    if not doc:
+        return Response({'error': 'Not found'}, status=404)
+
+    # Очищаем только поля товара
+    doc.prekes_pavadinimas = ""
+    doc.prekes_kodas = ""
+    doc.prekes_barkodas = ""
+    doc.preke_paslauga = ""
+    doc.save(update_fields=["prekes_pavadinimas", "prekes_kodas", "prekes_barkodas", "preke_paslauga"])
+
+    return Response(ScannedDocumentSerializer(doc).data)
+
+
+
+# Udaliajet produkt s lineitem
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def clear_lineitem_product(request, pk, lineitem_id):
+    from .models import ScannedDocument, LineItem
+    from .serializers import LineItemSerializer
+
+    doc = ScannedDocument.objects.filter(pk=pk, user=request.user).first()
+    if not doc:
+        return Response({'error': 'Document not found'}, status=404)
+
+    item = LineItem.objects.filter(document=doc, pk=lineitem_id).first()
+    if not item:
+        return Response({'error': 'Line item not found'}, status=404)
+
+    item.prekes_pavadinimas = ""
+    item.prekes_kodas = ""
+    item.prekes_barkodas = ""
+    item.preke_paslauga = ""
+    item.save(update_fields=["prekes_pavadinimas", "prekes_kodas", "prekes_barkodas", "preke_paslauga"])
+
+    return Response(LineItemSerializer(item).data)
+
+
+
+
+
+# @api_view(['PATCH'])
+# @permission_classes([IsAuthenticated])
+# def update_scanned_document_extra_fields(request, pk):
+#     from .models import ScannedDocument, LineItem
+#     from .serializers import ScannedDocumentSerializer
+#     from .utils.pirkimas_pardavimas import determine_pirkimas_pardavimas
+#     from .validators.vat_klas import auto_select_pvm_code
+
+#     doc = ScannedDocument.objects.filter(pk=pk, user=request.user).first()
+#     if not doc:
+#         return Response({'error': 'Dokumentas nerastas'}, status=404)
+
+#     # Разрешённые поля (добавь нужные, если чего не хватает)
+#     ALLOWED_FIELDS = [
+#         'buyer_id', 'buyer_name', 'buyer_vat_code', 'buyer_iban', 'buyer_address', 'buyer_country_iso',
+#         'seller_id', 'seller_name', 'seller_vat_code', 'seller_iban', 'seller_address', 'seller_country_iso',
+#         'prekes_kodas', 'prekes_barkodas', 'prekes_pavadinimas',
+#         # ... (добавь остальные нужные)
+#     ]
+
+#     changed = False
+#     for field in ALLOWED_FIELDS:
+#         if field in request.data:
+#             setattr(doc, field, request.data[field])
+#             changed = True
+#     if changed:
+#         doc.save()
+
+#         # --- Здесь твоя логика для автоопределения ---
+#         doc_struct = {
+#             "seller_id": doc.seller_id,
+#             "seller_vat_code": doc.seller_vat_code,
+#             "seller_name": doc.seller_name,
+#             "buyer_id": doc.buyer_id,
+#             "buyer_vat_code": doc.buyer_vat_code,
+#             "buyer_name": doc.buyer_name,
+#         }
+#         doc.pirkimas_pardavimas = determine_pirkimas_pardavimas(doc_struct, request.user)
+#         doc.vat_class = auto_select_pvm_code(
+#             doc.scan_type or "sumiskai",
+#             doc.vat_percent or 21,
+#             doc.buyer_country_iso or "LT",
+#             doc.seller_country_iso or "LT",
+#             False
+#         )
+#         doc.save(update_fields=["pirkimas_pardavimas", "pvm_kodas"])
+
+#         # Если детальные — обновим line items
+#         if doc.scan_type == "detaliai":
+#             items = LineItem.objects.filter(document=doc)
+#             for item in items:
+#                 item.vat_class = auto_select_pvm_code(
+#                     doc.scan_type,
+#                     item.vat_percent or doc.vat_percent or 21,
+#                     doc.buyer_country_iso or "LT",
+#                     doc.seller_country_iso or "LT",
+#                     False
+#                 )
+#                 item.save(update_fields=["pvm_kodas"])
+
+#     # Возвращаем сериализованный документ
+#     return Response(ScannedDocumentSerializer(doc).data)
 
 
 

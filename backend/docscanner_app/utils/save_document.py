@@ -1,6 +1,7 @@
 from typing import Any, Dict, List, Optional
 from decimal import Decimal
 import logging
+import json
 
 from django.db import transaction
 
@@ -24,7 +25,7 @@ from ..utils.parsers import (
     convert_for_json,
 )
 
-logger = logging.getLogger("celery")
+logger = logging.getLogger("docscanner_app")
 
 
 def _apply_top_level_fields(
@@ -186,6 +187,98 @@ def _apply_top_level_fields(
     db_doc.pirkimas_pardavimas = determine_pirkimas_pardavimas(doc_struct, user)
 
 
+def _apply_sumiskai_defaults_from_user(db_doc, user) -> bool:
+    if getattr(db_doc, "scan_type", None) != "sumiskai":
+        logger.info("Skip defaults: scan_type != sumiskai (%s)", db_doc.scan_type)
+        return False
+
+    mode = (getattr(db_doc, "pirkimas_pardavimas", "") or "").strip().lower()
+    if mode not in ("pirkimas", "pardavimas"):
+        mode = "pardavimas" if getattr(db_doc, "seller_is_me", False) else "pirkimas"
+    logger.info("Apply defaults mode=%s (original=%s)", mode, db_doc.pirkimas_pardavimas)
+
+    raw_defaults = getattr(user, "purchase_defaults" if mode == "pirkimas" else "sales_defaults", None)
+    logger.info("Raw defaults=%s", raw_defaults)
+
+    defaults = None
+    if isinstance(raw_defaults, dict):
+        defaults = raw_defaults
+    elif isinstance(raw_defaults, str) and raw_defaults.strip():
+        try:
+            defaults = json.loads(raw_defaults)
+        except Exception as e:
+            logger.warning("Failed to parse defaults JSON: %s", e)
+    if not isinstance(defaults, dict) or not defaults:
+        logger.info("No usable defaults found")
+        return False
+
+    changed = False
+
+    def set_if_empty(field, key, normalize=None):
+        nonlocal changed
+        cur = (getattr(db_doc, field, "") or "").strip()
+        if cur:
+            logger.info("Skip field %s, already has value: %s", field, cur)
+            return
+        val = defaults.get(key)
+        if normalize:
+            val = normalize(val)
+        if val:
+            setattr(db_doc, field, str(val))
+            changed = True
+            logger.info("Set %s = %s (from %s)", field, val, key)
+
+    set_if_empty("prekes_pavadinimas", "pavadinimas")
+    set_if_empty("prekes_kodas", "kodas")
+    set_if_empty("prekes_barkodas", "barkodas")
+    set_if_empty("preke_paslauga", "tipas", normalize=lambda v: str(v) if str(v).strip() in ("1", "2", "3") else None)
+
+    logger.info("Result after apply: pavadinimas=%s, kodas=%s, barkodas=%s, paslauga=%s",
+                 db_doc.prekes_pavadinimas, db_doc.prekes_kodas, db_doc.prekes_barkodas, db_doc.preke_paslauga)
+
+    return changed
+
+
+# def _apply_sumiskai_defaults_from_user(db_doc, user):
+#     """
+#     Если scan_type='sumiskai', подставляет дефолты из nustatymai в короткие продуктовые поля
+#     в зависимости от db_doc.pirkimas_pardavimas (pirkimas|pardavimas).
+#     НЕ перезаписывает уже найденные OCR значения.
+#     """
+#     if getattr(db_doc, "scan_type", None) != "sumiskai":
+#         return
+
+#     mode = (db_doc.pirkimas_pardavimas or "").strip().lower()
+#     if mode not in ("pirkimas", "pardavimas"):
+#         return
+
+#     defaults = user.purchase_defaults if mode == "pirkimas" else user.sales_defaults
+#     if not isinstance(defaults, dict) or not defaults:
+#         return
+
+#     if not (db_doc.prekes_pavadinimas or "").strip():
+#         val = (defaults.get("pavadinimas") or "").strip()
+#         if val:
+#             db_doc.prekes_pavadinimas = val
+
+#     if not (db_doc.prekes_kodas or "").strip():
+#         val = (defaults.get("kodas") or "").strip()
+#         if val:
+#             db_doc.prekes_kodas = val
+
+#     if not (db_doc.prekes_barkodas or "").strip():
+#         val = (defaults.get("barkodas") or "").strip()
+#         if val:
+#             db_doc.prekes_barkodas = val
+
+#     # tipas → пишем как есть (1/2/3) в preke_paslauga
+#     if not (db_doc.preke_paslauga or "").strip():
+#         t = defaults.get("tipas")
+#         if t in (1, 2, 3):
+#             db_doc.preke_paslauga = str(t)
+
+
+
 def _save_line_items(db_doc, doc_struct: Dict[str, Any], scan_type: str):
     """
     Пересоздаёт строки LineItem из doc_struct["line_items"] для detaliai.
@@ -320,38 +413,6 @@ def update_scanned_document(
     # 1.5) Дедупликация скидок ДО расчётов
     doc_struct = dedupe_document_discounts(doc_struct)
 
-    # # --- Сброс флагов ---
-    # db_doc.val_subtotal_match = None
-    # db_doc.val_vat_match = None
-    # db_doc.val_total_match = None
-    # db_doc.val_ar_sutapo = None
-    # db_doc.error_message = ""
-
-    # # 2) Валидации
-    # if scan_type == "sumiskai":
-    #     doc_struct = validate_and_calculate_main_amounts(doc_struct)
-    
-    # elif scan_type == "detaliai":
-    #     line_items = doc_struct.get("line_items", []) or []
-    #     # 1) нормализуем строки ТОЛЬКО при необходимости (если используешь)
-    #     # doc_struct = normalize_line_items_if_needed(doc_struct)
-    #     # если нет — оставь как у тебя:
-    #     doc_struct["line_items"] = [validate_and_calculate_lineitem_amounts(item) for item in line_items]
-
-    #     # 2) глобальная коррекция документа
-    #     doc_struct = global_validate_and_correct(doc_struct)
-
-    #     # 3) финальная сверка уже ПОСЛЕ коррекции
-    #     compare_result = compare_lineitems_with_main_totals(doc_struct)
-    #     db_doc.val_subtotal_match = bool(compare_result["subtotal_match"])
-    #     db_doc.val_vat_match      = bool(compare_result["vat_match"])
-    #     db_doc.val_total_match    = bool(compare_result["total_match"])
-
-    #     # 4) НЕ затираем True на False из-за флага "было заменено".
-    #     #    Вместо этого — просто оставим примечание, если что-то меняли.
-    #     was_adjusted = bool(doc_struct.get("_doc_totals_replaced_by_lineitems"))
-    #     db_doc.was_adjusted = was_adjusted  # новый необязательный признак в БД (если есть)
-
 
     # --- Сброс флагов ---
     db_doc.val_subtotal_match = None
@@ -390,33 +451,6 @@ def update_scanned_document(
         )
 
 
-
-
-    # if scan_type == "sumiskai":
-    #     doc_struct = validate_and_calculate_main_amounts(doc_struct)
-
-    # elif scan_type == "detaliai":
-    #     line_items = doc_struct.get("line_items", []) or []
-    #     doc_struct["line_items"] = [validate_and_calculate_lineitem_amounts(item) for item in line_items]
-
-    #     doc_struct = global_validate_and_correct(doc_struct)
-
-    #     compare_result = compare_lineitems_with_main_totals(doc_struct)
-    #     db_doc.val_subtotal_match = compare_result["subtotal_match"]
-    #     db_doc.val_vat_match = compare_result["vat_match"]
-    #     db_doc.val_total_match = compare_result["total_match"]
-
-    #     # Если документные суммы заменились суммами строк → сразу False
-    #     if doc_struct.get("_doc_totals_replaced_by_lineitems"):
-    #         if doc_struct.get("_subtotal_replaced"):
-    #             db_doc.val_subtotal_match = False
-    #         if doc_struct.get("_vat_replaced"):
-    #             db_doc.val_vat_match = False
-    #         if doc_struct.get("_total_replaced"):
-    #             db_doc.val_total_match = False
-
-
-
     # 3) Сохранение документа и строк
     with transaction.atomic():
         _apply_top_level_fields(
@@ -427,6 +461,9 @@ def update_scanned_document(
             raw_text=raw_text,
             preview_url=preview_url,
         )
+
+        # ⬇️ НОВОЕ: подставляем дефолты из nustatymai для sumiskai
+        _apply_sumiskai_defaults_from_user(db_doc, user)        
         db_doc.save()
 
         _save_line_items(db_doc, doc_struct, scan_type)

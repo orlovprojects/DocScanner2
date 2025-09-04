@@ -13,6 +13,8 @@ from .views import (
     import_products_view,
     bulk_delete_documents,
     user_me_view,
+    clear_document_product,
+    clear_lineitem_product,
 )
 
 from docscanner_app.views import export_documents
@@ -76,6 +78,10 @@ urlpatterns = [
     path('scanned-documents/<int:pk>/extra-fields/', update_scanned_document_extra_fields, name="update_scanned_document_extra_fields"),
 
     path("scanned-documents/<int:doc_id>/lineitem/<int:lineitem_id>/", update_lineitem_fields, name="update_lineitem_fields"),
+
+
+    path("scanned-documents/<int:pk>/clear-product/", clear_document_product),
+    path("scanned-documents/<int:pk>/lineitem/<int:lineitem_id>/clear-product/", clear_lineitem_product),
 
 
 

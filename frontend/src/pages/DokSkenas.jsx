@@ -33,7 +33,7 @@ const faqList = [
     },
     {
         question: "Ar galima integruoti su mano buhalterine programa?",
-        answer: "Šiuo metu turime integracijas su šiomis programomis:\n- Rivilė GAMA\n- Rivilė ERP\n- Centas\nPo skaitmenizavimo galėsite eksportuoti duomenis į pasirinktą programą. Atsisiųstus failus iš DokSkeno tereikės importuoti į buhalterinę programą.",
+        answer: "Šiuo metu turime integracijas su šiomis programomis:\n- Rivilė GAMA\n- Rivilė ERP\n- Centas\n- Finvalda\nPo skaitmenizavimo galėsite eksportuoti duomenis į pasirinktą programą. Atsisiųstus failus iš DokSkeno tereikės importuoti į buhalterinę programą.",
     },
     {
         question: "Ar sistema aptinka dublikatus ir netinkamus dokumentus?",
@@ -713,7 +713,7 @@ const Dokskenas = () => {
                     >
                         Šiuo metu turime šias integracijas:
                     </Typography>
-                    <Box
+<Box
                         sx={{
                             display: 'flex',
                             flexDirection: 'column',
@@ -726,10 +726,11 @@ const Dokskenas = () => {
                         }}
                     >
                         {[
-                            { label: 'Rivilė GAMA (.eip)' },
-                            { label: 'Rivilė ERP (.xlsx)' },
-                            { label: 'Centas (.xml)' },
-                            { label: 'Excel (.csv/.xlsx)' },
+                            { label: 'Finvalda (.xml)', url: 'https://finvalda.lt/', hasLink: true },
+                            { label: 'Rivilė GAMA (.eip)', hasLink: false },
+                            { label: 'Rivilė ERP (.xlsx)', hasLink: false },
+                            { label: 'Centas (.xml)', hasLink: false },
+                            { label: 'Excel (.csv/.xlsx)', hasLink: false },
                         ].map((item, idx) => (
                             <Box key={idx} sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
                                 <Box
@@ -748,15 +749,40 @@ const Dokskenas = () => {
                                         boxShadow: 1,
                                     }}
                                 >
-                                    {/* Пример чек-иконки SVG — можно заменить на любую свою */}
                                     <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
                                         <circle cx="9" cy="9" r="9" fill="#f5cf54"/>
                                         <path d="M5 9.5L8 12L13 7" stroke="#1b1b1b" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
                                     </svg>
                                 </Box>
-                                <Typography sx={{ fontSize: '18px', fontFamily: 'Helvetica', color: '#1b1b1b' }}>
-                                    {item.label}
-                                </Typography>
+                                {item.hasLink ? (
+                                    <a 
+                                        href={item.url} 
+                                        target="_blank" 
+                                        rel="dofollow noopener"
+                                        style={{
+                                            textDecoration: 'none',
+                                            color: '#1b1b1b',
+                                            fontSize: '18px',
+                                            fontFamily: 'Helvetica',
+                                            borderBottom: '1px solid #f5cf54',
+                                            transition: 'all 0.2s ease'
+                                        }}
+                                        onMouseEnter={(e) => {
+                                            e.target.style.color = '#f5be0d';
+                                            e.target.style.borderBottomColor = '#f5be0d';
+                                        }}
+                                        onMouseLeave={(e) => {
+                                            e.target.style.color = '#1b1b1b';
+                                            e.target.style.borderBottomColor = '#f5cf54';
+                                        }}
+                                    >
+                                        {item.label}
+                                    </a>
+                                ) : (
+                                    <Typography sx={{ fontSize: '18px', fontFamily: 'Helvetica', color: '#1b1b1b' }}>
+                                        {item.label}
+                                    </Typography>
+                                )}
                             </Box>
                         ))}
                     </Box>

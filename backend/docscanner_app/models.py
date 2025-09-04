@@ -284,6 +284,33 @@ ACCOUNTING_PROGRAM_CHOICES = [
 ]
 
 
+
+
+
+
+TIPAS_CHOICES = (
+    (1, "Preke"),
+    (2, "Paslauga"),
+    (3, "Kodas"),
+)
+
+def _purchase_default():
+    return {
+        "pavadinimas": "",   # pirkimo_prekes_pavadinimas
+        "kodas": "",         # pirkimo_prekes_kodas
+        "barkodas": "",      # pirkimo_prekes_barkodas
+        "tipas": 1,          # 1=Preke, 2=Paslauga, 3=Kodas
+    }
+
+def _sales_default():
+    return {
+        "pavadinimas": "",   # pardavimo_prekes_pavadinimas
+        "kodas": "",
+        "barkodas": "",
+        "tipas": 1,
+    }
+
+
 # Кастомная модель пользователя
 class CustomUser(AbstractUser):
     username = None  # Убираем username
@@ -304,6 +331,9 @@ class CustomUser(AbstractUser):
     company_iban = models.CharField("Įmonės IBAN",max_length=255, blank=True, null=True)
     company_address = models.CharField("Įmonės adresas", max_length=255, blank=True, null=True)
     company_country_iso = models.CharField("Įmonės šalis", max_length=10, blank=True, null=True)
+
+    purchase_defaults = models.JSONField(default=_purchase_default, blank=True)
+    sales_defaults = models.JSONField(default=_sales_default, blank=True)
 
 
     USERNAME_FIELD = 'email'  # Используем email как уникальный идентификатор
