@@ -186,7 +186,7 @@ def export_pirkimai_group_to_rivile(documents):
             ET.SubElement(i06, "I06_VAL_POZ").text = "1"
             ET.SubElement(i06, "I06_KODAS_VL").text = currency.upper()
             rate = get_currency_rate(currency, op_date)
-            ET.SubElement(i06, "I06_KURSAS").text = str(rate if rate else "")
+            ET.SubElement(i06, "I06_KURSAS").text = str(rate if rate else "1")
         else:
             ET.SubElement(i06, "I06_VAL_POZ").text = "0"
 
