@@ -33,6 +33,22 @@ def prettify_no_header(elem):
     return pretty_xml.encode("utf-8")
 
 
+def resolve_party_code(doc, id_field, vat_field):
+    """
+    Возвращает код контрагента для Rivile:
+    1) doc.<id_field> если непустой
+    2) иначе doc.<vat_field> если непустой
+    3) иначе '111111111'
+    """
+    val = getattr(doc, id_field, None)
+    if val is not None and str(val).strip():
+        return str(val).strip()
+    val = getattr(doc, vat_field, None)
+    if val is not None and str(val).strip():
+        return str(val).strip()
+    return "111111111"
+
+
 # =========================================================
 # 1) PREKĖS / PASLAUGOS / KODAI (N25) — ПО ТВОЕЙ ЛОГИКЕ
 # =========================================================
@@ -193,7 +209,8 @@ def export_pirkimai_group_to_rivile(documents):
         ET.SubElement(i06, "I06_DOK_NR").text     = dok_num
         ET.SubElement(i06, "I06_OP_DATA").text    = format_date(op_date)
         ET.SubElement(i06, "I06_DOK_DATA").text   = format_date(getattr(doc, 'invoice_date', None))
-        ET.SubElement(i06, "I06_KODAS_KS").text   = smart_str(getattr(doc, 'seller_id', '') or '')
+        seller_code = resolve_party_code(doc, 'seller_id', 'seller_vat_code')
+        ET.SubElement(i06, "I06_KODAS_KS").text = smart_str(seller_code)
         ET.SubElement(i06, "I06_DOK_REG").text    = smart_str(getattr(doc, 'document_number', '') or '')
         ET.SubElement(i06, "I06_APRASYMAS1").text = smart_str(getattr(doc, 'preview_url', '') or '')
 
@@ -296,7 +313,8 @@ def export_pardavimai_group_to_rivile(documents):
         ET.SubElement(i06, "I06_DOK_NR").text     = dok_num
         ET.SubElement(i06, "I06_OP_DATA").text    = format_date(op_date)
         ET.SubElement(i06, "I06_DOK_DATA").text   = format_date(getattr(doc, 'invoice_date', None))
-        ET.SubElement(i06, "I06_KODAS_KS").text   = smart_str(getattr(doc, 'buyer_id', '') or '')
+        buyer_code = resolve_party_code(doc, 'buyer_id', 'buyer_vat_code')
+        ET.SubElement(i06, "I06_KODAS_KS").text = smart_str(buyer_code)
         ET.SubElement(i06, "I06_DOK_REG").text    = smart_str(getattr(doc, 'document_number', '') or '')
         ET.SubElement(i06, "I06_APRASYMAS1").text = smart_str(getattr(doc, 'preview_url', '') or '')
 
@@ -374,60 +392,280 @@ def export_pardavimai_group_to_rivile(documents):
 # =========================================================
 # 4) KLIENTAI (N08 + N33)
 # =========================================================
-def export_clients_group_to_rivile(clients):
+def export_clients_group_to_rivile(clients=None, documents=None):
     """
     Экспортирует клиентов для Rivile в формате N08 (БЕЗ <root>).
-    Каждый client — dict с ключами:
-      id, vat, name, address, country_iso, currency, kodas_ds, type, is_person, iban
+    
+    Если передан параметр documents, автоматически извлекает клиентов из документов.
+    Если передан параметр clients, использует его.
     """
     elements = []
-
-    for client in clients:
-        # Код клиента: id -> vat -> "111111111"
-        client_code = smart_str(client.get('id') or client.get('vat') or "111111111")
-
-        # Роли/типы (оставлено как у тебя)
-        doc_type = client.get('type', 'pirkimas')
-        rusis = "2" if doc_type == 'pirkimas' else "1"  # при необходимости инвертируй
-        tipas = "2" if client.get('is_person') else "1" # 1–juridinis, 2–fizinis
-
-        currency = smart_str(client.get('currency', 'EUR')).upper()
-        val_poz = "0" if currency == "EUR" else "1"
-
-        vat_code = smart_str(client.get('vat', ''))
-
-        n08 = ET.Element("N08")
-        ET.SubElement(n08, "N08_KODAS_KS").text    = client_code
-        ET.SubElement(n08, "N08_RUSIS").text       = rusis
-        ET.SubElement(n08, "N08_PVM_KODAS").text   = vat_code
-        ET.SubElement(n08, "N08_IM_KODAS").text    = client_code
-        ET.SubElement(n08, "N08_PAV").text         = smart_str(client.get('name', ''))
-        ET.SubElement(n08, "N08_ADR").text         = smart_str(client.get('address', ''))
-        ET.SubElement(n08, "N08_TIPAS_PIRK").text  = "1"
-        ET.SubElement(n08, "N08_TIPAS_TIEK").text  = "1"
-        ET.SubElement(n08, "N08_KODAS_DS").text    = smart_str(client.get('kodas_ds', 'PT001'))
-        ET.SubElement(n08, "N08_KODAS_XS_T").text  = "PVM"
-        ET.SubElement(n08, "N08_KODAS_XS_P").text  = "PVM"
-        ET.SubElement(n08, "N08_VAL_POZ").text     = val_poz
-        ET.SubElement(n08, "N08_KODAS_VL_1").text  = currency
-        ET.SubElement(n08, "N08_BUSENA").text      = "1"
-        ET.SubElement(n08, "N08_TIPAS").text       = tipas
-
-        # Банковские реквизиты (N33)
-        n33 = ET.SubElement(n08, "N33")
-        ET.SubElement(n33, "N33_NUTYL").text       = "1"
-        ET.SubElement(n33, "N33_KODAS_KS").text    = client_code
-        ET.SubElement(n33, "N33_S_KODAS").text     = smart_str(client.get('iban', ''))
-        ET.SubElement(n33, "N33_SALIES_K").text    = smart_str(client.get('country_iso', ''))
-
-        elements.append(n08)
-
-    # Объединяем все N08 без <root> и нормализуем пустые теги
+    client_codes_seen = set()  # чтобы избежать дубликатов
+    
+    # Если переданы документы, автоматически извлекаем из них клиентов
+    if documents:
+        for doc in documents:
+            # Определяем тип документа
+            doc_type = getattr(doc, 'pirkimas_pardavimas', '').strip().lower()
+            if not doc_type:
+                # Пытаемся определить тип по наличию полей
+                if hasattr(doc, 'seller_id') or hasattr(doc, 'seller_vat_code'):
+                    doc_type = 'pirkimas'
+                elif hasattr(doc, 'buyer_id') or hasattr(doc, 'buyer_vat_code'):
+                    doc_type = 'pardavimas'
+            
+            # Извлекаем данные клиента в зависимости от типа
+            if doc_type == 'pirkimas':
+                client_code = resolve_party_code(doc, 'seller_id', 'seller_vat_code')
+                if client_code not in client_codes_seen:
+                    client_data = {
+                        'type': 'pirkimas',
+                        'seller_id': getattr(doc, 'seller_id', None),
+                        'seller_vat_code': getattr(doc, 'seller_vat_code', None),
+                        'seller_is_person': getattr(doc, 'seller_is_person', False),
+                        'name': getattr(doc, 'seller_name', '') or '',
+                        'address': getattr(doc, 'seller_address', '') or '',
+                        'country_iso': getattr(doc, 'seller_country_iso', '') or '',
+                        'currency': getattr(doc, 'currency', 'EUR'),
+                        'kodas_ds': getattr(doc, 'kodas_ds', 'PT001'),
+                        'iban': getattr(doc, 'seller_iban', '') or ''
+                    }
+                    _add_client_n08(elements, client_data)
+                    client_codes_seen.add(client_code)
+            
+            elif doc_type == 'pardavimas':
+                client_code = resolve_party_code(doc, 'buyer_id', 'buyer_vat_code')
+                if client_code not in client_codes_seen:
+                    client_data = {
+                        'type': 'pardavimas',
+                        'buyer_id': getattr(doc, 'buyer_id', None),
+                        'buyer_vat_code': getattr(doc, 'buyer_vat_code', None),
+                        'buyer_is_person': getattr(doc, 'buyer_is_person', False),
+                        'name': getattr(doc, 'buyer_name', '') or '',
+                        'address': getattr(doc, 'buyer_address', '') or '',
+                        'country_iso': getattr(doc, 'buyer_country_iso', '') or '',
+                        'currency': getattr(doc, 'currency', 'EUR'),
+                        'kodas_ds': getattr(doc, 'kodas_ds', 'PT001'),
+                        'iban': getattr(doc, 'buyer_iban', '') or ''
+                    }
+                    _add_client_n08(elements, client_data)
+                    client_codes_seen.add(client_code)
+    
+    # Если переданы клиенты напрямую, обрабатываем их
+    if clients:
+        for client in clients:
+            # Определяем код клиента для проверки дубликатов
+            doc_type = (client.get('type') or '').strip().lower()
+            if doc_type == 'pirkimas':
+                client_code = smart_str(
+                    client.get('seller_id') or client.get('seller_vat_code') or "111111111"
+                )
+            elif doc_type == 'pardavimas':
+                client_code = smart_str(
+                    client.get('buyer_id') or client.get('buyer_vat_code') or "111111111"
+                )
+            else:
+                client_code = smart_str(
+                    client.get('id')
+                    or client.get('vat')
+                    or client.get('seller_id')
+                    or client.get('seller_vat_code')
+                    or client.get('buyer_id')
+                    or client.get('buyer_vat_code')
+                    or "111111111"
+                )
+            
+            if client_code not in client_codes_seen:
+                _add_client_n08(elements, client)
+                client_codes_seen.add(client_code)
+    
     xml = b""
     for el in elements:
         xml += prettify_no_header(el) + b"\n"
-
     return expand_empty_tags(xml)
+
+
+def _add_client_n08(elements, client):
+    """
+    Вспомогательная функция для добавления N08 элемента клиента
+    """
+    doc_type = (client.get('type') or '').strip().lower()
+
+    if doc_type == 'pirkimas':
+        # только поставщик
+        client_code = smart_str(
+            client.get('seller_id') or client.get('seller_vat_code') or "111111111"
+        )
+        tipas = "2" if client.get('seller_is_person') else "1"
+        tipas_pirk = "0"
+        tipas_tiek = "1"
+        rusis = "2"
+        # Для PVM кода берем VAT код без префикса LT
+        vat_raw = client.get('seller_vat_code') or ''
+        vat_code = smart_str(vat_raw.replace('LT', '').replace(' ', '').upper()) if vat_raw else ''
+    elif doc_type == 'pardavimas':
+        # только покупатель  
+        client_code = smart_str(
+            client.get('buyer_id') or client.get('buyer_vat_code') or "111111111"
+        )
+        tipas = "2" if client.get('buyer_is_person') else "1"
+        tipas_pirk = "1"
+        tipas_tiek = "0"
+        rusis = "1"
+        # Для PVM кода берем VAT код без префикса LT
+        vat_raw = client.get('buyer_vat_code') or ''
+        vat_code = smart_str(vat_raw.replace('LT', '').replace(' ', '').upper()) if vat_raw else ''
+    else:
+        # тип неизвестен — берём наиболее вероятный код
+        client_code = smart_str(
+            client.get('id')
+            or client.get('vat')
+            or client.get('seller_id')
+            or client.get('seller_vat_code')
+            or client.get('buyer_id')
+            or client.get('buyer_vat_code')
+            or "111111111"
+        )
+        tipas = "2" if client.get('is_person') else "1"
+        tipas_pirk = "1"
+        tipas_tiek = "1"
+        rusis = "1"
+        vat_raw = client.get('vat') or ''
+        vat_code = smart_str(vat_raw.replace('LT', '').replace(' ', '').upper()) if vat_raw else ''
+
+    currency = smart_str((client.get('currency') or 'EUR')).upper()
+    val_poz = "0" if currency == "EUR" else "1"
+
+    n08 = ET.Element("N08")
+    ET.SubElement(n08, "N08_KODAS_KS").text    = client_code
+    ET.SubElement(n08, "N08_RUSIS").text       = rusis
+    ET.SubElement(n08, "N08_PVM_KODAS").text   = vat_code
+    ET.SubElement(n08, "N08_IM_KODAS").text    = client_code
+    ET.SubElement(n08, "N08_PAV").text         = smart_str(client.get('name', '') or '')
+    ET.SubElement(n08, "N08_ADR").text         = smart_str(client.get('address', '') or '')
+    ET.SubElement(n08, "N08_TIPAS_PIRK").text  = tipas_pirk
+    ET.SubElement(n08, "N08_TIPAS_TIEK").text  = tipas_tiek
+    ET.SubElement(n08, "N08_KODAS_DS").text    = smart_str(client.get('kodas_ds', 'PT001'))
+    ET.SubElement(n08, "N08_KODAS_XS_T").text  = "PVM"
+    ET.SubElement(n08, "N08_KODAS_XS_P").text  = "PVM"
+    ET.SubElement(n08, "N08_VAL_POZ").text     = val_poz
+    ET.SubElement(n08, "N08_KODAS_VL_1").text  = currency
+    ET.SubElement(n08, "N08_BUSENA").text      = "1"
+    ET.SubElement(n08, "N08_TIPAS").text       = tipas
+
+    # Банковские реквизиты (N33)
+    n33 = ET.SubElement(n08, "N33")
+    ET.SubElement(n33, "N33_NUTYL").text       = "1"
+    ET.SubElement(n33, "N33_KODAS_KS").text    = client_code
+    ET.SubElement(n33, "N33_S_KODAS").text     = smart_str(client.get('iban', '') or '')
+    ET.SubElement(n33, "N33_SALIES_K").text    = smart_str((client.get('country_iso') or '').upper())
+
+    elements.append(n08)
+
+
+# def export_clients_group_to_rivile(clients):
+#     """
+#     Экспортирует клиентов для Rivile в формате N08 (БЕЗ <root>).
+
+#     Каждый client — dict с ключами:
+#       name, address, country_iso, currency, kodas_ds, iban
+#     Доп. поля (если есть):
+#       type: 'pirkimas' | 'pardavimas'
+#       seller_id, seller_vat_code, seller_is_person
+#       buyer_id,  buyer_vat_code,  buyer_is_person
+#       id, vat, is_person
+#     """
+#     elements = []
+
+#     for client in clients:
+#         doc_type = (client.get('type') or '').strip().lower()
+
+#         # Определяем тип документа, если не задан
+#         if not doc_type:
+#             if client.get('seller_id') or client.get('seller_vat_code'):
+#                 doc_type = 'pirkimas'
+#             elif client.get('buyer_id') or client.get('buyer_vat_code'):
+#                 doc_type = 'pardavimas'
+#             else:
+#                 doc_type = ''  # оставляем пустым — значит неизвестно
+
+#         if doc_type == 'pirkimas':
+#             # только поставщик
+#             client_code = smart_str(
+#                 client.get('seller_id') or client.get('seller_vat_code') or "111111111"
+#             )
+#             tipas = "2" if client.get('seller_is_person') else "1"
+#             tipas_pirk = "0"
+#             tipas_tiek = "1"
+#             rusis = "2"
+#         elif doc_type == 'pardavimas':
+#             # только покупатель
+#             client_code = smart_str(
+#                 client.get('buyer_id') or client.get('buyer_vat_code') or "111111111"
+#             )
+#             tipas = "2" if client.get('buyer_is_person') else "1"
+#             tipas_pirk = "1"
+#             tipas_tiek = "0"
+#             rusis = "1"
+#         else:
+#             # тип неизвестен — берём наиболее вероятный код (чтобы точно совпал с I06_KODAS_KS)
+#             client_code = smart_str(
+#                 client.get('id')
+#                 or client.get('vat')
+#                 or client.get('seller_id')
+#                 or client.get('seller_vat_code')
+#                 or client.get('buyer_id')
+#                 or client.get('buyer_vat_code')
+#                 or "111111111"
+#             )
+#             tipas = "2" if client.get('is_person') else "1"
+#             tipas_pirk = "1"   # ставим обе роли, чтобы запись точно подошла
+#             tipas_tiek = "1"
+#             rusis = "1"        # не принципиально; можно оставить "1"
+
+#         currency = smart_str((client.get('currency') or 'EUR')).upper()
+#         val_poz = "0" if currency == "EUR" else "1"
+
+#         vat_code = smart_str((client.get('vat') or '').replace(' ', '').upper())
+
+#         n08 = ET.Element("N08")
+#         ET.SubElement(n08, "N08_KODAS_KS").text    = client_code
+#         ET.SubElement(n08, "N08_RUSIS").text       = rusis
+#         ET.SubElement(n08, "N08_PVM_KODAS").text   = vat_code
+#         ET.SubElement(n08, "N08_IM_KODAS").text    = client_code
+#         ET.SubElement(n08, "N08_PAV").text         = smart_str(client.get('name', '') or '')
+#         ET.SubElement(n08, "N08_ADR").text         = smart_str(client.get('address', '') or '')
+#         ET.SubElement(n08, "N08_TIPAS_PIRK").text  = tipas_pirk
+#         ET.SubElement(n08, "N08_TIPAS_TIEK").text  = tipas_tiek
+#         ET.SubElement(n08, "N08_KODAS_DS").text    = smart_str(client.get('kodas_ds', 'PT001'))
+#         ET.SubElement(n08, "N08_KODAS_XS_T").text  = "PVM"
+#         ET.SubElement(n08, "N08_KODAS_XS_P").text  = "PVM"
+#         ET.SubElement(n08, "N08_VAL_POZ").text     = val_poz
+#         ET.SubElement(n08, "N08_KODAS_VL_1").text  = currency
+#         ET.SubElement(n08, "N08_BUSENA").text      = "1"
+#         ET.SubElement(n08, "N08_TIPAS").text       = tipas
+
+#         # Банковские реквизиты (N33)
+#         n33 = ET.SubElement(n08, "N33")
+#         ET.SubElement(n33, "N33_NUTYL").text       = "1"
+#         ET.SubElement(n33, "N33_KODAS_KS").text    = client_code
+#         ET.SubElement(n33, "N33_S_KODAS").text     = smart_str(client.get('iban', '') or '')
+#         ET.SubElement(n33, "N33_SALIES_K").text    = smart_str((client.get('country_iso') or '').upper())
+
+#         elements.append(n08)
+
+#     xml = b""
+#     for el in elements:
+#         xml += prettify_no_header(el) + b"\n"
+#     return expand_empty_tags(xml)
+
+
+
+
+
+
+
+
 
 
 

@@ -136,7 +136,7 @@ def export_documents(request):
                     'currency': doc.currency or "EUR",
                     'kodas_ds': 'PT001',
                     'type': klient_type,
-                    'is_person': is_person,
+                    'seller_is_person': bool(doc.seller_is_person),
                     'iban': doc.seller_iban or "",
                 }
             elif doc.pirkimas_pardavimas == 'pardavimas':
@@ -151,13 +151,17 @@ def export_documents(request):
                     'currency': doc.currency or "EUR",
                     'kodas_ds': 'PT001',
                     'type': klient_type,
-                    'is_person': is_person,
+                    'buyer_is_person': bool(doc.buyer_is_person),
                     'iban': doc.buyer_iban or "",
                 }
             else:
                 continue
             client_key = (client['id'], client['vat'], client['name'], client['type'])
-            if client['id'] and client_key not in seen:
+            # если id пустой → подставляем vat или заглушку
+            if not client['id']:
+                client['id'] = client['vat'] or "111111111"
+
+            if client_key not in seen:
                 klientai.append(client)
                 seen.add(client_key)
 
