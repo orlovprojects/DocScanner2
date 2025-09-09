@@ -541,7 +541,7 @@ def _add_client_n08(elements, client):
     ET.SubElement(n08, "N08_RUSIS").text       = rusis
     ET.SubElement(n08, "N08_PVM_KODAS").text   = vat_code
     ET.SubElement(n08, "N08_IM_KODAS").text    = client_code
-    ET.SubElement(n08, "N08_PAV").text         = smart_str(client.get('name', '') or '')
+    ET.SubElement(n08, "N08_PAV").text         = smart_str(client.get('name', '') or 'Nezinoma')
     ET.SubElement(n08, "N08_ADR").text         = smart_str(client.get('address', '') or '')
     ET.SubElement(n08, "N08_TIPAS_PIRK").text  = tipas_pirk
     ET.SubElement(n08, "N08_TIPAS_TIEK").text  = tipas_tiek

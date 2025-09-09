@@ -131,11 +131,11 @@ export default function DocumentsTable({
                 inputProps={{ "aria-label": "select all exportable" }}
               />
             </TableCell>
-            <TableCell>Failas</TableCell>
-            <TableCell>Skaitmenizavimo tipas</TableCell>
-            <TableCell>Pirkimas / pardavimas</TableCell>
-            <TableCell>Statusas</TableCell>
-            <TableCell>Data</TableCell>
+            <TableCell sx={{ fontWeight: 600 }}>Failas</TableCell>
+            <TableCell sx={{ fontWeight: 600 }}>Skaitmenizavimo tipas</TableCell>
+            <TableCell sx={{ fontWeight: 600 }}>Pirkimas / pardavimas</TableCell>
+            <TableCell sx={{ fontWeight: 600 }}>Statusas</TableCell>
+            <TableCell sx={{ fontWeight: 600 }}>Data</TableCell>
             <TableCell align="right"></TableCell>
           </TableRow>
         </TableHead>

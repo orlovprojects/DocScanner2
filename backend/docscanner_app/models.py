@@ -375,6 +375,7 @@ class ProductAutocomplete(models.Model):
     prekes_barkodas = models.CharField("Prekės barkodas", max_length=128, blank=True, null=True)
     prekes_pavadinimas = models.CharField("Prekės pavadinimas", max_length=255, blank=True, null=True)
     prekes_tipas = models.CharField("Prekės tipas", max_length=128, blank=True, null=True)
+    preke_paslauga = models.CharField("Preke_paslauga", max_length=12, blank=True, null=True)
 
     sandelio_kodas = models.CharField("Sandėlio kodas", max_length=128, blank=True, null=True)
     sandelio_pavadinimas = models.CharField("Sandėlio pavadinimas", max_length=255, blank=True, null=True)

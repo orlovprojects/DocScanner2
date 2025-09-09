@@ -623,13 +623,13 @@ def update_scanned_document_extra_fields(request, pk):
     from .serializers import ScannedDocumentSerializer
     from .utils.pirkimas_pardavimas import determine_pirkimas_pardavimas
     from .validators.vat_klas import auto_select_pvm_code
-    from .utils.save_document import _apply_sumiskai_defaults_from_user  
+    from .utils.save_document import _apply_sumiskai_defaults_from_user  # обновлённая версия
 
     doc = ScannedDocument.objects.filter(pk=pk, user=request.user).first()
     if not doc:
         return Response({'error': 'Dokumentas nerastas'}, status=404)
 
-    # Что можно править PATCH’ем
+    # Разрешённые к патчу поля
     ALLOWED_FIELDS = [
         'buyer_id', 'buyer_name', 'buyer_vat_code', 'buyer_iban', 'buyer_address', 'buyer_country_iso',
         'seller_id', 'seller_name', 'seller_vat_code', 'seller_iban', 'seller_address', 'seller_country_iso',
@@ -643,11 +643,46 @@ def update_scanned_document_extra_fields(request, pk):
             setattr(doc, field, request.data[field])
             fields_to_update.append(field)
 
+    # helper: распознать, что пришёл явный "clear" клиента
+    def _is_cleared(prefix: str) -> bool:
+        keys = [
+            f"{prefix}_name",
+            f"{prefix}_id",
+            f"{prefix}_vat_code",
+            f"{prefix}_iban",
+            f"{prefix}_address",
+            f"{prefix}_country_iso",
+        ]
+        touched = any(k in request.data for k in keys)
+        if not touched:
+            return False
+        # все значения пустые/пробельные
+        return all(not str(request.data.get(k) or "").strip() for k in keys)
+
+    buyer_cleared = _is_cleared("buyer")
+    seller_cleared = _is_cleared("seller")
+
+    # helper: привести apply_defaults к bool
+    def _to_bool_allow(x):
+        if x is None:
+            return None
+        if isinstance(x, bool):
+            return x
+        s = str(x).strip().lower()
+        if s in {"0", "false", "no", "ne", "off"}:
+            return False
+        if s in {"1", "true", "taip", "yes", "on"}:
+            return True
+        return None  # неизвестно — трактуем как не задано
+
+    apply_defaults_req = _to_bool_allow(request.data.get("apply_defaults", None))
+
     with transaction.atomic():
+        # 0) Сохранить то, что прямо прислали (чтобы расчёт шёл по уже проставленным значениям)
         if fields_to_update:
             doc.save(update_fields=fields_to_update)
 
-        # 1) Пересчёт pirkimas/pardavimas
+        # 1) Пересчёт pirkimas/pardavimas по текущим полям
         doc_struct = {
             "seller_id": doc.seller_id,
             "seller_vat_code": doc.seller_vat_code,
@@ -658,13 +693,29 @@ def update_scanned_document_extra_fields(request, pk):
         }
         doc.pirkimas_pardavimas = determine_pirkimas_pardavimas(doc_struct, request.user)
 
-        # 2) Если sumiskai — подставим дефолты пользователя в пустые поля
-        if (doc.scan_type or "").strip().lower() == "sumiskai":
-            _apply_sumiskai_defaults_from_user(doc, request.user)
-            # гарантированно записать короткие поля, если их заполнили дефолты
+        # 1.1) Если очищаем одного из клиентов — очистим и «дефолтные» товарные поля
+        if buyer_cleared or seller_cleared:
+            doc.prekes_pavadinimas = ""
+            doc.prekes_kodas = ""
+            doc.prekes_barkodas = ""
+            doc.preke_paslauga = ""
             fields_to_update += ["prekes_pavadinimas", "prekes_kodas", "prekes_barkodas", "preke_paslauga"]
 
-        # 3) Пересчёт PVM kodo (именно pvm_kodas)
+        # 2) Применение дефолтов (ТОЛЬКО если это sumiskai, режим ясен, не было очистки, и не запрещено флагом)
+        scan_type = (doc.scan_type or "").strip().lower()
+        mode = (doc.pirkimas_pardavimas or "").strip().lower()
+        allow_defaults = (
+            scan_type == "sumiskai" and
+            mode in ("pirkimas", "pardavimas") and
+            not (buyer_cleared or seller_cleared) and
+            (apply_defaults_req is None or apply_defaults_req is True)
+        )
+        if allow_defaults:
+            changed = _apply_sumiskai_defaults_from_user(doc, request.user)
+            if changed:
+                fields_to_update += ["prekes_pavadinimas", "prekes_kodas", "prekes_barkodas", "preke_paslauga"]
+
+        # 3) Пересчёт PVM kodo
         doc.pvm_kodas = auto_select_pvm_code(
             (doc.scan_type or "sumiskai"),
             (doc.vat_percent or 21),
@@ -677,7 +728,7 @@ def update_scanned_document_extra_fields(request, pk):
         doc.save(update_fields=list(set(fields_to_update + ["pirkimas_pardavimas", "pvm_kodas"])))
 
         # 5) Для детальных документов — обновить pvm_kodas в строках
-        if (doc.scan_type or "").strip().lower() == "detaliai":
+        if scan_type == "detaliai":
             items = LineItem.objects.filter(document=doc)
             for item in items:
                 item.pvm_kodas = auto_select_pvm_code(

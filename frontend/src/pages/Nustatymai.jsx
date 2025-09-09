@@ -6,7 +6,7 @@ import {
 } from "@mui/material";
 import HelpOutlineIcon from "@mui/icons-material/HelpOutline";
 import Autocomplete from "@mui/material/Autocomplete";
-import { api } from "../api/endpoints"; // поправь путь к api если нужно
+import { api } from "../api/endpoints"; // поправь путь к api jei reikia
 import { COUNTRY_OPTIONS } from "../page_elements/Countries";
 import { ACCOUNTING_PROGRAMS } from "../page_elements/AccountingPrograms";
 import { Helmet } from "react-helmet";
@@ -16,9 +16,10 @@ function ImportTab({ label, url, templateFileName }) {
   const [file, setFile] = useState(null);
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
+  const inputRef = React.useRef(null);
 
   const handleFile = (e) => {
-    setFile(e.target.files[0]);
+    setFile(e.target.files[0] || null);
     setResult(null);
     setError(null);
   };
@@ -33,11 +34,26 @@ function ImportTab({ label, url, templateFileName }) {
         withCredentials: true,
         headers: { "Content-Type": "multipart/form-data" },
       });
-      setResult(data);
-      setError(null);
+
+      if (data?.error) {
+        setError(data.error);
+        setResult({ imported: 0, processed: 0 });
+      } else {
+        setResult({
+          imported: Number(data?.imported) || 0,
+          processed: Number(data?.processed) || 0,
+        });
+        setError(null);
+      }
     } catch (err) {
       setError(err?.response?.data?.error || "Importo klaida");
-      setResult(null);
+      setResult({ imported: 0, processed: 0 });
+    } finally {
+      // išvalom pasirinkimą
+      if (inputRef.current) {
+        inputRef.current.value = "";
+      }
+      setFile(null);
     }
   };
 
@@ -48,27 +64,41 @@ function ImportTab({ label, url, templateFileName }) {
   return (
     <Paper sx={{ p: 2, mb: 2 }}>
       <Typography gutterBottom variant="subtitle1">{label}</Typography>
-      <input
-        type="file"
-        accept=".xlsx"
-        onChange={handleFile}
-        style={{ marginBottom: 12 }}
-      />
-      <Button variant="contained" disabled={!file} onClick={handleImport} sx={{ ml: 2 }}>
+
+      {/* Custom file input */}
+      <Stack direction="row" spacing={2} alignItems="center" sx={{ mb: 2 }}>
+        <Button variant="outlined" component="label">
+          Pasirinkite failą
+          <input
+            type="file"
+            accept=".xlsx"
+            hidden
+            ref={inputRef}
+            onChange={handleFile}
+          />
+        </Button>
+        <Typography variant="body2">
+          {file ? file.name : "Niekas nepasirinkta"}
+        </Typography>
+      </Stack>
+
+      <Button variant="contained" disabled={!file} onClick={handleImport}>
         Importuoti
       </Button>
-      <Button variant="outlined" size="small" sx={{ ml: 2, mt: 2 }} onClick={handleDownloadTemplate}>
+      <Button variant="outlined" size="small" sx={{ ml: 2 }} onClick={handleDownloadTemplate}>
         Atsisiųsti Excel šabloną
       </Button>
+
       {result && (
         <Alert severity="success" sx={{ mt: 2 }}>
-          Importuota įrašų: {result.imported} iš {result.processed}
+          Importuota įrašų: {result?.imported ?? 0} iš {result?.processed ?? 0}
         </Alert>
       )}
       {error && <Alert severity="error" sx={{ mt: 2 }}>{error}</Alert>}
     </Paper>
   );
 }
+
 
 // ===== Defaults fieldset (memoized to keep focus stable) =====
 const DefaultsFields = React.memo(function DefaultsFields({ mode, state, setState }) {
@@ -173,7 +203,12 @@ export default function NustatymaiPage() {
   const [successDefaults, setSuccessDefaults] = useState(false);
   const [errorDefaults, setErrorDefaults] = useState("");
 
-  const numToTipas = (n) => (n === 2 ? "Paslauga" : n === 3 ? "Kodas" : "Prekė");
+  const numToTipas = (n) => {
+    const v = Number(n);
+    if (v === 2) return "Paslauga";
+    if (v === 3) return "Kodas";
+    return "Prekė"; // default
+  };
   const tipasToNum = (t) => {
     const v = (t || "").toString().trim().toLowerCase();
     if (v === "paslauga") return 2;
@@ -199,7 +234,7 @@ export default function NustatymaiPage() {
         pavadinimas: pd.pavadinimas ?? "",
         kodas: pd.kodas ?? "",
         barkodas: pd.barkodas ?? "",
-        tipas: numToTipas(pd.tipas ?? 1),
+        tipas: numToTipas(Number(pd.tipas ?? 1)),
       });
       setSalesDefaults({
         pavadinimas: sd.pavadinimas ?? "",
@@ -254,9 +289,6 @@ export default function NustatymaiPage() {
       setSavingCompany(false);
     }
   };
-
-  const showCentasImport =
-    program === "centas" || (user && user.default_accounting_program === "centas");
 
   const saveDefaults = async () => {
     setSavingDefaults(true);
@@ -387,32 +419,33 @@ export default function NustatymaiPage() {
         Išsaugota!
       </Alert>}
 
-      {/* 3. Centas import */}
-      { (program === "centas" || (user && user.default_accounting_program === "centas")) && (
-        <Box mt={6}>
-          <Typography variant="h6" gutterBottom>
-            Centas — duomenų importas
-          </Typography>
-          <Tabs value={importTab} onChange={(_, v) => setImportTab(v)} sx={{ mb: 2 }}>
-            <Tab label="Prekės" />
-            <Tab label="Įmonės" />
-          </Tabs>
-          {importTab === 0 && (
-            <ImportTab
-              label="Importuoti prekes iš Excel"
-              url="/data/import-products/"
-              templateFileName="prekes_sablonas.xlsx"
-            />
-          )}
-          {importTab === 1 && (
-            <ImportTab
-              label="Importuoti įmones iš Excel"
-              url="/data/import-clients/"
-              templateFileName="imones_sablonas.xlsx"
-            />
-          )}
-        </Box>
-      )}
+      {/* 3. Duomenų importas (visada) */}
+      <Box mt={6}>
+        <Typography variant="h6" gutterBottom>
+          Duomenų importas
+        </Typography>
+
+        <Tabs value={importTab} onChange={(_, v) => setImportTab(v)} sx={{ mb: 2 }}>
+          <Tab label="Prekės" />
+          <Tab label="Įmonės" />
+        </Tabs>
+
+        {importTab === 0 && (
+          <ImportTab
+            label="Importuoti prekes iš Excel"
+            url="/data/import-products/"
+            templateFileName="prekes_sablonas.xlsx"
+          />
+        )}
+
+        {importTab === 1 && (
+          <ImportTab
+            label="Importuoti įmones iš Excel"
+            url="/data/import-clients/"
+            templateFileName="imones_sablonas.xlsx"
+          />
+        )}
+      </Box>
 
       {/* 4. Defaults for sumiskai */}
       <Paper sx={{ p: 3, mt: 6 }}>
@@ -469,6 +502,7 @@ export default function NustatymaiPage() {
     </Box>
   );
 }
+
 
 
 

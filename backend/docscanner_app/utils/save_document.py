@@ -33,6 +33,8 @@ def _apply_top_level_fields(
 ):
     """
     Заполняет поля ScannedDocument из уже САНИТИЗИРОВАННОГО doc_struct.
+    Ничего не подставляет из пользовательских дефолтов. В конце выставляет
+    служебный флажок db_doc._can_apply_defaults (не сохраняется в БД).
     """
     # Базовые технические поля
     db_doc.raw_text = raw_text
@@ -95,7 +97,7 @@ def _apply_top_level_fields(
     db_doc.document_type_code = doc_struct.get("document_type_code")
     db_doc.xml_source = doc_struct.get("xml_source")
 
-    # --- Короткие продуктовые поля для sumiskai ---
+    # --- Короткие продуктовые поля для sumiskai (ТОЛЬКО из OCR/LLM) ---
     if scan_type == "sumiskai":
         if "line_items" in doc_struct and doc_struct["line_items"]:
             first_item = doc_struct["line_items"][0]
@@ -186,35 +188,224 @@ def _apply_top_level_fields(
     # Определяем pirkimas/pardavimas
     db_doc.pirkimas_pardavimas = determine_pirkimas_pardavimas(doc_struct, user)
 
+    # --- Служебный флажок: можно ли применять дефолтные товары прямо сейчас? ---
+    mode = (db_doc.pirkimas_pardavimas or "").strip().lower()
+    has_buyer = any([
+        (db_doc.buyer_id or "").strip(),
+        (db_doc.buyer_vat_code or "").strip(),
+        (db_doc.buyer_name or "").strip(),
+    ])
+    has_seller = any([
+        (db_doc.seller_id or "").strip(),
+        (db_doc.seller_vat_code or "").strip(),
+        (db_doc.seller_name or "").strip(),
+    ])
+
+    # Разрешаем дефолты только в sumiskai и только если назначен соответствующий контрагент
+    db_doc._can_apply_defaults = (
+        (scan_type == "sumiskai") and (
+            (mode == "pirkimas" and has_seller) or
+            (mode == "pardavimas" and has_buyer)
+        )
+    )
+
+
+
+# def _apply_top_level_fields(
+#     db_doc, doc_struct: Dict[str, Any], user, scan_type: str, raw_text: str, preview_url: Optional[str]
+# ):
+#     """
+#     Заполняет поля ScannedDocument из уже САНИТИЗИРОВАННОГО doc_struct.
+#     """
+#     # Базовые технические поля
+#     db_doc.raw_text = raw_text
+#     db_doc.preview_url = preview_url
+#     db_doc.structured_json = convert_for_json(doc_struct)
+
+#     # --- Основные поля ---
+#     db_doc.seller_id = doc_struct.get("seller_id")
+#     db_doc.seller_name = doc_struct.get("seller_name")
+#     db_doc.seller_vat_code = doc_struct.get("seller_vat_code")
+#     db_doc.seller_address = doc_struct.get("seller_address")
+#     db_doc.seller_country = doc_struct.get("seller_country")
+#     db_doc.seller_country_iso = doc_struct.get("seller_country_iso")
+#     db_doc.seller_iban = doc_struct.get("seller_iban")
+#     db_doc.seller_is_person = doc_struct.get("seller_is_person")
+
+#     db_doc.buyer_id = doc_struct.get("buyer_id")
+#     db_doc.buyer_name = doc_struct.get("buyer_name")
+#     db_doc.buyer_vat_code = doc_struct.get("buyer_vat_code")
+#     db_doc.buyer_address = doc_struct.get("buyer_address")
+#     db_doc.buyer_country = doc_struct.get("buyer_country")
+#     db_doc.buyer_country_iso = doc_struct.get("buyer_country_iso")
+#     db_doc.buyer_iban = doc_struct.get("buyer_iban")
+#     db_doc.buyer_is_person = doc_struct.get("buyer_is_person")
+
+#     db_doc.invoice_date = doc_struct.get("invoice_date")
+#     db_doc.due_date = doc_struct.get("due_date")
+#     db_doc.operation_date = doc_struct.get("operation_date")
+#     db_doc.document_series = doc_struct.get("document_series")
+#     db_doc.document_number = doc_struct.get("document_number")
+#     db_doc.order_number = doc_struct.get("order_number")
+
+#     db_doc.amount_wo_vat = doc_struct.get("amount_wo_vat")
+#     db_doc.invoice_discount_with_vat = doc_struct.get("invoice_discount_with_vat")
+#     db_doc.invoice_discount_wo_vat = doc_struct.get("invoice_discount_wo_vat")
+#     db_doc.vat_amount = doc_struct.get("vat_amount")
+#     db_doc.vat_percent = doc_struct.get("vat_percent")
+#     db_doc.amount_with_vat = doc_struct.get("amount_with_vat")
+
+#     db_doc.separate_vat = doc_struct.get("separate_vat")
+
+#     # 1) конвертируем символ/префикс → ISO3
+#     raw_currency = doc_struct.get("currency")
+#     normalized_currency = to_iso_currency(raw_currency)
+
+#     # 2) если результат не строгий ISO-4217 (ровно 3 буквы), считаем, что валюты нет
+#     if not (isinstance(normalized_currency, str) and len(normalized_currency) == 3 and normalized_currency.isalpha()):
+#         normalized_currency = None
+
+#     # 3) выставляем дефолт (если None/пусто)
+#     db_doc.currency = set_default_currency(normalized_currency)
+
+#     db_doc.with_receipt = doc_struct.get("with_receipt")
+#     db_doc.paid_by_cash = doc_struct.get("paid_by_cash")
+#     db_doc.document_type = doc_struct.get("document_type")
+
+#     db_doc.similarity_percent = doc_struct.get("similarity_percent")
+#     db_doc.note = doc_struct.get("note")
+#     db_doc.report_to_isaf = doc_struct.get("report_to_isaf")
+#     db_doc.document_type_code = doc_struct.get("document_type_code")
+#     db_doc.xml_source = doc_struct.get("xml_source")
+
+#     # --- Короткие продуктовые поля для sumiskai ---
+#     if scan_type == "sumiskai":
+#         if "line_items" in doc_struct and doc_struct["line_items"]:
+#             first_item = doc_struct["line_items"][0]
+#         else:
+#             first_item = doc_struct
+
+#         db_doc.prekes_kodas = first_item.get("product_code") or ""
+#         db_doc.prekes_barkodas = first_item.get("product_barcode") or ""
+#         db_doc.prekes_pavadinimas = first_item.get("product_name") or ""
+#         db_doc.prekes_tipas = first_item.get("prekes_tipas") or ""
+#         db_doc.preke_paslauga = first_item.get("preke_paslauga")
+#         db_doc.sandelio_kodas = first_item.get("sandelio_kodas") or ""
+#         db_doc.sandelio_pavadinimas = first_item.get("sandelio_pavadinimas") or ""
+#         db_doc.objekto_kodas = first_item.get("objekto_kodas") or ""
+#         db_doc.objekto_pavadinimas = first_item.get("objekto_pavadinimas") or ""
+#         db_doc.padalinio_kodas = first_item.get("padalinio_kodas") or ""
+#         db_doc.padalinio_pavadinimas = first_item.get("padalinio_pavadinimas") or ""
+#         db_doc.mokescio_kodas = first_item.get("mokescio_kodas") or ""
+#         db_doc.mokescio_pavadinimas = first_item.get("mokescio_pavadinimas") or ""
+#         db_doc.atsakingo_asmens_kodas = first_item.get("atsakingo_asmens_kodas") or ""
+#         db_doc.atsakingo_asmens_pavadinimas = first_item.get("atsakingo_asmens_pavadinimas") or ""
+#         db_doc.operacijos_kodas = first_item.get("operacijos_kodas") or ""
+#         db_doc.operacijos_pavadinimas = first_item.get("operacijos_pavadinimas") or ""
+#         db_doc.islaidu_straipsnio_kodas = first_item.get("islaidu_straipsnio_kodas") or ""
+#         db_doc.islaidu_straipsnio_pavadinimas = first_item.get("islaidu_straipsnio_pavadinimas") or ""
+#         db_doc.pvm_kodas = first_item.get("pvm_kodas") or ""
+#         db_doc.pvm_pavadinimas = first_item.get("pvm_pavadinimas") or ""
+#         db_doc.tipo_kodas = first_item.get("tipo_kodas") or ""
+#         db_doc.tipo_pavadinimas = first_item.get("tipo_pavadinimas") or ""
+#         db_doc.zurnalo_kodas = first_item.get("zurnalo_kodas") or ""
+#         db_doc.zurnalo_pavadinimas = first_item.get("zurnalo_pavadinimas") or ""
+#         db_doc.projekto_kodas = first_item.get("projekto_kodas") or ""
+#         db_doc.projekto_pavadinimas = first_item.get("projekto_pavadinimas") or ""
+#         db_doc.projekto_vadovo_kodas = first_item.get("projekto_vadovo_kodas") or ""
+#         db_doc.projekto_vadovo_pavadinimas = first_item.get("projekto_vadovo_pavadinimas") or ""
+#         db_doc.skyrio_kodas = first_item.get("skyrio_kodas") or ""
+#         db_doc.skyrio_pavadinimas = first_item.get("skyrio_pavadinimas") or ""
+#         db_doc.partijos_nr_kodas = first_item.get("partijos_nr_kodas") or ""
+#         db_doc.partijos_nr_pavadinimas = first_item.get("partijos_nr_pavadinimas") or ""
+#         db_doc.korespondencijos_kodas = first_item.get("korespondencijos_kodas") or ""
+#         db_doc.korespondencijos_pavadinimas = first_item.get("korespondencijos_pavadinimas") or ""
+#         db_doc.serijos_kodas = first_item.get("serijos_kodas") or ""
+#         db_doc.serijos_pavadinimas = first_item.get("serijos_pavadinimas") or ""
+#         db_doc.centro_kodas = first_item.get("centro_kodas") or ""
+#         db_doc.centro_pavadinimas = first_item.get("centro_pavadinimas") or ""
+#     else:
+#         # detaliai — чистим короткие поля
+#         db_doc.prekes_kodas = ""
+#         db_doc.prekes_barkodas = ""
+#         db_doc.prekes_pavadinimas = ""
+#         db_doc.prekes_tipas = ""
+#         db_doc.preke_paslauga = ""
+#         db_doc.sandelio_kodas = ""
+#         db_doc.sandelio_pavadinimas = ""
+#         db_doc.objekto_kodas = ""
+#         db_doc.objekto_pavadinimas = ""
+#         db_doc.padalinio_kodas = ""
+#         db_doc.padalinio_pavadinimas = ""
+#         db_doc.mokescio_kodas = ""
+#         db_doc.mokescio_pavadinimas = ""
+#         db_doc.atsakingo_asmens_kodas = ""
+#         db_doc.atsakingo_asmens_pavadinimas = ""
+#         db_doc.operacijos_kodas = ""
+#         db_doc.operacijos_pavadinimas = ""
+#         db_doc.islaidu_straipsnio_kodas = ""
+#         db_doc.islaidu_straipsnio_pavadinimas = ""
+#         db_doc.pvm_kodas = ""
+#         db_doc.pvm_pavadinimas = ""
+#         db_doc.tipo_kodas = ""
+#         db_doc.tipo_pavadinimas = ""
+#         db_doc.zurnalo_kodas = ""
+#         db_doc.zurnalo_pavadinimas = ""
+#         db_doc.projekto_kodas = ""
+#         db_doc.projekto_pavadinimas = ""
+#         db_doc.projekto_vadovo_kodas = ""
+#         db_doc.projekto_vadovo_pavadinimas = ""
+#         db_doc.skyrio_kodas = ""
+#         db_doc.skyrio_pavadinimas = ""
+#         db_doc.partijos_nr_kodas = ""
+#         db_doc.partijos_nr_pavadinimas = ""
+#         db_doc.korespondencijos_kodas = ""
+#         db_doc.korespondencijos_pavadinimas = ""
+#         db_doc.serijos_kodas = ""
+#         db_doc.serijos_pavadinimas = ""
+#         db_doc.centro_kodas = ""
+#         db_doc.centro_pavadinimas = ""
+
+#     # Определяем pirkimas/pardavimas
+#     db_doc.pirkimas_pardavimas = determine_pirkimas_pardavimas(doc_struct, user)
+
 
 def _apply_sumiskai_defaults_from_user(db_doc, user) -> bool:
-    if getattr(db_doc, "scan_type", None) != "sumiskai":
+    """
+    Применяет пользовательские дефолты к суммарному документу (scan_type == 'sumiskai')
+    ТОЛЬКО если режим явно определён как 'pirkimas' или 'pardavimas'.
+    Возвращает True, если какие-либо поля были заполнены.
+    """
+    if (getattr(db_doc, "scan_type", None) or "").strip().lower() != "sumiskai":
         logger.info("Skip defaults: scan_type != sumiskai (%s)", db_doc.scan_type)
         return False
 
     mode = (getattr(db_doc, "pirkimas_pardavimas", "") or "").strip().lower()
     if mode not in ("pirkimas", "pardavimas"):
-        mode = "pardavimas" if getattr(db_doc, "seller_is_me", False) else "pirkimas"
-    logger.info("Apply defaults mode=%s (original=%s)", mode, db_doc.pirkimas_pardavimas)
+        logger.info("Skip defaults: pirkimas_pardavimas is not explicit (value=%s)", db_doc.pirkimas_pardavimas)
+        return False
 
     raw_defaults = getattr(user, "purchase_defaults" if mode == "pirkimas" else "sales_defaults", None)
-    logger.info("Raw defaults=%s", raw_defaults)
+    logger.info("Apply defaults mode=%s; raw_defaults=%s", mode, raw_defaults)
 
+    # Разбираем defaults: допускаем dict или JSON-строку
     defaults = None
     if isinstance(raw_defaults, dict):
         defaults = raw_defaults
     elif isinstance(raw_defaults, str) and raw_defaults.strip():
         try:
+            import json
             defaults = json.loads(raw_defaults)
         except Exception as e:
             logger.warning("Failed to parse defaults JSON: %s", e)
+
     if not isinstance(defaults, dict) or not defaults:
         logger.info("No usable defaults found")
         return False
 
     changed = False
 
-    def set_if_empty(field, key, normalize=None):
+    def set_if_empty(field: str, key: str, normalize=None):
         nonlocal changed
         cur = (getattr(db_doc, field, "") or "").strip()
         if cur:
@@ -223,18 +414,28 @@ def _apply_sumiskai_defaults_from_user(db_doc, user) -> bool:
         val = defaults.get(key)
         if normalize:
             val = normalize(val)
-        if val:
+        if val is not None and str(val).strip():
             setattr(db_doc, field, str(val))
             changed = True
             logger.info("Set %s = %s (from %s)", field, val, key)
 
+    # Нормализация tipas: допускаем 1/2/3 или их строковые варианты
+    def _norm_tipas(v):
+        s = str(v or "").strip()
+        return s if s in ("1", "2", "3") else None
+
     set_if_empty("prekes_pavadinimas", "pavadinimas")
     set_if_empty("prekes_kodas", "kodas")
     set_if_empty("prekes_barkodas", "barkodas")
-    set_if_empty("preke_paslauga", "tipas", normalize=lambda v: str(v) if str(v).strip() in ("1", "2", "3") else None)
+    set_if_empty("preke_paslauga", "tipas", normalize=_norm_tipas)
 
-    logger.info("Result after apply: pavadinimas=%s, kodas=%s, barkodas=%s, paslauga=%s",
-                 db_doc.prekes_pavadinimas, db_doc.prekes_kodas, db_doc.prekes_barkodas, db_doc.preke_paslauga)
+    logger.info(
+        "Result after apply: pavadinimas=%s, kodas=%s, barkodas=%s, paslauga=%s",
+        getattr(db_doc, "prekes_pavadinimas", None),
+        getattr(db_doc, "prekes_kodas", None),
+        getattr(db_doc, "prekes_barkodas", None),
+        getattr(db_doc, "preke_paslauga", None),
+    )
 
     return changed
 
@@ -462,10 +663,19 @@ def update_scanned_document(
             preview_url=preview_url,
         )
 
-        # ⬇️ НОВОЕ: подставляем дефолты из nustatymai для sumiskai
-        _apply_sumiskai_defaults_from_user(db_doc, user)        
+        # ⬇️ Подставляем дефолты только если явно можно
+        if getattr(db_doc, "_can_apply_defaults", False):
+            _apply_sumiskai_defaults_from_user(db_doc, user)
+        else:
+            logger.debug(
+                "Defaults skipped at save_document: mode=%s, can_apply=%s",
+                db_doc.pirkimas_pardavimas,
+                getattr(db_doc, "_can_apply_defaults", None)
+            )
+
         db_doc.save()
 
+        
         _save_line_items(db_doc, doc_struct, scan_type)
 
         if scan_type == "detaliai":
