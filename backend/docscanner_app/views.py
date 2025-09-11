@@ -861,17 +861,32 @@ def clear_lineitem_product(request, pk, lineitem_id):
 
 
 
+# @api_view(['PATCH'])
+# @permission_classes([IsAuthenticated])
+# def update_lineitem_fields(request, doc_id, lineitem_id):
+#     doc = get_object_or_404(ScannedDocument, pk=doc_id, user=request.user)
+#     lineitem = get_object_or_404(LineItem, pk=lineitem_id, document=doc)
+#     allowed = ['prekes_kodas', 'prekes_pavadinimas', 'prekes_barkodas']
+#     for field in allowed:
+#         if field in request.data:
+#             setattr(lineitem, field, request.data[field])
+#     lineitem.save()
+#     return Response({'success': True})
+
 @api_view(['PATCH'])
 @permission_classes([IsAuthenticated])
 def update_lineitem_fields(request, doc_id, lineitem_id):
+    from .serializers import LineItemSerializer  # убедись, что есть
     doc = get_object_or_404(ScannedDocument, pk=doc_id, user=request.user)
     lineitem = get_object_or_404(LineItem, pk=lineitem_id, document=doc)
+
     allowed = ['prekes_kodas', 'prekes_pavadinimas', 'prekes_barkodas']
     for field in allowed:
         if field in request.data:
             setattr(lineitem, field, request.data[field])
     lineitem.save()
-    return Response({'success': True})
+
+    return Response(LineItemSerializer(lineitem).data, status=200)
 
 
 
