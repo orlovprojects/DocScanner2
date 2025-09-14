@@ -312,9 +312,67 @@ def _sales_default():
 
 
 # Кастомная модель пользователя
+# class CustomUser(AbstractUser):
+#     username = None  # Убираем username
+#     email = models.EmailField(unique=True)  # Email теперь обязательный и уникальный
+
+#     credits = models.DecimalField(max_digits=7, decimal_places=2, default=0)
+#     stripe_customer_id = models.CharField(max_length=255, blank=True, null=True)
+#     subscription_status = models.CharField(max_length=50, blank=True, null=True)
+#     subscription_plan = models.CharField(max_length=255, blank=True, null=True)
+#     subscription_start_date = models.DateTimeField(blank=True, null=True)
+#     subscription_end_date = models.DateTimeField(blank=True, null=True)
+#     default_accounting_program = models.CharField(
+#         max_length=32, choices=ACCOUNTING_PROGRAM_CHOICES, blank=True, null=True
+#     )
+#     company_name = models.CharField("Įmonės pavadinimas", max_length=255, blank=True, null=True)
+#     company_code = models.CharField("Įmonės kodas", max_length=50, blank=True, null=True)
+#     vat_code = models.CharField("PVM kodas", max_length=50, blank=True, null=True)
+#     company_iban = models.CharField("Įmonės IBAN",max_length=255, blank=True, null=True)
+#     company_address = models.CharField("Įmonės adresas", max_length=255, blank=True, null=True)
+#     company_country_iso = models.CharField("Įmonės šalis", max_length=10, blank=True, null=True)
+
+#     purchase_defaults = models.JSONField(default=_purchase_default, blank=True)
+#     sales_defaults = models.JSONField(default=_sales_default, blank=True)
+
+
+#     USERNAME_FIELD = 'email'  # Используем email как уникальный идентификатор
+#     REQUIRED_FIELDS = []  # Поле password уже обязательно, других обязательных полей нет
+
+#     objects = CustomUserManager()
+
+#     def __str__(self):
+#         return self.email
+
+#     def get_subscription_status(self):
+#         current_time = now()
+#         if self.subscription_status == "trial":
+#             if self.subscription_end_date and self.subscription_end_date < current_time:
+#                 return "trial_expired"
+#             return "trial"
+#         elif self.subscription_status == "active":
+#             if self.subscription_end_date and self.subscription_end_date < current_time:
+#                 return "expired"
+#             return "active"
+#         elif self.subscription_status == "canceled":
+#             if self.subscription_end_date and self.subscription_end_date < current_time:
+#                 return "canceled_expired"
+#             return "canceled"
+#         return "unknown"
+
+
+
 class CustomUser(AbstractUser):
-    username = None  # Убираем username
-    email = models.EmailField(unique=True)  # Email теперь обязательный и уникальный
+    # --- NEW: view mode choices ---
+    VIEW_MODE_SINGLE = "single"
+    VIEW_MODE_MULTI  = "multi"
+    VIEW_MODE_CHOICES = [
+        (VIEW_MODE_SINGLE, "Single-company"),
+        (VIEW_MODE_MULTI,  "Multi-company"),
+    ]
+
+    username = None
+    email = models.EmailField(unique=True)
 
     credits = models.DecimalField(max_digits=7, decimal_places=2, default=0)
     stripe_customer_id = models.CharField(max_length=255, blank=True, null=True)
@@ -328,16 +386,23 @@ class CustomUser(AbstractUser):
     company_name = models.CharField("Įmonės pavadinimas", max_length=255, blank=True, null=True)
     company_code = models.CharField("Įmonės kodas", max_length=50, blank=True, null=True)
     vat_code = models.CharField("PVM kodas", max_length=50, blank=True, null=True)
-    company_iban = models.CharField("Įmonės IBAN",max_length=255, blank=True, null=True)
+    company_iban = models.CharField("Įmonės IBAN", max_length=255, blank=True, null=True)
     company_address = models.CharField("Įmonės adresas", max_length=255, blank=True, null=True)
     company_country_iso = models.CharField("Įmonės šalis", max_length=10, blank=True, null=True)
 
     purchase_defaults = models.JSONField(default=_purchase_default, blank=True)
     sales_defaults = models.JSONField(default=_sales_default, blank=True)
 
+    # --- NEW: UI režimas dokumentų sąrašui ---
+    view_mode = models.CharField(
+        max_length=16,
+        choices=VIEW_MODE_CHOICES,
+        default=VIEW_MODE_SINGLE,
+        help_text="UI mode for documents: single or multi company."
+    )
 
-    USERNAME_FIELD = 'email'  # Используем email как уникальный идентификатор
-    REQUIRED_FIELDS = []  # Поле password уже обязательно, других обязательных полей нет
+    USERNAME_FIELD = "email"
+    REQUIRED_FIELDS = []
 
     objects = CustomUserManager()
 

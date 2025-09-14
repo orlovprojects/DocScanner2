@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import {
   Box, Typography, FormControl, InputLabel, Select, MenuItem,
   Button, Alert, Tabs, Tab, Paper, TextField, Stack, RadioGroup,
-  FormControlLabel, Radio, IconButton, Tooltip
+  FormControlLabel, Radio, IconButton, Tooltip, Switch
 } from "@mui/material";
 import HelpOutlineIcon from "@mui/icons-material/HelpOutline";
 import Autocomplete from "@mui/material/Autocomplete";
@@ -49,7 +49,6 @@ function ImportTab({ label, url, templateFileName }) {
       setError(err?.response?.data?.error || "Importo klaida");
       setResult({ imported: 0, processed: 0 });
     } finally {
-      // išvalom pasirinkimą
       if (inputRef.current) {
         inputRef.current.value = "";
       }
@@ -65,7 +64,6 @@ function ImportTab({ label, url, templateFileName }) {
     <Paper sx={{ p: 2, mb: 2 }}>
       <Typography gutterBottom variant="subtitle1">{label}</Typography>
 
-      {/* Custom file input */}
       <Stack direction="row" spacing={2} alignItems="center" sx={{ mb: 2 }}>
         <Button variant="outlined" component="label">
           Pasirinkite failą
@@ -98,7 +96,6 @@ function ImportTab({ label, url, templateFileName }) {
     </Paper>
   );
 }
-
 
 // ===== Defaults fieldset (memoized to keep focus stable) =====
 const DefaultsFields = React.memo(function DefaultsFields({ mode, state, setState }) {
@@ -203,6 +200,10 @@ export default function NustatymaiPage() {
   const [successDefaults, setSuccessDefaults] = useState(false);
   const [errorDefaults, setErrorDefaults] = useState("");
 
+  // === NEW: Kelių įmonių režimas ===
+  const [viewMode, setViewMode] = useState("single");        // "single" | "multi"
+  const [savingViewMode, setSavingViewMode] = useState(false);
+
   const numToTipas = (n) => {
     const v = Number(n);
     if (v === 2) return "Paslauga";
@@ -242,6 +243,9 @@ export default function NustatymaiPage() {
         barkodas: sd.barkodas ?? "",
         tipas: numToTipas(sd.tipas ?? 1),
       });
+
+      // NEW: init view mode from profile
+      setViewMode(data.view_mode || "single");
     });
   }, []);
 
@@ -296,7 +300,6 @@ export default function NustatymaiPage() {
     try {
       const d = defaultsMode === "pirkimas" ? purchaseDefaults : salesDefaults;
 
-      // required fields
       if (!d.pavadinimas?.trim() || !d.kodas?.trim() || !d.tipas) {
         setErrorDefaults("„Pavadinimas“, „Kodas“ ir „Tipas“ yra privalomi.");
         setSavingDefaults(false);
@@ -316,6 +319,25 @@ export default function NustatymaiPage() {
       setErrorDefaults(e?.response?.data?.detail || "Nepavyko išsaugoti numatytųjų reikšmių.");
     } finally {
       setSavingDefaults(false);
+    }
+  };
+
+  // NEW: toggle kelių įmonių režimas
+  const toggleViewMode = async (e) => {
+    const nextChecked = e.target.checked;
+    const nextMode = nextChecked ? "multi" : "single";
+    const prevMode = viewMode;
+
+    setViewMode(nextMode); // optimistic UI
+    setSavingViewMode(true);
+    try {
+      await api.patch("/view-mode/", { view_mode: nextMode }, { withCredentials: true });
+      // success: state already set
+    } catch (err) {
+      setViewMode(prevMode); // rollback
+      alert("Nepavyko pakeisti režimo.");
+    } finally {
+      setSavingViewMode(false);
     }
   };
 
@@ -411,7 +433,34 @@ export default function NustatymaiPage() {
             </MenuItem>
           ))}
         </Select>
+
+        {/* NEW: Kelių įmonių režimas (switch) */}
+        <Box sx={{ mt: 2 }}>
+          <FormControlLabel
+            control={
+              <Switch
+                checked={viewMode === "multi"}
+                onChange={toggleViewMode}
+                disabled={savingViewMode}
+              />
+            }
+            label={
+              <Box sx={{ display: "inline-flex", alignItems: "center", gap: 0.5 }}>
+                <span>Kelių įmonių režimas</span>
+                <Tooltip
+                  title="Pasirinkus šį režimą, galėsite vesti kelių įmonių apskaitą. Matysite visų kontrahentų sąrašą suvestinėje."
+                  arrow
+                  enterTouchDelay={0}
+                  leaveTouchDelay={4000}
+                >
+                  <HelpOutlineIcon fontSize="small" />
+                </Tooltip>
+              </Box>
+            }
+          />
+        </Box>
       </FormControl>
+
       <Button variant="contained" disabled={!program || saving} onClick={save}>
         Išsaugoti
       </Button>
@@ -501,7 +550,8 @@ export default function NustatymaiPage() {
       </Paper>
     </Box>
   );
-}
+};
+
 
 
 

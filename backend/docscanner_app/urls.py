@@ -15,6 +15,7 @@ from .views import (
     user_me_view,
     clear_document_product,
     clear_lineitem_product,
+    update_view_mode,
 )
 
 from docscanner_app.views import export_documents
@@ -82,6 +83,8 @@ urlpatterns = [
 
     path("scanned-documents/<int:pk>/clear-product/", clear_document_product),
     path("scanned-documents/<int:pk>/lineitem/<int:lineitem_id>/clear-product/", clear_lineitem_product),
+
+    path("view-mode/", update_view_mode, name="user-view-mode"),
 
 
 

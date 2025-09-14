@@ -175,7 +175,11 @@ class ScannedDocumentListSerializer(serializers.ModelSerializer):
             # Добавь, если нужно для фильтрации или отрисовки:
             'amount_with_vat',
             'seller_name',
+            'seller_id',
+            'seller_vat_code',
             'buyer_name',
+            'buyer_id',
+            'buyer_vat_code',
             'val_ar_sutapo',
             'val_subtotal_match',
             'val_vat_match',
@@ -340,6 +344,7 @@ class DefaultsSerializer(serializers.Serializer):
 
 
 # Ваш основной сериализатор, дополненный полями дефолтов
+
 class CustomUserSerializer(serializers.ModelSerializer):
     credits = serializers.DecimalField(read_only=True, max_digits=7, decimal_places=2)
     purchase_defaults = DefaultsSerializer(required=False)
@@ -354,38 +359,43 @@ class CustomUserSerializer(serializers.ModelSerializer):
             'credits', 'default_accounting_program',
             'company_name', 'company_code', 'vat_code',
             'company_iban', 'company_address', 'company_country_iso',
-            'purchase_defaults', 'sales_defaults',
+            'purchase_defaults', 'sales_defaults', 'view_mode',
         ]
         read_only_fields = ('credits',)
         extra_kwargs = {
-            'password': {'write_only': True, 'required': True},
+            'password': {'write_only': True, 'required': True},  # требуем только на create
             'email':    {'required': True},
             'company_name': {'required': False},
             'company_code': {'required': False},
             'company_country_iso': {'required': False},
+            'view_mode': {'required': False},
         }
 
-    # Хелпер: аккуратно мерджим JSON-дефолты, не затирая отсутствующие ключи
+    def validate_view_mode(self, value):
+        if value is None:
+            return value
+        value = str(value).lower()
+        allowed = {CustomUser.VIEW_MODE_SINGLE, CustomUser.VIEW_MODE_MULTI}
+        if value not in allowed:
+            raise serializers.ValidationError("view_mode must be 'single' or 'multi'.")
+        return value
+
     def _merge_defaults(self, instance, validated_data, key):
         if key not in validated_data:
             return
         cur = getattr(instance, key, {}) or {}
         new = validated_data.pop(key) or {}
-        cur.update(new)  # обновляем только переданные поля
+        cur.update(new)
         setattr(instance, key, cur)
 
     def create(self, validated_data):
         password = validated_data.pop('password')
-        # вытащим дефолты (если пришли) до create_user
         purchase_defaults = validated_data.pop('purchase_defaults', None)
         sales_defaults = validated_data.pop('sales_defaults', None)
 
         user = CustomUser.objects.create_user(password=password, **validated_data)
-
-        # стартовые кредиты (как у вас)
         user.credits = 50
 
-        # применим дефолты, если прислали
         if purchase_defaults:
             base = user.purchase_defaults or {}
             base.update(purchase_defaults)
@@ -400,12 +410,9 @@ class CustomUserSerializer(serializers.ModelSerializer):
 
     def update(self, instance, validated_data):
         password = validated_data.pop('password', None)
-
-        # сначала мерджим JSON-дефолты (если пришли)
         self._merge_defaults(instance, validated_data, 'purchase_defaults')
         self._merge_defaults(instance, validated_data, 'sales_defaults')
 
-        # остальные простые поля
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
 
@@ -416,7 +423,6 @@ class CustomUserSerializer(serializers.ModelSerializer):
         return instance
 
     def validate(self, attrs):
-        # При PATCH требуем обязательные поля (ваша логика)
         request = self.context.get('request')
         if request and request.method == 'PATCH':
             required = ['company_name', 'company_code', 'company_country_iso']
@@ -424,6 +430,102 @@ class CustomUserSerializer(serializers.ModelSerializer):
                 if field in attrs and not attrs[field]:
                     raise serializers.ValidationError({field: 'This field is required.'})
         return attrs
+
+
+class ViewModeSerializer(serializers.Serializer):
+    view_mode = serializers.ChoiceField(choices=[
+        (CustomUser.VIEW_MODE_SINGLE, 'single'),
+        (CustomUser.VIEW_MODE_MULTI, 'multi'),
+    ])
+
+
+
+
+
+# class CustomUserSerializer(serializers.ModelSerializer):
+#     credits = serializers.DecimalField(read_only=True, max_digits=7, decimal_places=2)
+#     purchase_defaults = DefaultsSerializer(required=False)
+#     sales_defaults = DefaultsSerializer(required=False)
+
+#     class Meta:
+#         model = CustomUser
+#         fields = [
+#             'id', 'email', 'password', 'first_name', 'last_name',
+#             'stripe_customer_id', 'subscription_status', 'subscription_plan',
+#             'subscription_start_date', 'subscription_end_date',
+#             'credits', 'default_accounting_program',
+#             'company_name', 'company_code', 'vat_code',
+#             'company_iban', 'company_address', 'company_country_iso',
+#             'purchase_defaults', 'sales_defaults', 'view_mode',
+#         ]
+#         read_only_fields = ('credits',)
+#         extra_kwargs = {
+#             'password': {'write_only': True, 'required': True},
+#             'email':    {'required': True},
+#             'company_name': {'required': False},
+#             'company_code': {'required': False},
+#             'company_country_iso': {'required': False},
+#         }
+
+#     # Хелпер: аккуратно мерджим JSON-дефолты, не затирая отсутствующие ключи
+#     def _merge_defaults(self, instance, validated_data, key):
+#         if key not in validated_data:
+#             return
+#         cur = getattr(instance, key, {}) or {}
+#         new = validated_data.pop(key) or {}
+#         cur.update(new)  # обновляем только переданные поля
+#         setattr(instance, key, cur)
+
+#     def create(self, validated_data):
+#         password = validated_data.pop('password')
+#         # вытащим дефолты (если пришли) до create_user
+#         purchase_defaults = validated_data.pop('purchase_defaults', None)
+#         sales_defaults = validated_data.pop('sales_defaults', None)
+
+#         user = CustomUser.objects.create_user(password=password, **validated_data)
+
+#         # стартовые кредиты (как у вас)
+#         user.credits = 50
+
+#         # применим дефолты, если прислали
+#         if purchase_defaults:
+#             base = user.purchase_defaults or {}
+#             base.update(purchase_defaults)
+#             user.purchase_defaults = base
+#         if sales_defaults:
+#             base = user.sales_defaults or {}
+#             base.update(sales_defaults)
+#             user.sales_defaults = base
+
+#         user.save(update_fields=['credits', 'purchase_defaults', 'sales_defaults'])
+#         return user
+
+#     def update(self, instance, validated_data):
+#         password = validated_data.pop('password', None)
+
+#         # сначала мерджим JSON-дефолты (если пришли)
+#         self._merge_defaults(instance, validated_data, 'purchase_defaults')
+#         self._merge_defaults(instance, validated_data, 'sales_defaults')
+
+#         # остальные простые поля
+#         for attr, value in validated_data.items():
+#             setattr(instance, attr, value)
+
+#         if password:
+#             instance.set_password(password)
+
+#         instance.save()
+#         return instance
+
+#     def validate(self, attrs):
+#         # При PATCH требуем обязательные поля (ваша логика)
+#         request = self.context.get('request')
+#         if request and request.method == 'PATCH':
+#             required = ['company_name', 'company_code', 'company_country_iso']
+#             for field in required:
+#                 if field in attrs and not attrs[field]:
+#                     raise serializers.ValidationError({field: 'This field is required.'})
+#         return attrs
 
 
 

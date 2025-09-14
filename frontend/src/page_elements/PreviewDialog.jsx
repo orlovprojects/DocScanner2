@@ -347,16 +347,18 @@ export default function PreviewDialog({
                   <b>Dėmesio!</b> Kai kurios sumos galimai nesutampa. Patikrinkite dokumentą!
                 </Alert>
               )}
-              <Typography gutterBottom>
-                Pirkimas/pardavimas:&nbsp;
-                <b>
-                  {selected.pirkimas_pardavimas === "pirkimas"
-                    ? "Pirkimas"
-                    : selected.pirkimas_pardavimas === "pardavimas"
-                    ? "Pardavimas"
-                    : "—"}
-                </b>
-              </Typography>
+              {user?.view_mode !== "multi" && (
+                <Typography gutterBottom>
+                  Pirkimas/pardavimas:&nbsp;
+                  <b>
+                    {selected.pirkimas_pardavimas === "pirkimas"
+                      ? "Pirkimas"
+                      : selected.pirkimas_pardavimas === "pardavimas"
+                      ? "Pardavimas"
+                      : "—"}
+                  </b>
+                </Typography>
+              )}
               <Typography gutterBottom>
                 Dokumento tipas: <b>{selected.document_type || "—"}</b>
               </Typography>
@@ -557,7 +559,7 @@ export default function PreviewDialog({
                           <Typography>PVM klasė: <b>{item.pvm_kodas || item.vat_class || "—"}</b></Typography>
                           <Typography>Suma (su PVM): <b>{formatNumberPreview(item.total)}</b></Typography>
                           <Typography>Nuolaida (be PVM): <b>{formatNumberPreview(item.discount_wo_vat)}</b></Typography>
-                          <Typography>Nuolaida (su ПVM): <b>{formatNumberPreview(item.discount_with_vat)}</b></Typography>
+                          <Typography>Nuolaida (su PVM): <b>{formatNumberPreview(item.discount_with_vat)}</b></Typography>
                         </Stack>
                       </Box>
                     ))}

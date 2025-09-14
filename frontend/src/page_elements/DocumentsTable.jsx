@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { api } from "../api/endpoints";
 import {
   TableContainer,
@@ -16,10 +16,10 @@ import {
   MenuItem,
   Box,
 } from "@mui/material";
-import WarningIcon from '@mui/icons-material/Warning';
-import HelpOutlineIcon from '@mui/icons-material/HelpOutline';
-import CheckCircleIcon from '@mui/icons-material/CheckCircle';
-import MoreVertIcon from '@mui/icons-material/MoreVert';
+import WarningIcon from "@mui/icons-material/Warning";
+import HelpOutlineIcon from "@mui/icons-material/HelpOutline";
+import CheckCircleIcon from "@mui/icons-material/CheckCircle";
+import MoreVertIcon from "@mui/icons-material/MoreVert";
 
 export default function DocumentsTable({
   filtered,
@@ -29,14 +29,13 @@ export default function DocumentsTable({
   handleSelectAll,
   isRowExportable,
   reloadDocuments,
+  allowUnknownDirection = false, // из UploadPage: user?.view_mode === "multi"
+  onDeleteDoc, // новый проп — поднимаем удаление в родителя
 }) {
   const [anchorEl, setAnchorEl] = useState(null);
   const [menuRowId, setMenuRowId] = useState(null);
-  const [localRows, setLocalRows] = useState(filtered);
 
-  useEffect(() => {
-    setLocalRows(filtered);
-  }, [filtered]);
+  const rows = filtered || [];
 
   const handleMenuOpen = (event, rowId) => {
     setAnchorEl(event.currentTarget);
@@ -49,13 +48,15 @@ export default function DocumentsTable({
   };
 
   const handleDeleteRow = async (rowId) => {
-    setLocalRows((rows) => rows.filter((row) => row.id !== rowId));
     handleMenuClose();
+    // оптимистично убираем запись в родителе
+    onDeleteDoc?.(rowId);
     try {
       await api.delete("/documents/bulk-delete/", { data: { ids: [rowId] } });
-      if (typeof reloadDocuments === "function") reloadDocuments();
+      reloadDocuments?.();
     } catch (e) {
       alert("Įvyko klaida trinant dokumentą.");
+      reloadDocuments?.();
     }
   };
 
@@ -64,12 +65,29 @@ export default function DocumentsTable({
     d.val_vat_match === false ||
     d.val_total_match === false;
 
-  const canExport = (d) =>
-    isRowExportable(d) &&
-    !!d.pirkimas_pardavimas &&
-    d.pirkimas_pardavimas.toLowerCase() !== "nezinoma";
+  // направление — из effective_direction (если задано), иначе из бэкенда
+  const getDirectionToShow = (d) => {
+    const raw =
+      typeof d.effective_direction !== "undefined"
+        ? d.effective_direction
+        : (d.pirkimas_pardavimas || "").toLowerCase();
 
-  const exportableRows = localRows.filter(canExport);
+    if (raw === "") return ""; // контрагент не выбран — пустая ячейка
+
+    const v = (raw || "").toLowerCase();
+    if (!v || v === "nezinoma") return "nezinoma";
+    if (v === "pirkimas" || v === "pardavimas") return v;
+    return "nezinoma";
+  };
+
+  const canExport = (d) => {
+    if (!isRowExportable(d)) return false;
+    if (allowUnknownDirection) return true; // multi: можно экспортировать даже при неизвестном
+    const dir = getDirectionToShow(d);
+    return dir === "pirkimas" || dir === "pardavimas";
+  };
+
+  const exportableRows = rows.filter(canExport);
 
   const statusLabel = (d) => {
     if (d.status === "exported") return "Atliktas (Eksportuotas)";
@@ -79,13 +97,12 @@ export default function DocumentsTable({
 
   const iconForStatus = (d) => {
     if (d.status === "exported") {
-      return <CheckCircleIcon color="success" sx={{ verticalAlign: 'middle' }} />;
+      return <CheckCircleIcon color="success" sx={{ verticalAlign: "middle" }} />;
     }
     if (typeof d.iconForStatus === "function") return d.iconForStatus(d.status);
     return null;
   };
 
-  // ---- Skaitmenizavimo tipas (scan_type) ----
   const renderScanType = (d) => {
     const t = d?.scan_type;
     if (!t) {
@@ -98,18 +115,31 @@ export default function DocumentsTable({
         </Tooltip>
       );
     }
-
-    const mapping = {
-      sumiskai: "Sumiškai",
-      // при необходимости добавляй другие:
-      // invoice: "Sąskaita",
-      // receipt: "Kvitas",
-    };
-
+    const mapping = { sumiskai: "Sumiškai" };
     if (mapping[t]) return mapping[t];
-
     const label = String(t).replace(/_/g, " ").toLowerCase();
     return label.charAt(0).toUpperCase() + label.slice(1);
+  };
+
+  const renderDirectionCell = (d) => {
+    const dir = getDirectionToShow(d);
+
+    if (dir === "") {
+      return <span>&nbsp;</span>;
+    }
+
+    if (dir === "nezinoma") {
+      return (
+        <Tooltip title="Nežinomas tipas. Atnaujinkite pirkėjo ar pardavėjo duomenis.">
+          <span style={{ color: "#bdbdbd", display: "flex", alignItems: "center" }}>
+            <HelpOutlineIcon fontSize="small" style={{ marginRight: 4 }} />
+            Nežinomas
+          </span>
+        </Tooltip>
+      );
+    }
+
+    return dir.charAt(0).toUpperCase() + dir.slice(1);
   };
 
   return (
@@ -142,97 +172,72 @@ export default function DocumentsTable({
         <TableBody>
           {loading ? (
             <TableRow>
-              {/* 7 колонок: checkbox + 6 ячеек */}
               <TableCell colSpan={7} align="center">
                 <CircularProgress size={24} />
               </TableCell>
             </TableRow>
           ) : (
-            localRows.map((d, idx) => {
-              const tipasIsKnown =
-                d.pirkimas_pardavimas &&
-                d.pirkimas_pardavimas.toLowerCase() !== "nezinoma";
+            rows.map((d) => (
+              <TableRow key={String(d.id)} hover>
+                <TableCell padding="checkbox">
+                  <Checkbox
+                    checked={selectedRows.includes(d.id)}
+                    onChange={handleSelectRow(d.id)}
+                    disabled={!canExport(d)}
+                    inputProps={{ "aria-label": "select row" }}
+                  />
+                </TableCell>
 
-              const tipasValue = tipasIsKnown
-                ? (d.pirkimas_pardavimas.charAt(0).toUpperCase() +
-                   d.pirkimas_pardavimas.slice(1))
-                : (
-                  <Tooltip title="Nežinomas tipas. Atnaujinkite pirkėjo ar pardavėjo duomenis.">
-                    <span style={{ color: "#bdbdbd", display: "flex", alignItems: "center" }}>
-                      <HelpOutlineIcon fontSize="small" style={{ marginRight: 4 }} />
-                      Nežinomas
-                    </span>
-                  </Tooltip>
-                );
+                <TableCell
+                  sx={{ cursor: "pointer", color: "primary.main" }}
+                  onClick={() => d.onClickPreview?.(d)}
+                >
+                  {d.original_filename}
+                </TableCell>
 
-              return (
-                <TableRow key={d.id || idx} hover>
-                  <TableCell padding="checkbox">
-                    <Checkbox
-                      checked={selectedRows.includes(d.id)}
-                      onChange={handleSelectRow(d.id)}
-                      disabled={!canExport(d)}
-                      inputProps={{ "aria-label": "select row" }}
-                    />
-                  </TableCell>
+                <TableCell>{renderScanType(d)}</TableCell>
 
-                  <TableCell
-                    sx={{ cursor: "pointer", color: "primary.main" }}
-                    onClick={() => d.onClickPreview(d)}
+                <TableCell>{renderDirectionCell(d)}</TableCell>
+
+                <TableCell sx={{ verticalAlign: "middle", minHeight: 44 }}>
+                  <Box display="flex" alignItems="center">
+                    {iconForStatus(d)}&nbsp;{statusLabel(d)}
+                    {hasSumValidationError(d) && (
+                      <Tooltip title="Patikrinkite sumas">
+                        <WarningIcon
+                          color="warning"
+                          fontSize="small"
+                          sx={{ ml: 1, verticalAlign: "middle", cursor: "pointer" }}
+                        />
+                      </Tooltip>
+                    )}
+                  </Box>
+                </TableCell>
+
+                <TableCell>{d.fmt?.(d.uploaded_at) || ""}</TableCell>
+
+                <TableCell align="right">
+                  <IconButton onClick={(e) => handleMenuOpen(e, d.id)}>
+                    <MoreVertIcon />
+                  </IconButton>
+                  <Menu
+                    anchorEl={anchorEl}
+                    open={Boolean(anchorEl) && menuRowId === d.id}
+                    onClose={handleMenuClose}
                   >
-                    {d.original_filename}
-                  </TableCell>
-
-                  <TableCell>
-                    {renderScanType(d)}
-                  </TableCell>
-
-                  <TableCell>
-                    {tipasValue}
-                  </TableCell>
-
-                  <TableCell sx={{ verticalAlign: "middle", minHeight: 44 }}>
-                    <Box display="flex" alignItems="center">
-                      {iconForStatus(d)}&nbsp;{statusLabel(d)}
-                      {hasSumValidationError(d) && (
-                        <Tooltip title="Patikrinkite sumas">
-                          <WarningIcon
-                            color="warning"
-                            fontSize="small"
-                            sx={{ ml: 1, verticalAlign: 'middle', cursor: 'pointer' }}
-                          />
-                        </Tooltip>
-                      )}
-                    </Box>
-                  </TableCell>
-
-                  <TableCell>{d.fmt(d.uploaded_at)}</TableCell>
-
-                  <TableCell align="right">
-                    <IconButton onClick={(e) => handleMenuOpen(e, d.id)}>
-                      <MoreVertIcon />
-                    </IconButton>
-                    <Menu
-                      anchorEl={anchorEl}
-                      open={Boolean(anchorEl) && menuRowId === d.id}
-                      onClose={handleMenuClose}
-                    >
-                      <MenuItem onClick={() => handleDeleteRow(d.id)}>
-                        Ištrinti
-                      </MenuItem>
-                    </Menu>
-                  </TableCell>
-                </TableRow>
-              );
-            })
+                    <MenuItem onClick={() => handleDeleteRow(d.id)}>
+                      Ištrinti
+                    </MenuItem>
+                  </Menu>
+                </TableCell>
+              </TableRow>
+            ))
           )}
         </TableBody>
       </Table>
     </TableContainer>
   );
 }
-
-
 
 
 
@@ -257,10 +262,10 @@ export default function DocumentsTable({
 //   MenuItem,
 //   Box,
 // } from "@mui/material";
-// import WarningIcon from '@mui/icons-material/Warning';
-// import HelpOutlineIcon from '@mui/icons-material/HelpOutline';
-// import CheckCircleIcon from '@mui/icons-material/CheckCircle';
-// import MoreVertIcon from '@mui/icons-material/MoreVert';
+// import WarningIcon from "@mui/icons-material/Warning";
+// import HelpOutlineIcon from "@mui/icons-material/HelpOutline";
+// import CheckCircleIcon from "@mui/icons-material/CheckCircle";
+// import MoreVertIcon from "@mui/icons-material/MoreVert";
 
 // export default function DocumentsTable({
 //   filtered,
@@ -269,15 +274,15 @@ export default function DocumentsTable({
 //   handleSelectRow,
 //   handleSelectAll,
 //   isRowExportable,
-//   reloadDocuments, // функция из родителя
+//   reloadDocuments,
+//   allowUnknownDirection = false, // из UploadPage: user?.view_mode === "multi"
 // }) {
 //   const [anchorEl, setAnchorEl] = useState(null);
 //   const [menuRowId, setMenuRowId] = useState(null);
-//   const [localRows, setLocalRows] = useState(filtered);
+//   const [localRows, setLocalRows] = useState(filtered || []);
 
-//   // Синхронизация с пропами (при обновлении фильтра/документов)
 //   useEffect(() => {
-//     setLocalRows(filtered);
+//     setLocalRows(filtered || []);
 //   }, [filtered]);
 
 //   const handleMenuOpen = (event, rowId) => {
@@ -290,19 +295,14 @@ export default function DocumentsTable({
 //     setMenuRowId(null);
 //   };
 
-//   // Удаление строки — без confirm!
 //   const handleDeleteRow = async (rowId) => {
 //     setLocalRows((rows) => rows.filter((row) => row.id !== rowId));
 //     handleMenuClose();
 //     try {
-//       await api.delete("/documents/bulk-delete/", {
-//         data: { ids: [rowId] }
-//       });
+//       await api.delete("/documents/bulk-delete/", { data: { ids: [rowId] } });
 //       if (typeof reloadDocuments === "function") reloadDocuments();
 //     } catch (e) {
 //       alert("Įvyko klaida trinant dokumentą.");
-//       // Если нужно вернуть обратно при ошибке — раскомментируй:
-//       // setLocalRows((rows) => [...rows, filtered.find((row) => row.id === rowId)]);
 //     }
 //   };
 
@@ -311,10 +311,27 @@ export default function DocumentsTable({
 //     d.val_vat_match === false ||
 //     d.val_total_match === false;
 
-//   const canExport = (d) =>
-//     isRowExportable(d) &&
-//     !!d.pirkimas_pardavimas &&
-//     d.pirkimas_pardavimas.toLowerCase() !== "nezinoma";
+//   // ----- ВАЖНО: берём направление из effective_direction (если задано), иначе из бэкенда
+//   const getDirectionToShow = (d) => {
+//     const raw =
+//       typeof d.effective_direction !== "undefined"
+//         ? d.effective_direction
+//         : (d.pirkimas_pardavimas || "").toLowerCase();
+
+//     if (raw === "") return ""; // контрагент не выбран — показываем пусто
+
+//     const v = (raw || "").toLowerCase();
+//     if (!v || v === "nezinoma") return "nezinoma";
+//     if (v === "pirkimas" || v === "pardavimas") return v;
+//     return "nezinoma";
+//   };
+
+//   const canExport = (d) => {
+//     if (!isRowExportable(d)) return false;
+//     if (allowUnknownDirection) return true; // multi: можно экспортировать даже при неизвестном
+//     const dir = getDirectionToShow(d);
+//     return dir === "pirkimas" || dir === "pardavimas";
+//   };
 
 //   const exportableRows = localRows.filter(canExport);
 
@@ -326,10 +343,51 @@ export default function DocumentsTable({
 
 //   const iconForStatus = (d) => {
 //     if (d.status === "exported") {
-//       return <CheckCircleIcon color="success" sx={{ verticalAlign: 'middle' }} />;
+//       return <CheckCircleIcon color="success" sx={{ verticalAlign: "middle" }} />;
 //     }
 //     if (typeof d.iconForStatus === "function") return d.iconForStatus(d.status);
 //     return null;
+//   };
+
+//   const renderScanType = (d) => {
+//     const t = d?.scan_type;
+//     if (!t) {
+//       return (
+//         <Tooltip title="Nežinomas skaitmenizavimo tipas">
+//           <span style={{ color: "#bdbdbd", display: "flex", alignItems: "center" }}>
+//             <HelpOutlineIcon fontSize="small" style={{ marginRight: 4 }} />
+//             Nežinomas
+//           </span>
+//         </Tooltip>
+//       );
+//     }
+//     const mapping = { sumiskai: "Sumiškai" };
+//     if (mapping[t]) return mapping[t];
+//     const label = String(t).replace(/_/g, " ").toLowerCase();
+//     return label.charAt(0).toUpperCase() + label.slice(1);
+//   };
+
+//   const renderDirectionCell = (d) => {
+//     const dir = getDirectionToShow(d);
+
+//     if (dir === "") {
+//       // контрагент не выбран — показываем пустую ячейку
+//       return <span>&nbsp;</span>;
+//     }
+
+//     if (dir === "nezinoma") {
+//       return (
+//         <Tooltip title="Nežinomas tipas. Atnaujinkite pirkėjo ar pardavėjo duomenis.">
+//           <span style={{ color: "#bdbdbd", display: "flex", alignItems: "center" }}>
+//             <HelpOutlineIcon fontSize="small" style={{ marginRight: 4 }} />
+//             Nežinomas
+//           </span>
+//         </Tooltip>
+//       );
+//     }
+
+//     // pirkimas / pardavimas -> с заглавной
+//     return dir.charAt(0).toUpperCase() + dir.slice(1);
 //   };
 
 //   return (
@@ -351,267 +409,82 @@ export default function DocumentsTable({
 //                 inputProps={{ "aria-label": "select all exportable" }}
 //               />
 //             </TableCell>
-//             <TableCell>Failas</TableCell>
-//             <TableCell>Skaitmenizavimo tipas</TableCell>
-//             <TableCell>Pirkimas / pardavimas</TableCell>
-//             <TableCell>Statusas</TableCell>
-//             <TableCell>Data</TableCell>
+//             <TableCell sx={{ fontWeight: 600 }}>Failas</TableCell>
+//             <TableCell sx={{ fontWeight: 600 }}>Skaitmenizavimo tipas</TableCell>
+//             <TableCell sx={{ fontWeight: 600 }}>Pirkimas / pardavimas</TableCell>
+//             <TableCell sx={{ fontWeight: 600 }}>Statusas</TableCell>
+//             <TableCell sx={{ fontWeight: 600 }}>Data</TableCell>
 //             <TableCell align="right"></TableCell>
 //           </TableRow>
 //         </TableHead>
 //         <TableBody>
 //           {loading ? (
 //             <TableRow>
-//               <TableCell colSpan={6} align="center">
+//               <TableCell colSpan={7} align="center">
 //                 <CircularProgress size={24} />
 //               </TableCell>
 //             </TableRow>
 //           ) : (
-//             localRows.map((d, idx) => {
-//               const tipasIsKnown =
-//                 d.pirkimas_pardavimas &&
-//                 d.pirkimas_pardavimas.toLowerCase() !== "nezinoma";
+//             localRows.map((d, idx) => (
+//               <TableRow key={d.id || idx} hover>
+//                 <TableCell padding="checkbox">
+//                   <Checkbox
+//                     checked={selectedRows.includes(d.id)}
+//                     onChange={handleSelectRow(d.id)}
+//                     disabled={!canExport(d)}
+//                     inputProps={{ "aria-label": "select row" }}
+//                   />
+//                 </TableCell>
 
-//               let tipasValue = tipasIsKnown
-//                 ? (d.pirkimas_pardavimas.charAt(0).toUpperCase() +
-//                   d.pirkimas_pardavimas.slice(1))
-//                 : (
-//                   <Tooltip title="Nežinomas tipas. Atnaujinkite pirkėjo ar pardavėjo duomenis.">
-//                     <span style={{ color: "#bdbdbd", display: "flex", alignItems: "center" }}>
-//                       <HelpOutlineIcon fontSize="small" sx={{ mr: 0.5 }} />
-//                       Nežinomas
-//                     </span>
-//                   </Tooltip>
-//                 );
+//                 <TableCell
+//                   sx={{ cursor: "pointer", color: "primary.main" }}
+//                   onClick={() => d.onClickPreview?.(d)}
+//                 >
+//                   {d.original_filename}
+//                 </TableCell>
 
-//               return (
-//                 <TableRow key={d.id || idx} hover>
-//                   <TableCell padding="checkbox">
-//                     <Checkbox
-//                       checked={selectedRows.includes(d.id)}
-//                       onChange={handleSelectRow(d.id)}
-//                       disabled={!canExport(d)}
-//                       inputProps={{ "aria-label": "select row" }}
-//                     />
-//                   </TableCell>
-//                   <TableCell
-//                     sx={{ cursor: "pointer", color: "primary.main" }}
-//                     onClick={() => d.onClickPreview(d)}
-//                   >
-//                     {d.original_filename}
-//                   </TableCell>
-//                   <TableCell>
-//                     {tipasValue}
-//                   </TableCell>
-//                   {/* Исправленный Statusas */}
-//                   <TableCell sx={{ verticalAlign: "middle", minHeight: 44 }}>
-//                     <Box display="flex" alignItems="center">
-//                       {iconForStatus(d)}&nbsp;{statusLabel(d)}
-//                       {hasSumValidationError(d) && (
-//                         <Tooltip title="Patikrinkite sumas">
-//                           <WarningIcon
-//                             color="warning"
-//                             fontSize="small"
-//                             sx={{ ml: 1, verticalAlign: 'middle', cursor: 'pointer' }}
-//                           />
-//                         </Tooltip>
-//                       )}
-//                     </Box>
-//                   </TableCell>
-//                   <TableCell>{d.fmt(d.uploaded_at)}</TableCell>
-//                   <TableCell align="right">
-//                     <IconButton onClick={(e) => handleMenuOpen(e, d.id)}>
-//                       <MoreVertIcon />
-//                     </IconButton>
-//                     <Menu
-//                       anchorEl={anchorEl}
-//                       open={Boolean(anchorEl) && menuRowId === d.id}
-//                       onClose={handleMenuClose}
-//                     >
-//                       <MenuItem onClick={() => handleDeleteRow(d.id)}>
-//                         Ištrinti
-//                       </MenuItem>
-//                     </Menu>
-//                   </TableCell>
-//                 </TableRow>
-//               );
-//             })
-//           )}
-//         </TableBody>
-//       </Table>
-//     </TableContainer>
-//   );
-// }
+//                 <TableCell>{renderScanType(d)}</TableCell>
 
+//                 <TableCell>{renderDirectionCell(d)}</TableCell>
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-// import {
-//   TableContainer,
-//   Table,
-//   TableHead,
-//   TableRow,
-//   TableCell,
-//   TableBody,
-//   Paper,
-//   Checkbox,
-//   CircularProgress,
-//   Tooltip,
-// } from "@mui/material";
-// import WarningIcon from '@mui/icons-material/Warning';
-// import HelpOutlineIcon from '@mui/icons-material/HelpOutline';
-// import CheckCircleIcon from '@mui/icons-material/CheckCircle';
-
-// export default function DocumentsTable({
-//   filtered,
-//   loading,
-//   selectedRows,
-//   handleSelectRow,
-//   handleSelectAll,
-//   isRowExportable,
-// }) {
-//   // Проверка на ошибку суммы
-//   const hasSumValidationError = (d) =>
-//     // d.val_ar_sutapo === false ||
-//     d.val_subtotal_match === false ||
-//     d.val_vat_match === false ||
-//     d.val_total_match === false;
-
-//   // Можно ли экспортировать (тип определён и строка экспортируемая)
-//   const canExport = (d) =>
-//     isRowExportable(d) &&
-//     !!d.pirkimas_pardavimas &&
-//     d.pirkimas_pardavimas.toLowerCase() !== "nezinoma";
-
-//   // Только экспортируемые строки
-//   const exportableRows = filtered.filter(canExport);
-
-//   // Статус документа
-//   const statusLabel = (d) => {
-//     if (d.status === "exported") return "Atliktas (Eksportuotas)";
-//     if (typeof d.statusLabel === "function") return d.statusLabel(d);
-//     return d.status || "";
-//   };
-
-//   // Статус-иконка
-//   const iconForStatus = (d) => {
-//     if (d.status === "exported") {
-//       return <CheckCircleIcon color="success" sx={{ verticalAlign: 'middle' }} />;
-//     }
-//     if (typeof d.iconForStatus === "function") return d.iconForStatus(d.status);
-//     return null;
-//   };
-
-//   return (
-//     <TableContainer component={Paper} sx={{ maxHeight: 580 }}>
-//       <Table stickyHeader size="small">
-//         <TableHead>
-//           <TableRow>
-//             <TableCell padding="checkbox">
-//               <Checkbox
-//                 indeterminate={
-//                   selectedRows.length > 0 &&
-//                   selectedRows.length < exportableRows.length
-//                 }
-//                 checked={
-//                   exportableRows.length > 0 &&
-//                   selectedRows.length === exportableRows.length
-//                 }
-//                 onChange={handleSelectAll}
-//                 inputProps={{ "aria-label": "select all exportable" }}
-//               />
-//             </TableCell>
-//             <TableCell>Failas</TableCell>
-//             <TableCell>Tipas</TableCell>
-//             <TableCell>Statusas</TableCell>
-//             <TableCell>Data</TableCell>
-//           </TableRow>
-//         </TableHead>
-//         <TableBody>
-//           {loading ? (
-//             <TableRow>
-//               <TableCell colSpan={5} align="center">
-//                 <CircularProgress size={24} />
-//               </TableCell>
-//             </TableRow>
-//           ) : (
-//             filtered.map((d, idx) => {
-//               const tipasIsKnown =
-//                 d.pirkimas_pardavimas &&
-//                 d.pirkimas_pardavimas.toLowerCase() !== "nezinoma";
-
-//               let tipasValue = tipasIsKnown
-//                 ? (d.pirkimas_pardavimas.charAt(0).toUpperCase() +
-//                   d.pirkimas_pardavimas.slice(1))
-//                 : (
-//                   <Tooltip title="Nežinomas tipas. Atnaujinkite pirkėjo ar pardavėjo duomenis.">
-//                     <span style={{ color: "#bdbdbd", display: "flex", alignItems: "center" }}>
-//                       <HelpOutlineIcon fontSize="small" sx={{ mr: 0.5 }} />
-//                       Nežinomas
-//                     </span>
-//                   </Tooltip>
-//                 );
-
-//               return (
-//                 <TableRow key={d.id || idx} hover>
-//                   <TableCell padding="checkbox">
-//                     <Checkbox
-//                       checked={selectedRows.includes(d.id)}
-//                       onChange={handleSelectRow(d.id)}
-//                       disabled={!canExport(d)}
-//                       inputProps={{ "aria-label": "select row" }}
-//                     />
-//                   </TableCell>
-//                   <TableCell
-//                     sx={{ cursor: "pointer", color: "primary.main" }}
-//                     onClick={() => d.onClickPreview(d)}
-//                   >
-//                     {d.original_filename}
-//                   </TableCell>
-//                   <TableCell>
-//                     {tipasValue}
-//                   </TableCell>
-//                   <TableCell
-//                     sx={{
-//                       verticalAlign: "middle",
-//                       display: "flex",
-//                       alignItems: "center",
-//                       minHeight: 44,
-//                     }}
-//                   >
+//                 <TableCell sx={{ verticalAlign: "middle", minHeight: 44 }}>
+//                   <Box display="flex" alignItems="center">
 //                     {iconForStatus(d)}&nbsp;{statusLabel(d)}
 //                     {hasSumValidationError(d) && (
 //                       <Tooltip title="Patikrinkite sumas">
 //                         <WarningIcon
 //                           color="warning"
 //                           fontSize="small"
-//                           sx={{ ml: 1, verticalAlign: 'middle', cursor: 'pointer' }}
+//                           sx={{ ml: 1, verticalAlign: "middle", cursor: "pointer" }}
 //                         />
 //                       </Tooltip>
 //                     )}
-//                   </TableCell>
-//                   <TableCell>{d.fmt(d.uploaded_at)}</TableCell>
-//                 </TableRow>
-//               );
-//             })
+//                   </Box>
+//                 </TableCell>
+
+//                 <TableCell>{d.fmt?.(d.uploaded_at) || ""}</TableCell>
+
+//                 <TableCell align="right">
+//                   <IconButton onClick={(e) => handleMenuOpen(e, d.id)}>
+//                     <MoreVertIcon />
+//                   </IconButton>
+//                   <Menu
+//                     anchorEl={anchorEl}
+//                     open={Boolean(anchorEl) && menuRowId === d.id}
+//                     onClose={handleMenuClose}
+//                   >
+//                     <MenuItem onClick={() => handleDeleteRow(d.id)}>
+//                       Ištrinti
+//                     </MenuItem>
+//                   </Menu>
+//                 </TableCell>
+//               </TableRow>
+//             ))
 //           )}
 //         </TableBody>
 //       </Table>
 //     </TableContainer>
 //   );
 // }
+
+
