@@ -136,6 +136,12 @@ export default function UploadPage() {
     formData.append("scan_type", scanType);
 
     try {
+      // 🔄 Сразу сбрасываем выбор контрагента, чтобы новые документы были видны
+      setSelectedCpKey("");
+      setSelectedRows([]);
+      setCpSearch("");
+      try { localStorage.removeItem("sv_selected_key"); } catch {}
+      
       await api.post("/scan/", formData, {
         withCredentials: true,
         headers: { "Content-Type": "multipart/form-data" },

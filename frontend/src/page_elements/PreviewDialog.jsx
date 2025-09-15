@@ -509,20 +509,23 @@ export default function PreviewDialog({
                     <Typography>Prekė(s):</Typography>
                   </AccordionSummary>
                   <AccordionDetails>
-                    {lineItems.map((item) => (
+                    {lineItems.map((item, idx) => (
                       <Box
-                        key={item.id ?? `${item.prekes_kodas}-${item.prekes_pavadinimas}`}
+                        key={item.id ?? `li-${idx}`}
                         sx={{ mb: 2, p: 1, border: "1px solid #eee", borderRadius: 2, background: "#fff" }}
                       >
-                        <Typography sx={{ fontWeight: 100, marginBottom: 3, fontStyle: 'italic' }}>
-                          Prekė #{String(item.seq_number ?? item.id ?? "")}
+                        <Typography sx={{ fontWeight: 100, marginBottom: 3, fontStyle: "italic" }}>
+                          {`Prekė #${idx + 1}`}
                         </Typography>
+
                         {PRODUCT_FIELDS.map(({ field, label }) => (
                           <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }} key={field}>
-                            <Typography color="text.secondary" sx={{ minWidth: 130, color: 'black' }}>{label}</Typography>
+                            <Typography color="text.secondary" sx={{ minWidth: 130, color: "black" }}>
+                              {label}
+                            </Typography>
                             <DynamicAutocomplete
-                              key={`${item.id}-${item.prekes_kodas ?? ""}-${item.prekes_pavadinimas ?? ""}-${item.prekes_barkodas ?? ""}`}
-                              field={EXTRA_FIELDS_CONFIG.product.find(f => f.name === field)}
+                              key={`${item.id ?? `idx-${idx}`}-${item.prekes_kodas ?? ""}-${item.prekes_pavadinimas ?? ""}-${item.prekes_barkodas ?? ""}`}
+                              field={EXTRA_FIELDS_CONFIG.product.find((f) => f.name === field)}
                               selectedValue={{
                                 prekes_kodas: item.prekes_kodas,
                                 prekes_pavadinimas: item.prekes_pavadinimas,
@@ -534,13 +537,13 @@ export default function PreviewDialog({
                               size="small"
                               sx={{
                                 mb: 1,
-                                '& .MuiInputBase-root': {
-                                  minHeight: '28px',
-                                  background: 'transparent',
+                                "& .MuiInputBase-root": {
+                                  minHeight: "28px",
+                                  background: "transparent",
                                   fontSize: "14px",
                                   px: 1,
                                 },
-                                '& input': {
+                                "& input": {
                                   padding: 0,
                                   fontSize: "14px",
                                   fontWeight: 700,
@@ -549,6 +552,7 @@ export default function PreviewDialog({
                             />
                           </Stack>
                         ))}
+
                         <Stack spacing={0.5} mt={1} mb={1}>
                           <Typography>Mato vnt: <b>{item.unit || "—"}</b></Typography>
                           <Typography>Kiekis: <b>{formatNumberPreview(item.quantity)}</b></Typography>
