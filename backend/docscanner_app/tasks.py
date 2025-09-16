@@ -234,7 +234,7 @@ def process_uploaded_file_task(user_id, doc_id, scan_type):
 
         # 9) Похожесть с другими документами пользователя — по склеенному тексту
         t0 = _t()
-        similarity_percent = calculate_max_similarity_percent(glued_text_for_db or "", user, exclude_doc_id=doc.pk)
+        similarity_percent = calculate_max_similarity_percent(doc.raw_text or "", user, exclude_doc_id=doc.pk)
         _log_t("Calculate similarity", t0)
 
         t0 = _t()
