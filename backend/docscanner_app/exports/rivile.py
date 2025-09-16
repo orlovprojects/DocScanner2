@@ -26,7 +26,6 @@ def prettify_no_header(elem):
     при этом &quot; заменяется на ".
     """
     from xml.dom import minidom
-    from xml.sax.saxutils import unescape
 
     rough_string = ET.tostring(elem, encoding="utf-8")
     reparsed = minidom.parseString(rough_string)
@@ -35,8 +34,8 @@ def prettify_no_header(elem):
     pretty_xml = '\n'.join(pretty_xml.split('\n')[1:])
     # убираем пустые строки
     pretty_xml = '\n'.join([line for line in pretty_xml.split('\n') if line.strip()])
-    # снимаем экранирование кавычек
-    pretty_xml = unescape(pretty_xml, {"&quot;": '"'})
+    # ВАЖНО: заменяем только &quot;
+    pretty_xml = pretty_xml.replace("&quot;", '"')
     return pretty_xml.encode("utf-8")
 
 
