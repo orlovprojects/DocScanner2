@@ -29,7 +29,7 @@ logger = logging.getLogger("docscanner_app")
 
 
 def _apply_top_level_fields(
-    db_doc, doc_struct: Dict[str, Any], user, scan_type: str, raw_text: str, preview_url: Optional[str]
+    db_doc, doc_struct: Dict[str, Any], user, scan_type: str, raw_text: str, preview_url: Optional[str], glued_raw_text: str = "",
 ):
     """
     Заполняет поля ScannedDocument из уже САНИТИЗИРОВАННОГО doc_struct.
@@ -37,7 +37,8 @@ def _apply_top_level_fields(
     служебный флажок db_doc._can_apply_defaults (не сохраняется в БД).
     """
     # Базовые технические поля
-    db_doc.raw_text = raw_text
+    db_doc.raw_text = raw_text  
+    db_doc.glued_raw_text = glued_raw_text
     db_doc.preview_url = preview_url
     db_doc.structured_json = convert_for_json(doc_struct)
 
@@ -599,6 +600,7 @@ def update_scanned_document(
     preview_url: Optional[str],
     user,
     structured: Optional[Dict[str, Any]] = None,
+    glued_raw_text: str = "",
 ):
     """
     Главный вход: принимает распарсенный JSON от LLM, санитизирует, валидирует суммы, сохраняет документ и строки.
@@ -661,6 +663,7 @@ def update_scanned_document(
             scan_type=scan_type,
             raw_text=raw_text,
             preview_url=preview_url,
+            glued_raw_text=glued_raw_text,
         )
 
         # ⬇️ Подставляем дефолты только если явно можно
@@ -675,7 +678,7 @@ def update_scanned_document(
 
         db_doc.save()
 
-        
+
         _save_line_items(db_doc, doc_struct, scan_type)
 
         if scan_type == "detaliai":
