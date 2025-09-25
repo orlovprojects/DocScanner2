@@ -16,6 +16,9 @@ from .validators.company_matcher import update_seller_buyer_info
 from .validators.verify_lt_company_match import update_seller_buyer_info_from_companies
 from .utils.file_converter import normalize_uploaded_file
 from .utils.llm_json import parse_llm_json_robust
+from .utils.duplicates import is_duplicate_by_series_number
+from .utils.save_document import _apply_sumiskai_defaults_from_user
+
 
 import os
 import logging
@@ -326,6 +329,33 @@ def process_uploaded_file_task(user_id, doc_id, scan_type):
             logger.info("[TASK] Rejected due to multiple docs")
             _log_t("TOTAL", total_start)
             return
+        
+
+        # 13.1) Проверка дублей по номеру/серии (НОВОЕ)
+        # Логика:
+        #   - если серия НЕ пуста → сравниваем (номер + серия) после очистки
+        #   - если серия пуста → сравниваем только номер
+        # Очистка: оставляем только буквы и цифры (игнорируем пробелы, дефисы, символы '/')
+        # Если найден дубликат → документ помечается как rejected и кредиты НЕ списываются
+        doc_struct = documents[0]
+        number = doc_struct.get("document_number")
+        series = doc_struct.get("document_series")
+
+        t0 = _t()
+        if is_duplicate_by_series_number(user, number, series, exclude_doc_id=doc.pk):
+            doc.status = 'rejected'
+            if (series or "").strip():
+                doc.error_message = "Dublikatas: dokumentas su tokia serija ir numeriu jau buvo įkeltas"
+            else:
+                doc.error_message = "Dublikatas: dokumentas su tokiu numeriu jau buvo įkeltas"
+            doc.preview_url = preview_url
+            doc.save(update_fields=['status', 'error_message', 'preview_url'])
+            _log_t("Duplicate check (number/series)", t0)  # <-- лог времени
+            logger.info("[TASK] Rejected as duplicate by number/series (no credits deducted)")
+            _log_t("TOTAL", total_start)
+            return
+        _log_t("Duplicate check (number/series, passed)", t0)
+
 
         # 14) Обновление документа
         doc_struct = documents[0]
@@ -351,6 +381,17 @@ def process_uploaded_file_task(user_id, doc_id, scan_type):
         t0 = _t()
         update_seller_buyer_info_from_companies(doc)
         _log_t("update_seller_buyer_info_from_companies()", t0)
+
+        # 15.1) Применяем дефолты один раз — теперь, когда контрагенты уточнены
+        t0 = _t()
+        if _apply_sumiskai_defaults_from_user(doc, user):
+            doc.save(update_fields=[
+                'prekes_pavadinimas',
+                'prekes_kodas',
+                'prekes_barkodas',
+                'preke_paslauga',
+            ])
+        _log_t("apply defaults (post party enrichment)", t0)
 
         # 16) Списание кредитов
         t0 = _t()

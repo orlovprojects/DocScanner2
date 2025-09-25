@@ -51,13 +51,15 @@ from .exports.finvalda import (
     export_pirkimai_group_to_finvalda,
     export_pardavimai_group_to_finvalda,
 )
-from .exports.apskaita5 import export_documents_group_to_apskaita5
+from .exports.apskaita5 import export_documents_group_to_apskaita5_files
 from .exports.rivile_erp import export_clients_to_rivile_erp_xlsx, export_prekes_and_paslaugos_to_rivile_erp_xlsx, export_documents_to_rivile_erp_xlsx
 from docscanner_app.utils.prekes_kodas import assign_random_prekes_kodai
 import tempfile
 from .models import AdClick
 from .serializers import AdClickSerializer
 from rest_framework import generics, permissions
+
+from .utils.data_resolver import build_preview
 
 
 
@@ -77,58 +79,146 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
+
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def export_documents(request):
+    from datetime import date
+    import io
+    import zipfile
+    import tempfile
+    import logging
+
+    logger = logging.getLogger(__name__)
+    log_ctx = {"user": getattr(request.user, "id", None)}
+
+    # ---- входные параметры
     ids = request.data.get('ids', [])
+    export_type = request.data.get('export_type') or getattr(request.user, 'default_accounting_program', 'centas')
+    raw_overrides = request.data.get('overrides', {}) or {}
+    mode_raw = (request.data.get('mode') or "").strip().lower()  # <<< NEW
+
+    logger.info("[EXP] start user=%s export_type_raw=%r ids=%s raw_overrides=%r mode_raw=%r",
+                log_ctx["user"], export_type, ids, raw_overrides, mode_raw)
+
     if not ids:
+        logger.warning("[EXP] no ids provided")
         return Response({"error": "No document ids provided"}, status=400)
 
     user = request.user
-    export_type = request.data.get('export_type') or getattr(user, 'default_accounting_program', 'centas')
     export_type = str(export_type).lower()
 
-    # --- NEW: optional overrides from frontend (multi-mode) --------------------
-    raw_overrides = request.data.get('overrides', {}) or {}
-    # нормализуем ключи как строки id и пропускаем только допустимые значения
+    # --- нормализация overrides (id -> 'pirkimas'|'pardavimas')
     overrides = {}
     for k, v in raw_overrides.items():
         key = str(k)
         val = str(v).lower()
         if val in ('pirkimas', 'pardavimas'):
             overrides[key] = val
+        else:
+            logger.warning("[EXP] skip override key=%r val=%r (invalid)", key, v)
 
-    def resolved_dir(doc):
-        """Вернёт 'pirkimas' / 'pardavimas' с учётом overrides; иначе значение из БД (может быть None/'nezinoma')."""
-        ov = overrides.get(str(doc.pk))
-        if ov in ('pirkimas', 'pardavimas'):
-            return ov
-        val = getattr(doc, 'pirkimas_pardavimas', None)
-        return (val or '').lower() if isinstance(val, str) else val
-    # --------------------------------------------------------------------------
+    # --- определить mode: берём из клиента, иначе как раньше (по overrides)
+    if mode_raw in ("multi", "single"):                       # <<< NEW
+        mode = mode_raw
+        logger.info("[EXP] view mode taken from request: %s", mode)
+    else:
+        mode = 'multi' if overrides else 'single'
+        logger.info("[EXP] view mode inferred for backward-compat: %s", mode)
+
+    # Доп. диагностика: если пришёл multi, но overrides пустой
+    if mode == "multi" and not overrides:
+        logger.info("[EXP] mode is 'multi' but overrides are EMPTY (will rely on resolver/doc DB fields)")
+
+    logger.info("[EXP] export_type=%s overrides_norm=%r", export_type, overrides)
 
     today_str = date.today().strftime('%Y-%m-%d')
 
     documents = ScannedDocument.objects.filter(pk__in=ids, user=user)
     if not documents:
+        logger.warning("[EXP] no documents found by ids=%s user=%s", ids, log_ctx["user"])
         return Response({"error": "No documents found"}, status=404)
 
-    # Группировки делаем через resolved_dir (НЕ трогаем БД!)
-    pirkimai   = [doc for doc in documents if resolved_dir(doc) == 'pirkimas']
-    pardavimai = [doc for doc in documents if resolved_dir(doc) == 'pardavimas']
+    # === резолвер ===
+    from .utils.data_resolver import prepare_export_groups
+    logger.info("[EXP] resolver_mode=%s", mode)
+
+    try:
+        prepared = prepare_export_groups(
+            documents,
+            user=user,
+            overrides=overrides if mode == 'multi' else {},  # <<< уважать переданный режим
+            view_mode=mode,                                   # <<< уважать переданный режим
+        )
+    except Exception as e:
+        logger.exception("[EXP] prepare_export_groups failed: %s", e)
+        return Response({"error": "Resolver failed", "detail": str(e)}, status=500)
+
+    # быстрый дамп того, что пришло из резолвера
+    def _debug_dump(prepared_obj, where):
+        for bucket in ("pirkimai", "pardavimai", "unknown"):
+            packs = prepared_obj.get(bucket) or []
+            logger.info("[EXPDBG:%s] bucket=%s count=%d", where, bucket, len(packs))
+            for p in packs:
+                d = p.get("doc")
+                dpk = getattr(d, "pk", None)
+                li = p.get("line_items") or []
+                logger.info(
+                    "[EXPDBG:%s] bucket=%s doc=%s dir=%r pack_keys=%s pvm=%r lines=%d",
+                    where, bucket, dpk, p.get("direction"), list(p.keys()),
+                    p.get("pvm_kodas", None), len(li)
+                )
+                if li:
+                    preview = [(x.get("id"), x.get("pvm_kodas")) for x in li[:3]]
+                    logger.info("[EXPDBG:%s] doc=%s sample_line_items=%s", where, dpk, preview)
+
+    _debug_dump(prepared, "after_resolver")
+
+    # применяем «в память» (без сохранения в БД)
+    def _apply_resolved(pack_list, tag):
+        out_docs = []
+        for pack in pack_list:
+            d = pack["doc"]
+            setattr(d, "pirkimas_pardavimas", pack.get("direction"))
+            setattr(d, "pvm_kodas", pack.get("pvm_kodas", None))  # явное перетирание
+
+            line_map = {}
+            for li in (pack.get("line_items") or []):
+                li_id = li.get("id")
+                if li_id is not None:
+                    line_map[li_id] = li.get("pvm_kodas")
+            setattr(d, "_pvm_line_map", line_map)
+
+            logger.info("[EXPDBG:apply] tag=%s doc=%s dir=%r pvm_kodas=%r line_map_size=%d",
+                        tag, getattr(d, "pk", None), getattr(d, "pirkimas_pardavimas", None),
+                        getattr(d, "pvm_kodas", None), len(line_map))
+            out_docs.append(d)
+        return out_docs
+
+    pirkimai_docs   = _apply_resolved(prepared.get("pirkimai", []), "pirkimai")
+    pardavimai_docs = _apply_resolved(prepared.get("pardavimai", []), "pardavimai")
+    unknown_docs    = _apply_resolved(prepared.get("unknown", []), "unknown")
+
+    logger.info("[EXP] ready_for_export counts: pirkimai=%d pardavimai=%d unknown=%d",
+                len(pirkimai_docs), len(pardavimai_docs), len(unknown_docs))
 
     files_to_export = []
 
+    # ========================= CENTAS =========================
     if export_type == 'centas':
+        logger.info("[EXP] CENTAS export started")
         assign_random_prekes_kodai(documents)
 
-        # твой текущий экспорт для Centas
-        if pirkimai:
-            xml_bytes = export_documents_group_to_centras_xml(pirkimai, direction="pirkimas")
+        if pirkimai_docs:
+            logger.info("[EXP] CENTAS exporting pirkimai: %d docs", len(pirkimai_docs))
+            xml_bytes = export_documents_group_to_centras_xml(pirkimai_docs, direction="pirkimas")
             files_to_export.append((f"{today_str}_pirkimai.xml", xml_bytes))
-        if pardavimai:
-            xml_bytes = export_documents_group_to_centras_xml(pardavimai, direction="pardavimas")
+        if pardavimai_docs:
+            logger.info("[EXP] CENTAS exporting pardavimai: %d docs", len(pardavimai_docs))
+            xml_bytes = export_documents_group_to_centras_xml(pardavimai_docs, direction="pardavimas")
             files_to_export.append((f"{today_str}_pardavimai.xml", xml_bytes))
+
+        logger.info("[EXP] CENTAS files_to_export=%s", [n for n, _ in files_to_export])
 
         if len(files_to_export) > 1:
             zip_buffer = io.BytesIO()
@@ -141,71 +231,48 @@ def export_documents(request):
             return response
         elif len(files_to_export) == 1:
             filename, xml_content = files_to_export[0]
-            response = HttpResponse(xml_content, content_type='application/xml')
+            response = HttpResponse(
+                xml_content,
+                content_type='application/xml; charset=utf-8'
+            )
             response['Content-Disposition'] = f'attachment; filename={filename}'
             return response
 
+        else:
+            logger.warning("[EXP] CENTAS nothing to export")
+            return Response({"error": "No documents to export"}, status=400)
+
+    # ========================= RIVILĖ (EIP) =========================
     elif export_type == 'rivile':
+        logger.info("[EXP] RIVILE export started")
         assign_random_prekes_kodai(documents)
 
-        klientai = []
-        seen = set()
-        for doc in documents:
-            dir_ = resolved_dir(doc)  # <-- USE overrides-aware direction
-            if dir_ == 'pirkimas':
-                is_person = doc.seller_is_person
-                klient_type = 'pirkimas'
-                client = {
-                    'id': doc.seller_id or "",
-                    'vat': doc.seller_vat_code or "",
-                    'name': doc.seller_name or "",
-                    'address': doc.seller_address or "",
-                    'country_iso': doc.seller_country_iso or "",
-                    'currency': doc.currency or "EUR",
-                    'kodas_ds': 'PT001',
-                    'type': klient_type,
-                    'seller_is_person': bool(doc.seller_is_person),
-                    'iban': doc.seller_iban or "",
-                }
-            elif dir_ == 'pardavimas':
-                is_person = doc.buyer_is_person
-                klient_type = 'pardavimas'
-                client = {
-                    'id': doc.buyer_id or "",
-                    'vat': doc.buyer_vat_code or "",
-                    'name': doc.buyer_name or "",
-                    'address': doc.buyer_address or "",
-                    'country_iso': doc.buyer_country_iso or "",
-                    'currency': doc.currency or "EUR",
-                    'kodas_ds': 'PT001',
-                    'type': klient_type,
-                    'buyer_is_person': bool(doc.buyer_is_person),
-                    'iban': doc.buyer_iban or "",
-                }
-            else:
-                continue
+        files_to_export = []
 
-            client_key = (client['id'], client['vat'], client['name'], client['type'])
+        # 1) Клиенты (N08+N33): собираем ИЗ ДОКУМЕНТОВ; кэш больше не нужен
+        docs_for_clients = (pirkimai_docs or []) + (pardavimai_docs or [])
+        if docs_for_clients:
+            klientai_xml = export_clients_group_to_rivile(
+                clients=None,
+                documents=docs_for_clients,
+            )
+            if klientai_xml and klientai_xml.strip():
+                files_to_export.append(('klientai.eip', klientai_xml))
+                logger.info("[EXP] RIVILE clients exported")
 
-            # если id пустой → подставляем vat или заглушку
-            if not client['id']:
-                client['id'] = client.get('vat') or "111111111"
-
-            if client_key not in seen:
-                klientai.append(client)
-                seen.add(client_key)
-
-        if klientai:
-            klientai_xml = export_clients_group_to_rivile(klientai)
-            files_to_export.append(('klientai.eip', klientai_xml))
-        if pirkimai:
-            pirkimai_xml = export_pirkimai_group_to_rivile(pirkimai)
+        # 2) ПИРКИМАИ (I06/I07)
+        if pirkimai_docs:
+            logger.info("[EXP] RIVILE exporting pirkimai: %d docs", len(pirkimai_docs))
+            pirkimai_xml = export_pirkimai_group_to_rivile(pirkimai_docs)
             files_to_export.append(('pirkimai.eip', pirkimai_xml))
-        if pardavimai:
-            pardavimai_xml = export_pardavimai_group_to_rivile(pardavimai)
+
+        # 3) ПАРДАВИМАИ (I06/I07)
+        if pardavimai_docs:
+            logger.info("[EXP] RIVILE exporting pardavimai: %d docs", len(pardavimai_docs))
+            pardavimai_xml = export_pardavimai_group_to_rivile(pardavimai_docs)
             files_to_export.append(('pardavimai.eip', pardavimai_xml))
 
-        # -------- PREKĖS / PASLAUGOS / KODAI ---------
+        # 4) N17/N25
         prekes_xml, paslaugos_xml, kodai_xml = export_prekes_paslaugos_kodai_group_to_rivile(documents)
         if prekes_xml and prekes_xml.strip():
             files_to_export.append(('prekes.eip', prekes_xml))
@@ -213,7 +280,8 @@ def export_documents(request):
             files_to_export.append(('paslaugos.eip', paslaugos_xml))
         if kodai_xml and kodai_xml.strip():
             files_to_export.append(('kodai.eip', kodai_xml))
-        # ---------------------------------------------
+
+        logger.info("[EXP] RIVILE files_to_export=%s", [n for n, _ in files_to_export])
 
         if files_to_export:
             zip_buffer = io.BytesIO()
@@ -225,16 +293,27 @@ def export_documents(request):
             response['Content-Disposition'] = f'attachment; filename={today_str}_rivile_eip.zip'
             documents.update(status="exported")
             return response
+        else:
+            logger.warning("[EXP] RIVILE nothing to export")
+            return Response({"error": "No documents to export"}, status=400)
 
+
+
+    # ========================= FINVALDA =========================
     elif export_type == 'finvalda':
+        logger.info("[EXP] FINVALDA export started")
         assign_random_prekes_kodai(documents)
 
-        if pirkimai:
-            xml_bytes = export_pirkimai_group_to_finvalda(pirkimai)
+        if pirkimai_docs:
+            logger.info("[EXP] FINVALDA exporting pirkimai: %d docs", len(pirkimai_docs))
+            xml_bytes = export_pirkimai_group_to_finvalda(pirkimai_docs)
             files_to_export.append((f"{today_str}_pirkimai_finvalda.xml", xml_bytes))
-        if pardavimai:
-            xml_bytes = export_pardavimai_group_to_finvalda(pardavimai)
+        if pardavimai_docs:
+            logger.info("[EXP] FINVALDA exporting pardavimai: %d docs", len(pardavimai_docs))
+            xml_bytes = export_pardavimai_group_to_finvalda(pardavimai_docs)
             files_to_export.append((f"{today_str}_pardavimai_finvalda.xml", xml_bytes))
+
+        logger.info("[EXP] FINVALDA files_to_export=%s", [n for n, _ in files_to_export])
 
         if len(files_to_export) > 1:
             zip_buffer = io.BytesIO()
@@ -251,24 +330,39 @@ def export_documents(request):
             response['Content-Disposition'] = f'attachment; filename={filename}'
             return response
         else:
+            logger.warning("[EXP] FINVALDA nothing to export")
             return Response({"error": "No documents to export"}, status=400)
 
+    # ========================= APSKAITA5 =========================
     elif export_type == 'apskaita5':
+        logger.info("[EXP] APSKAITA5 export started")
         assign_random_prekes_kodai(documents)
-        # Если внутри export_documents_group_to_apskaita5 нужна сегментация,
-        # она уже возьмёт 'documents' целиком; при необходимости можно передать pirkimai/pardavimai отдельно.
-        xml_bytes = export_documents_group_to_apskaita5(documents, site_url)
-        response = HttpResponse(xml_bytes, content_type='application/xml')
-        response['Content-Disposition'] = f'attachment; filename={today_str}_apskaita5.xml'
+
+        content, filename, content_type = export_documents_group_to_apskaita5_files(
+            documents=documents,
+            site_url=site_url,
+            company_code=None,
+            direction=None,
+        )
+        logger.info("[EXP] APSKAITA5 produced file=%s content_type=%s size=%d",
+                    filename, content_type, len(content))
+        response = HttpResponse(content, content_type=content_type)
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        response['X-Content-Type-Options'] = 'nosniff'
         return response
 
+    # ========================= RIVILĖ ERP (XLSX) =========================
     elif export_type == 'rivile_erp':
+        logger.info("[EXP] RIVILE_ERP export started")
         assign_random_prekes_kodai(documents)
 
         klientai = []
         seen = set()
-        for doc in documents:
-            dir_ = resolved_dir(doc)  # <-- USE overrides-aware direction
+
+        for pack in (prepared.get("pirkimai", []) + prepared.get("pardavimai", [])):
+            doc = pack["doc"]
+            dir_ = pack.get("direction")
+
             if dir_ == 'pirkimas':
                 is_person = doc.seller_is_person
                 klient_type = 'pirkimas'
@@ -302,18 +396,16 @@ def export_documents(request):
             else:
                 continue
 
-            # id fallback
-            if not client['id']:
-                client['id'] = client['vat'] or "111111111"
-
             client_key = (client['id'], client['vat'], client['name'], client['type'])
             if client['id'] and client_key not in seen:
                 klientai.append(client)
                 seen.add(client_key)
 
+        logger.info("[EXP] RIVILE_ERP klientai=%d docs_pirk=%d docs_pard=%d",
+                    len(klientai), len(pirkimai_docs), len(pardavimai_docs))
+
         files_to_export = []
 
-        # Klientai.xlsx
         if klientai:
             with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp:
                 export_clients_to_rivile_erp_xlsx(klientai, tmp.name)
@@ -321,30 +413,28 @@ def export_documents(request):
                 klientai_xlsx_bytes = tmp.read()
             files_to_export.append((f'klientai_{today_str}.xlsx', klientai_xlsx_bytes))
 
-        # Prekės, paslaugos.xlsx
         with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp:
             export_prekes_and_paslaugos_to_rivile_erp_xlsx(documents, tmp.name)
             tmp.seek(0)
             prekes_xlsx_bytes = tmp.read()
         files_to_export.append((f'prekes_paslaugos_{today_str}.xlsx', prekes_xlsx_bytes))
 
-        # Pirkimai.xlsx
-        if pirkimai:
+        if pirkimai_docs:
             with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp:
-                export_documents_to_rivile_erp_xlsx(pirkimai, tmp.name, doc_type="pirkimai")
+                export_documents_to_rivile_erp_xlsx(pirkimai_docs, tmp.name, doc_type="pirkimai")
                 tmp.seek(0)
                 pirkimai_xlsx_bytes = tmp.read()
             files_to_export.append((f'pirkimai_{today_str}.xlsx', pirkimai_xlsx_bytes))
 
-        # Pardavimai.xlsx
-        if pardavimai:
+        if pardavimai_docs:
             with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp:
-                export_documents_to_rivile_erp_xlsx(pardavimai, tmp.name, doc_type="pardavimai")
+                export_documents_to_rivile_erp_xlsx(pardavimai_docs, tmp.name, doc_type="pardavimai")
                 tmp.seek(0)
                 pardavimai_xlsx_bytes = tmp.read()
             files_to_export.append((f'pardavimai_{today_str}.xlsx', pardavimai_xlsx_bytes))
 
-        # ZIP или одиночный файл
+        logger.info("[EXP] RIVILE_ERP files_to_export=%s", [n for n, _ in files_to_export])
+
         if len(files_to_export) > 1:
             zip_buffer = io.BytesIO()
             with zipfile.ZipFile(zip_buffer, "w") as zf:
@@ -363,12 +453,18 @@ def export_documents(request):
             response['Content-Disposition'] = f'attachment; filename={filename}'
             return response
         else:
+            logger.warning("[EXP] RIVILE_ERP nothing to export")
             return Response({"error": "No clients or products to export"}, status=400)
 
     else:
+        logger.error("[EXP] unknown export type: %s", export_type)
         return Response({"error": "Unknown export type"}, status=400)
 
+    logger.warning("[EXP] fell through unexpectedly")
     return Response({"error": "No documents to export"}, status=400)
+
+
+
 
 
 
@@ -380,31 +476,51 @@ def export_documents(request):
 #         return Response({"error": "No document ids provided"}, status=400)
 
 #     user = request.user
-#     export_type = request.data.get('export_type')
-#     if not export_type:
-#         export_type = getattr(user, 'default_accounting_program', 'centas')
-#     export_type = export_type.lower()
+#     export_type = request.data.get('export_type') or getattr(user, 'default_accounting_program', 'centas')
+#     export_type = str(export_type).lower()
+
+#     # --- NEW: optional overrides from frontend (multi-mode) --------------------
+#     raw_overrides = request.data.get('overrides', {}) or {}
+#     # нормализуем ключи как строки id и пропускаем только допустимые значения
+#     overrides = {}
+#     for k, v in raw_overrides.items():
+#         key = str(k)
+#         val = str(v).lower()
+#         if val in ('pirkimas', 'pardavimas'):
+#             overrides[key] = val
+
+#     def resolved_dir(doc):
+#         """Вернёт 'pirkimas' / 'pardavimas' с учётом overrides; иначе значение из БД (может быть None/'nezinoma')."""
+#         ov = overrides.get(str(doc.pk))
+#         if ov in ('pirkimas', 'pardavimas'):
+#             return ov
+#         val = getattr(doc, 'pirkimas_pardavimas', None)
+#         return (val or '').lower() if isinstance(val, str) else val
+#     # --------------------------------------------------------------------------
 
 #     today_str = date.today().strftime('%Y-%m-%d')
+
 #     documents = ScannedDocument.objects.filter(pk__in=ids, user=user)
 #     if not documents:
 #         return Response({"error": "No documents found"}, status=404)
 
-#     # Группируем по типу
-#     pirkimai = [doc for doc in documents if doc.pirkimas_pardavimas == 'pirkimas']
-#     pardavimai = [doc for doc in documents if doc.pirkimas_pardavimas == 'pardavimas']
+#     # Группировки делаем через resolved_dir (НЕ трогаем БД!)
+#     pirkimai   = [doc for doc in documents if resolved_dir(doc) == 'pirkimas']
+#     pardavimai = [doc for doc in documents if resolved_dir(doc) == 'pardavimas']
 
 #     files_to_export = []
 
 #     if export_type == 'centas':
 #         assign_random_prekes_kodai(documents)
-#         # ... твой код экспорта Centas (оставь как есть)
+
+#         # твой текущий экспорт для Centas
 #         if pirkimai:
-#             xml_bytes = export_documents_group_to_centras_xml(pirkimai)
+#             xml_bytes = export_documents_group_to_centras_xml(pirkimai, direction="pirkimas")
 #             files_to_export.append((f"{today_str}_pirkimai.xml", xml_bytes))
 #         if pardavimai:
-#             xml_bytes = export_documents_group_to_centras_xml(pardavimai)
+#             xml_bytes = export_documents_group_to_centras_xml(pardavimai, direction="pardavimas")
 #             files_to_export.append((f"{today_str}_pardavimai.xml", xml_bytes))
+
 #         if len(files_to_export) > 1:
 #             zip_buffer = io.BytesIO()
 #             with zipfile.ZipFile(zip_buffer, "w") as zf:
@@ -426,12 +542,14 @@ def export_documents(request):
 #         klientai = []
 #         seen = set()
 #         for doc in documents:
-#             if doc.pirkimas_pardavimas == 'pirkimas':
-#                 is_person = doc.seller_is_person
+#             dir_ = resolved_dir(doc)
+#             logger.info(f"[RIVILE] Обрабатываем документ id={doc.pk}, dir={dir_}")
+
+#             if dir_ == 'pirkimas':
 #                 klient_type = 'pirkimas'
 #                 client = {
-#                     'id': doc.seller_id or "",
-#                     'vat': doc.seller_vat_code or "",
+#                     'seller_id': doc.seller_id or "",
+#                     'seller_vat_code': doc.seller_vat_code or "",
 #                     'name': doc.seller_name or "",
 #                     'address': doc.seller_address or "",
 #                     'country_iso': doc.seller_country_iso or "",
@@ -441,12 +559,13 @@ def export_documents(request):
 #                     'seller_is_person': bool(doc.seller_is_person),
 #                     'iban': doc.seller_iban or "",
 #                 }
-#             elif doc.pirkimas_pardavimas == 'pardavimas':
-#                 is_person = doc.buyer_is_person
+#                 client_id = client['seller_id']
+#                 client_vat = client['seller_vat_code']
+#             elif dir_ == 'pardavimas':
 #                 klient_type = 'pardavimas'
 #                 client = {
-#                     'id': doc.buyer_id or "",
-#                     'vat': doc.buyer_vat_code or "",
+#                     'buyer_id': doc.buyer_id or "",
+#                     'buyer_vat_code': doc.buyer_vat_code or "",
 #                     'name': doc.buyer_name or "",
 #                     'address': doc.buyer_address or "",
 #                     'country_iso': doc.buyer_country_iso or "",
@@ -456,54 +575,59 @@ def export_documents(request):
 #                     'buyer_is_person': bool(doc.buyer_is_person),
 #                     'iban': doc.buyer_iban or "",
 #                 }
+#                 client_id = client['buyer_id']
+#                 client_vat = client['buyer_vat_code']
 #             else:
+#                 logger.info(f"[RIVILE] Документ id={doc.pk} пропущен (не pirkimas/pardavimas)")
 #                 continue
-#             client_key = (client['id'], client['vat'], client['name'], client['type'])
-#             # если id пустой → подставляем vat или заглушку
-#             if not client['id']:
-#                 client['id'] = client['vat'] or "111111111"
+
+#             client_key = (client_id, client_vat, client['name'], client['type'])
 
 #             if client_key not in seen:
+#                 logger.info(f"[RIVILE] Добавляем клиента: {client}")
 #                 klientai.append(client)
 #                 seen.add(client_key)
+#             else:
+#                 logger.info(f"[RIVILE] Клиент уже был: {client_key}")
 
 #         if klientai:
+#             logger.info(f"[RIVILE] Всего клиентов для экспорта: {len(klientai)}")
 #             klientai_xml = export_clients_group_to_rivile(klientai)
 #             files_to_export.append(('klientai.eip', klientai_xml))
 #         if pirkimai:
+#             logger.info(f"[RIVILE] Экспортируем pirkimai: {len(pirkimai)} документов")
 #             pirkimai_xml = export_pirkimai_group_to_rivile(pirkimai)
 #             files_to_export.append(('pirkimai.eip', pirkimai_xml))
 #         if pardavimai:
+#             logger.info(f"[RIVILE] Экспортируем pardavimai: {len(pardavimai)} документов")
 #             pardavimai_xml = export_pardavimai_group_to_rivile(pardavimai)
 #             files_to_export.append(('pardavimai.eip', pardavimai_xml))
 
-#         # -------- ЭКСПОРТ PREKĖS / PASLAUGOS / KODAI ---------
+#         # -------- PREKĖS / PASLAUGOS / KODAI ---------
 #         prekes_xml, paslaugos_xml, kodai_xml = export_prekes_paslaugos_kodai_group_to_rivile(documents)
-
-#         # Используем .strip(), чтобы не писались файлы из пустых буферов с \n
 #         if prekes_xml and prekes_xml.strip():
+#             logger.info(f"[RIVILE] Добавляем prekes.eip ({len(prekes_xml)} байт)")
 #             files_to_export.append(('prekes.eip', prekes_xml))
-
 #         if paslaugos_xml and paslaugos_xml.strip():
+#             logger.info(f"[RIVILE] Добавляем paslaugos.eip ({len(paslaugos_xml)} байт)")
 #             files_to_export.append(('paslaugos.eip', paslaugos_xml))
-
-#         # <-- ЭТОГО НЕ ХВАТАЛО
 #         if kodai_xml and kodai_xml.strip():
+#             logger.info(f"[RIVILE] Добавляем kodai.eip ({len(kodai_xml)} байт)")
 #             files_to_export.append(('kodai.eip', kodai_xml))
-#         # -------- КОНЕЦ ---------
+#         # ---------------------------------------------
 
 #         if files_to_export:
+#             logger.info(f"[RIVILE] Формируем ZIP с {len(files_to_export)} файлами")
 #             zip_buffer = io.BytesIO()
 #             with zipfile.ZipFile(zip_buffer, "w") as zf:
 #                 for filename, xml_content in files_to_export:
+#                     logger.info(f"[RIVILE]   Файл в ZIP: {filename} ({len(xml_content)} байт)")
 #                     zf.writestr(filename, xml_content)
 #             zip_buffer.seek(0)
 #             response = HttpResponse(zip_buffer.read(), content_type='application/zip')
 #             response['Content-Disposition'] = f'attachment; filename={today_str}_rivile_eip.zip'
 #             documents.update(status="exported")
 #             return response
-        
-
 
 #     elif export_type == 'finvalda':
 #         assign_random_prekes_kodai(documents)
@@ -532,23 +656,29 @@ def export_documents(request):
 #         else:
 #             return Response({"error": "No documents to export"}, status=400)
 
-
-
 #     elif export_type == 'apskaita5':
 #         assign_random_prekes_kodai(documents)
-#         xml_bytes = export_documents_group_to_apskaita5(documents, site_url)
-#         response = HttpResponse(xml_bytes, content_type='application/xml')
-#         response['Content-Disposition'] = f'attachment; filename={today_str}_apskaita5.xml'
+
+#         content, filename, content_type = export_documents_group_to_apskaita5_files(
+#             documents=documents,
+#             site_url=site_url,
+#             company_code=None,   # можно оставить None — возьмётся из buyer/seller
+#             direction=None,      # авто-определение pirkimas/pardavimas
+#         )
+
+#         response = HttpResponse(content, content_type=content_type)
+#         response['Content-Disposition'] = f'attachment; filename="{filename}"'
+#         response['X-Content-Type-Options'] = 'nosniff'
 #         return response
-
-
 
 #     elif export_type == 'rivile_erp':
 #         assign_random_prekes_kodai(documents)
+
 #         klientai = []
 #         seen = set()
 #         for doc in documents:
-#             if doc.pirkimas_pardavimas == 'pirkimas':
+#             dir_ = resolved_dir(doc)  # <-- USE overrides-aware direction
+#             if dir_ == 'pirkimas':
 #                 is_person = doc.seller_is_person
 #                 klient_type = 'pirkimas'
 #                 client = {
@@ -563,7 +693,7 @@ def export_documents(request):
 #                     'is_person': is_person,
 #                     'iban': doc.seller_iban or "",
 #                 }
-#             elif doc.pirkimas_pardavimas == 'pardavimas':
+#             elif dir_ == 'pardavimas':
 #                 is_person = doc.buyer_is_person
 #                 klient_type = 'pardavimas'
 #                 client = {
@@ -581,11 +711,9 @@ def export_documents(request):
 #             else:
 #                 continue
 
-#             # === ВАЖНО: Логика для client['id'] ===
+#             # id fallback
 #             if not client['id']:
-#                 client['id'] = client['vat'] or ""
-#             if not client['id']:
-#                 client['id'] = "111111111"
+#                 client['id'] = client['vat'] or "111111111"
 
 #             client_key = (client['id'], client['vat'], client['name'], client['type'])
 #             if client['id'] and client_key not in seen:
@@ -594,7 +722,7 @@ def export_documents(request):
 
 #         files_to_export = []
 
-#         # --- Экспортируем Klientai.xlsx ---
+#         # Klientai.xlsx
 #         if klientai:
 #             with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp:
 #                 export_clients_to_rivile_erp_xlsx(klientai, tmp.name)
@@ -602,15 +730,14 @@ def export_documents(request):
 #                 klientai_xlsx_bytes = tmp.read()
 #             files_to_export.append((f'klientai_{today_str}.xlsx', klientai_xlsx_bytes))
 
-#         # --- Экспортируем Prekės, paslaugos.xlsx ---
+#         # Prekės, paslaugos.xlsx
 #         with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp:
 #             export_prekes_and_paslaugos_to_rivile_erp_xlsx(documents, tmp.name)
 #             tmp.seek(0)
 #             prekes_xlsx_bytes = tmp.read()
 #         files_to_export.append((f'prekes_paslaugos_{today_str}.xlsx', prekes_xlsx_bytes))
 
-#         # --- Экспортируем Pirkimai.xlsx ---
-#         pirkimai = [doc for doc in documents if doc.pirkimas_pardavimas == 'pirkimas']
+#         # Pirkimai.xlsx
 #         if pirkimai:
 #             with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp:
 #                 export_documents_to_rivile_erp_xlsx(pirkimai, tmp.name, doc_type="pirkimai")
@@ -618,8 +745,7 @@ def export_documents(request):
 #                 pirkimai_xlsx_bytes = tmp.read()
 #             files_to_export.append((f'pirkimai_{today_str}.xlsx', pirkimai_xlsx_bytes))
 
-#         # --- Экспортируем Pardavimai.xlsx ---
-#         pardavimai = [doc for doc in documents if doc.pirkimas_pardavimas == 'pardavimas']
+#         # Pardavimai.xlsx
 #         if pardavimai:
 #             with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp:
 #                 export_documents_to_rivile_erp_xlsx(pardavimai, tmp.name, doc_type="pardavimai")
@@ -627,7 +753,7 @@ def export_documents(request):
 #                 pardavimai_xlsx_bytes = tmp.read()
 #             files_to_export.append((f'pardavimai_{today_str}.xlsx', pardavimai_xlsx_bytes))
 
-#         # --- ZIP или один файл ---
+#         # ZIP или одиночный файл
 #         if len(files_to_export) > 1:
 #             zip_buffer = io.BytesIO()
 #             with zipfile.ZipFile(zip_buffer, "w") as zf:
@@ -648,19 +774,10 @@ def export_documents(request):
 #         else:
 #             return Response({"error": "No clients or products to export"}, status=400)
 
-
-
-
-
-
-
-
 #     else:
 #         return Response({"error": "Unknown export type"}, status=400)
-    
 
 #     return Response({"error": "No documents to export"}, status=400)
-
 
 
 
@@ -731,71 +848,6 @@ def process_image(request):
 
 
 
-# @api_view(['PATCH'])
-# @permission_classes([IsAuthenticated])
-# def update_extra_fields(request, pk):
-#     try:
-#         doc = ScannedDocument.objects.get(pk=pk, user=request.user)
-#     except ScannedDocument.DoesNotExist:
-#         return Response({'error': 'Not found'}, status=404)
-
-#     serializer = ScannedDocumentSerializer(doc, data=request.data, partial=True)
-#     if not serializer.is_valid():
-#         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-#     with transaction.atomic():
-#         doc = serializer.save()
-
-#         # 1) Пересчёт pirkimas/pardavimas
-#         doc_struct = {
-#             "seller_id": doc.seller_id,
-#             "seller_vat_code": doc.seller_vat_code,
-#             "seller_name": doc.seller_name,
-#             "buyer_id": doc.buyer_id,
-#             "buyer_vat_code": doc.buyer_vat_code,
-#             "buyer_name": doc.buyer_name,
-#         }
-#         doc.pirkimas_pardavimas = determine_pirkimas_pardavimas(doc_struct, request.user)
-
-#         # 2) Применяем дефолты сумiškai
-#         changed = False
-#         if doc.scan_type == "sumiskai":
-#             changed = _apply_sumiskai_defaults_from_user(doc, request.user)
-
-#         # 3) Пересчёт VAT-класса (как у тебя было)
-#         doc.vat_class = auto_select_pvm_code(
-#             doc.scan_type or "sumiskai",
-#             doc.vat_percent or 21,
-#             doc.buyer_country_iso or "LT",
-#             doc.seller_country_iso or "LT",
-#             False
-#         )
-
-#         # 4) Сохраняем. ВАЖНО: принудительно сохраняем короткие поля,
-#         #    потому что они меняются на самом doc, а не через сериализатор.
-#         fields_to_save = ["pirkimas_pardavimas", "pvm_kodas"]
-#         if doc.scan_type == "sumiskai":
-#             fields_to_save += [
-#                 "prekes_pavadinimas",
-#                 "prekes_kodas",
-#                 "prekes_barkodas",
-#                 "preke_paslauga",
-#             ]
-
-#         # Если хочешь быть совсем строгим — сохраняй только если реально изменилось:
-#         # но для диагностики сейчас сохраняем всегда.
-#         doc.save(update_fields=fields_to_save)
-
-#         # 5) Проверяем, что реально лежит в БД после save()
-#         doc.refresh_from_db(fields=[
-#             "prekes_pavadinimas", "prekes_kodas", "prekes_barkodas",
-#             "preke_paslauga", "pirkimas_pardavimas", "pvm_kodas"
-#         ])
-
-#     return Response(ScannedDocumentSerializer(doc).data)
-
-
-
 
 # Obnovit company details v Nustatymai
 
@@ -851,21 +903,273 @@ def get_user_documents(request):
 
 
 # /documents/<id>/
+# @api_view(['GET'])
+# @permission_classes([IsAuthenticated])
+# def get_document_detail(request, pk):
+#     try:
+#         doc = ScannedDocument.objects.get(pk=pk, user=request.user)
+#     except ScannedDocument.DoesNotExist:
+#         return Response({'error': 'Not found'}, status=404)
+#     serializer = ScannedDocumentDetailSerializer(doc)
+#     return Response(serializer.data)
+
+# /documents/<id>/
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def get_document_detail(request, pk):
+    """
+    Детали документа.
+    - В single-режиме: отдаем сериализованные данные из БД (без preview).
+    - В multi-режиме: добавляем preview через data_resolver.build_preview (ничего в БД не пишем).
+    """
     try:
         doc = ScannedDocument.objects.get(pk=pk, user=request.user)
     except ScannedDocument.DoesNotExist:
         return Response({'error': 'Not found'}, status=404)
+
     serializer = ScannedDocumentDetailSerializer(doc)
-    return Response(serializer.data)
+    data = serializer.data
+
+    # Превью только в multi
+    if getattr(request.user, "view_mode", None) != "multi":
+        return Response(data)
+
+    cp_key = request.query_params.get("cp_key")
+    preview = build_preview(
+        doc,
+        request.user,
+        cp_key=cp_key,
+        view_mode="multi",
+        base_vat_percent=data.get("vat_percent"),
+        base_preke_paslauga=data.get("preke_paslauga"),
+    )
+
+    data["preview"] = preview
+    return Response(data)
+
+# @api_view(['GET'])
+# @permission_classes([IsAuthenticated])
+# def get_document_detail(request, pk):
+#     from decimal import Decimal
+#     from .models import ScannedDocument, LineItem
+#     from .serializers import ScannedDocumentDetailSerializer
+#     from .utils.pirkimas_pardavimas import determine_pirkimas_pardavimas
+#     from .validators.vat_klas import auto_select_pvm_code
+
+#     try:
+#         doc = ScannedDocument.objects.get(pk=pk, user=request.user)
+#     except ScannedDocument.DoesNotExist:
+#         return Response({'error': 'Not found'}, status=404)
+
+#     serializer = ScannedDocumentDetailSerializer(doc)
+#     data = serializer.data
+
+#     # Превью только в multi
+#     if getattr(request.user, "view_mode", None) != "multi":
+#         return Response(data)
+
+#     cp_key = request.query_params.get("cp_key")
+#     cp_selected = bool(cp_key)
+
+#     # ---------- helpers ----------
+#     def _nz(x):
+#         if x is None: return None
+#         s = str(x).strip()
+#         return s if s else None
+
+#     def _normalize_vat_percent(v):
+#         if v is None: return None
+#         try:
+#             if isinstance(v, Decimal): return float(v)
+#             s = str(v).strip().replace(",", ".")
+#             if not s: return None
+#             if s.endswith("%"): s = s[:-1]
+#             return float(Decimal(s))
+#         except Exception:
+#             return None
+
+#     def _normalize_ps(v):
+#         if v is None: return None
+#         try:
+#             i = int(str(v).strip())
+#             return i if i in (1, 2, 3, 4) else None
+#         except Exception:
+#             return None
+
+#     def _mk_key(id_val, vat_val, name_val):
+#         id_s = ("" if id_val is None else str(id_val).strip())
+#         if id_s:
+#             return f"id:{id_s}"
+#         vat_s = (vat_val or "").strip().lower()
+#         name_s = (name_val or "").strip().lower()
+#         return vat_s or name_s
+
+#     def _pp_label(code):
+#         if code == "pirkimas": return "Pirkimas"
+#         if code == "pardavimas": return "Pardavimas"
+#         return "Pasirinkite kontrahentą" if not cp_selected else ""
+
+#     def _pvm_label(code):
+#         if code: return code
+#         return "Pasirinkite kontrahentą" if not cp_selected else ""
+
+#     # 1) Сырые флаги/поля сторон
+#     buyer_iso    = _nz(doc.buyer_country_iso)
+#     seller_iso   = _nz(doc.seller_country_iso)
+#     buyer_has_v  = bool(_nz(doc.buyer_vat_code))
+#     seller_has_v = bool(_nz(doc.seller_vat_code))
+
+#     has_buyer  = any((_nz(doc.buyer_id),  _nz(doc.buyer_vat_code),  _nz(doc.buyer_name)))
+#     has_seller = any((_nz(doc.seller_id), _nz(doc.seller_vat_code), _nz(doc.seller_name)))
+
+#     # 2) Направление
+#     pp_code = None
+
+#     # 2.1 Если выбран контрагент — определяем строго по нему
+#     if cp_selected and (has_buyer or has_seller):
+#         s_key = _mk_key(doc.seller_id, doc.seller_vat_code, doc.seller_name)
+#         b_key = _mk_key(doc.buyer_id,  doc.buyer_vat_code,  doc.buyer_name)
+#         if cp_key == s_key:
+#             pp_code = "pardavimas"
+#         elif cp_key == b_key:
+#             pp_code = "pirkimas"
+#         else:
+#             pp_code = None  # выбранный контрагент не совпал с документом → неизвестно
+
+#     # 2.2 Если контрагент не выбран — старая эвристика
+#     if not cp_selected:
+#         if not has_buyer and not has_seller:
+#             pp_code = None
+#         elif has_buyer and has_seller:
+#             # сперва пробуем по компании пользователя (если поля в профиле заполнены)
+#             user_code = _nz(getattr(request.user, "company_code", None))
+#             user_vat  = _nz(getattr(request.user, "company_vat_code", None))
+#             user_name = _nz(getattr(request.user, "company_name", None))
+
+#             def _matches_user(prefix):
+#                 pid  = _nz(getattr(doc, f"{prefix}_id", None))
+#                 pvat = _nz(getattr(doc, f"{prefix}_vat_code", None))
+#                 pname= _nz(getattr(doc, f"{prefix}_name", None))
+#                 return (
+#                     (user_code and pid  and str(user_code).strip() == str(pid).strip()) or
+#                     (user_vat  and pvat and str(user_vat).strip().lower() == str(pvat).strip().lower()) or
+#                     (user_name and pname and str(user_name).strip().lower() == str(pname).strip().lower())
+#                 )
+
+#             if _matches_user("buyer"):
+#                 pp_code = "pirkimas"
+#             elif _matches_user("seller"):
+#                 pp_code = "pardavimas"
+#             else:
+#                 # fallback к твоей функции
+#                 doc_struct = {
+#                     "seller_id": doc.seller_id, "seller_vat_code": doc.seller_vat_code, "seller_name": doc.seller_name,
+#                     "buyer_id":  doc.buyer_id,  "buyer_vat_code":  doc.buyer_vat_code,  "buyer_name":  doc.buyer_name,
+#                 }
+#                 tmp = (determine_pirkimas_pardavimas(doc_struct, request.user) or "").strip().lower()
+#                 pp_code = tmp if tmp in ("pirkimas", "pardavimas") else None
+#         else:
+#             pp_code = "pirkimas" if has_buyer else "pardavimas"
+
+#     # 3) Расчёт PVM (detaliai по строкам, иначе — по документу)
+#     scan_type = (data.get("scan_type") or "").strip().lower()
+
+#     if scan_type == "detaliai":
+#         items_qs = LineItem.objects.filter(document=doc).only("id", "vat_percent", "preke_paslauga")
+#         li_preview, pvm_set, vat_set = [], set(), set()
+
+#         vat_doc = _normalize_vat_percent(data.get("vat_percent"))
+#         ps_doc  = _normalize_ps(data.get("preke_paslauga"))
+#         ps_doc_bin = 1 if ps_doc in (1, 3) else (2 if ps_doc in (2, 4) else None)
+
+#         for li in items_qs:
+#             li_vat = _normalize_vat_percent(li.vat_percent if li.vat_percent is not None else data.get("vat_percent"))
+#             li_ps  = _normalize_ps(li.preke_paslauga if li.preke_paslauga is not None else ps_doc_bin)
+#             li_ps_bin = 1 if li_ps in (1, 3) else (2 if li_ps in (2, 4) else None)
+
+#             need_geo = (li_vat == 0.0)
+#             if need_geo and (pp_code is None or not (buyer_iso and seller_iso)):
+#                 li_code = None
+#             else:
+#                 li_code = auto_select_pvm_code(
+#                     pirkimas_pardavimas=pp_code,
+#                     buyer_country_iso=buyer_iso,
+#                     seller_country_iso=seller_iso,
+#                     preke_paslauga=li_ps_bin,
+#                     vat_percent=li_vat,
+#                     separate_vat=bool(doc.separate_vat),
+#                     buyer_has_vat_code=buyer_has_v,
+#                     seller_has_vat_code=seller_has_v,
+#                 )
+
+#             if li_code is not None:
+#                 pvm_set.add(li_code)
+#             if li_vat is not None:
+#                 vat_set.add(li_vat)
+
+#             li_preview.append({
+#                 "id": li.id,
+#                 "pvm_kodas": li_code,
+#                 "pvm_kodas_label": _pvm_label(li_code),
+#             })
+
+#         if bool(doc.separate_vat):
+#             pvm_doc = "Keli skirtingi PVM"
+#         else:
+#             if len(pvm_set) == 1 and len(vat_set) == 1:
+#                 pvm_doc = next(iter(pvm_set))
+#             elif len(pvm_set) == 0:
+#                 pvm_doc = None
+#             else:
+#                 pvm_doc = ""
+
+#         data["preview"] = {
+#             "pirkimas_pardavimas_code": pp_code,
+#             "pirkimas_pardavimas_label": _pp_label(pp_code),
+#             "pvm_kodas": pvm_doc,
+#             "pvm_kodas_label": _pvm_label(pvm_doc),
+#             "line_items": li_preview,
+#         }
+#         return Response(data)
+
+#     # sumiskai / detaliai без строк
+#     vat_doc = _normalize_vat_percent(data.get("vat_percent"))
+#     ps_doc  = _normalize_ps(data.get("preke_paslauga"))
+#     ps_bin  = 1 if ps_doc in (1, 3) else (2 if ps_doc in (2, 4) else None)
+
+#     need_geo = (vat_doc == 0.0)
+#     if need_geo and (pp_code is None or not (buyer_iso and seller_iso)):
+#         pvm_doc = None
+#     else:
+#         pvm_doc = auto_select_pvm_code(
+#             pirkimas_pardavimas=pp_code,
+#             buyer_country_iso=buyer_iso,
+#             seller_country_iso=seller_iso,
+#             preke_paslauga=ps_bin,
+#             vat_percent=vat_doc,
+#             separate_vat=bool(doc.separate_vat),
+#             buyer_has_vat_code=buyer_has_v,
+#             seller_has_vat_code=seller_has_v,
+#         )
+
+#     data["preview"] = {
+#         "pirkimas_pardavimas_code": pp_code,
+#         "pirkimas_pardavimas_label": _pp_label(pp_code),
+#         "pvm_kodas": pvm_doc,
+#         "pvm_kodas_label": _pvm_label(pvm_doc),
+#         "line_items": [],
+#     }
+#     return Response(data)
+
+
+
 
 
 #Obnovit extra field vzavisimosti ot vybranoj buh programy
 @api_view(['PATCH'])
 @permission_classes([IsAuthenticated])
 def update_scanned_document_extra_fields(request, pk):
+    import logging
     from django.db import transaction
     from .models import ScannedDocument, LineItem
     from .serializers import ScannedDocumentSerializer
@@ -873,11 +1177,13 @@ def update_scanned_document_extra_fields(request, pk):
     from .validators.vat_klas import auto_select_pvm_code
     from .utils.save_document import _apply_sumiskai_defaults_from_user  # обновлённая версия
 
+    log = logging.getLogger("docscanner_app.api.update_extra_fields")
+
     doc = ScannedDocument.objects.filter(pk=pk, user=request.user).first()
     if not doc:
+        log.warning("PATCH extra_fields pk=%s: document not found for user=%s", pk, request.user.id)
         return Response({'error': 'Dokumentas nerastas'}, status=404)
 
-    # Разрешённые к патчу поля
     ALLOWED_FIELDS = [
         'buyer_id', 'buyer_name', 'buyer_vat_code', 'buyer_iban', 'buyer_address', 'buyer_country_iso',
         'seller_id', 'seller_name', 'seller_vat_code', 'seller_iban', 'seller_address', 'seller_country_iso',
@@ -885,52 +1191,73 @@ def update_scanned_document_extra_fields(request, pk):
         'vat_percent', 'scan_type',
     ]
 
-    fields_to_update = []
-    for field in ALLOWED_FIELDS:
-        if field in request.data:
-            setattr(doc, field, request.data[field])
-            fields_to_update.append(field)
-
-    # helper: распознать, что пришёл явный "clear" клиента
+    # helpers
     def _is_cleared(prefix: str) -> bool:
         keys = [
-            f"{prefix}_name",
-            f"{prefix}_id",
-            f"{prefix}_vat_code",
-            f"{prefix}_iban",
-            f"{prefix}_address",
-            f"{prefix}_country_iso",
+            f"{prefix}_name", f"{prefix}_id", f"{prefix}_vat_code",
+            f"{prefix}_iban", f"{prefix}_address", f"{prefix}_country_iso",
         ]
         touched = any(k in request.data for k in keys)
         if not touched:
             return False
-        # все значения пустые/пробельные
         return all(not str(request.data.get(k) or "").strip() for k in keys)
+
+    def _to_bool_allow(x):
+        if x is None: return None
+        if isinstance(x, bool): return x
+        s = str(x).strip().lower()
+        if s in {"0","false","no","ne","off"}: return False
+        if s in {"1","true","taip","yes","on"}: return True
+        return None
+
+    def _normalize_ps(v):
+        if v is None: return None
+        if isinstance(v, int): return v if v in (1,2,3,4) else None
+        s = str(v).strip()
+        return int(s) if s.isdigit() and int(s) in (1,2,3,4) else None
+
+    def _normalize_vat_percent(v):
+        if v is None: return None
+        try:
+            from decimal import Decimal
+            if isinstance(v, Decimal): return float(v)
+            s = str(v).strip().replace(",", ".")
+            if not s: return None
+            if s.endswith("%"): s = s[:-1]
+            return float(Decimal(s))
+        except Exception:
+            return None
+
+    def _nz(s):
+        if s is None: return None
+        s2 = str(s).strip()
+        return s2 if s2 else None
+
+    # применяем входные изменения (сыро), логируем
+    fields_to_update = []
+    for field in ALLOWED_FIELDS:
+        if field in request.data:
+            old_val = getattr(doc, field, None)
+            new_val = request.data[field]
+            setattr(doc, field, new_val)
+            fields_to_update.append(field)
+            if str(old_val) != str(new_val):
+                log.info("pk=%s: field %s changed: %r -> %r", pk, field, old_val, new_val)
 
     buyer_cleared = _is_cleared("buyer")
     seller_cleared = _is_cleared("seller")
-
-    # helper: привести apply_defaults к bool
-    def _to_bool_allow(x):
-        if x is None:
-            return None
-        if isinstance(x, bool):
-            return x
-        s = str(x).strip().lower()
-        if s in {"0", "false", "no", "ne", "off"}:
-            return False
-        if s in {"1", "true", "taip", "yes", "on"}:
-            return True
-        return None  # неизвестно — трактуем как не задано
+    if buyer_cleared or seller_cleared:
+        log.info("pk=%s: clear detected: buyer_cleared=%s seller_cleared=%s", pk, buyer_cleared, seller_cleared)
 
     apply_defaults_req = _to_bool_allow(request.data.get("apply_defaults", None))
+    log.info("pk=%s: apply_defaults_req=%r", pk, apply_defaults_req)
 
     with transaction.atomic():
-        # 0) Сохранить то, что прямо прислали (чтобы расчёт шёл по уже проставленным значениям)
+        # 0) Сохранить присланные поля
         if fields_to_update:
             doc.save(update_fields=fields_to_update)
 
-        # 1) Пересчёт pirkimas/pardavimas по текущим полям
+        # 1) Пересчитать pirkimas/pardavimas
         doc_struct = {
             "seller_id": doc.seller_id,
             "seller_vat_code": doc.seller_vat_code,
@@ -940,55 +1267,273 @@ def update_scanned_document_extra_fields(request, pk):
             "buyer_name": doc.buyer_name,
         }
         doc.pirkimas_pardavimas = determine_pirkimas_pardavimas(doc_struct, request.user)
+        log.info("pk=%s: pirkimas_pardavimas=%r", pk, doc.pirkimas_pardavimas)
 
-        # 1.1) Если очищаем одного из клиентов — очистим и «дефолтные» товарные поля
+        # 1.1) Флаги наличия VAT кода
+        buyer_has_vat_code = bool((doc.buyer_vat_code or "").strip())
+        seller_has_vat_code = bool((doc.seller_vat_code or "").strip())
+        if hasattr(doc, "buyer_has_vat_code"):
+            doc.buyer_has_vat_code = buyer_has_vat_code
+        if hasattr(doc, "seller_has_vat_code"):
+            doc.seller_has_vat_code = seller_has_vat_code
+        log.info("pk=%s: buyer_has_vat_code=%s seller_has_vat_code=%s", pk, buyer_has_vat_code, seller_has_vat_code)
+
+        # 1.2) ЕСЛИ очищаем buyer/seller — чистим товарные поля и PVM И ВЫХОДИМ РАНО
         if buyer_cleared or seller_cleared:
             doc.prekes_pavadinimas = ""
             doc.prekes_kodas = ""
             doc.prekes_barkodas = ""
             doc.preke_paslauga = ""
-            fields_to_update += ["prekes_pavadinimas", "prekes_kodas", "prekes_barkodas", "preke_paslauga"]
+            doc.pvm_kodas = None
+            update_fields_now = ["prekes_pavadinimas","prekes_kodas","prekes_barkodas","preke_paslauga","pvm_kodas","pirkimas_pardavimas"]
 
-        # 2) Применение дефолтов (ТОЛЬКО если это sumiskai, режим ясен, не было очистки, и не запрещено флагом)
+            if hasattr(doc, "buyer_has_vat_code"): update_fields_now.append("buyer_has_vat_code")
+            if hasattr(doc, "seller_has_vat_code"): update_fields_now.append("seller_has_vat_code")
+
+            if (doc.scan_type or "").strip().lower() == "detaliai":
+                cleared = LineItem.objects.filter(document=doc).update(pvm_kodas=None)
+                log.info("pk=%s: cleared LineItem.pvm_kodas for %d items", pk, cleared)
+
+            doc.save(update_fields=update_fields_now)
+            log.info("pk=%s: PVM cleared due to party clear, early return", pk)
+            return Response(ScannedDocumentSerializer(doc).data)
+
+        # 2) Применить дефолты (sumiskai, если разрешено)
         scan_type = (doc.scan_type or "").strip().lower()
-        mode = (doc.pirkimas_pardavimas or "").strip().lower()
-        allow_defaults = (
-            scan_type == "sumiskai" and
-            mode in ("pirkimas", "pardavimas") and
-            not (buyer_cleared or seller_cleared) and
-            (apply_defaults_req is None or apply_defaults_req is True)
-        )
+        allow_defaults = (scan_type == "sumiskai" and (apply_defaults_req is None or apply_defaults_req is True))
         if allow_defaults:
             changed = _apply_sumiskai_defaults_from_user(doc, request.user)
+            log.info("pk=%s: defaults applied=%s", pk, changed)
             if changed:
-                fields_to_update += ["prekes_pavadinimas", "prekes_kodas", "prekes_barkodas", "preke_paslauga"]
+                doc.save(update_fields=["prekes_pavadinimas","prekes_kodas","prekes_barkodas","preke_paslauga"])
 
-        # 3) Пересчёт PVM kodo
-        doc.pvm_kodas = auto_select_pvm_code(
-            (doc.scan_type or "sumiskai"),
-            (doc.vat_percent or 21),
-            (doc.buyer_country_iso or "LT"),
-            (doc.seller_country_iso or "LT"),
-            False
+        # 3) Нормализованные данные для расчёта
+        buyer_iso = _nz(doc.buyer_country_iso)
+        seller_iso = _nz(doc.seller_country_iso)
+        doc_vat_norm = _normalize_vat_percent(doc.vat_percent)
+        doc_ps = _normalize_ps(doc.preke_paslauga)
+
+        log.info("pk=%s: buyer_iso=%r seller_iso=%r vat_percent_norm=%r preke_paslauga_norm=%r",
+                 pk, buyer_iso, seller_iso, doc_vat_norm, doc_ps)
+
+        # требуем страны/направление только если 0%
+        need_countries_doc = (doc_vat_norm == 0.0)
+        missing_crit = need_countries_doc and (
+            doc.pirkimas_pardavimas not in ("pirkimas", "pardavimas") or not (buyer_iso and seller_iso)
         )
+        log.info("pk=%s: need_countries_doc=%s missing_crit=%s", pk, need_countries_doc, missing_crit)
 
-        # 4) Сохранить вычисленные поля
-        doc.save(update_fields=list(set(fields_to_update + ["pirkimas_pardavimas", "pvm_kodas"])))
-
-        # 5) Для детальных документов — обновить pvm_kodas в строках
+        # 4) Пересчёт PVM
         if scan_type == "detaliai":
-            items = LineItem.objects.filter(document=doc)
+            items = list(LineItem.objects.filter(document=doc))
+            pvm_codes = set()
+            vat_percents = set()
+            log.info("pk=%s: recalc items count=%d", pk, len(items))
+
             for item in items:
-                item.pvm_kodas = auto_select_pvm_code(
-                    doc.scan_type,
-                    (item.vat_percent or doc.vat_percent or 21),
-                    (doc.buyer_country_iso or "LT"),
-                    (doc.seller_country_iso or "LT"),
-                    False
+                item_vat = item.vat_percent if item.vat_percent is not None else doc.vat_percent
+                item_vat_norm = _normalize_vat_percent(item_vat)
+                item_ps = _normalize_ps(item.preke_paslauga)
+                if item_ps is None:
+                    item_ps = doc_ps
+
+                item_pvm = auto_select_pvm_code(
+                    pirkimas_pardavimas=doc.pirkimas_pardavimas,
+                    buyer_country_iso=buyer_iso,
+                    seller_country_iso=seller_iso,
+                    preke_paslauga=item_ps,
+                    vat_percent=item_vat_norm,
+                    separate_vat=bool(doc.separate_vat),
+                    buyer_has_vat_code=buyer_has_vat_code,
+                    seller_has_vat_code=seller_has_vat_code,
                 )
+
+                old = item.pvm_kodas
+                item.pvm_kodas = item_pvm
                 item.save(update_fields=["pvm_kodas"])
+                log.info("pk=%s: item[%s] vat=%r ps=%r -> pvm %r (was %r)",
+                         pk, item.id, item_vat_norm, item_ps, item_pvm, old)
+
+                if item_pvm is not None: pvm_codes.add(item_pvm)
+                if item_vat_norm is not None: vat_percents.add(item_vat_norm)
+
+            if bool(doc.separate_vat):
+                doc.pvm_kodas = "Keli skirtingi PVM"
+                doc.vat_percent = None
+                log.info("pk=%s: separate_vat=True -> doc.pvm_kodas='Keli skirtingi PVM'", pk)
+            else:
+                if len(pvm_codes) == 1 and len(vat_percents) == 1:
+                    doc.pvm_kodas = next(iter(pvm_codes))
+                    doc.vat_percent = next(iter(vat_percents))
+                    log.info("pk=%s: unified items -> doc.pvm_kodas=%r vat_percent=%r",
+                             pk, doc.pvm_kodas, doc.vat_percent)
+                else:
+                    doc.pvm_kodas = ""
+                    doc.vat_percent = None
+                    log.info("pk=%s: heterogeneous items -> doc.pvm_kodas cleared", pk)
+
+        else:
+            # sumiskai / detaliai без строк — документный расчёт
+            doc_pvm = auto_select_pvm_code(
+                pirkimas_pardavimas=doc.pirkimas_pardavimas,
+                buyer_country_iso=buyer_iso,
+                seller_country_iso=seller_iso,
+                preke_paslauga=doc_ps,
+                vat_percent=doc_vat_norm,
+                separate_vat=bool(doc.separate_vat),
+                buyer_has_vat_code=buyer_has_vat_code,
+                seller_has_vat_code=seller_has_vat_code,
+            )
+            old_doc_pvm = doc.pvm_kodas
+            doc.pvm_kodas = doc_pvm
+            log.info("pk=%s: doc-level recalc -> pvm %r (was %r)", pk, doc_pvm, old_doc_pvm)
+
+        # 5) Сохранить
+        update_set = {"pirkimas_pardavimas","pvm_kodas","vat_percent"}
+        if hasattr(doc, "buyer_has_vat_code"): update_set.add("buyer_has_vat_code")
+        if hasattr(doc, "seller_has_vat_code"): update_set.add("seller_has_vat_code")
+
+        doc.save(update_fields=list(update_set))
+        log.info("pk=%s: saved fields=%s", pk, sorted(update_set))
 
     return Response(ScannedDocumentSerializer(doc).data)
+
+
+
+
+
+
+
+
+
+
+
+
+# @api_view(['PATCH'])
+# @permission_classes([IsAuthenticated])
+# def update_scanned_document_extra_fields(request, pk):
+#     from django.db import transaction
+#     from .models import ScannedDocument, LineItem
+#     from .serializers import ScannedDocumentSerializer
+#     from .utils.pirkimas_pardavimas import determine_pirkimas_pardavimas
+#     from .validators.vat_klas import auto_select_pvm_code
+#     from .utils.save_document import _apply_sumiskai_defaults_from_user  # обновлённая версия
+
+#     doc = ScannedDocument.objects.filter(pk=pk, user=request.user).first()
+#     if not doc:
+#         return Response({'error': 'Dokumentas nerastas'}, status=404)
+
+#     # Разрешённые к патчу поля
+#     ALLOWED_FIELDS = [
+#         'buyer_id', 'buyer_name', 'buyer_vat_code', 'buyer_iban', 'buyer_address', 'buyer_country_iso',
+#         'seller_id', 'seller_name', 'seller_vat_code', 'seller_iban', 'seller_address', 'seller_country_iso',
+#         'prekes_kodas', 'prekes_barkodas', 'prekes_pavadinimas', 'preke_paslauga',
+#         'vat_percent', 'scan_type',
+#     ]
+
+#     fields_to_update = []
+#     for field in ALLOWED_FIELDS:
+#         if field in request.data:
+#             setattr(doc, field, request.data[field])
+#             fields_to_update.append(field)
+
+#     # helper: распознать, что пришёл явный "clear" клиента
+#     def _is_cleared(prefix: str) -> bool:
+#         keys = [
+#             f"{prefix}_name",
+#             f"{prefix}_id",
+#             f"{prefix}_vat_code",
+#             f"{prefix}_iban",
+#             f"{prefix}_address",
+#             f"{prefix}_country_iso",
+#         ]
+#         touched = any(k in request.data for k in keys)
+#         if not touched:
+#             return False
+#         # все значения пустые/пробельные
+#         return all(not str(request.data.get(k) or "").strip() for k in keys)
+
+#     buyer_cleared = _is_cleared("buyer")
+#     seller_cleared = _is_cleared("seller")
+
+#     # helper: привести apply_defaults к bool
+#     def _to_bool_allow(x):
+#         if x is None:
+#             return None
+#         if isinstance(x, bool):
+#             return x
+#         s = str(x).strip().lower()
+#         if s in {"0", "false", "no", "ne", "off"}:
+#             return False
+#         if s in {"1", "true", "taip", "yes", "on"}:
+#             return True
+#         return None  # неизвестно — трактуем как не задано
+
+#     apply_defaults_req = _to_bool_allow(request.data.get("apply_defaults", None))
+
+#     with transaction.atomic():
+#         # 0) Сохранить то, что прямо прислали (чтобы расчёт шёл по уже проставленным значениям)
+#         if fields_to_update:
+#             doc.save(update_fields=fields_to_update)
+
+#         # 1) Пересчёт pirkimas/pardavimas по текущим полям
+#         doc_struct = {
+#             "seller_id": doc.seller_id,
+#             "seller_vat_code": doc.seller_vat_code,
+#             "seller_name": doc.seller_name,
+#             "buyer_id": doc.buyer_id,
+#             "buyer_vat_code": doc.buyer_vat_code,
+#             "buyer_name": doc.buyer_name,
+#         }
+#         doc.pirkimas_pardavimas = determine_pirkimas_pardavimas(doc_struct, request.user)
+
+#         # 1.1) Если очищаем одного из клиентов — очистим и «дефолтные» товарные поля
+#         if buyer_cleared or seller_cleared:
+#             doc.prekes_pavadinimas = ""
+#             doc.prekes_kodas = ""
+#             doc.prekes_barkodas = ""
+#             doc.preke_paslauga = ""
+#             fields_to_update += ["prekes_pavadinimas", "prekes_kodas", "prekes_barkodas", "preke_paslauga"]
+
+#         # 2) Применение дефолтов (ТОЛЬКО если это sumiskai, режим ясен, не было очистки, и не запрещено флагом)
+#         scan_type = (doc.scan_type or "").strip().lower()
+#         allow_defaults = (
+#             scan_type == "sumiskai"
+#             and not (buyer_cleared or seller_cleared)
+#             and (apply_defaults_req is None or apply_defaults_req is True)
+#         )
+
+#         if allow_defaults:
+#             changed = _apply_sumiskai_defaults_from_user(doc, request.user)
+#             if changed:
+#                 fields_to_update += ["prekes_pavadinimas", "prekes_kodas", "prekes_barkodas", "preke_paslauga"]
+
+#         # 3) Пересчёт PVM kodo
+#         doc.pvm_kodas = auto_select_pvm_code(
+#             (doc.scan_type or "sumiskai"),
+#             (doc.vat_percent or 21),
+#             (doc.buyer_country_iso or "LT"),
+#             (doc.seller_country_iso or "LT"),
+#             False
+#         )
+
+#         # 4) Сохранить вычисленные поля
+#         doc.save(update_fields=list(set(fields_to_update + ["pirkimas_pardavimas", "pvm_kodas"])))
+
+#         # 5) Для детальных документов — обновить pvm_kodas в строках
+#         if scan_type == "detaliai":
+#             items = LineItem.objects.filter(document=doc)
+#             for item in items:
+#                 item.pvm_kodas = auto_select_pvm_code(
+#                     doc.scan_type,
+#                     (item.vat_percent or doc.vat_percent or 21),
+#                     (doc.buyer_country_iso or "LT"),
+#                     (doc.seller_country_iso or "LT"),
+#                     False
+#                 )
+#                 item.save(update_fields=["pvm_kodas"])
+
+#     return Response(ScannedDocumentSerializer(doc).data)
 
 
 
@@ -1057,84 +1602,6 @@ def update_view_mode(request):
 
 
 
-# @api_view(['PATCH'])
-# @permission_classes([IsAuthenticated])
-# def update_scanned_document_extra_fields(request, pk):
-#     from .models import ScannedDocument, LineItem
-#     from .serializers import ScannedDocumentSerializer
-#     from .utils.pirkimas_pardavimas import determine_pirkimas_pardavimas
-#     from .validators.vat_klas import auto_select_pvm_code
-
-#     doc = ScannedDocument.objects.filter(pk=pk, user=request.user).first()
-#     if not doc:
-#         return Response({'error': 'Dokumentas nerastas'}, status=404)
-
-#     # Разрешённые поля (добавь нужные, если чего не хватает)
-#     ALLOWED_FIELDS = [
-#         'buyer_id', 'buyer_name', 'buyer_vat_code', 'buyer_iban', 'buyer_address', 'buyer_country_iso',
-#         'seller_id', 'seller_name', 'seller_vat_code', 'seller_iban', 'seller_address', 'seller_country_iso',
-#         'prekes_kodas', 'prekes_barkodas', 'prekes_pavadinimas',
-#         # ... (добавь остальные нужные)
-#     ]
-
-#     changed = False
-#     for field in ALLOWED_FIELDS:
-#         if field in request.data:
-#             setattr(doc, field, request.data[field])
-#             changed = True
-#     if changed:
-#         doc.save()
-
-#         # --- Здесь твоя логика для автоопределения ---
-#         doc_struct = {
-#             "seller_id": doc.seller_id,
-#             "seller_vat_code": doc.seller_vat_code,
-#             "seller_name": doc.seller_name,
-#             "buyer_id": doc.buyer_id,
-#             "buyer_vat_code": doc.buyer_vat_code,
-#             "buyer_name": doc.buyer_name,
-#         }
-#         doc.pirkimas_pardavimas = determine_pirkimas_pardavimas(doc_struct, request.user)
-#         doc.vat_class = auto_select_pvm_code(
-#             doc.scan_type or "sumiskai",
-#             doc.vat_percent or 21,
-#             doc.buyer_country_iso or "LT",
-#             doc.seller_country_iso or "LT",
-#             False
-#         )
-#         doc.save(update_fields=["pirkimas_pardavimas", "pvm_kodas"])
-
-#         # Если детальные — обновим line items
-#         if doc.scan_type == "detaliai":
-#             items = LineItem.objects.filter(document=doc)
-#             for item in items:
-#                 item.vat_class = auto_select_pvm_code(
-#                     doc.scan_type,
-#                     item.vat_percent or doc.vat_percent or 21,
-#                     doc.buyer_country_iso or "LT",
-#                     doc.seller_country_iso or "LT",
-#                     False
-#                 )
-#                 item.save(update_fields=["pvm_kodas"])
-
-#     # Возвращаем сериализованный документ
-#     return Response(ScannedDocumentSerializer(doc).data)
-
-
-
-
-
-# @api_view(['PATCH'])
-# @permission_classes([IsAuthenticated])
-# def update_lineitem_fields(request, doc_id, lineitem_id):
-#     doc = get_object_or_404(ScannedDocument, pk=doc_id, user=request.user)
-#     lineitem = get_object_or_404(LineItem, pk=lineitem_id, document=doc)
-#     allowed = ['prekes_kodas', 'prekes_pavadinimas', 'prekes_barkodas']
-#     for field in allowed:
-#         if field in request.data:
-#             setattr(lineitem, field, request.data[field])
-#     lineitem.save()
-#     return Response({'success': True})
 
 @api_view(['PATCH'])
 @permission_classes([IsAuthenticated])

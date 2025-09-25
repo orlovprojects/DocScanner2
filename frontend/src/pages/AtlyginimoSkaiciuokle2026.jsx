@@ -20,7 +20,7 @@ import PlayCircleIcon from '@mui/icons-material/PlayCircle';
  */
 
 const VDU = 2304.5;   // VDU, kaip prašei (2025)
-const MMA = 1038;
+const MMA = 1153;
 
 // GPM ribos
 const T1_MONTHLY = 3 * VDU; // 36 VDU / 12
@@ -485,11 +485,8 @@ function TaxInfo2026() {
           fontStyle: "italic",
         }}
       >
-        <b>PASTABA:</b> oficialūs MMA (minimalus mėnesinis atlyginimas) ir VDU
-        (vidutinis darbo užmokestis) rodikliai 2026 metams dar nėra patvirtinti.
-        Šioje skaičiuoklėje naudojame šių metų galiojančias reikšmes –{" "}
-        <b>MMA: 1038 €</b>, <b>VDU: 2304,5 €</b>. Kai tik Vyriausybė
-        paskelbs atnaujintus rodiklius, skaičiuoklę atnaujinsime.
+        <b>PASTABA:</b> Šioje skaičiuoklėje naudojame 2026 metų MMA ir VDU reikšmes –{" "}
+        <b>MMA: 1153 €</b>, <b>VDU: 2304,5 €</b>.
       </Typography>
 
       {/* H2 – Atlyginimo mokesčių lentelė 2026 */}

@@ -9,7 +9,7 @@ import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 const faqList = [
     {
         question: "Kiek trunka vieno dokumento skaitmeninimas?",
-        answer: "Vidutiniškai 10–20 sekundžių.",
+        answer: "Vidutiniškai apie 30 sekundžių.",
     },
     {
         question: "Kokius dokumentų tipus galima įkelti?",
@@ -33,7 +33,15 @@ const faqList = [
     },
     {
         question: "Ar galima integruoti su mano buhalterine programa?",
-        answer: "Šiuo metu turime integracijas su šiomis programomis:\n- Rivilė GAMA\n- Rivilė ERP\n- Centas\n- Finvalda\nPo skaitmenizavimo galėsite eksportuoti duomenis į pasirinktą programą. Atsisiųstus failus iš DokSkeno tereikės importuoti į buhalterinę programą.",
+        answerIntro: "Šiuo metu turime integracijas su šiomis programomis:",
+        programs: [
+            "Rivilė GAMA",
+            "Rivilė ERP",
+            "Centas",
+            "Finvalda",
+            "Apskaita5"
+        ],
+        answerOutro: "Po skaitmenizavimo galėsite eksportuoti duomenis į pasirinktą programą. Atsisiųstus failus iš DokSkeno tereikės importuoti į buhalterinę programą."
     },
     {
         question: "Ar sistema aptinka dublikatus ir netinkamus dokumentus?",
@@ -116,11 +124,77 @@ function FaqSection() {
                             fontSize: "17px",
                             color: "#333",
                             background: "#fff",
-                            marginTop: '10px',
+                            marginTop: "10px",
+                            "& ul": { paddingLeft: "1.2rem", margin: "0.5rem 0" },
+                            "& li": { marginBottom: "6px" },
+                            "& p": { margin: "0 0 8px 0" },
                         }}
-                    >
-                        {item.answer}
-                    </AccordionDetails>
+                        >
+                        {/* Вариант с programs (intro + <ul> + outro) */}
+                        {item.programs ? (
+                            <>
+                            {item.answerIntro && <p>{item.answerIntro}</p>}
+                            <ul>
+                                {item.programs.map((program, i) => (
+                                <li key={i}>{program}</li>
+                                ))}
+                            </ul>
+                            {item.answerOutro && <p>{item.answerOutro}</p>}
+                            </>
+                        ) : (
+                            // Универсальный рендер для answer-строки (поддерживает абзацы и "-", как список)
+                            (() => {
+                            const text = item.answer || "";
+                            const lines = text.split("\n");
+
+                            // Если есть хотя бы одна строка, начинающаяся с "- ", рисуем список.
+                            const hasBullets = lines.some((l) => l.trim().startsWith("-"));
+
+                            if (hasBullets) {
+                                const intro = [];
+                                const bullets = [];
+                                const outro = [];
+
+                                let phase = "intro";
+                                for (const l of lines) {
+                                const trimmed = l.trim();
+                                if (trimmed.startsWith("-")) {
+                                    phase = "bullets";
+                                    bullets.push(trimmed.replace(/^-+\s*/, ""));
+                                } else {
+                                    if (phase === "intro") intro.push(trimmed);
+                                    else if (phase === "bullets") {
+                                    // Переход к завершающему тексту после списка
+                                    if (trimmed) {
+                                        phase = "outro";
+                                        outro.push(trimmed);
+                                    }
+                                    } else {
+                                    if (trimmed) outro.push(trimmed);
+                                    }
+                                }
+                                }
+
+                                return (
+                                <>
+                                    {intro.length > 0 && <p>{intro.join(" ")}</p>}
+                                    <ul>
+                                    {bullets.map((b, i) => (
+                                        <li key={i}>{b}</li>
+                                    ))}
+                                    </ul>
+                                    {outro.length > 0 && <p>{outro.join(" ")}</p>}
+                                </>
+                                );
+                            }
+
+                            // Иначе — просто абзацы
+                            return lines.map((chunk, i) =>
+                                chunk.trim() ? <p key={i}>{chunk}</p> : null
+                            );
+                            })()
+                        )}
+                        </AccordionDetails>
                 </Accordion>
             ))}
         </Box>
@@ -288,7 +362,7 @@ const Dokskenas = () => {
                                     <StarIcon key={index} sx={{ color: '#f5cf54' }} />
                                 ))}
                             </Stack>
-                            {/* <Typography variant="body2">134 įmonės pasitiki mumis</Typography> */}
+                            <Typography variant="body2">Daugiau nei 100 įmonių naudojasi DokSkenu kasdien</Typography>
                         </Stack>
                         {/* <Stack direction="row" spacing={-1} justifyContent="center">
                             {avatars.map((src, idx) => (
@@ -730,6 +804,7 @@ const Dokskenas = () => {
                             { label: 'Rivilė GAMA (.eip)', hasLink: false },
                             { label: 'Rivilė ERP (.xlsx)', hasLink: false },
                             { label: 'Centas (.xml)', hasLink: false },
+                            { label: 'Apskaita5 (.xml)', hasLink: false },
                             { label: 'Excel (.csv/.xlsx)', hasLink: false },
                         ].map((item, idx) => (
                             <Box key={idx} sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>

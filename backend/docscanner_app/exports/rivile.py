@@ -1,22 +1,33 @@
 import xml.etree.ElementTree as ET
+import logging
 from django.utils.encoding import smart_str
 from .formatters import format_date, vat_to_int_str, get_price_or_zero, expand_empty_tags
 from ..models import CurrencyRate
 
+logger = logging.getLogger(__name__)
 
 # =========================
 # Helpers
 # =========================
+
+def _s(v):
+    """Безопасная строка с strip()."""
+    return str(v).strip() if v is not None else ""
+
+
 def get_currency_rate(currency_code, date_obj):
     """
     Получить курс для валюты на заданную дату (к EUR).
     """
     if not currency_code or currency_code.upper() == "EUR":
+        logger.info("[RIVILE:RATE] currency=%r -> 1.0", currency_code)
         return 1.0
     obj = CurrencyRate.objects.filter(currency=currency_code.upper(), date=date_obj).first()
     if obj:
+        logger.info("[RIVILE:RATE] currency=%s date=%s -> exact=%s", currency_code, date_obj, obj.rate)
         return obj.rate
     obj = CurrencyRate.objects.filter(currency=currency_code.upper(), date__lt=date_obj).order_by('-date').first()
+    logger.info("[RIVILE:RATE] currency=%s date=%s -> prev=%s", currency_code, date_obj, (obj.rate if obj else None))
     return obj.rate if obj else None
 
 
@@ -39,20 +50,70 @@ def prettify_no_header(elem):
     return pretty_xml.encode("utf-8")
 
 
-def resolve_party_code(doc, id_field, vat_field):
+def build_dok_nr(series: str, number: str) -> str:
     """
-    Возвращает код контрагента для Rivile:
-    1) doc.<id_field> если непустой
-    2) иначе doc.<vat_field> если непустой
-    3) иначе '111111111'
+    Формирует DOK_NR строго как 'series-number', если series не пустая.
+    - Пустая series -> number
+    - Если number начинается с series (с дефисом или без) -> нормализует в 'series-number'
     """
-    val = getattr(doc, id_field, None)
-    if val is not None and str(val).strip():
-        return str(val).strip()
-    val = getattr(doc, vat_field, None)
-    if val is not None and str(val).strip():
-        return str(val).strip()
-    return "111111111"
+    s = (series or "").strip()
+    n = (number or "").strip()
+
+    if not s:
+        res = n
+        logger.info("[RIVILE:DOK_NR] s='', n=%r -> %r", n, res)
+        return res
+    if not n:
+        logger.info("[RIVILE:DOK_NR] n='', s=%r -> %r", s, s)
+        return s
+
+    if n.startswith(s):
+        tail = n[len(s):]
+        if tail.startswith("-"):
+            tail = tail[1:]
+        res = f"{s}-{tail}"
+        logger.info("[RIVILE:DOK_NR] n startswith s: s=%r n=%r -> %r", s, n, res)
+        return res
+
+    res = f"{s}-{n}"
+    logger.info("[RIVILE:DOK_NR] s=%r n=%r -> %r", s, n, res)
+    return res
+
+
+# ===== ЕДИНЫЙ РЕЗОЛВЕР КОДА КЛИЕНТА/ПОСТАВЩИКА БЕЗ КЭША И РАНДОМА =====
+def get_party_code(
+    doc,
+    *,
+    role: str,
+    id_field: str,
+    vat_field: str,
+    id_programoje_field: str,
+) -> str:
+    """
+    Код стороны (seller/buyer) по приоритету:
+      1) *_id
+      2) *_vat_code
+      3) *_id_programoje
+    Если все пусто — вернётся "" (ничего не генерируем).
+    Генерацию 7-значного *_id_programoje переносим в save_document.
+    """
+    sid = _s(getattr(doc, id_field, None))
+    if sid:
+        logger.info("[RIVILE:PARTY] %s: %s -> %s", role, id_field, sid)
+        return sid
+
+    svat = _s(getattr(doc, vat_field, None))
+    if svat:
+        logger.info("[RIVILE:PARTY] %s: %s -> %s", role, vat_field, svat)
+        return svat
+
+    sidp = _s(getattr(doc, id_programoje_field, None))
+    if sidp:
+        logger.info("[RIVILE:PARTY] %s: %s -> %s", role, id_programoje_field, sidp)
+        return sidp
+
+    logger.info("[RIVILE:PARTY] %s: empty id/vat/id_programoje -> ''", role)
+    return ""
 
 
 def normalize_preke_paslauga_tipas(value: object) -> str:
@@ -62,15 +123,17 @@ def normalize_preke_paslauga_tipas(value: object) -> str:
     'kodas/kodai', пробелы, запятые/точки. Пусто/непонятно -> '1'.
     """
     if value is None:
+        logger.info("[RIVILE:TIPAS] value=None -> '1'")
         return "1"
     s = str(value).strip().lower()
     if not s:
+        logger.info("[RIVILE:TIPAS] value='' -> '1'")
         return "1"
 
-    # как число
     try:
         n = int(float(s.replace(",", ".")))
         if n in (1, 2, 3):
+            logger.info("[RIVILE:TIPAS] numeric %r -> %r", s, n)
             return str(n)
     except ValueError:
         pass
@@ -80,16 +143,20 @@ def normalize_preke_paslauga_tipas(value: object) -> str:
     kodas_syn    = {"kodas", "kodai"}
 
     if s in preke_syn:
+        logger.info("[RIVILE:TIPAS] word %r -> '1'", s)
         return "1"
     if s in paslauga_syn:
+        logger.info("[RIVILE:TIPAS] word %r -> '2'", s)
         return "2"
     if s in kodas_syn:
+        logger.info("[RIVILE:TIPAS] word %r -> '3'", s)
         return "3"
+    logger.info("[RIVILE:TIPAS] fallback for %r -> '1'", s)
     return "1"
 
 
 # =========================================================
-# 1) PREKĖS / PASLAUGOS / KODAI (N25)
+# 1) PREKĖS / PASLAУGOS / KODAI (N25)
 # =========================================================
 def export_prekes_paslaugos_kodai_group_to_rivile(documents):
     """
@@ -98,12 +165,15 @@ def export_prekes_paslaugos_kodai_group_to_rivile(documents):
       - paslaugos_xml (N17) — только услуги
       - kodai_xml (N25)  — если doc.preke_paslauga == '3', формируем блоки <N25> по заданному шаблону
     """
+    logger.info("[RIVILE:N17/N25] start, docs=%d", len(documents) if documents is not None else 0)
     prekes_dict = {}      # key: kodas -> Element("N17")
     paslaugos_dict = {}   # key: kodas -> Element("N17")
     kodai_dict = {}       # key: kodas -> Element("N25")
 
     def add_n17_record(target_dict, kodas, tipas, unit, pavadinimas, kodas_ds="PR001"):
-        if not kodas or kodas in target_dict:
+        if not kodas:
+            return
+        if kodas in target_dict:
             return
         n17 = ET.Element("N17")
         ET.SubElement(n17, "N17_KODAS_PS").text = smart_str(kodas)
@@ -112,6 +182,7 @@ def export_prekes_paslaugos_kodai_group_to_rivile(documents):
         ET.SubElement(n17, "N17_PAV").text      = smart_str(pavadinimas or "Prekė")
         ET.SubElement(n17, "N17_KODAS_DS").text = smart_str(kodas_ds or "PR001")
         target_dict[kodas] = n17
+        logger.info("[RIVILE:N17] added kodas=%r tipas=%r unit=%r", kodas, tipas, unit)
 
     def add_n25_record(kodai_dict, doc):
         kodas = getattr(doc, "prekes_kodas", None)
@@ -151,10 +222,12 @@ def export_prekes_paslaugos_kodai_group_to_rivile(documents):
         ET.SubElement(n25, "N25_MOKESTIS").text = smart_str(str(mokestis))
         ET.SubElement(n25, "N25_POZ_DATE").text = smart_str(str(poz_date))
         kodai_dict[kodas] = n25
+        logger.info("[RIVILE:N25] added kodas=%r tipas=%r saskaita=%r", kodas, tipas, saskaita)
 
-    for doc in documents:
+    for doc in documents or []:
         line_items = getattr(doc, "line_items", None)
         has_items = bool(line_items and hasattr(line_items, 'all') and line_items.exists())
+        logger.info("[RIVILE:N17/N25] doc=%s has_items=%s", getattr(doc, "pk", None), has_items)
 
         if not has_items:
             tipas = normalize_preke_paslauga_tipas(getattr(doc, "preke_paslauga", None))
@@ -190,7 +263,6 @@ def export_prekes_paslaugos_kodai_group_to_rivile(documents):
                 elif tipas == '3':
                     add_n25_record(kodai_dict, doc)
 
-    # Склеиваем XML
     prekes_xml = b"".join(prettify_no_header(el) + b"\n" for el in prekes_dict.values())
     paslaugos_xml = b"".join(prettify_no_header(el) + b"\n" for el in paslaugos_dict.values())
     kodai_xml = b"".join(prettify_no_header(el) + b"\n" for el in kodai_dict.values())
@@ -202,6 +274,8 @@ def export_prekes_paslaugos_kodai_group_to_rivile(documents):
     if kodai_xml.strip():
         kodai_xml = expand_empty_tags(kodai_xml)
 
+    logger.info("[RIVILE:N17/N25] done prekes=%d paslaugos=%d kodai=%d",
+                len(prekes_dict), len(paslaugos_dict), len(kodai_dict))
     return prekes_xml, paslaugos_xml, kodai_xml
 
 
@@ -210,7 +284,7 @@ def export_prekes_paslaugos_kodai_group_to_rivile(documents):
 # =========================================================
 def export_pirkimai_group_to_rivile(documents):
     elements = []
-    for doc in documents:
+    for doc in documents or []:
         i06 = ET.Element("I06")
         currency = getattr(doc, 'currency', 'EUR') or 'EUR'
         op_date = getattr(doc, 'operation_date', None) or getattr(doc, 'invoice_date', None)
@@ -218,7 +292,7 @@ def export_pirkimai_group_to_rivile(documents):
 
         series = smart_str(getattr(doc, "document_series", "") or "")
         number = smart_str(getattr(doc, "document_number", "") or "")
-        dok_num = f"{series}{number}" if series and not number.startswith(series) else number
+        dok_num = build_dok_nr(series, number)
 
         if currency.upper() != "EUR":
             ET.SubElement(i06, "I06_VAL_POZ").text = "1"
@@ -228,25 +302,38 @@ def export_pirkimai_group_to_rivile(documents):
         else:
             ET.SubElement(i06, "I06_VAL_POZ").text = "0"
 
-        ET.SubElement(i06, "I06_DOK_NR").text     = dok_num
-        ET.SubElement(i06, "I06_OP_DATA").text    = format_date(op_date)
-        ET.SubElement(i06, "I06_DOK_DATA").text   = format_date(getattr(doc, 'invoice_date', None))
-        seller_code = resolve_party_code(doc, 'seller_id', 'seller_vat_code')
+        ET.SubElement(i06, "I06_DOK_NR").text   = dok_num
+        ET.SubElement(i06, "I06_OP_DATA").text  = format_date(op_date)
+        ET.SubElement(i06, "I06_DOK_DATA").text = format_date(getattr(doc, 'invoice_date', None))
+
+        # ЕДИНЫЙ КОД ПРОДАВЦА (seller): id -> vat -> id_programoje
+        seller_code = get_party_code(
+            doc,
+            role="seller",
+            id_field="seller_id",
+            vat_field="seller_vat_code",
+            id_programoje_field="seller_id_programoje",
+        )
         ET.SubElement(i06, "I06_KODAS_KS").text = smart_str(seller_code)
+        logger.info("[RIVILE:I06] doc=%s dir=pirkimas KODAS_KS=%r DOK_NR=%r CUR=%s",
+                    getattr(doc, "pk", None), seller_code, dok_num, currency)
+
         ET.SubElement(i06, "I06_DOK_REG").text    = smart_str(getattr(doc, 'document_number', '') or '')
         ET.SubElement(i06, "I06_APRASYMAS1").text = smart_str(getattr(doc, 'preview_url', '') or '')
 
         line_items = getattr(doc, "line_items", None)
+        added = 0
         if line_items and hasattr(line_items, 'all') and line_items.exists():
+            line_map = getattr(doc, "_pvm_line_map", None)  # есть -> multi; нет -> single
             for item in line_items.all():
                 i07 = ET.SubElement(i06, "I07")
-                # I07_KODAS: item -> doc -> fallback
+
                 kodas = getattr(item, "prekes_kodas", None) or getattr(doc, "prekes_kodas", None) or "PREKE001"
                 ET.SubElement(i07, "I07_KODAS").text = kodas
 
-                # I07_TIPAS: item.preke_paslauga -> doc.preke_paslauga -> '1'
                 preke_paslauga_src = getattr(item, "preke_paslauga", None) or getattr(doc, "preke_paslauga", None)
-                ET.SubElement(i07, "I07_TIPAS").text = normalize_preke_paslauga_tipas(preke_paslauga_src)
+                tipas = normalize_preke_paslauga_tipas(preke_paslauga_src)
+                ET.SubElement(i07, "I07_TIPAS").text = tipas
 
                 if currency.upper() == "EUR":
                     ET.SubElement(i07, "I07_KAINA_BE").text  = get_price_or_zero(getattr(item, "price", None))
@@ -260,14 +347,19 @@ def export_pirkimai_group_to_rivile(documents):
                 ET.SubElement(i07, "I07_MOKESTIS").text   = "1"
                 ET.SubElement(i07, "I07_MOKESTIS_P").text = vat_to_int_str(getattr(item, "vat_percent", None))
                 ET.SubElement(i07, "T_KIEKIS").text       = str(getattr(item, "quantity", None) or "1")
-                ET.SubElement(i07, "I07_KODAS_KL").text   = smart_str(getattr(item, "pvm_kodas", None) or "")
+
+                # источники кода без fallback’ов
+                if line_map is not None:  # multi
+                    code = (line_map or {}).get(getattr(item, "id", None))
+                else:                      # single
+                    code = getattr(item, "pvm_kodas", None)
+                ET.SubElement(i07, "I07_KODAS_KL").text = smart_str(code or "")
+
+                added += 1
         else:
-            # Одна строка на документ
             i07 = ET.SubElement(i06, "I07")
             kodas = getattr(doc, "prekes_kodas", None) or "PREKE001"
             ET.SubElement(i07, "I07_KODAS").text = kodas
-
-            # I07_TIPAS: doc.preke_paslauga -> '1'
             ET.SubElement(i07, "I07_TIPAS").text = normalize_preke_paslauga_tipas(getattr(doc, "preke_paslauga", None))
 
             if currency.upper() == "EUR":
@@ -283,7 +375,9 @@ def export_pirkimai_group_to_rivile(documents):
             ET.SubElement(i07, "I07_MOKESTIS_P").text = vat_to_int_str(getattr(doc, "vat_percent", None))
             ET.SubElement(i07, "T_KIEKIS").text       = "1"
             ET.SubElement(i07, "I07_KODAS_KL").text   = smart_str(getattr(doc, "pvm_kodas", None) or "")
+            added = 1
 
+        logger.info("[RIVILE:I07] doc=%s lines=%d", getattr(doc, "pk", None), added)
         elements.append(i06)
 
     xml = b""
@@ -297,14 +391,14 @@ def export_pirkimai_group_to_rivile(documents):
 # =========================================================
 def export_pardavimai_group_to_rivile(documents):
     elements = []
-    for doc in documents:
+    for doc in documents or []:
         i06 = ET.Element("I06")
         currency = getattr(doc, 'currency', 'EUR') or 'EUR'
         op_date = getattr(doc, 'operation_date', None) or getattr(doc, 'invoice_date', None)
 
         series = smart_str(getattr(doc, "document_series", "") or "")
         number = smart_str(getattr(doc, "document_number", "") or "")
-        dok_num = f"{series}{number}" if series and not number.startswith(series) else number
+        dok_num = build_dok_nr(series, number)
 
         ET.SubElement(i06, "I06_OP_TIP").text = "51"
         if currency.upper() != "EUR":
@@ -315,25 +409,38 @@ def export_pardavimai_group_to_rivile(documents):
         else:
             ET.SubElement(i06, "I06_VAL_POZ").text = "0"
 
-        ET.SubElement(i06, "I06_DOK_NR").text     = dok_num
-        ET.SubElement(i06, "I06_OP_DATA").text    = format_date(op_date)
-        ET.SubElement(i06, "I06_DOK_DATA").text   = format_date(getattr(doc, 'invoice_date', None))
-        buyer_code = resolve_party_code(doc, 'buyer_id', 'buyer_vat_code')
+        ET.SubElement(i06, "I06_DOK_NR").text   = dok_num
+        ET.SubElement(i06, "I06_OP_DATA").text  = format_date(op_date)
+        ET.SubElement(i06, "I06_DOK_DATA").text = format_date(getattr(doc, 'invoice_date', None))
+
+        # ЕДИНЫЙ КОД ПОКУПАТЕЛЯ (buyer): id -> vat -> id_programoje
+        buyer_code = get_party_code(
+            doc,
+            role="buyer",
+            id_field="buyer_id",
+            vat_field="buyer_vat_code",
+            id_programoje_field="buyer_id_programoje",
+        )
         ET.SubElement(i06, "I06_KODAS_KS").text = smart_str(buyer_code)
+        logger.info("[RIVILE:I06] doc=%s dir=pardavimas KODAS_KS=%r DOK_NR=%r CUR=%s",
+                    getattr(doc, "pk", None), buyer_code, dok_num, currency)
+
         ET.SubElement(i06, "I06_DOK_REG").text    = smart_str(getattr(doc, 'document_number', '') or '')
         ET.SubElement(i06, "I06_APRASYMAS1").text = smart_str(getattr(doc, 'preview_url', '') or '')
 
         line_items = getattr(doc, "line_items", None)
+        added = 0
         if line_items and hasattr(line_items, 'all') and line_items.exists():
+            line_map = getattr(doc, "_pvm_line_map", None)  # есть -> multi; нет -> single
             for item in line_items.all():
                 i07 = ET.SubElement(i06, "I07")
-                # I07_KODAS: item -> doc -> fallback
+
                 kodas = getattr(item, "prekes_kodas", None) or getattr(doc, "prekes_kodas", None) or "PREKE002"
                 ET.SubElement(i07, "I07_KODAS").text = kodas
 
-                # I07_TIPAS: item.preke_paslauga -> doc.preke_paslauga -> '1'
                 preke_paslauga_src = getattr(item, "preke_paslauga", None) or getattr(doc, "preke_paslauga", None)
-                ET.SubElement(i07, "I07_TIPAS").text = normalize_preke_paslauga_tipas(preke_paslauga_src)
+                tipas = normalize_preke_paslauga_tipas(preke_paslauga_src)
+                ET.SubElement(i07, "I07_TIPAS").text = tipas
 
                 if currency.upper() == "EUR":
                     ET.SubElement(i07, "I07_KAINA_BE").text  = get_price_or_zero(getattr(item, "price", None))
@@ -343,17 +450,23 @@ def export_pardavimai_group_to_rivile(documents):
                     ET.SubElement(i07, "I07_VAL_KAINA").text  = get_price_or_zero(getattr(item, "price", None))
                     ET.SubElement(i07, "I07_PVM_VAL").text    = get_price_or_zero(getattr(item, "vat", None))
                     ET.SubElement(i07, "I07_SUMA_VAL").text   = get_price_or_zero(getattr(item, "subtotal", None))
-                ET.SubElement(i07, "I07_MOKESTIS").text   = "1"
+
+                ET.SubElement(i07, "I07_MOKESTИС").text   = "1"
                 ET.SubElement(i07, "I07_MOKESTIS_P").text = vat_to_int_str(getattr(item, "vat_percent", None))
                 ET.SubElement(i07, "T_KIEKIS").text       = str(getattr(item, "quantity", None) or "1")
-                ET.SubElement(i07, "I07_KODAS_KL").text   = smart_str(getattr(item, "pvm_kodas", None) or "")
+
+                # источники кода без fallback’ов
+                if line_map is not None:  # multi
+                    code = (line_map or {}).get(getattr(item, "id", None))
+                else:                      # single
+                    code = getattr(item, "pvm_kodas", None)
+                ET.SubElement(i07, "I07_KODAS_KL").text = smart_str(code or "")
+
+                added += 1
         else:
-            # Одна строка
             i07 = ET.SubElement(i06, "I07")
             kodas = getattr(doc, "prekes_kodas", None) or "PREKE002"
             ET.SubElement(i07, "I07_KODAS").text = kodas
-
-            # I07_TIPAS: doc.preke_paslauga -> '1'
             ET.SubElement(i07, "I07_TIPAS").text = normalize_preke_paslauga_tipas(getattr(doc, "preke_paslauga", None))
 
             if currency.upper() == "EUR":
@@ -364,11 +477,14 @@ def export_pardavimai_group_to_rivile(documents):
                 ET.SubElement(i07, "I07_VAL_KAINA").text  = get_price_or_zero(getattr(doc, "amount_wo_vat", None))
                 ET.SubElement(i07, "I07_PVM_VAL").text    = get_price_or_zero(getattr(doc, "vat_amount", None))
                 ET.SubElement(i07, "I07_SUMA_VAL").text   = get_price_or_zero(getattr(doc, "amount_wo_vat", None))
+
             ET.SubElement(i07, "I07_MOKESTIS").text   = "1"
             ET.SubElement(i07, "I07_MOKESTIS_P").text = vat_to_int_str(getattr(doc, "vat_percent", None))
             ET.SubElement(i07, "T_KIEKIS").text       = "1"
             ET.SubElement(i07, "I07_KODAS_KL").text   = smart_str(getattr(doc, "pvm_kodas", None) or "")
+            added = 1
 
+        logger.info("[RIVILE:I07] doc=%s lines=%d", getattr(doc, "pk", None), added)
         elements.append(i06)
 
     xml = b""
@@ -395,75 +511,117 @@ def export_clients_group_to_rivile(clients=None, documents=None):
 
     # --- 1) Извлекаем из документов ---
     if documents:
+        logger.info("[RIVILE:N08] collect from documents: %d", len(documents))
         for doc in documents:
             # корректно определяем сторону
-            doc_type = (getattr(doc, 'pirkimas_pardavimas', '') or '').strip().lower()
+            doc_type = (_s(getattr(doc, 'pirkimas_pardavimas', ''))).lower()
             if doc_type not in ('pirkimas', 'pardavimas'):
-                if _nz(getattr(doc, 'seller_id', None)) or _nz(getattr(doc, 'seller_vat_code', None)):
+                if _nz(getattr(doc, 'seller_id', None)) or _nz(getattr(doc, 'seller_vat_code', None)) or _nz(getattr(doc, 'seller_id_programoje', None)):
                     doc_type = 'pirkimas'
-                elif _nz(getattr(doc, 'buyer_id', None)) or _nz(getattr(doc, 'buyer_vat_code', None)):
+                elif _nz(getattr(doc, 'buyer_id', None)) or _nz(getattr(doc, 'buyer_vat_code', None)) or _nz(getattr(doc, 'buyer_id_programoje', None)):
                     doc_type = 'pardavimas'
                 else:
-                    # ничего не известно — пропускаем
+                    logger.info("[RIVILE:N08] doc=%s skipped (no side nor ids)", getattr(doc, "pk", None))
                     continue
 
             if doc_type == 'pirkimas':
-                client_code = resolve_party_code(doc, 'seller_id', 'seller_vat_code')
+                # ЕДИНЫЙ КОД: как и в I06 (seller)
+                client_code = get_party_code(
+                    doc,
+                    role="seller",
+                    id_field="seller_id",
+                    vat_field="seller_vat_code",
+                    id_programoje_field="seller_id_programoje",
+                )
                 if client_code not in client_codes_seen:
                     client_data = {
                         'type': 'pirkimas',
-                        'client_code': client_code,  # передаём явно
-                        'seller_id': (getattr(doc, 'seller_id', '') or '').strip(),
-                        'seller_vat_code': (getattr(doc, 'seller_vat_code', '') or '').strip(),
+                        'client_code': client_code,
+                        'seller_id': _s(getattr(doc, 'seller_id', '') or ''),
+                        'seller_vat_code': _s(getattr(doc, 'seller_vat_code', '') or ''),
+                        'seller_id_programoje': _s(getattr(doc, 'seller_id_programoje', '') or ''),
                         'seller_is_person': bool(getattr(doc, 'seller_is_person', False)),
-                        'name': (getattr(doc, 'seller_name', '') or '').strip(),
-                        'address': (getattr(doc, 'seller_address', '') or '').strip(),
-                        'country_iso': (getattr(doc, 'seller_country_iso', '') or '').strip(),
+                        'name': _s(getattr(doc, 'seller_name', '') or ''),
+                        'address': _s(getattr(doc, 'seller_address', '') or ''),
+                        'country_iso': _s(getattr(doc, 'seller_country_iso', '') or ''),
                         'currency': (getattr(doc, 'currency', 'EUR') or 'EUR').upper(),
-                        'kodas_ds': (getattr(doc, 'kodas_ds', 'PT001') or 'PT001').strip(),
-                        'iban': (getattr(doc, 'seller_iban', '') or '').strip(),
+                        'kodas_ds': _s(getattr(doc, 'kodas_ds', 'PT001') or 'PT001'),
+                        'iban': _s(getattr(doc, 'seller_iban', '') or ''),
                     }
+                    logger.info("[RIVILE:N08] add from doc=%s type=pirkimas client_code=%r", getattr(doc, "pk", None), client_code)
                     _add_client_n08(elements, client_data)
                     client_codes_seen.add(client_code)
+                else:
+                    logger.info("[RIVILE:N08] skip duplicate client_code=%r (doc=%s)", client_code, getattr(doc, "pk", None))
 
             elif doc_type == 'pardavimas':
-                client_code = resolve_party_code(doc, 'buyer_id', 'buyer_vat_code')
+                # ЕДИНЫЙ КОД: как и в I06 (buyer)
+                client_code = get_party_code(
+                    doc,
+                    role="buyer",
+                    id_field="buyer_id",
+                    vat_field="buyer_vat_code",
+                    id_programoje_field="buyer_id_programoje",
+                )
                 if client_code not in client_codes_seen:
                     client_data = {
                         'type': 'pardavimas',
                         'client_code': client_code,
-                        'buyer_id': (getattr(doc, 'buyer_id', '') or '').strip(),
-                        'buyer_vat_code': (getattr(doc, 'buyer_vat_code', '') or '').strip(),
+                        'buyer_id': _s(getattr(doc, 'buyer_id', '') or ''),
+                        'buyer_vat_code': _s(getattr(doc, 'buyer_vat_code', '') or ''),
+                        'buyer_id_programoje': _s(getattr(doc, 'buyer_id_programoje', '') or ''),
                         'buyer_is_person': bool(getattr(doc, 'buyer_is_person', False)),
-                        'name': (getattr(doc, 'buyer_name', '') or '').strip(),
-                        'address': (getattr(doc, 'buyer_address', '') or '').strip(),
-                        'country_iso': (getattr(doc, 'buyer_country_iso', '') or '').strip(),
+                        'name': _s(getattr(doc, 'buyer_name', '') or ''),
+                        'address': _s(getattr(doc, 'buyer_address', '') or ''),
+                        'country_iso': _s(getattr(doc, 'buyer_country_iso', '') or ''),
                         'currency': (getattr(doc, 'currency', 'EUR') or 'EUR').upper(),
-                        'kodas_ds': (getattr(doc, 'kodas_ds', 'PT001') or 'PT001').strip(),
-                        'iban': (getattr(doc, 'buyer_iban', '') or '').strip(),
+                        'kodas_ds': _s(getattr(doc, 'kodas_ds', 'PT001') or 'PT001'),
+                        'iban': _s(getattr(doc, 'buyer_iban', '') or ''),
                     }
+                    logger.info("[RIVILE:N08] add from doc=%s type=pardavimas client_code=%r", getattr(doc, "pk", None), client_code)
                     _add_client_n08(elements, client_data)
                     client_codes_seen.add(client_code)
+                else:
+                    logger.info("[RIVILE:N08] skip duplicate client_code=%r (doc=%s)", client_code, getattr(doc, "pk", None))
 
     # --- 2) Клиенты, переданные вручную ---
     if clients:
+        logger.info("[RIVILE:N08] collect from clients dicts: %d", len(clients))
         for client in clients:
-            doc_type = (client.get('type') or '').strip().lower()
-            client_code = (client.get('client_code') or '').strip()
-            if not client_code:
-                if doc_type == 'pirkimas':
-                    client_code = (client.get('seller_id') or client.get('seller_vat_code') or '').strip()
-                elif doc_type == 'pardavimas':
-                    client_code = (client.get('buyer_id') or client.get('buyer_vat_code') or '').strip()
-                if not client_code:
-                    client_code = (client.get('id') or client.get('vat') or '').strip() or "111111111"
+            doc_type = _s(client.get('type')).lower()
 
-            if client_code not in client_codes_seen:
+            if doc_type == 'pirkimas':
+                client_code = (
+                    _s(client.get('client_code'))
+                    or _s(client.get('seller_id'))
+                    or _s(client.get('seller_vat_code'))
+                    or _s(client.get('seller_id_programoje'))
+                )
+            elif doc_type == 'pardavimas':
+                client_code = (
+                    _s(client.get('client_code'))
+                    or _s(client.get('buyer_id'))
+                    or _s(client.get('buyer_vat_code'))
+                    or _s(client.get('buyer_id_programoje'))
+                )
+            else:
+                client_code = (
+                    _s(client.get('client_code'))
+                    or _s(client.get('id'))
+                    or _s(client.get('vat'))
+                    or _s(client.get('id_programoje'))
+                )
+
+            if client_code and client_code not in client_codes_seen:
+                logger.info("[RIVILE:N08] add from clients type=%s client_code=%r raw=%s", doc_type, client_code, client)
                 client = {**client, 'client_code': client_code}
                 _add_client_n08(elements, client)
                 client_codes_seen.add(client_code)
+            else:
+                logger.info("[RIVILE:N08] skip duplicate/empty client_code=%r (manual)", client_code)
 
     # --- 3) Склеиваем и возвращаем XML ---
+    logger.info("[RIVILE:N08] total unique clients: %d", len(elements))
     xml = b""
     for el in elements:
         xml += prettify_no_header(el) + b"\n"
@@ -471,51 +629,62 @@ def export_clients_group_to_rivile(clients=None, documents=None):
 
 
 def _add_client_n08(elements, client):
-    doc_type = (client.get('type') or '').strip().lower()
-    client_code = (client.get('client_code') or '').strip()
+    """
+    Правила:
+      - N08_IM_KODAS: только seller_id/buyer_id (или id в else); если пусто — оставляем пустым.
+      - N08_PVM_KODAS: только seller_vat_code/buyer_vat_code (или vat в else).
+      - N08_KODAS_KS и N33_KODAS_KS: client_code собран по цепочке *_id -> *_vat_code -> *_id_programoje (без рандома).
+    """
+    doc_type = _s(client.get('type')).lower()
 
-    # Код клиента (как и было)
-    if not client_code:
-        for k in ('seller_id', 'seller_vat_code', 'buyer_id', 'buyer_vat_code', 'id', 'vat'):
-            v = (client.get(k) or '').strip()
-            if v:
-                client_code = v
-                break
-        if not client_code:
-            client_code = "111111111"
-
-    # --- PVM kodas: первичный источник по типу ---
     if doc_type == 'pirkimas':
-        tipas = "2" if client.get('seller_is_person') else "1"
+        client_code = (
+            _s(client.get('client_code'))
+            or _s(client.get('seller_id'))
+            or _s(client.get('seller_vat_code'))
+            or _s(client.get('seller_id_programoje'))
+        )
+        vat_code    = _s(client.get('seller_vat_code'))      # только VAT-код продавца
+        im_code     = _s(client.get('seller_id'))            # только ID продавца
+        tipas       = "2" if client.get('seller_is_person') else "1"
         tipas_pirk, tipas_tiek, rusis = "0", "1", "2"
-        vat_code = (client.get('seller_vat_code') or '').strip()
     elif doc_type == 'pardavimas':
-        tipas = "2" if client.get('buyer_is_person') else "1"
+        client_code = (
+            _s(client.get('client_code'))
+            or _s(client.get('buyer_id'))
+            or _s(client.get('buyer_vat_code'))
+            or _s(client.get('buyer_id_programoje'))
+        )
+        vat_code    = _s(client.get('buyer_vat_code'))       # только VAT-код покупателя
+        im_code     = _s(client.get('buyer_id'))             # только ID покупателя
+        tipas       = "2" if client.get('buyer_is_person') else "1"
         tipas_pirk, tipas_tiek, rusis = "1", "0", "1"
-        vat_code = (client.get('buyer_vat_code') or '').strip()
     else:
-        tipas = "2" if client.get('is_person') else "1"
+        client_code = (
+            _s(client.get('client_code'))
+            or _s(client.get('id'))
+            or _s(client.get('vat'))
+            or _s(client.get('id_programoje'))
+        )
+        vat_code    = _s(client.get('vat'))
+        im_code     = _s(client.get('id'))
+        tipas       = "2" if client.get('is_person') else "1"
         tipas_pirk, tipas_tiek, rusis = "1", "1", "1"
-        vat_code = (client.get('vat') or '').strip()
 
-    # --- Устойчивый фоллбек, если пусто ---
-    if not vat_code:
-        for k in ('seller_vat_code', 'buyer_vat_code', 'vat', 'pvm_kodas', 'vat_code'):
-            v = (client.get(k) or '').strip()
-            if v:
-                vat_code = v
-                break
-
-    currency = smart_str((client.get('currency') or 'EUR')).upper()
+    name = _s(client.get('name')) or 'Nezinoma'
+    currency = smart_str((_s(client.get('currency')) or 'EUR')).upper()
     val_poz = "0" if currency == "EUR" else "1"
+
+    logger.info("[RIVILE:N08->] type=%s name=%r KODAS_KS=%r IM_KODAS=%r PVM_KODAS=%r VL=%s",
+                doc_type, name, client_code, im_code, vat_code, currency)
 
     n08 = ET.Element("N08")
     ET.SubElement(n08, "N08_KODAS_KS").text    = smart_str(client_code)
     ET.SubElement(n08, "N08_RUSIS").text       = rusis
-    ET.SubElement(n08, "N08_PVM_KODAS").text   = smart_str(vat_code)  # без каких-либо замен
-    ET.SubElement(n08, "N08_IM_KODAS").text    = smart_str(client_code)
-    ET.SubElement(n08, "N08_PAV").text         = smart_str((client.get('name') or 'Nezinoma').strip() or 'Nezinoma')
-    ET.SubElement(n08, "N08_ADR").text         = smart_str((client.get('address') or '').strip())
+    ET.SubElement(n08, "N08_PVM_KODAS").text   = smart_str(vat_code)
+    ET.SubElement(n08, "N08_IM_KODAS").text    = smart_str(im_code)
+    ET.SubElement(n08, "N08_PAV").text         = smart_str(name or 'Nezinoma')
+    ET.SubElement(n08, "N08_ADR").text         = smart_str(_s(client.get('address')))
     ET.SubElement(n08, "N08_TIPAS_PIRK").text  = tipas_pirk
     ET.SubElement(n08, "N08_TIPAS_TIEK").text  = tipas_tiek
     ET.SubElement(n08, "N08_KODAS_DS").text    = smart_str(client.get('kodas_ds', 'PT001'))
@@ -528,1022 +697,8 @@ def _add_client_n08(elements, client):
 
     n33 = ET.SubElement(n08, "N33")
     ET.SubElement(n33, "N33_NUTYL").text       = "1"
-    ET.SubElement(n33, "N33_KODAS_KS").text    = smart_str(client_code)
-    ET.SubElement(n33, "N33_S_KODAS").text     = smart_str((client.get('iban') or '').strip())
-    ET.SubElement(n33, "N33_SALIES_K").text    = smart_str((client.get('country_iso') or '').strip().upper())
+    ET.SubElement(n33, "N33_KODAS_KS").text    = smart_str(client_code)   # тот же код, что и в N08_KODAS_KS
+    ET.SubElement(n33, "N33_S_KODAS").text     = smart_str(_s(client.get('iban')))
+    ET.SubElement(n33, "N33_SALIES_K").text    = smart_str(_s(client.get('country_iso')).upper())
 
     elements.append(n08)
-
-
-
-
-
-
-
-
-
-
-# import xml.etree.ElementTree as ET
-# from django.utils.encoding import smart_str
-# from .formatters import format_date, vat_to_int_str, get_price_or_zero, expand_empty_tags
-# from ..models import CurrencyRate
-# from xml.sax.saxutils import unescape
-
-
-
-
-# # =========================
-# # Helpers
-# # =========================
-# def get_currency_rate(currency_code, date_obj):
-#     """
-#     Получить курс для валюты на заданную дату (к EUR).
-#     """
-#     if not currency_code or currency_code.upper() == "EUR":
-#         return 1.0
-#     obj = CurrencyRate.objects.filter(currency=currency_code.upper(), date=date_obj).first()
-#     if obj:
-#         return obj.rate
-#     obj = CurrencyRate.objects.filter(currency=currency_code.upper(), date__lt=date_obj).order_by('-date').first()
-#     return obj.rate if obj else None
-
-
-# def prettify_no_header(elem):
-#     """
-#     Возвращает pretty-XML без заголовка <?xml ...?> (bytes),
-#     при этом &quot; заменяется на ".
-#     """
-#     from xml.dom import minidom
-#     from xml.sax.saxutils import unescape
-
-#     rough_string = ET.tostring(elem, encoding="utf-8")
-#     reparsed = minidom.parseString(rough_string)
-#     pretty_xml = reparsed.toprettyxml(indent="  ")
-#     # убираем заголовок <?xml ...?>
-#     pretty_xml = '\n'.join(pretty_xml.split('\n')[1:])
-#     # убираем пустые строки
-#     pretty_xml = '\n'.join([line for line in pretty_xml.split('\n') if line.strip()])
-#     # снимаем экранирование кавычек
-#     pretty_xml = unescape(pretty_xml, {"&quot;": '"'})
-#     return pretty_xml.encode("utf-8")
-
-
-
-# def resolve_party_code(doc, id_field, vat_field):
-#     """
-#     Возвращает код контрагента для Rivile:
-#     1) doc.<id_field> если непустой
-#     2) иначе doc.<vat_field> если непустой
-#     3) иначе '111111111'
-#     """
-#     val = getattr(doc, id_field, None)
-#     if val is not None and str(val).strip():
-#         return str(val).strip()
-#     val = getattr(doc, vat_field, None)
-#     if val is not None and str(val).strip():
-#         return str(val).strip()
-#     return "111111111"
-
-
-# # =========================================================
-# # 1) PREKĖS / PASLAUGOS / KODAI (N25) — ПО ТВОЕЙ ЛОГИКЕ
-# # =========================================================
-# def export_prekes_paslaugos_kodai_group_to_rivile(documents):
-#     """
-#     Возвращает три XML-потока БЕЗ <root>:
-#       - prekes_xml (N17)  — только товары
-#       - paslaugos_xml (N17) — только услуги
-#       - kodai_xml (N25)  — если doc.preke_paslauga == '3', формируем блоки <N25> по заданному шаблону
-#     """
-#     prekes_dict = {}      # key: kodas -> Element("N17")
-#     paslaugos_dict = {}   # key: kodas -> Element("N17")
-#     kodai_dict = {}       # key: kodas -> Element("N25")
-
-#     def normalize_tipas(value):
-#         """
-#         Приводит doc/item.preke_paslauga к '1'/'2'/'3'.
-#         Поддерживает int, str, синонимы и лишние пробелы.
-#         """
-#         if value is None:
-#             return None
-#         if isinstance(value, (int, float)):
-#             value = str(int(value))
-#         s = str(value).strip().lower()
-#         if s in {"1", "preke", "prekė", "prekė"}:
-#             return "1"
-#         if s in {"2", "paslauga"}:
-#             return "2"
-#         if s in {"3", "komplektavimas", "komplektavimu", "komplektavimų"}:
-#             return "3"
-#         return None
-
-#     def add_n17_record(target_dict, kodas, tipas, unit, pavadinimas, kodas_ds="PR001"):
-#         if not kodas or kodas in target_dict:
-#             return
-#         n17 = ET.Element("N17")
-#         ET.SubElement(n17, "N17_KODAS_PS").text = smart_str(kodas)
-#         ET.SubElement(n17, "N17_TIPAS").text    = smart_str(tipas or '1')
-#         ET.SubElement(n17, "N17_KODAS_US").text = smart_str(unit or "VNT")
-#         ET.SubElement(n17, "N17_PAV").text      = smart_str(pavadinimas or "Prekė")
-#         ET.SubElement(n17, "N17_KODAS_DS").text = smart_str(kodas_ds or "PR001")
-#         target_dict[kodas] = n17
-
-#     def add_n25_record(kodai_dict, doc):
-#         kodas = getattr(doc, "prekes_kodas", None)
-#         if not kodas or kodas in kodai_dict:
-#             return
-
-#         pavadinimas = getattr(doc, "prekes_pavadinimas", None) or "Prekė"
-
-#         # <-- ВАЖНО: TIPAS зависит от doc.pirkimas_pardavimas
-#         pirk_pard = getattr(doc, "pirkimas_pardavimas", "").strip().lower()
-#         if pirk_pard == "pirkimas":
-#             tipas = "1"
-#         elif pirk_pard == "pardavimas":
-#             tipas = "2"
-#         else:
-#             tipas = "1"  # дефолт – пускай будет как закупка
-
-#         saskaita    = getattr(doc, "N25_KODAS_SS", None) or getattr(doc, "saskaita", None) or "5001"
-#         kodas_ds    = getattr(doc, "N25_KODAS_DS", None) or getattr(doc, "kodas_ds", None) or "PR001"
-#         unit        = getattr(doc, "unit", None) or getattr(doc, "N25_KODAS_US", None) or "VNT"
-#         frakcija    = getattr(doc, "N25_FRAKCIJA", None) or "100"
-#         suma        = getattr(doc, "N25_SUMA", None) or "0.00"
-#         tax         = getattr(doc, "N25_TAX", None) or "1"
-#         mokestis    = getattr(doc, "N25_MOKESTIS", None) or "1"
-#         poz_date    = getattr(doc, "N25_POZ_DATE", None) or "0"
-
-#         n25 = ET.Element("N25")
-#         ET.SubElement(n25, "N25_KODAS_BS").text = smart_str(kodas)
-#         ET.SubElement(n25, "N25_PAV").text      = smart_str(pavadinimas)
-#         ET.SubElement(n25, "N25_TIPAS").text    = tipas
-#         ET.SubElement(n25, "N25_KODAS_SS").text = smart_str(saskaita)
-#         ET.SubElement(n25, "N25_KODAS_DS").text = smart_str(kodas_ds)
-#         ET.SubElement(n25, "N25_KODAS_US").text = smart_str(unit)
-#         ET.SubElement(n25, "N25_FRAKCIJA").text = smart_str(str(frakcija))
-#         ET.SubElement(n25, "N25_SUMA").text     = smart_str(str(suma))
-#         ET.SubElement(n25, "N25_TAX").text      = smart_str(str(tax))
-#         ET.SubElement(n25, "N25_MOKESTIS").text = smart_str(str(mokestis))
-#         ET.SubElement(n25, "N25_POZ_DATE").text = smart_str(str(poz_date))
-#         kodai_dict[kodas] = n25
-
-#     for doc in documents:
-#         line_items = getattr(doc, "line_items", None)
-#         has_items = bool(line_items and hasattr(line_items, 'all') and line_items.exists())
-
-#         if not has_items:
-#             tipas = normalize_tipas(getattr(doc, "preke_paslauga", None))
-#             kodas = (getattr(doc, "prekes_kodas", None) or getattr(doc, "prekes_barkodas", None) or "").strip()
-#             if not kodas:
-#                 continue
-#             unit  = (getattr(doc, "unit", None) or "VNT").strip()
-#             pavadinimas = (getattr(doc, "prekes_pavadinimas", None) or "Prekė").strip()
-#             kodas_ds = (getattr(doc, "kodas_ds", None) or "PR001").strip()
-
-#             if tipas == '1':
-#                 add_n17_record(prekes_dict, kodas, '1', unit, pavadinimas, kodas_ds)
-#             elif tipas == '2':
-#                 add_n17_record(paslaugos_dict, kodas, '2', unit, pavadinimas, kodas_ds)
-#             elif tipas == '3':
-#                 add_n25_record(kodai_dict, doc)
-#         else:
-#             for item in line_items.all():
-#                 tipas = normalize_tipas(getattr(item, "preke_paslauga", None) or getattr(doc, "preke_paslauga", None) or '1')
-#                 kodas = (getattr(item, "prekes_kodas", None) or getattr(item, "prekes_barkodas", None) or "").strip()
-#                 if not kodas:
-#                     continue
-#                 unit  = (getattr(item, "unit", None) or "VNT").strip()
-#                 pavadinimas = (getattr(item, "prekes_pavadinimas", None) or "Prekė").strip()
-#                 kodas_ds = (getattr(item, "kodas_ds", None) or "PR001").strip()
-
-#                 if tipas == '1':
-#                     add_n17_record(prekes_dict, kodas, '1', unit, pavadinimas, kodas_ds)
-#                 elif tipas == '2':
-#                     add_n17_record(paslaugos_dict, kodas, '2', unit, pavadinimas, kodas_ds)
-#                 elif tipas == '3':
-#                     add_n25_record(kodai_dict, doc)
-
-#     # Склеиваем XML
-#     prekes_xml = b"".join(prettify_no_header(el) + b"\n" for el in prekes_dict.values())
-#     paslaugos_xml = b"".join(prettify_no_header(el) + b"\n" for el in paslaugos_dict.values())
-#     kodai_xml = b"".join(prettify_no_header(el) + b"\n" for el in kodai_dict.values())
-
-#     if prekes_xml.strip():
-#         prekes_xml = expand_empty_tags(prekes_xml)
-#     if paslaugos_xml.strip():
-#         paslaugos_xml = expand_empty_tags(paslaugos_xml)
-#     if kodai_xml.strip():
-#         kodai_xml = expand_empty_tags(kodai_xml)
-
-#     return prekes_xml, paslaugos_xml, kodai_xml
-
-
-
-# # =========================================================
-# # 2) PIRKIMAI (I06/I07) — ВСЕГДА ПРАВИЛЬНЫЙ I07_KODAS
-# # =========================================================
-# def export_pirkimai_group_to_rivile(documents):
-#     elements = []
-#     for doc in documents:
-#         i06 = ET.Element("I06")
-#         currency = getattr(doc, 'currency', 'EUR') or 'EUR'
-#         op_date = getattr(doc, 'operation_date', None) or getattr(doc, 'invoice_date', None)
-#         ET.SubElement(i06, "I06_OP_TIP").text = "1"
-
-#         series = smart_str(getattr(doc, "document_series", "") or "")
-#         number = smart_str(getattr(doc, "document_number", "") or "")
-#         dok_num = f"{series}{number}" if series and not number.startswith(series) else number
-
-#         if currency.upper() != "EUR":
-#             ET.SubElement(i06, "I06_VAL_POZ").text = "1"
-#             ET.SubElement(i06, "I06_KODAS_VL").text = currency.upper()
-#             rate = get_currency_rate(currency, op_date)
-#             ET.SubElement(i06, "I06_KURSAS").text = str(rate if rate else "1")
-#         else:
-#             ET.SubElement(i06, "I06_VAL_POZ").text = "0"
-
-#         ET.SubElement(i06, "I06_DOK_NR").text     = dok_num
-#         ET.SubElement(i06, "I06_OP_DATA").text    = format_date(op_date)
-#         ET.SubElement(i06, "I06_DOK_DATA").text   = format_date(getattr(doc, 'invoice_date', None))
-#         seller_code = resolve_party_code(doc, 'seller_id', 'seller_vat_code')
-#         ET.SubElement(i06, "I06_KODAS_KS").text = smart_str(seller_code)
-#         ET.SubElement(i06, "I06_DOK_REG").text    = smart_str(getattr(doc, 'document_number', '') or '')
-#         ET.SubElement(i06, "I06_APRASYMAS1").text = smart_str(getattr(doc, 'preview_url', '') or '')
-
-#         line_items = getattr(doc, "line_items", None)
-#         if line_items and hasattr(line_items, 'all') and line_items.exists():
-#             for item in line_items.all():
-#                 i07 = ET.SubElement(i06, "I07")
-#                 # I07_KODAS: item -> doc -> fallback
-#                 kodas = getattr(item, "prekes_kodas", None) or getattr(doc, "prekes_kodas", None) or "PREKE001"
-#                 ET.SubElement(i07, "I07_KODAS").text = kodas
-
-#                 tipas_val = '1'
-#                 preke_paslauga = getattr(item, "preke_paslauga", None) or getattr(doc, "preke_paslauga", None)
-#                 if preke_paslauga:
-#                     pls = str(preke_paslauga).lower()
-#                     if pls == "paslauga":
-#                         tipas_val = "2"
-#                     elif pls == "preke":
-#                         tipas_val = "1"
-#                     elif pls == "3":
-#                         tipas_val = "3"
-#                 ET.SubElement(i07, "I07_TIPAS").text = tipas_val
-
-#                 if currency.upper() == "EUR":
-#                     ET.SubElement(i07, "I07_KAINA_BE").text  = get_price_or_zero(getattr(item, "price", None))
-#                     ET.SubElement(i07, "I07_PVM").text       = get_price_or_zero(getattr(item, "vat", None))
-#                     ET.SubElement(i07, "I07_SUMA").text      = get_price_or_zero(getattr(item, "subtotal", None))
-#                 else:
-#                     ET.SubElement(i07, "I07_VAL_KAINA").text = get_price_or_zero(getattr(item, "price", None))
-#                     ET.SubElement(i07, "I07_PVM_VAL").text   = get_price_or_zero(getattr(item, "vat", None))
-#                     ET.SubElement(i07, "I07_SUMA_VAL").text  = get_price_or_zero(getattr(item, "subtotal", None))
-
-#                 ET.SubElement(i07, "I07_MOKESTIS").text   = "1"
-#                 ET.SubElement(i07, "I07_MOKESTIS_P").text = vat_to_int_str(getattr(item, "vat_percent", None))
-#                 ET.SubElement(i07, "T_KIEKIS").text       = str(getattr(item, "quantity", None) or "1")
-#                 ET.SubElement(i07, "I07_KODAS_KL").text   = smart_str(getattr(item, "pvm_kodas", None) or "")
-#         else:
-#             # Одна строка на документ
-#             i07 = ET.SubElement(i06, "I07")
-#             kodas = getattr(doc, "prekes_kodas", None) or "PREKE001"
-#             ET.SubElement(i07, "I07_KODAS").text = kodas
-
-#             tipas_val = '1'
-#             preke_paslauga = getattr(doc, "preke_paslauga", None)
-#             if preke_paslauga:
-#                 pls = str(preke_paslauga).lower()
-#                 if pls == "paslauga":
-#                     tipas_val = "2"
-#                 elif pls == "preke":
-#                     tipas_val = "1"
-#                 elif pls == "3":
-#                     tipas_val = "3"
-#             ET.SubElement(i07, "I07_TIPAS").text = tipas_val
-
-#             if currency.upper() == "EUR":
-#                 ET.SubElement(i07, "I07_KAINA_BE").text  = get_price_or_zero(getattr(doc, "amount_wo_vat", None))
-#                 ET.SubElement(i07, "I07_PVM").text       = get_price_or_zero(getattr(doc, "vat_amount", None))
-#                 ET.SubElement(i07, "I07_SUMA").text      = get_price_or_zero(getattr(doc, "amount_wo_vat", None))
-#             else:
-#                 ET.SubElement(i07, "I07_VAL_KAINA").text = get_price_or_zero(getattr(doc, "amount_wo_vat", None))
-#                 ET.SubElement(i07, "I07_PVM_VAL").text   = get_price_or_zero(getattr(doc, "vat_amount", None))
-#                 ET.SubElement(i07, "I07_SUMA_VAL").text  = get_price_or_zero(getattr(doc, "amount_wo_vat", None))
-
-#             ET.SubElement(i07, "I07_MOKESTIS").text   = "1"
-#             ET.SubElement(i07, "I07_MOKESTIS_P").text = vat_to_int_str(getattr(doc, "vat_percent", None))
-#             ET.SubElement(i07, "T_KIEKIS").text       = "1"
-#             ET.SubElement(i07, "I07_KODAS_KL").text   = smart_str(getattr(doc, "pvm_kodas", None) or "")
-
-#         elements.append(i06)
-
-#     xml = b""
-#     for el in elements:
-#         xml += prettify_no_header(el) + b"\n"
-#     return expand_empty_tags(xml)
-
-
-# # =========================================================
-# # 3) PARDAVIMAI (I06/I07) — ВСЕГДА ПРАВИЛЬНЫЙ I07_KODAS
-# # =========================================================
-# def export_pardavimai_group_to_rivile(documents):
-#     elements = []
-#     for doc in documents:
-#         i06 = ET.Element("I06")
-#         currency = getattr(doc, 'currency', 'EUR') or 'EUR'
-#         op_date = getattr(doc, 'operation_date', None) or getattr(doc, 'invoice_date', None)
-
-#         series = smart_str(getattr(doc, "document_series", "") or "")
-#         number = smart_str(getattr(doc, "document_number", "") or "")
-#         dok_num = f"{series}{number}" if series and not number.startswith(series) else number
-
-#         ET.SubElement(i06, "I06_OP_TIP").text = "51"
-#         if currency.upper() != "EUR":
-#             ET.SubElement(i06, "I06_VAL_POZ").text = "1"
-#             ET.SubElement(i06, "I06_KODAS_VL").text = currency.upper()
-#             rate = get_currency_rate(currency, op_date)
-#             ET.SubElement(i06, "I06_KURSAS").text = str(rate if rate else "")
-#         else:
-#             ET.SubElement(i06, "I06_VAL_POZ").text = "0"
-
-#         ET.SubElement(i06, "I06_DOK_NR").text     = dok_num
-#         ET.SubElement(i06, "I06_OP_DATA").text    = format_date(op_date)
-#         ET.SubElement(i06, "I06_DOK_DATA").text   = format_date(getattr(doc, 'invoice_date', None))
-#         buyer_code = resolve_party_code(doc, 'buyer_id', 'buyer_vat_code')
-#         ET.SubElement(i06, "I06_KODAS_KS").text = smart_str(buyer_code)
-#         ET.SubElement(i06, "I06_DOK_REG").text    = smart_str(getattr(doc, 'document_number', '') or '')
-#         ET.SubElement(i06, "I06_APRASYMAS1").text = smart_str(getattr(doc, 'preview_url', '') or '')
-
-#         line_items = getattr(doc, "line_items", None)
-#         if line_items and hasattr(line_items, 'all') and line_items.exists():
-#             for item in line_items.all():
-#                 i07 = ET.SubElement(i06, "I07")
-#                 # I07_KODAS: item -> doc -> fallback
-#                 kodas = getattr(item, "prekes_kodas", None) or getattr(doc, "prekes_kodas", None) or "PREKE002"
-#                 ET.SubElement(i07, "I07_KODAS").text = kodas
-
-#                 tipas_val = '1'
-#                 preke_paslauga = getattr(item, "preke_paslauga", None) or getattr(doc, "preke_paslauga", None)
-#                 if preke_paslauga:
-#                     pls = str(preke_paslauga).lower()
-#                     if pls == "paslauga":
-#                         tipas_val = "2"
-#                     elif pls == "preke":
-#                         tipas_val = "1"
-#                     elif pls == "3":
-#                         tipas_val = "3"
-#                 ET.SubElement(i07, "I07_TIPAS").text = tipas_val
-
-#                 if currency.upper() == "EUR":
-#                     ET.SubElement(i07, "I07_KAINA_BE").text  = get_price_or_zero(getattr(item, "price", None))
-#                     ET.SubElement(i07, "I07_PVM").text       = get_price_or_zero(getattr(item, "vat", None))
-#                     ET.SubElement(i07, "I07_SUMA").text      = get_price_or_zero(getattr(item, "subtotal", None))
-#                 else:
-#                     ET.SubElement(i07, "I07_VAL_KAINA").text  = get_price_or_zero(getattr(item, "price", None))
-#                     ET.SubElement(i07, "I07_PVM_VAL").text    = get_price_or_zero(getattr(item, "vat", None))
-#                     ET.SubElement(i07, "I07_SUMA_VAL").text   = get_price_or_zero(getattr(item, "subtotal", None))
-#                 ET.SubElement(i07, "I07_MOKESTIS").text   = "1"
-#                 ET.SubElement(i07, "I07_MOKESTIS_P").text = vat_to_int_str(getattr(item, "vat_percent", None))
-#                 ET.SubElement(i07, "T_KIEKIS").text       = str(getattr(item, "quantity", None) or "1")
-#                 ET.SubElement(i07, "I07_KODAS_KL").text   = smart_str(getattr(item, "pvm_kodas", None) or "")
-#         else:
-#             # Одна строка
-#             i07 = ET.SubElement(i06, "I07")
-#             kodas = getattr(doc, "prekes_kodas", None) or "PREKE002"
-#             ET.SubElement(i07, "I07_KODAS").text = kodas
-
-#             tipas_val = '1'
-#             preke_paslauga = getattr(doc, "preke_paslauga", None)
-#             if preke_paslauga:
-#                 pls = str(preke_paslauga).lower()
-#                 if pls == "paslauga":
-#                     tipas_val = "2"
-#                 elif pls == "preke":
-#                     tipas_val = "1"
-#                 elif pls == "3":
-#                     tipas_val = "3"
-#             ET.SubElement(i07, "I07_TIPAS").text = tipas_val
-
-#             if currency.upper() == "EUR":
-#                 ET.SubElement(i07, "I07_KAINA_BE").text  = get_price_or_zero(getattr(doc, "amount_wo_vat", None))
-#                 ET.SubElement(i07, "I07_PVM").text       = get_price_or_zero(getattr(doc, "vat_amount", None))
-#                 ET.SubElement(i07, "I07_SUMA").text      = get_price_or_zero(getattr(doc, "amount_wo_vat", None))
-#             else:
-#                 ET.SubElement(i07, "I07_VAL_KAINA").text  = get_price_or_zero(getattr(doc, "amount_wo_vat", None))
-#                 ET.SubElement(i07, "I07_PVM_VAL").text    = get_price_or_zero(getattr(doc, "vat_amount", None))
-#                 ET.SubElement(i07, "I07_SUMA_VAL").text   = get_price_or_zero(getattr(doc, "amount_wo_vat", None))
-#             ET.SubElement(i07, "I07_MOKESTIS").text   = "1"
-#             ET.SubElement(i07, "I07_MOKESTIS_P").text = vat_to_int_str(getattr(doc, "vat_percent", None))
-#             ET.SubElement(i07, "T_KIEKIS").text       = "1"
-#             ET.SubElement(i07, "I07_KODAS_KL").text   = smart_str(getattr(doc, "pvm_kodas", None) or "")
-
-#         elements.append(i06)
-
-#     xml = b""
-#     for el in elements:
-#         xml += prettify_no_header(el) + b"\n"
-#     return expand_empty_tags(xml)
-
-
-# # =========================================================
-# # 4) KLIENTAI (N08 + N33)
-# # =========================================================
-# def _nz(v):
-#     """True, если есть непустая строка после strip()."""
-#     return bool((str(v).strip() if v is not None else ""))
-
-
-# def export_clients_group_to_rivile(clients=None, documents=None):
-#     """
-#     Возвращает XML (N08 с вложенным N33) без <root>.
-#     Берёт клиентов из documents (автовытягивание seller/buyer) и/или из clients.
-#     """
-#     elements = []
-#     client_codes_seen = set()
-
-#     # --- 1) Извлекаем из документов ---
-#     if documents:
-#         for doc in documents:
-#             # корректно определяем сторону
-#             doc_type = (getattr(doc, 'pirkimas_pardavimas', '') or '').strip().lower()
-#             if doc_type not in ('pirkimas', 'pardavimas'):
-#                 if _nz(getattr(doc, 'seller_id', None)) or _nz(getattr(doc, 'seller_vat_code', None)):
-#                     doc_type = 'pirkimas'
-#                 elif _nz(getattr(doc, 'buyer_id', None)) or _nz(getattr(doc, 'buyer_vat_code', None)):
-#                     doc_type = 'pardavimas'
-#                 else:
-#                     # ничего не известно — пропускаем
-#                     continue
-
-#             if doc_type == 'pirkimas':
-#                 client_code = resolve_party_code(doc, 'seller_id', 'seller_vat_code')
-#                 if client_code not in client_codes_seen:
-#                     client_data = {
-#                         'type': 'pirkimas',
-#                         'client_code': client_code,  # передаём явно
-#                         'seller_id': (getattr(doc, 'seller_id', '') or '').strip(),
-#                         'seller_vat_code': (getattr(doc, 'seller_vat_code', '') or '').strip(),
-#                         'seller_is_person': bool(getattr(doc, 'seller_is_person', False)),
-#                         'name': (getattr(doc, 'seller_name', '') or '').strip(),
-#                         'address': (getattr(doc, 'seller_address', '') or '').strip(),
-#                         'country_iso': (getattr(doc, 'seller_country_iso', '') or '').strip(),
-#                         'currency': (getattr(doc, 'currency', 'EUR') or 'EUR').upper(),
-#                         'kodas_ds': (getattr(doc, 'kodas_ds', 'PT001') or 'PT001').strip(),
-#                         'iban': (getattr(doc, 'seller_iban', '') or '').strip(),
-#                     }
-#                     _add_client_n08(elements, client_data)
-#                     client_codes_seen.add(client_code)
-
-#             elif doc_type == 'pardavimas':
-#                 client_code = resolve_party_code(doc, 'buyer_id', 'buyer_vat_code')
-#                 if client_code not in client_codes_seen:
-#                     client_data = {
-#                         'type': 'pardavimas',
-#                         'client_code': client_code,
-#                         'buyer_id': (getattr(doc, 'buyer_id', '') or '').strip(),
-#                         'buyer_vat_code': (getattr(doc, 'buyer_vat_code', '') or '').strip(),
-#                         'buyer_is_person': bool(getattr(doc, 'buyer_is_person', False)),
-#                         'name': (getattr(doc, 'buyer_name', '') or '').strip(),
-#                         'address': (getattr(doc, 'buyer_address', '') or '').strip(),
-#                         'country_iso': (getattr(doc, 'buyer_country_iso', '') or '').strip(),
-#                         'currency': (getattr(doc, 'currency', 'EUR') or 'EUR').upper(),
-#                         'kodas_ds': (getattr(doc, 'kodas_ds', 'PT001') or 'PT001').strip(),
-#                         'iban': (getattr(doc, 'buyer_iban', '') or '').strip(),
-#                     }
-#                     _add_client_n08(elements, client_data)
-#                     client_codes_seen.add(client_code)
-
-#     # --- 2) Клиенты, переданные вручную ---
-#     if clients:
-#         for client in clients:
-#             doc_type = (client.get('type') or '').strip().lower()
-#             client_code = (client.get('client_code') or '').strip()
-#             if not client_code:
-#                 if doc_type == 'pirkimas':
-#                     client_code = (client.get('seller_id') or client.get('seller_vat_code') or '').strip()
-#                 elif doc_type == 'pardavimas':
-#                     client_code = (client.get('buyer_id') or client.get('buyer_vat_code') or '').strip()
-#                 if not client_code:
-#                     client_code = (client.get('id') or client.get('vat') or '').strip() or "111111111"
-
-#             if client_code not in client_codes_seen:
-#                 client = {**client, 'client_code': client_code}
-#                 _add_client_n08(elements, client)
-#                 client_codes_seen.add(client_code)
-
-#     # --- 3) Склеиваем и возвращаем XML ---
-#     xml = b""
-#     for el in elements:
-#         xml += prettify_no_header(el) + b"\n"
-#     return expand_empty_tags(xml)
-
-
-
-
-# def _add_client_n08(elements, client):
-#     doc_type = (client.get('type') or '').strip().lower()
-#     client_code = (client.get('client_code') or '').strip()
-
-#     # Код клиента (как и было)
-#     if not client_code:
-#         for k in ('seller_id', 'seller_vat_code', 'buyer_id', 'buyer_vat_code', 'id', 'vat'):
-#             v = (client.get(k) or '').strip()
-#             if v:
-#                 client_code = v
-#                 break
-#         if not client_code:
-#             client_code = "111111111"
-
-#     # --- PVM kodas: первичный источник по типу ---
-#     if doc_type == 'pirkimas':
-#         tipas = "2" if client.get('seller_is_person') else "1"
-#         tipas_pirk, tipas_tiek, rusis = "0", "1", "2"
-#         vat_code = (client.get('seller_vat_code') or '').strip()
-#     elif doc_type == 'pardavimas':
-#         tipas = "2" if client.get('buyer_is_person') else "1"
-#         tipas_pirk, tipas_tiek, rusis = "1", "0", "1"
-#         vat_code = (client.get('buyer_vat_code') or '').strip()
-#     else:
-#         tipas = "2" if client.get('is_person') else "1"
-#         tipas_pirk, tipas_tiek, rusis = "1", "1", "1"
-#         vat_code = (client.get('vat') or '').strip()
-
-#     # --- Устойчивый фоллбек, если пусто ---
-#     if not vat_code:
-#         for k in ('seller_vat_code', 'buyer_vat_code', 'vat', 'pvm_kodas', 'vat_code'):
-#             v = (client.get(k) or '').strip()
-#             if v:
-#                 vat_code = v
-#                 break
-
-#     currency = smart_str((client.get('currency') or 'EUR')).upper()
-#     val_poz = "0" if currency == "EUR" else "1"
-
-#     n08 = ET.Element("N08")
-#     ET.SubElement(n08, "N08_KODAS_KS").text    = smart_str(client_code)
-#     ET.SubElement(n08, "N08_RUSIS").text       = rusis
-#     ET.SubElement(n08, "N08_PVM_KODAS").text   = smart_str(vat_code)  # без каких-либо замен
-#     ET.SubElement(n08, "N08_PAV").text         = smart_str((client.get('name') or 'Nezinoma').strip() or 'Nezinoma')
-#     ET.SubElement(n08, "N08_ADR").text         = smart_str((client.get('address') or '').strip())
-#     ET.SubElement(n08, "N08_TIPAS_PIRK").text  = tipas_pirk
-#     ET.SubElement(n08, "N08_TIPAS_TIEK").text  = tipas_tiek
-#     ET.SubElement(n08, "N08_KODAS_DS").text    = smart_str(client.get('kodas_ds', 'PT001'))
-#     ET.SubElement(n08, "N08_KODAS_XS_T").text  = "PVM"
-#     ET.SubElement(n08, "N08_KODAS_XS_P").text  = "PVM"
-#     ET.SubElement(n08, "N08_VAL_POZ").text     = val_poz
-#     ET.SubElement(n08, "N08_KODAS_VL_1").text  = currency
-#     ET.SubElement(n08, "N08_BUSENA").text      = "1"
-#     ET.SubElement(n08, "N08_TIPAS").text       = tipas
-
-#     n33 = ET.SubElement(n08, "N33")
-#     ET.SubElement(n33, "N33_NUTYL").text       = "1"
-#     ET.SubElement(n33, "N33_KODAS_KS").text    = smart_str(client_code)
-#     ET.SubElement(n33, "N33_S_KODAS").text     = smart_str((client.get('iban') or '').strip())
-#     ET.SubElement(n33, "N33_SALIES_K").text    = smart_str((client.get('country_iso') or '').strip().upper())
-
-#     elements.append(n08)
-
-
-
-
-# def export_clients_group_to_rivile(clients):
-#     """
-#     Экспортирует клиентов для Rivile в формате N08 (БЕЗ <root>).
-
-#     Каждый client — dict с ключами:
-#       name, address, country_iso, currency, kodas_ds, iban
-#     Доп. поля (если есть):
-#       type: 'pirkimas' | 'pardavimas'
-#       seller_id, seller_vat_code, seller_is_person
-#       buyer_id,  buyer_vat_code,  buyer_is_person
-#       id, vat, is_person
-#     """
-#     elements = []
-
-#     for client in clients:
-#         doc_type = (client.get('type') or '').strip().lower()
-
-#         # Определяем тип документа, если не задан
-#         if not doc_type:
-#             if client.get('seller_id') or client.get('seller_vat_code'):
-#                 doc_type = 'pirkimas'
-#             elif client.get('buyer_id') or client.get('buyer_vat_code'):
-#                 doc_type = 'pardavimas'
-#             else:
-#                 doc_type = ''  # оставляем пустым — значит неизвестно
-
-#         if doc_type == 'pirkimas':
-#             # только поставщик
-#             client_code = smart_str(
-#                 client.get('seller_id') or client.get('seller_vat_code') or "111111111"
-#             )
-#             tipas = "2" if client.get('seller_is_person') else "1"
-#             tipas_pirk = "0"
-#             tipas_tiek = "1"
-#             rusis = "2"
-#         elif doc_type == 'pardavimas':
-#             # только покупатель
-#             client_code = smart_str(
-#                 client.get('buyer_id') or client.get('buyer_vat_code') or "111111111"
-#             )
-#             tipas = "2" if client.get('buyer_is_person') else "1"
-#             tipas_pirk = "1"
-#             tipas_tiek = "0"
-#             rusis = "1"
-#         else:
-#             # тип неизвестен — берём наиболее вероятный код (чтобы точно совпал с I06_KODAS_KS)
-#             client_code = smart_str(
-#                 client.get('id')
-#                 or client.get('vat')
-#                 or client.get('seller_id')
-#                 or client.get('seller_vat_code')
-#                 or client.get('buyer_id')
-#                 or client.get('buyer_vat_code')
-#                 or "111111111"
-#             )
-#             tipas = "2" if client.get('is_person') else "1"
-#             tipas_pirk = "1"   # ставим обе роли, чтобы запись точно подошла
-#             tipas_tiek = "1"
-#             rusis = "1"        # не принципиально; можно оставить "1"
-
-#         currency = smart_str((client.get('currency') or 'EUR')).upper()
-#         val_poz = "0" if currency == "EUR" else "1"
-
-#         vat_code = smart_str((client.get('vat') or '').replace(' ', '').upper())
-
-#         n08 = ET.Element("N08")
-#         ET.SubElement(n08, "N08_KODAS_KS").text    = client_code
-#         ET.SubElement(n08, "N08_RUSIS").text       = rusis
-#         ET.SubElement(n08, "N08_PVM_KODAS").text   = vat_code
-#         ET.SubElement(n08, "N08_IM_KODAS").text    = client_code
-#         ET.SubElement(n08, "N08_PAV").text         = smart_str(client.get('name', '') or '')
-#         ET.SubElement(n08, "N08_ADR").text         = smart_str(client.get('address', '') or '')
-#         ET.SubElement(n08, "N08_TIPAS_PIRK").text  = tipas_pirk
-#         ET.SubElement(n08, "N08_TIPAS_TIEK").text  = tipas_tiek
-#         ET.SubElement(n08, "N08_KODAS_DS").text    = smart_str(client.get('kodas_ds', 'PT001'))
-#         ET.SubElement(n08, "N08_KODAS_XS_T").text  = "PVM"
-#         ET.SubElement(n08, "N08_KODAS_XS_P").text  = "PVM"
-#         ET.SubElement(n08, "N08_VAL_POZ").text     = val_poz
-#         ET.SubElement(n08, "N08_KODAS_VL_1").text  = currency
-#         ET.SubElement(n08, "N08_BUSENA").text      = "1"
-#         ET.SubElement(n08, "N08_TIPAS").text       = tipas
-
-#         # Банковские реквизиты (N33)
-#         n33 = ET.SubElement(n08, "N33")
-#         ET.SubElement(n33, "N33_NUTYL").text       = "1"
-#         ET.SubElement(n33, "N33_KODAS_KS").text    = client_code
-#         ET.SubElement(n33, "N33_S_KODAS").text     = smart_str(client.get('iban', '') or '')
-#         ET.SubElement(n33, "N33_SALIES_K").text    = smart_str((client.get('country_iso') or '').upper())
-
-#         elements.append(n08)
-
-#     xml = b""
-#     for el in elements:
-#         xml += prettify_no_header(el) + b"\n"
-#     return expand_empty_tags(xml)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-# import xml.etree.ElementTree as ET
-# import random
-# import string
-# from django.utils.encoding import smart_str
-# from .formatters import format_date, vat_to_int_str, get_price_or_zero, expand_empty_tags
-# from ..models import CurrencyRate
-
-
-# def get_currency_rate(currency_code, date_obj):
-#     """
-#     Получить курс для валюты на заданную дату (по отношению к EUR).
-#     currency_code: 'USD', 'RUB', ...
-#     date_obj: datetime.date (например, дата документа)
-#     """
-#     if not currency_code or currency_code.upper() == "EUR":
-#         return 1.0
-#     obj = CurrencyRate.objects.filter(currency=currency_code.upper(), date=date_obj).first()
-#     if obj:
-#         return obj.rate
-#     # fallback: ближайшая предыдущая дата
-#     obj = CurrencyRate.objects.filter(currency=currency_code.upper(), date__lt=date_obj).order_by('-date').first()
-#     return obj.rate if obj else None
-
-
-
-
-# def prettify_no_header(elem):
-#     # Преобразует ET.Element в красивый XML без <?xml...> и без <root>
-#     from xml.dom import minidom
-#     rough_string = ET.tostring(elem, encoding="utf-8")
-#     reparsed = minidom.parseString(rough_string)
-#     pretty_xml = reparsed.toprettyxml(indent="  ")
-#     # Убираем первую строку с <?xml ... ?>
-#     pretty_xml = '\n'.join(pretty_xml.split('\n')[1:])
-#     # Убираем пустые строки и приводим к байтам
-#     pretty_xml = '\n'.join([line for line in pretty_xml.split('\n') if line.strip()])
-#     return pretty_xml.encode("utf-8")
-
-
-
-
-# def export_prekes_and_paslaugos_group_to_rivile(documents):
-#     """
-#     Возвращает 2 xml:
-#       - prekes_xml: только товары (preke)
-#       - paslaugos_xml: только услуги (paslauga)
-#     """
-#     prekes_dict = {}
-#     paslaugos_dict = {}
-
-#     for doc in documents:
-#         line_items = getattr(doc, "line_items", None)
-#         if line_items and hasattr(line_items, 'all') and line_items.exists():
-#             for item in line_items.all():
-#                 kodas = getattr(item, "prekes_kodas", None) or getattr(item, "prekes_barkodas", None)
-#                 tipas_val = getattr(item, "preke_paslauga", "preke")
-#                 tipas = "1" if tipas_val == "preke" else "2"
-#                 unit = getattr(item, "unit", None) or "VNT"
-#                 pavadinimas = getattr(item, "prekes_pavadinimas", None) or "Prekė"
-
-#                 target_dict = prekes_dict if tipas == "1" else paslaugos_dict
-
-#                 if kodas and kodas not in target_dict:
-#                     n17 = ET.Element("N17")
-#                     ET.SubElement(n17, "N17_KODAS_PS").text = kodas
-#                     ET.SubElement(n17, "N17_TIPAS").text = tipas
-#                     ET.SubElement(n17, "N17_KODAS_US").text = unit
-#                     ET.SubElement(n17, "N17_PAV").text = smart_str(pavadinimas)
-#                     ET.SubElement(n17, "N17_KODAS_DS").text = "PR001"
-#                     target_dict[kodas] = n17
-#         else:
-#             kodas = getattr(doc, "prekes_kodas", None) or getattr(doc, "prekes_barkodas", None)
-#             tipas_val = getattr(doc, "preke_paslauga", "preke")
-#             tipas = "1" if tipas_val == "preke" else "2"
-#             unit = "VNT"
-#             pavadinimas = getattr(doc, "prekes_pavadinimas", None) or "Prekė"
-
-#             target_dict = prekes_dict if tipas == "1" else paslaugos_dict
-
-#             if kodas and kodas not in target_dict:
-#                 n17 = ET.Element("N17")
-#                 ET.SubElement(n17, "N17_KODAS_PS").text = kodas
-#                 ET.SubElement(n17, "N17_TIPAS").text = tipas
-#                 ET.SubElement(n17, "N17_KODAS_US").text = unit
-#                 ET.SubElement(n17, "N17_PAV").text = smart_str(pavadinimas)
-#                 ET.SubElement(n17, "N17_KODAS_DS").text = "PR001"
-#                 target_dict[kodas] = n17
-
-#     # Склеиваем XML по отдельности
-#     prekes_xml = b""
-#     paslaugos_xml = b""
-#     for el in prekes_dict.values():
-#         prekes_xml += prettify_no_header(el) + b"\n"
-#     for el in paslaugos_dict.values():
-#         paslaugos_xml += prettify_no_header(el) + b"\n"
-#     return prekes_xml, paslaugos_xml
-
-
-
-
-
-# def export_clients_group_to_rivile(clients):
-#     """
-#     Экспортирует клиентов для Rivile в формате N08 (БЕЗ <root>).
-#     Каждый client — dict с ключами: id, vat, name, address, country_iso, currency, kodas_ds, type, is_person, iban
-#     """
-#     elements = []
-#     for client in clients:
-#         # 1) Логика выбора кода клиента
-#         client_code = smart_str(client.get('id') or client.get('vat') or "111111111")
-
-#         # 2) Прочее — как было
-#         doc_type = client.get('type', 'pirkimas')
-#         rusis = "2" if doc_type == 'pirkimas' else "1"
-#         tipas = "2" if client.get('is_person') else "1"
-
-#         currency = smart_str(client.get('currency', 'EUR')).upper()
-#         val_poz = "0" if currency == "EUR" else "1"
-
-#         vat_code = smart_str(client.get('vat', ''))
-
-#         n08 = ET.Element("N08")
-#         ET.SubElement(n08, "N08_KODAS_KS").text    = client_code
-#         ET.SubElement(n08, "N08_RUSIS").text       = rusis
-#         ET.SubElement(n08, "N08_PVM_KODAS").text   = vat_code
-#         ET.SubElement(n08, "N08_IM_KODAS").text    = client_code
-#         ET.SubElement(n08, "N08_PAV").text         = smart_str(client.get('name', ''))
-#         ET.SubElement(n08, "N08_ADR").text         = smart_str(client.get('address', ''))
-#         ET.SubElement(n08, "N08_TIPAS_PIRK").text  = "1"
-#         ET.SubElement(n08, "N08_TIPAS_TIEK").text  = "1"
-#         ET.SubElement(n08, "N08_KODAS_DS").text    = smart_str(client.get('kodas_ds', 'PT001'))
-#         ET.SubElement(n08, "N08_KODAS_XS_T").text  = "PVM"
-#         ET.SubElement(n08, "N08_KODAS_XS_P").text  = "PVM"
-#         ET.SubElement(n08, "N08_VAL_POZ").text     = val_poz
-#         ET.SubElement(n08, "N08_KODAS_VL_1").text  = currency
-#         ET.SubElement(n08, "N08_BUSENA").text      = "1"
-#         ET.SubElement(n08, "N08_TIPAS").text       = tipas
-
-#         n33 = ET.SubElement(n08, "N33")
-#         ET.SubElement(n33, "N33_NUTYL").text       = "1"
-#         ET.SubElement(n33, "N33_KODAS_KS").text    = client_code
-#         ET.SubElement(n33, "N33_S_KODAS").text     = smart_str(client.get('iban', ''))
-#         ET.SubElement(n33, "N33_SALIES_K").text    = smart_str(client.get('country_iso', ''))
-
-#         elements.append(n08)
-
-#     # Объединяем все N08 без <root>
-#     xml = b""
-#     for el in elements:
-#         xml += prettify_no_header(el) + b"\n"
-
-#     # ВАЖНО: прогоняем результат через expand_empty_tags!
-#     return expand_empty_tags(xml)
-
-
-
-
-
-
-# def export_pirkimai_group_to_rivile(documents):
-#     elements = []
-#     for doc in documents:
-#         i06 = ET.Element("I06")
-#         currency = getattr(doc, 'currency', 'EUR') or 'EUR'
-#         op_date = getattr(doc, 'operation_date', None) or getattr(doc, 'invoice_date', None)
-#         ET.SubElement(i06, "I06_OP_TIP").text = "1"
-#         series = smart_str(getattr(doc, "document_series", "") or "")
-#         number = smart_str(getattr(doc, "document_number", "") or "")
-#         if series and not number.startswith(series):
-#             dok_num = f"{series}{number}"
-#         else:
-#             dok_num = number
-#         if currency.upper() != "EUR":
-#             ET.SubElement(i06, "I06_VAL_POZ").text = "1"
-#             ET.SubElement(i06, "I06_KODAS_VL").text = currency.upper()
-#             rate = get_currency_rate(currency, op_date)
-#             ET.SubElement(i06, "I06_KURSAS").text = str(rate if rate else "")
-#         else:
-#             ET.SubElement(i06, "I06_VAL_POZ").text = "0"
-
-#         ET.SubElement(i06, "I06_DOK_NR").text     = dok_num
-#         ET.SubElement(i06, "I06_OP_DATA").text    = format_date(op_date)
-#         ET.SubElement(i06, "I06_DOK_DATA").text   = format_date(getattr(doc, 'invoice_date', None))
-#         ET.SubElement(i06, "I06_KODAS_KS").text   = smart_str(getattr(doc, 'seller_id', '') or '')
-#         ET.SubElement(i06, "I06_DOK_REG").text    = smart_str(getattr(doc, 'document_number', '') or '')
-#         ET.SubElement(i06, "I06_APRASYMAS1").text = smart_str(getattr(doc, 'preview_url', '') or '')
-
-#         line_items = getattr(doc, "line_items", None)
-#         if line_items and hasattr(line_items, 'all') and line_items.exists():
-#             for item in line_items.all():
-#                 i07 = ET.SubElement(i06, "I07")
-#                 kodas = getattr(item, "prekes_kodas", None) or "PREKE001"
-#                 tipas_val = "1"  # по умолчанию товар
-#                 preke_paslauga = getattr(item, "preke_paslauga", None)
-#                 if preke_paslauga:
-#                     if preke_paslauga.lower() == "paslauga":
-#                         tipas_val = "2"
-#                     elif preke_paslauga.lower() == "preke":
-#                         tipas_val = "1"
-#                 ET.SubElement(i07, "I07_KODAS").text = kodas
-#                 ET.SubElement(i07, "I07_TIPAS").text = tipas_val
-#                 if currency.upper() == "EUR":
-#                     ET.SubElement(i07, "I07_KAINA_BE").text  = get_price_or_zero(getattr(item, "price", None))
-#                     ET.SubElement(i07, "I07_PVM").text       = get_price_or_zero(getattr(item, "vat", None))
-#                     ET.SubElement(i07, "I07_SUMA").text      = get_price_or_zero(getattr(item, "subtotal", None))
-#                 else:
-#                     ET.SubElement(i07, "I07_VAL_KAINA").text  = get_price_or_zero(getattr(item, "price", None))
-#                     ET.SubElement(i07, "I07_PVM_VAL").text    = get_price_or_zero(getattr(item, "vat", None))
-#                     ET.SubElement(i07, "I07_SUMA_VAL").text   = get_price_or_zero(getattr(item, "subtotal", None))
-#                 ET.SubElement(i07, "I07_MOKESTIS").text   = "1"
-#                 ET.SubElement(i07, "I07_MOKESTIS_P").text = vat_to_int_str(getattr(item, "vat_percent", None))
-#                 ET.SubElement(i07, "T_KIEKIS").text       = str(getattr(item, "quantity", None) or "1")
-#                 ET.SubElement(i07, "I07_KODAS_KL").text   = smart_str(getattr(item, "pvm_kodas", None) or "")
-            
-#         else:
-#         # Если нет line_items — одна строка (можно по аналогии с EUR/неEUR)
-#             i07 = ET.SubElement(i06, "I07")
-#             kodas = getattr(doc, "prekes_kodas", None) or "PREKE001"
-#             tipas_val = "1"  # по умолчанию товар
-#             preke_paslauga = getattr(doc, "preke_paslauga", None)
-#             if preke_paslauga:
-#                 if preke_paslauga.lower() == "paslauga":
-#                     tipas_val = "2"
-#                 elif preke_paslauga.lower() == "preke":
-#                     tipas_val = "1"
-#             ET.SubElement(i07, "I07_TIPAS").text = tipas_val
-#             if currency.upper() == "EUR":
-#                 ET.SubElement(i07, "I07_KAINA_BE").text  = get_price_or_zero(getattr(doc, "amount_wo_vat", None))
-#                 ET.SubElement(i07, "I07_PVM").text       = get_price_or_zero(getattr(doc, "vat_amount", None))
-#                 ET.SubElement(i07, "I07_SUMA").text      = get_price_or_zero(getattr(doc, "amount_wo_vat", None))
-#             else:
-#                 ET.SubElement(i07, "I07_VAL_KAINA").text  = get_price_or_zero(getattr(doc, "amount_wo_vat", None))
-#                 ET.SubElement(i07, "I07_PVM_VAL").text    = get_price_or_zero(getattr(doc, "vat_amount", None))
-#                 ET.SubElement(i07, "I07_SUMA_VAL").text   = get_price_or_zero(getattr(doc, "amount_wo_vat", None))
-#             ET.SubElement(i07, "I07_MOKESTIS").text   = "1"
-#             ET.SubElement(i07, "I07_MOKESTIS_P").text = vat_to_int_str(getattr(doc, "vat_percent", None))
-#             ET.SubElement(i07, "T_KIEKIS").text       = "1"
-#             ET.SubElement(i07, "I07_KODAS_KL").text   = smart_str(getattr(doc, "pvm_kodas", None) or "")
-
-#         elements.append(i06)
-#     xml = b""
-#     for el in elements:
-#         xml += prettify_no_header(el) + b"\n"
-#     return expand_empty_tags(xml)
-
-
-
-# def export_pardavimai_group_to_rivile(documents):
-#     """
-#     Экспортирует "Pardavimai" (продажи) для Rivile в формате I06/I07 (БЕЗ <root>).
-#     """
-#     elements = []
-#     for doc in documents:
-#         i06 = ET.Element("I06")
-#         currency = getattr(doc, 'currency', 'EUR') or 'EUR'
-#         op_date = getattr(doc, 'operation_date', None) or getattr(doc, 'invoice_date', None)
-#         series = smart_str(getattr(doc, "document_series", "") or "")
-#         number = smart_str(getattr(doc, "document_number", "") or "")
-#         if series and not number.startswith(series):
-#             dok_num = f"{series}{number}"
-#         else:
-#             dok_num = number
-#         ET.SubElement(i06, "I06_OP_TIP").text = "51"
-#         if currency.upper() != "EUR":
-#             ET.SubElement(i06, "I06_VAL_POZ").text = "1"
-#             ET.SubElement(i06, "I06_KODAS_VL").text = currency.upper()
-#             rate = get_currency_rate(currency, op_date)
-#             ET.SubElement(i06, "I06_KURSAS").text = str(rate if rate else "")
-#         else:
-#             ET.SubElement(i06, "I06_VAL_POZ").text = "0"
-
-#         ET.SubElement(i06, "I06_DOK_NR").text     = dok_num
-#         ET.SubElement(i06, "I06_OP_DATA").text    = format_date(op_date)
-#         ET.SubElement(i06, "I06_DOK_DATA").text   = format_date(getattr(doc, 'invoice_date', None))
-#         ET.SubElement(i06, "I06_KODAS_KS").text   = smart_str(getattr(doc, 'buyer_id', '') or '')
-#         ET.SubElement(i06, "I06_DOK_REG").text    = smart_str(getattr(doc, 'document_number', '') or '')
-#         ET.SubElement(i06, "I06_APRASYMAS1").text = smart_str(getattr(doc, 'preview_url', '') or '')
-
-#         # --- Строки документа (I07) ---
-#         line_items = getattr(doc, "line_items", None)
-#         if line_items and hasattr(line_items, 'all') and line_items.exists():
-#             for item in line_items.all():
-#                 i07 = ET.SubElement(i06, "I07")
-#                 kodas = getattr(item, "prekes_kodas", None) or "PREKE002"
-#                 ET.SubElement(i07, "I07_KODAS").text = kodas
-#                 ET.SubElement(i07, "I07_TIPAS").text = "3"
-#                 if currency.upper() == "EUR":
-#                     ET.SubElement(i07, "I07_KAINA_BE").text  = get_price_or_zero(getattr(item, "price", None))
-#                     ET.SubElement(i07, "I07_PVM").text       = get_price_or_zero(getattr(item, "vat", None))
-#                     ET.SubElement(i07, "I07_SUMA").text      = get_price_or_zero(getattr(item, "subtotal", None))
-#                 else:
-#                     ET.SubElement(i07, "I07_VAL_KAINA").text  = get_price_or_zero(getattr(item, "price", None))
-#                     ET.SubElement(i07, "I07_PVM_VAL").text    = get_price_or_zero(getattr(item, "vat", None))
-#                     ET.SubElement(i07, "I07_SUMA_VAL").text   = get_price_or_zero(getattr(item, "subtotal", None))
-#                 ET.SubElement(i07, "I07_MOKESTIS").text   = "1"
-#                 ET.SubElement(i07, "I07_MOKESTIS_P").text = vat_to_int_str(getattr(item, "vat_percent", None))
-#                 ET.SubElement(i07, "T_KIEKIS").text       = str(getattr(item, "quantity", None) or "1")
-#                 ET.SubElement(i07, "I07_KODAS_KL").text   = smart_str(getattr(item, "pvm_kodas", None) or "")
-#         else:
-#             # Если нет line_items — одна строка
-#             i07 = ET.SubElement(i06, "I07")
-#             kodas = getattr(doc, "prekes_kodas", None) or "PREKE002"
-#             ET.SubElement(i07, "I07_KODAS").text = kodas
-#             ET.SubElement(i07, "I07_TIPAS").text = "3"
-#             if currency.upper() == "EUR":
-#                 ET.SubElement(i07, "I07_KAINA_BE").text  = get_price_or_zero(getattr(doc, "amount_wo_vat", None))
-#                 ET.SubElement(i07, "I07_PVM").text       = get_price_or_zero(getattr(doc, "vat_amount", None))
-#                 ET.SubElement(i07, "I07_SUMA").text      = get_price_or_zero(getattr(doc, "amount_wo_vat", None))
-#             else:
-#                 ET.SubElement(i07, "I07_VAL_KAINA").text  = get_price_or_zero(getattr(doc, "amount_wo_vat", None))
-#                 ET.SubElement(i07, "I07_PVM_VAL").text    = get_price_or_zero(getattr(doc, "vat_amount", None))
-#                 ET.SubElement(i07, "I07_SUMA_VAL").text   = get_price_or_zero(getattr(doc, "amount_wo_vat", None))
-#             ET.SubElement(i07, "I07_MOKESTIS").text   = "1"
-#             ET.SubElement(i07, "I07_MOKESTIS_P").text = vat_to_int_str(getattr(doc, "vat_percent", None))
-#             ET.SubElement(i07, "T_KIEKIS").text       = "1"
-#             ET.SubElement(i07, "I07_KODAS_KL").text   = smart_str(getattr(doc, "pvm_kodas", None) or "")
-
-#         elements.append(i06)
-
-#     xml = b""
-#     for el in elements:
-#         xml += prettify_no_header(el) + b"\n"
-#     return expand_empty_tags(xml)
-
-

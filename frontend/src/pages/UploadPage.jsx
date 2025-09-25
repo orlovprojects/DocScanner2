@@ -20,8 +20,8 @@ import { usePollingDocumentStatus } from "../page_elements/Polling";
 import { ACCOUNTING_PROGRAMS } from "../page_elements/AccountingPrograms";
 
 const SCAN_TYPES = [
-  { value: "sumiskai", label: "Sumiskai (be eiluciu) – 1 kreditas" },
-  { value: "detaliai", label: "Detaliai (su eilutemis) – 1.3 kredito" },
+  { value: "sumiskai", label: "Sumiškai (be eilučių) – 1 kreditas" },
+  { value: "detaliai", label: "Detaliai (su eilutėmis) – 1.3 kredito" },
 ];
 
 // стабильный ключ контрагента
@@ -338,27 +338,31 @@ export default function UploadPage() {
       alert("Pasirinkite bent vieną dokumentą eksportui!");
       return;
     }
-    if (user?.view_mode === "multi" && !selectedCpKey) {
+    const mode = user?.view_mode === "multi" ? "multi" : "single";
+
+    if (mode === "multi" && !selectedCpKey) {
       alert("Pasirinkite kontrahentą kairėje pusėje, kad nustatyti pirkimą/pardavimą eksportui.");
       return;
     }
 
     try {
-      let payload = { ids: selectedRows };
+      const payload = { ids: selectedRows, mode };
 
-      if (user?.view_mode === "multi") {
+      if (mode === "multi") {
         const overrides = {};
         for (const id of selectedRows) {
           const d = tableData.find((x) => x.id === id);
           if (!d) continue;
-          const dir = resolveDirection(d, selectedCpKey);
-          if (dir && (String(d.pirkimas_pardavimas || "").toLowerCase() !== dir)) {
-            overrides[String(id)] = dir;
+          let dir = resolveDirection(d, selectedCpKey);
+
+          // fallback — если не вычислилось
+          if (!dir) {
+            const dbDir = (d.pirkimas_pardavimas || "").toLowerCase();
+            dir = dbDir === "pirkimas" || dbDir === "pardavimas" ? dbDir : "pirkimas";
           }
+          overrides[String(id)] = dir;
         }
-        if (Object.keys(overrides).length > 0) {
-          payload.overrides = overrides;
-        }
+        payload.overrides = overrides;
       }
 
       const res = await api.post("/documents/export_xml/", payload, {
@@ -394,6 +398,7 @@ export default function UploadPage() {
       console.error(err);
     }
   };
+
 
   // helpers
   const toggleSidebar = () => setOpenSidebar(v => !v);
@@ -629,6 +634,7 @@ export default function UploadPage() {
         setSelected={setSelected}
         setDocs={setDocs}
         user={user}
+        selectedCpKey={selectedCpKey}
       />
     </Box>
   );
