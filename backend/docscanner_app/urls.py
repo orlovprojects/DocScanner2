@@ -16,6 +16,7 @@ from .views import (
     clear_document_product,
     clear_lineitem_product,
     update_view_mode,
+    download_apskaita5_adapter,
 )
 
 from docscanner_app.views import export_documents
@@ -28,6 +29,8 @@ urlpatterns = [
     path('documents/', get_user_documents, name='get_user_documents'),
     path('documents/<int:pk>/', get_document_detail, name='get_document_detail'),
     path('documents/bulk-delete/', bulk_delete_documents, name='bulk_delete_documents'),
+
+    path('download/apskaita5-adapter/', download_apskaita5_adapter, name='download_apskaita5_adapter'),
 
     path('me/', user_me_view),
     path("api/track-click/", TrackAdClickView.as_view(), name="TrackAdClickView"),

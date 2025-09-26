@@ -636,6 +636,22 @@ export default function NustatymaiPage() {
       <Button variant="contained" disabled={!program || saving} onClick={save}>Išsaugoti</Button>
       {success && <Alert severity="success" sx={{ mt: 2 }}>Išsaugota!</Alert>}
 
+      {/* Atsisiųsti adapterį — rodoma tik pasirinkus Apskaita5 */}
+      {program === "apskaita5" && (
+        <Box sx={{ mt: 2 }}>
+          <Button
+            variant="outlined"
+            component="a"
+            href="/api/download/apskaita5-adapter/"
+          >
+            Atsisiųsti Apskaita5 adapterį
+          </Button>
+          <Typography variant="caption" sx={{ display: "block", mt: 1 }}>
+            Atsisiųskite zip ir išskleiskite .dll į Apskaita5 „InvoiceAdapters“ aplanką.
+          </Typography>
+        </Box>
+      )}
+
       {/* 3. Duomenų importas */}
       <Box mt={6}>
         <Typography variant="h6" gutterBottom>Duomenų importas</Typography>
