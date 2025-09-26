@@ -5,6 +5,8 @@ import os
 import uuid
 import hashlib
 from django.conf import settings
+from django.utils import timezone
+
 
 
 
@@ -515,3 +517,39 @@ class AdClick(models.Model):
 
     def __str__(self):
         return f"{self.ad_name} - {self.created_at}"
+    
+
+#Dlia soxranenii danyx o paymentax
+class Payments(models.Model):
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='payments')
+
+    # Stripe
+    stripe_event_id = models.CharField(max_length=255, db_index=True, unique=True)
+    session_id = models.CharField(max_length=255, db_index=True)
+    payment_intent_id = models.CharField(max_length=255, blank=True, null=True, db_index=True)
+    customer_id = models.CharField(max_length=255, blank=True, null=True, db_index=True)
+
+    # Money
+    amount_subtotal = models.BigIntegerField(default=0)   # cents
+    amount_tax = models.BigIntegerField(default=0)
+    amount_total = models.BigIntegerField(default=0)
+    stripe_fee = models.BigIntegerField(default=0)
+    net_amount = models.BigIntegerField(default=0)  # amount_total - stripe_fee
+    currency = models.CharField(max_length=10, default='eur')
+
+    # Credits
+    credits_purchased = models.IntegerField(default=0)
+
+    # Buyer snapshot
+    buyer_email = models.EmailField(blank=True, null=True)
+    buyer_address_json = models.JSONField(default=dict, blank=True)
+
+    # Status/time
+    payment_status = models.CharField(max_length=32, default='paid')
+    paid_at = models.DateTimeField(default=timezone.now)
+
+    # Links
+    receipt_url = models.URLField(blank=True, null=True)
+
+    # Raw
+    created_at = models.DateTimeField(auto_now_add=True)
