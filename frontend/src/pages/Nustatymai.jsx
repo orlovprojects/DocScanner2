@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import {
   Box, Typography, FormControl, InputLabel, Select, MenuItem,
   Button, Alert, Tabs, Tab, Paper, TextField, Stack, RadioGroup,
-  FormControlLabel, Radio, IconButton, Tooltip, Switch, Table,
+  FormControlLabel, Radio, IconButton, Tooltip, Switch, Table, TableContainer,
   TableHead, TableRow, TableCell, TableBody
 } from "@mui/material";
 import HelpOutlineIcon from "@mui/icons-material/HelpOutline";
@@ -223,9 +223,11 @@ const DefaultsFields = React.memo(function DefaultsFields({ mode, state, setStat
 /** ===== Table of saved defaults with delete ===== */
 function DefaultsTable({ rows, onDelete }) {
   if (!rows?.length) {
-    return <Typography variant="body2" sx={{ mt: 1, color: "text.secondary" }}>
-      Nėra išsaugotų profilių.
-    </Typography>;
+    return (
+      <Typography variant="body2" sx={{ mt: 1, color: "text.secondary" }}>
+        Nėra išsaugotų profilių.
+      </Typography>
+    );
   }
 
   const tipasLabel = (t) => {
@@ -238,40 +240,42 @@ function DefaultsTable({ rows, onDelete }) {
   };
 
   return (
-    <Table size="small" sx={{ mt: 2 }}>
-      <TableHead>
-        <TableRow>
-          <TableCell>#</TableCell>
-          <TableCell>Įmonės pavadinimas</TableCell>
-          <TableCell>Įmonės kodas</TableCell>
-          <TableCell>PVM kodas</TableCell>
-          <TableCell>Pavadinimas</TableCell>
-          <TableCell>Kodas</TableCell>
-          <TableCell>Barkodas</TableCell>
-          <TableCell>Tipas</TableCell>
-          <TableCell align="right">Veiksmai</TableCell>
-        </TableRow>
-      </TableHead>
-      <TableBody>
-        {rows.map((r, idx) => (
-          <TableRow key={idx}>
-            <TableCell>{idx}</TableCell>
-            <TableCell>{r.imones_pavadinimas || "—"}</TableCell>
-            <TableCell>{r.imones_kodas || "—"}</TableCell>
-            <TableCell>{r.imones_pvm_kodas || "—"}</TableCell>
-            <TableCell>{r.pavadinimas || "—"}</TableCell>
-            <TableCell>{r.kodas || "—"}</TableCell>
-            <TableCell>{r.barkodas || "—"}</TableCell>
-            <TableCell>{tipasLabel(r.tipas)}</TableCell>
-            <TableCell align="right">
-              <IconButton color="error" size="small" onClick={() => onDelete(idx)} aria-label="Ištrinti">
-                <DeleteOutlineIcon fontSize="small" />
-              </IconButton>
-            </TableCell>
+    <TableContainer sx={{ mt: 2, overflowX: "auto" }}>
+      <Table size="small" stickyHeader sx={{ minWidth: 900 }}>
+        <TableHead>
+          <TableRow>
+            <TableCell>#</TableCell>
+            <TableCell>Įmonės pavadinimas</TableCell>
+            <TableCell>Įmonės kodas</TableCell>
+            <TableCell>PVM kodas</TableCell>
+            <TableCell>Pavadinimas</TableCell>
+            <TableCell>Kodas</TableCell>
+            <TableCell>Barkodas</TableCell>
+            <TableCell>Tipas</TableCell>
+            <TableCell align="right">Veiksmai</TableCell>
           </TableRow>
-        ))}
-      </TableBody>
-    </Table>
+        </TableHead>
+        <TableBody>
+          {rows.map((r, idx) => (
+            <TableRow key={idx}>
+              <TableCell sx={{ whiteSpace: "nowrap" }}>{idx}</TableCell>
+              <TableCell>{r.imones_pavadinimas || "—"}</TableCell>
+              <TableCell>{r.imones_kodas || "—"}</TableCell>
+              <TableCell>{r.imones_pvm_kodas || "—"}</TableCell>
+              <TableCell>{r.pavadinimas || "—"}</TableCell>
+              <TableCell>{r.kodas || "—"}</TableCell>
+              <TableCell>{r.barkodas || "—"}</TableCell>
+              <TableCell>{tipasLabel(r.tipas)}</TableCell>
+              <TableCell align="right">
+                <IconButton color="error" size="small" onClick={() => onDelete(idx)} aria-label="Ištrinti">
+                  <DeleteOutlineIcon fontSize="small" />
+                </IconButton>
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </TableContainer>
   );
 }
 

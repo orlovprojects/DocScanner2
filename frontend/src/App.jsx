@@ -23,6 +23,8 @@ import './styles/MainChart.css';
 import UploadPage from './pages/UploadPage';
 import NustatymaiPage from './pages/Nustatymai';
 import Dokskenas from './pages/DokSkenas';
+import PvmCalculator from './pages/PVMskaiciuokle';
+import GpmSkaiciuokle from './pages/GPMskaiciuokle';
 
 import { initMetaPixel } from './metaPixel';
 
@@ -72,6 +74,8 @@ function App() {
         <Route path="/" element={<AtlyginimoSkaiciuokle />} />
         <Route path="/2026" element={<AtlyginimoSkaiciuokle2026 />} />
         <Route path="/saskaitu-skaitmenizavimas-dokskenas" element={<Dokskenas />} />
+        <Route path="/pvm-skaiciuokle" element={<PvmCalculator />} />
+        <Route path="/gpm-skaiciuokle" element={<GpmSkaiciuokle />} />
         <Route
           path="/suvestine"
           element={
