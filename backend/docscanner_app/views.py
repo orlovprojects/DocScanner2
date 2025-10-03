@@ -71,11 +71,103 @@ from .utils.save_document import _apply_sumiskai_defaults_from_user
 from .utils.update_currency_rates import update_currency_rates
 from .validators.vat_klas import auto_select_pvm_code
 
+#dlia superuser dashboard
+from django.db.models import Count
+from .permissions import IsSuperUser
+
 
 # --- Logging setup ---
 logging.config.dictConfig(settings.LOGGING)
 logger = logging.getLogger('docscanner_app')
 site_url = settings.SITE_URL_FRONTEND  # берём из settings.py
+
+
+#admin dashboard
+def _today_dates():
+    """Возвращает локальные даты для today/yesterday (без времени)."""
+    today = timezone.localdate()
+    yesterday = today - timedelta(days=1)
+    return today, yesterday
+
+def _count_by_date(model, date_field: str, target_date):
+    """
+    Быстрый способ посчитать записи за конкретную календарную дату:
+    фильтр по __date делает сравнение по дате в БД.
+    """
+    return model.objects.filter(**{f"{date_field}__date": target_date}).count()
+
+def _count_last_n_days(model, date_field: str, days: int):
+    """
+    Последние N дней включая текущий момент (rolling window).
+    """
+    since = timezone.now() - timedelta(days=days)
+    return model.objects.filter(**{f"{date_field}__gte": since}).count()
+
+
+@api_view(["GET"])
+@permission_classes([IsSuperUser])
+def superuser_dashboard_stats(request):
+    # ---- Настрой под свои точные названия полей ----
+    doc_date_field = "uploaded_at"   # или "scanned_at"
+    user_date_field = "date_joined" # или "created_at"
+
+    # Сегодня/вчера как локальные даты (таймзона берётся из настроек Django)
+    today, yesterday = _today_dates()
+
+    # Документы
+    docs_today = _count_by_date(ScannedDocument, doc_date_field, today)
+    docs_yesterday = _count_by_date(ScannedDocument, doc_date_field, yesterday)
+    docs_7d = _count_last_n_days(ScannedDocument, doc_date_field, 7)
+    docs_30d = _count_last_n_days(ScannedDocument, doc_date_field, 30)
+
+    # Уникальные пользователи, которые сканировали (исключая id 1 и 2) — за всё время
+    unique_users_excl_1_2 = (
+        ScannedDocument.objects
+        .exclude(user_id__in=[1, 2])
+        .values("user_id").distinct().count()
+    )
+
+    # Новые пользователи (регистрации) — сегодня/вчера/7/30 дней
+    new_users_today = _count_by_date(CustomUser, user_date_field, today)
+    new_users_yesterday = _count_by_date(CustomUser, user_date_field, yesterday)
+    new_users_7d = _count_last_n_days(CustomUser, user_date_field, 7)
+    new_users_30d = _count_last_n_days(CustomUser, user_date_field, 30)
+
+    # (Опционально) всего пользователей, всего документов
+    total_users = CustomUser.objects.count()
+    total_docs = ScannedDocument.objects.count()
+
+    data = {
+        "documents": {
+            "today": docs_today,
+            "yesterday": docs_yesterday,
+            "last_7_days": docs_7d,
+            "last_30_days": docs_30d,
+            "unique_users_excluding_1_2": unique_users_excl_1_2,
+            "total": total_docs,
+        },
+        "users": {
+            "new_today": new_users_today,
+            "new_yesterday": new_users_yesterday,
+            "new_last_7_days": new_users_7d,
+            "new_last_30_days": new_users_30d,
+            "total": total_users,
+        },
+        "meta": {
+            "timezone": str(timezone.get_current_timezone()),
+            "generated_at": timezone.now().isoformat(),
+        },
+    }
+    return Response(data)
+
+
+
+
+
+
+
+
+
 
 
 @api_view(['POST'])

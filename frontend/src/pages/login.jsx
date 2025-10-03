@@ -2,6 +2,7 @@ import { Box, Typography, TextField, Button, Link, Container } from '@mui/materi
 import { useState } from "react";
 import { useAuth } from "../contexts/useAuth";
 import { useNavigate } from "react-router-dom";
+import { Helmet } from 'react-helmet';
 
 const Login = () => {
   const [email, setEmail] = useState("");  // Изменено с username на email
@@ -20,6 +21,13 @@ const Login = () => {
 
   return (
     <Container maxWidth={false} disableGutters justifyContent='center'>
+      <Helmet>
+        <title>Prisijungti – DokSkenas</title>
+        <meta
+          name="description"
+          content="Prisijunk ir naudokis DokSkenu."
+        />
+      </Helmet>      
       <Box
         sx={{
           display: 'flex',

@@ -10,10 +10,12 @@ import Terms from './pages/Terms';
 import Privacy from './pages/Privacy';
 import AtlyginimoSkaiciuokle from './pages/AtlyginimoSkaiciuokle';
 import AtlyginimoSkaiciuokle2026 from './pages/AtlyginimoSkaiciuokle2026';
+import AdminDashboard from "./pages/AdminDashboard";
 
 import AuthProvider from './contexts/useAuth';
 import PrivateRoute from './components/private_route';
 import RedirectIfAuthenticated from './components/RedirectIfAuthenticated';
+import RequireSuperuser from "./components/RequireSuperuser";
 
 import Header from './page_elements/Header';
 import { initializeAnalytics, logPageView } from './analytics';
@@ -112,6 +114,14 @@ function App() {
         />
         <Route path="/privatumo-politika" element={<Privacy />} />
         <Route path="/naudojimo-taisykles" element={<Terms />} />
+              <Route
+        path="/admin-dashboard"
+        element={
+          <RequireSuperuser loginPath="/login" forbiddenPath="/403">
+            <AdminDashboard />
+          </RequireSuperuser>
+        }
+        />
       </Routes>
       <Footer />
     </AuthProvider>

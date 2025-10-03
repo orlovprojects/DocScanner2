@@ -1,6 +1,7 @@
 import { useState, useMemo, useRef } from "react";
 import { useAuth } from "../contexts/useAuth";
 import { useNavigate } from "react-router-dom";
+import { Helmet } from "react-helmet";
 import {
   Box,
   Typography,
@@ -165,6 +166,13 @@ export default function Register() {
 
   return (
     <Container maxWidth={false} disableGutters justifyContent="center">
+      <Helmet>
+        <title>Registruotis – DokSkenas</title>
+        <meta
+          name="description"
+          content="Registruokitės ir išbandykite DokSkeną."
+        />
+      </Helmet>
       <Box
         sx={{
           display: "flex",
