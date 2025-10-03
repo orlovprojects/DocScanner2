@@ -6,7 +6,7 @@ import logging.config
 import os
 import tempfile
 import zipfile
-from datetime import date, timedelta
+from datetime import date, timedelta, time, datetime
 from decimal import Decimal
 
 # --- Django ---
@@ -121,9 +121,13 @@ def superuser_dashboard_stats(request):
     docs_30d = _count_last_n_days(ScannedDocument, doc_date_field, 30)
 
     # Уникальные пользователи, которые сканировали (исключая id 1 и 2) — за всё время
-    unique_users_excl_1_2 = (
+    start_today = timezone.make_aware(datetime.combine(today, time.min))
+    end_today = timezone.make_aware(datetime.combine(today, time.max))
+
+    unique_users_excl_1_2_today = (
         ScannedDocument.objects
         .exclude(user_id__in=[1, 2])
+        .filter(uploaded_at__range=(start_today, end_today))
         .values("user_id").distinct().count()
     )
 
@@ -143,7 +147,7 @@ def superuser_dashboard_stats(request):
             "yesterday": docs_yesterday,
             "last_7_days": docs_7d,
             "last_30_days": docs_30d,
-            "unique_users_excluding_1_2": unique_users_excl_1_2,
+            "unique_users_excluding_1_2": unique_users_excl_1_2_today,
             "total": total_docs,
         },
         "users": {
