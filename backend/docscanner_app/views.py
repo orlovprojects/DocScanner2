@@ -62,8 +62,11 @@ from .serializers import (
     ScannedDocumentSerializer,
     ScannedDocumentListSerializer,
     ScannedDocumentDetailSerializer,
+    ScannedDocumentAdminDetailSerializer,
     AdClickSerializer,
 )
+
+
 from .tasks import process_uploaded_file_task
 from .utils.data_resolver import build_preview
 from .utils.pirkimas_pardavimas import determine_pirkimas_pardavimas
@@ -748,50 +751,81 @@ def get_user_documents(request):
     return Response(serializer.data)
 
 
-# /documents/<id>/
-# @api_view(['GET'])
-# @permission_classes([IsAuthenticated])
-# def get_document_detail(request, pk):
-#     try:
-#         doc = ScannedDocument.objects.get(pk=pk, user=request.user)
-#     except ScannedDocument.DoesNotExist:
-#         return Response({'error': 'Not found'}, status=404)
-#     serializer = ScannedDocumentDetailSerializer(doc)
-#     return Response(serializer.data)
 
-# /documents/<id>/
+
+
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def get_document_detail(request, pk):
     """
     Детали документа.
-    - В single-режиме: отдаем сериализованные данные из БД (без preview).
-    - В multi-режиме: добавляем preview через data_resolver.build_preview (ничего в БД не пишем).
+    - Superuser: может смотреть ЛЮБОЙ документ; возвращаем raw-поля (glued_raw_text, structured_json), без preview.
+    - Обычный пользователь:
+        * single-режим — просто данные из БД;
+        * multi-режим — добавляем preview (ничего в БД не пишем).
     """
-    try:
-        doc = ScannedDocument.objects.get(pk=pk, user=request.user)
-    except ScannedDocument.DoesNotExist:
-        return Response({'error': 'Not found'}, status=404)
+    user = request.user
 
-    serializer = ScannedDocumentDetailSerializer(doc)
-    data = serializer.data
+    if user.is_superuser:
+        # суперюзер видит любой документ
+        doc = get_object_or_404(ScannedDocument, pk=pk)
+        ser = ScannedDocumentAdminDetailSerializer(doc, context={'request': request})
+        return Response(ser.data)
 
-    # Превью только в multi
-    if getattr(request.user, "view_mode", None) != "multi":
+    # обычный пользователь — только свои документы
+    doc = get_object_or_404(ScannedDocument, pk=pk, user=user)
+    ser = ScannedDocumentDetailSerializer(doc, context={'request': request})
+    data = ser.data
+
+    # preview только в multi режиме
+    if getattr(user, "view_mode", None) != "multi":
         return Response(data)
 
     cp_key = request.query_params.get("cp_key")
     preview = build_preview(
         doc,
-        request.user,
+        user,
         cp_key=cp_key,
         view_mode="multi",
         base_vat_percent=data.get("vat_percent"),
         base_preke_paslauga=data.get("preke_paslauga"),
     )
-
     data["preview"] = preview
     return Response(data)
+
+
+# @api_view(['GET'])
+# @permission_classes([IsAuthenticated])
+# def get_document_detail(request, pk):
+#     """
+#     Детали документа.
+#     - В single-режиме: отдаем сериализованные данные из БД (без preview).
+#     - В multi-режиме: добавляем preview через data_resolver.build_preview (ничего в БД не пишем).
+#     """
+#     try:
+#         doc = ScannedDocument.objects.get(pk=pk, user=request.user)
+#     except ScannedDocument.DoesNotExist:
+#         return Response({'error': 'Not found'}, status=404)
+
+#     serializer = ScannedDocumentDetailSerializer(doc)
+#     data = serializer.data
+
+#     # Превью только в multi
+#     if getattr(request.user, "view_mode", None) != "multi":
+#         return Response(data)
+
+#     cp_key = request.query_params.get("cp_key")
+#     preview = build_preview(
+#         doc,
+#         request.user,
+#         cp_key=cp_key,
+#         view_mode="multi",
+#         base_vat_percent=data.get("vat_percent"),
+#         base_preke_paslauga=data.get("preke_paslauga"),
+#     )
+
+#     data["preview"] = preview
+#     return Response(data)
 
 
 
