@@ -289,8 +289,8 @@ const Dokskenas = () => {
   return (
     <Box sx={{ bgcolor: '#F9F9FA', minHeight: '100vh', padding: { xs: 2, sm: 5 }, paddingTop: { xs: '50px', sm: '70px'}, width: '100%' }}>
       <Helmet>
-        <title>Sąskaitų skaitmenizavimas su DI</title>
-        <meta name="description" content="Automatizuokite savo apskaitą su DI bei sutaupykite krūvą laiko." />
+        <title>Sąskaitų skaitmenizavimas su DI - DokSkenas</title>
+        <meta name="description" content="Automatizuokite savo apskaitą su DI bei sutaupykite krūvą laiko. Išbandykit DokSkeną dabar!" />
       </Helmet>
 
       {/* Section 1 */}

@@ -201,7 +201,25 @@ class ScannedDocumentDetailSerializer(serializers.ModelSerializer):
             "file": {"write_only": True},
             "gpt_raw_json": {"write_only": True},
             "raw_text": {"write_only": True},
-            # "structured_json": {"write_only": True},
+            "structured_json": {"write_only": True},
+            "glued_raw_text": {"write_only": True},
+        }
+
+
+
+class ScannedDocumentAdminDetailSerializer(serializers.ModelSerializer):
+    line_items = LineItemSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = ScannedDocument
+        fields = "__all__"
+        extra_kwargs = {
+            "file": {"write_only": True},
+            "gpt_raw_json": {"write_only": True},
+            "raw_text": {"write_only": True},
+            # ВАЖНО: НЕ помечаем как write_only, чтобы суперюзер их видел:
+            # "structured_json": {"write_only": True},   # ← не ставим
+            # "glued_raw_text": {"write_only": True},    # ← не ставим
         }
 
 

@@ -86,8 +86,7 @@ const RequireSuperuser = ({ children, loginPath = "/login", forbiddenPath = "/40
     // return <Navigate to={forbiddenPath} replace />;
     return (
       <Box sx={{ maxWidth: 560, mx: "auto", mt: 10, p: 3, textAlign: "center" }}>
-        <Typography variant="h5" gutterBottom>Доступ ограничен</Typography>
-        <Typography color="text.secondary">Эта страница доступна только суперюзерам.</Typography>
+        <Typography variant="h5" gutterBottom>Forbidden!</Typography>
       </Box>
     );
   }
