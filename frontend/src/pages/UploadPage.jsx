@@ -635,6 +635,7 @@ export default function UploadPage() {
         setDocs={setDocs}
         user={user}
         selectedCpKey={selectedCpKey}
+        showRawPanels={false}
       />
     </Box>
   );

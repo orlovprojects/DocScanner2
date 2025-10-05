@@ -10,6 +10,7 @@ import {
   Chip,
   Divider,
   Paper,
+  Stack,
 } from "@mui/material";
 import {
   Description,
@@ -17,16 +18,63 @@ import {
   TrendingUp,
   CalendarToday,
   Schedule,
+  CheckCircle,
+  ErrorOutline,
+  Percent,
 } from "@mui/icons-material";
 
-function StatItem({ label, value, color = "primary" }) {
+function DocStatItem({ label, count = 0, errors = 0, highlight = false }) {
+  const ok = Math.max((count || 0) - (errors || 0), 0);
+  const successRate = count > 0 ? ((ok / count) * 100).toFixed(1) : 0;
+  
   return (
-    <Box sx={{ py: 1.5 }}>
+    <Box sx={{ py: 1.25 }}>
       <Typography variant="body2" color="text.secondary" gutterBottom>
         {label}
       </Typography>
-      <Typography variant="h5" fontWeight="600" color={`${color}.main`}>
-        {value?.toLocaleString() ?? 0}
+      <Stack direction="row" alignItems="center" spacing={1.5} flexWrap="wrap">
+        <Typography
+          variant="h5"
+          fontWeight={700}
+          color={highlight ? "primary.main" : "text.primary"}
+        >
+          {(count ?? 0).toLocaleString()}
+        </Typography>
+        <Chip
+          size="small"
+          variant="outlined"
+          color="success"
+          icon={<CheckCircle sx={{ fontSize: 16 }} />}
+          label={`${ok.toLocaleString()} (${successRate}%)`}
+          sx={{ height: 24, fontWeight: 500 }}
+        />
+        {errors > 0 && (
+          <Chip
+            size="small"
+            variant="outlined"
+            color="warning"
+            icon={<ErrorOutline sx={{ fontSize: 16 }} />}
+            label={errors.toLocaleString()}
+            sx={{ 
+              height: 24,
+              opacity: 0.7,
+              '&:hover': { opacity: 1 }
+            }}
+          />
+        )}
+      </Stack>
+    </Box>
+  );
+}
+
+function SimpleStatItem({ label, value, color = "primary" }) {
+  return (
+    <Box sx={{ py: 1.25 }}>
+      <Typography variant="body2" color="text.secondary" gutterBottom>
+        {label}
+      </Typography>
+      <Typography variant="h5" fontWeight={700} color={`${color}.main`}>
+        {value?.toLocaleString?.() ?? value ?? 0}
       </Typography>
     </Box>
   );
@@ -34,9 +82,9 @@ function StatItem({ label, value, color = "primary" }) {
 
 function StatCard({ title, items, icon: Icon, color = "primary" }) {
   return (
-    <Card 
+    <Card
       elevation={0}
-      sx={{ 
+      sx={{
         height: "100%",
         border: 1,
         borderColor: "divider",
@@ -45,14 +93,14 @@ function StatCard({ title, items, icon: Icon, color = "primary" }) {
           borderColor: `${color}.main`,
           boxShadow: 2,
           transform: "translateY(-4px)",
-        }
+        },
       }}
     >
       <CardContent>
         <Box display="flex" alignItems="center" gap={1} mb={2}>
-          <Box 
-            sx={{ 
-              display: "flex", 
+          <Box
+            sx={{
+              display: "flex",
               alignItems: "center",
               justifyContent: "center",
               width: 40,
@@ -64,19 +112,12 @@ function StatCard({ title, items, icon: Icon, color = "primary" }) {
           >
             <Icon />
           </Box>
-          <Typography variant="h6" fontWeight="600">
+          <Typography variant="h6" fontWeight={700}>
             {title}
           </Typography>
         </Box>
         <Divider sx={{ mb: 2 }} />
-        {items.map((it, idx) => (
-          <StatItem 
-            key={it.label} 
-            label={it.label} 
-            value={it.value}
-            color={idx === 0 ? color : "primary"}
-          />
-        ))}
+        {items}
       </CardContent>
     </Card>
   );
@@ -100,11 +141,10 @@ export default function AdminDashboard() {
           .then((fresh) => setStats(fresh))
           .catch(() => {});
         return;
-      } catch (_) {
+      } catch {
         sessionStorage.removeItem("dashboardPrefetch");
       }
     }
-
     (async () => {
       try {
         const res = await fetch("/api/superuser/dashboard-stats/", {
@@ -138,77 +178,166 @@ export default function AdminDashboard() {
     );
   }
 
-  const docs = stats.documents;
-  const users = stats.users;
-  const meta = stats.meta;
+  const docs = stats.documents || {};
+  const users = stats.users || {};
+  const meta = stats.meta || {};
+  const sr = docs.success_rate || {};
+  const st = docs.scan_types || {};
+
+  const fmtPct = (v) => (typeof v === "number" ? `${v.toFixed(2)}%` : "0.00%");
 
   return (
     <Box sx={{ p: 4, bgcolor: "grey.50", minHeight: "100vh" }}>
       <Paper elevation={0} sx={{ p: 3, mb: 4, borderRadius: 3, border: 1, borderColor: "divider" }}>
         <Box display="flex" alignItems="center" justifyContent="space-between" flexWrap="wrap" gap={2}>
           <Box>
-            <Typography variant="h4" fontWeight="700" gutterBottom>
+            <Typography variant="h4" fontWeight={800} gutterBottom>
               Administratoriaus Valdymo Skydelis
             </Typography>
             <Box display="flex" alignItems="center" gap={2} flexWrap="wrap">
-              <Chip 
+              <Chip
                 icon={<Schedule />}
-                label={`Laiko juosta: ${meta?.timezone}`}
+                label={`Laiko juosta: ${meta?.timezone || ""}`}
                 size="small"
                 variant="outlined"
               />
-              <Chip 
+              <Chip
                 icon={<CalendarToday />}
-                label={`Atnaujinta: ${meta?.generated_at ? new Date(meta.generated_at).toLocaleString('lt-LT') : ""}`}
+                label={`Atnaujinta: ${meta?.generated_at ? new Date(meta.generated_at).toLocaleString("lt-LT") : ""}`}
                 size="small"
                 variant="outlined"
               />
             </Box>
           </Box>
-          <Chip 
-            label="Aktyvus"
-            color="success"
-            sx={{ fontWeight: 600 }}
-          />
+          <Chip label="Aktyvus" color="success" sx={{ fontWeight: 700 }} />
         </Box>
       </Paper>
 
       <Grid container spacing={3}>
+        {/* Documents with improved error display */}
         <Grid item xs={12} md={6}>
           <StatCard
             title="Dokumentai"
             icon={Description}
             color="primary"
-            items={[
-              { label: "Šiandien", value: docs?.today ?? 0 },
-              { label: "Naudotojų skenavo šiandien", value: docs?.unique_users_excluding_1_2 ?? 0 },
-              { label: "Vakar", value: docs?.yesterday ?? 0 },
-              { label: "Per paskutines 7 dienas", value: docs?.last_7_days ?? 0 },
-              { label: "Per paskutines 30 dienų", value: docs?.last_30_days ?? 0 },
-              { label: "Viso", value: docs?.total ?? 0 },
-            ]}
+            items={
+              <>
+                <DocStatItem
+                  label="Šiandien"
+                  count={docs?.today?.count}
+                  errors={docs?.today?.errors}
+                  highlight
+                />
+                <SimpleStatItem
+                  label="Naudotojų skenavo šiandien"
+                  value={docs?.unique_users_excluding_1_2_today}
+                />
+                <DocStatItem label="Vakar" count={docs?.yesterday?.count} errors={docs?.yesterday?.errors} />
+                <DocStatItem
+                  label="Per paskutines 7 dienas"
+                  count={docs?.last_7_days?.count}
+                  errors={docs?.last_7_days?.errors}
+                />
+                <DocStatItem
+                  label="Per paskutines 30 dienų"
+                  count={docs?.last_30_days?.count}
+                  errors={docs?.last_30_days?.errors}
+                />
+                <DocStatItem label="Viso" count={docs?.total?.count} errors={docs?.total?.errors} />
+                <Divider sx={{ my: 1 }} />
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 0.5 }}>
+                  Tipai (viso laikotarpio):
+                </Typography>
+                <Stack direction="row" spacing={1} flexWrap="wrap">
+                  <Chip 
+                    label={`Sumiškai: ${st?.sumiskai?.count ?? 0} (${fmtPct(st?.sumiskai?.pct)})`}
+                    size="small"
+                    variant="outlined"
+                  />
+                  <Chip 
+                    label={`Detaliai: ${st?.detaliai?.count ?? 0} (${fmtPct(st?.detaliai?.pct)})`}
+                    size="small"
+                    variant="outlined"
+                  />
+                </Stack>
+              </>
+            }
           />
         </Grid>
 
+        {/* Users */}
         <Grid item xs={12} md={6}>
           <StatCard
             title="Naudotojai"
             icon={People}
             color="secondary"
-            items={[
-              { label: "Nauji šiandien", value: users?.new_today ?? 0 },
-              { label: "Nauji vakar", value: users?.new_yesterday ?? 0 },
-              { label: "Per paskutines 7 dienas", value: users?.new_last_7_days ?? 0 },
-              { label: "Per paskutines 30 dienų", value: users?.new_last_30_days ?? 0 },
-              { label: "Viso", value: users?.total ?? 0 },
-            ]}
+            items={
+              <>
+                <SimpleStatItem label="Nauji šiandien" value={users?.new_today} />
+                <SimpleStatItem label="Nauji vakar" value={users?.new_yesterday} />
+                <SimpleStatItem label="Per paskutines 7 dienas" value={users?.new_last_7_days} />
+                <SimpleStatItem label="Per paskutines 30 dienų" value={users?.new_last_30_days} />
+                <SimpleStatItem label="Viso" value={users?.total} />
+              </>
+            }
           />
         </Grid>
 
+        {/* Success rate card */}
         <Grid item xs={12}>
-          <Card 
+          <Card
             elevation={0}
-            sx={{ 
+            sx={{
+              border: 1,
+              borderColor: "success.main",
+              bgcolor: "success.50",
+              borderRadius: 2,
+            }}
+          >
+            <CardContent>
+              <Box display="flex" alignItems="center" gap={2} flexWrap="wrap">
+                <Percent sx={{ color: "success.main", fontSize: 32 }} />
+                <Box flex={1} minWidth={260}>
+                  <Typography variant="h6" fontWeight={800} color="success.dark">
+                    Success rate (be klaidų)
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Procentas sėkmingų skenų per laikotarpius
+                  </Typography>
+                </Box>
+
+                <Stack direction="row" spacing={3} flexWrap="wrap">
+                  <Box>
+                    <Typography variant="caption" color="text.secondary">Šiandien</Typography>
+                    <Typography variant="h6" fontWeight={700}>{fmtPct(sr?.today)}</Typography>
+                  </Box>
+                  <Box>
+                    <Typography variant="caption" color="text.secondary">Vakar</Typography>
+                    <Typography variant="h6" fontWeight={700}>{fmtPct(sr?.yesterday)}</Typography>
+                  </Box>
+                  <Box>
+                    <Typography variant="caption" color="text.secondary">Pask. 7 d.</Typography>
+                    <Typography variant="h6" fontWeight={700}>{fmtPct(sr?.last_7_days)}</Typography>
+                  </Box>
+                  <Box>
+                    <Typography variant="caption" color="text.secondary">Pask. 30 d.</Typography>
+                    <Typography variant="h6" fontWeight={700}>{fmtPct(sr?.last_30_days)}</Typography>
+                  </Box>
+                  <Box>
+                    <Typography variant="caption" color="text.secondary">Viso</Typography>
+                    <Typography variant="h6" fontWeight={700}>{fmtPct(sr?.total)}</Typography>
+                  </Box>
+                </Stack>
+              </Box>
+            </CardContent>
+          </Card>
+        </Grid>
+
+        {/* System health info */}
+        <Grid item xs={12}>
+          <Card
+            elevation={0}
+            sx={{
               border: 1,
               borderColor: "success.main",
               bgcolor: "success.50",
@@ -219,7 +348,7 @@ export default function AdminDashboard() {
               <Box display="flex" alignItems="center" gap={2}>
                 <TrendingUp sx={{ color: "success.main", fontSize: 32 }} />
                 <Box>
-                  <Typography variant="h6" fontWeight="600" color="success.dark">
+                  <Typography variant="h6" fontWeight={700} color="success.dark">
                     Sistema veikia sklandžiai
                   </Typography>
                   <Typography variant="body2" color="text.secondary">

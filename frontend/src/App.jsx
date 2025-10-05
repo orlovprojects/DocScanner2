@@ -10,7 +10,9 @@ import Terms from './pages/Terms';
 import Privacy from './pages/Privacy';
 import AtlyginimoSkaiciuokle from './pages/AtlyginimoSkaiciuokle';
 import AtlyginimoSkaiciuokle2026 from './pages/AtlyginimoSkaiciuokle2026';
+
 import AdminDashboard from "./pages/AdminDashboard";
+import AdminSuvestine from "./pages/AdminSuvestine";
 
 import AuthProvider from './contexts/useAuth';
 import PrivateRoute from './components/private_route';
@@ -114,13 +116,19 @@ function App() {
         />
         <Route path="/privatumo-politika" element={<Privacy />} />
         <Route path="/naudojimo-taisykles" element={<Terms />} />
-              <Route
-        path="/admin-dashboard"
-        element={
+        <Route path="/admin-dashboard" element={
           <RequireSuperuser loginPath="/login" forbiddenPath="/403">
             <AdminDashboard />
           </RequireSuperuser>
         }
+        />
+        <Route
+          path="/admin-suvestine"
+          element={
+            <RequireSuperuser>
+              <AdminSuvestine />
+            </RequireSuperuser>
+          }
         />
       </Routes>
       <Footer />

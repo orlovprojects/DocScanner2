@@ -9,7 +9,10 @@ import {
   Stack,
   Alert,
   Grid2,
+  Paper,
+  Tooltip,
 } from "@mui/material";
+import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import ZoomableImage from "../pages/ZoomableImage";
 import { EXTRA_FIELDS_CONFIG } from "../pages/extraFieldsConfig";
@@ -26,7 +29,8 @@ export default function PreviewDialog({
   setSelected,
   setDocs,
   user,
-  selectedCpKey,            // выбранный контрагент (multi)
+  selectedCpKey,
+  showRawPanels = false,
 }) {
   const prevDocId = useRef();
   const isMulti = user?.view_mode === "multi";
@@ -412,6 +416,29 @@ export default function PreviewDialog({
     }
   };
 
+
+  // ----- RAW DATA (только для админ-просмотра) -----
+  const gluedRawText = useMemo(() => {
+    const v = selected?.glued_raw_text;
+    return typeof v === "string" ? v : (v == null ? "" : String(v));
+  }, [selected]);
+
+  const structuredPretty = useMemo(() => {
+    const raw = selected?.structured_json;
+    if (raw == null) return "";
+    try {
+      const obj = typeof raw === "string" ? JSON.parse(raw) : raw;
+      return JSON.stringify(obj, null, 2);
+    } catch {
+      return typeof raw === "string" ? raw : JSON.stringify(raw, null, 2);
+    }
+  }, [selected]);
+
+  const copyToClipboard = async (text) => {
+    try { await navigator.clipboard.writeText(text || ""); } catch {}
+  };
+  // END ----- RAW DATA (только для админ-просмотра)
+
   const PRODUCT_FIELDS = [
     { field: "prekes_pavadinimas", label: "Prekės pavadinimas:" },
     { field: "prekes_kodas", label: "Prekės kodas:" },
@@ -729,6 +756,60 @@ export default function PreviewDialog({
                         </Box>
                       );
                     })}
+                  </AccordionDetails>
+                </Accordion>
+              )}
+              {showRawPanels && (
+                <Accordion sx={{ mt: 2, background: "#f6f8ff" }}>
+                  <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                    <Typography sx={{ fontWeight: 500 }}>Admin: Raw duomenys</Typography>
+                  </AccordionSummary>
+                  <AccordionDetails>
+                    {/* OCR (glued) */}
+                    <Box sx={{ mb: 2 }}>
+                      <Box display="flex" alignItems="center" justifyContent="space-between" mb={1}>
+                        <Typography variant="subtitle2">OCR (glued_raw_text)</Typography>
+                        <Tooltip title="Kopijuoti">
+                          <IconButton size="small" onClick={() => copyToClipboard(gluedRawText)}>
+                            <ContentCopyIcon fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                      </Box>
+                      <Paper variant="outlined" sx={{ p: 2, maxHeight: 280, overflow: "auto", bgcolor: "#fafafa" }}>
+                        <Box
+                          component="pre"
+                          sx={{ m: 0, whiteSpace: "pre-wrap", wordBreak: "break-word", fontFamily: "monospace", fontSize: 13 }}
+                        >
+                          {gluedRawText || "—"}
+                        </Box>
+                      </Paper>
+                    </Box>
+
+                    {/* Structured JSON */}
+                    <Box>
+                      <Box display="flex" alignItems="center" justifyContent="space-between" mb={1}>
+                        <Typography variant="subtitle2">Structured JSON</Typography>
+                        <Tooltip title="Kopijuoti">
+                          <IconButton size="small" onClick={() => copyToClipboard(structuredPretty)}>
+                            <ContentCopyIcon fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                      </Box>
+                      <Paper variant="outlined" sx={{ p: 2, maxHeight: 380, overflow: "auto", bgcolor: "#0b1020" }}>
+                        <Box
+                          component="pre"
+                          sx={{
+                            m: 0,
+                            whiteSpace: "pre",
+                            color: "#c9e1ff",
+                            fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace",
+                            fontSize: 12,
+                          }}
+                        >
+                          {structuredPretty || "—"}
+                        </Box>
+                      </Paper>
+                    </Box>
                   </AccordionDetails>
                 </Accordion>
               )}

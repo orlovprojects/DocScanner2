@@ -201,7 +201,7 @@ class ScannedDocumentDetailSerializer(serializers.ModelSerializer):
             "file": {"write_only": True},
             "gpt_raw_json": {"write_only": True},
             "raw_text": {"write_only": True},
-            "structured_json": {"write_only": True},
+            # "structured_json": {"write_only": True},
         }
 
 
@@ -366,6 +366,9 @@ def _firm_key_tuple(d): return tuple(_norm(d.get(k)) for k in FIRM_KEYS)
 class CustomUserSerializer(serializers.ModelSerializer):
     credits = serializers.DecimalField(read_only=True, max_digits=7, decimal_places=2)
 
+    is_superuser = serializers.BooleanField(read_only=True)
+    is_staff     = serializers.BooleanField(read_only=True)
+
     # ВАЖНО: JSONField вместо many=True, чтобы принимать и dict (delete-команды), и list
     purchase_defaults = serializers.JSONField(required=False)
     sales_defaults    = serializers.JSONField(required=False)
@@ -382,7 +385,7 @@ class CustomUserSerializer(serializers.ModelSerializer):
             'company_name','company_code','vat_code',
             'company_iban','company_address','company_country_iso',
             'purchase_defaults','sales_defaults','view_mode',
-            'extra_settings',
+            'extra_settings', 'is_superuser','is_staff',
         ]
         read_only_fields = ('credits',)
         extra_kwargs = {

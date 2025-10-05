@@ -6,6 +6,7 @@ import logging.config
 import os
 import tempfile
 import zipfile
+import json
 from datetime import date, timedelta, time, datetime
 from decimal import Decimal
 
@@ -83,79 +84,147 @@ site_url = settings.SITE_URL_FRONTEND  # берём из settings.py
 
 
 #admin dashboard
+from datetime import datetime, time, timedelta
+from django.utils import timezone
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.response import Response
+import json
+
+# from .models import ScannedDocument, CustomUser
+# from .permissions import IsSuperUser
+# from .views import summarize_doc_issues  # если в том же файле — не нужно
+
 def _today_dates():
-    """Возвращает локальные даты для today/yesterday (без времени)."""
     today = timezone.localdate()
     yesterday = today - timedelta(days=1)
     return today, yesterday
 
 def _count_by_date(model, date_field: str, target_date):
-    """
-    Быстрый способ посчитать записи за конкретную календарную дату:
-    фильтр по __date делает сравнение по дате в БД.
-    """
     return model.objects.filter(**{f"{date_field}__date": target_date}).count()
 
-def _count_last_n_days(model, date_field: str, days: int):
-    """
-    Последние N дней включая текущий момент (rolling window).
-    """
-    since = timezone.now() - timedelta(days=days)
-    return model.objects.filter(**{f"{date_field}__gte": since}).count()
+def _qs_by_date(model, date_field: str, target_date):
+    start = timezone.make_aware(datetime.combine(target_date, time.min))
+    end = timezone.make_aware(datetime.combine(target_date, time.max))
+    return model.objects.filter(**{f"{date_field}__range": (start, end)})
 
+def _qs_last_n_days(model, date_field: str, days: int):
+    since = timezone.now() - timedelta(days=days)
+    return model.objects.filter(**{f"{date_field}__gte": since})
+
+def _ensure_dict(maybe_json):
+    if not maybe_json:
+        return {}
+    if isinstance(maybe_json, dict):
+        return maybe_json
+    if isinstance(maybe_json, str):
+        try:
+            return json.loads(maybe_json)
+        except Exception:
+            return {}
+    return {}
+
+def _doc_has_issues(doc):
+    raw = getattr(doc, 'structured_json', None) or getattr(doc, 'gpt_raw_json', None) or {}
+    struct = _ensure_dict(raw)
+    res = summarize_doc_issues(struct)
+    return bool(res.get("has_issues"))
+
+def _count_errors_in_qs(qs):
+    n = 0
+    for doc in qs.only('id', 'structured_json', 'gpt_raw_json'):
+        if _doc_has_issues(doc):
+            n += 1
+    return n
+
+def _pct(part, whole):
+    return round((part / whole * 100.0), 2) if whole else 0.0
+
+def _rate(ok_count, total_count):
+    """% успешных (без ошибок) от общего количества."""
+    return _pct(ok_count, total_count)
 
 @api_view(["GET"])
 @permission_classes([IsSuperUser])
 def superuser_dashboard_stats(request):
-    # ---- Настрой под свои точные названия полей ----
-    doc_date_field = "uploaded_at"   # или "scanned_at"
-    user_date_field = "date_joined" # или "created_at"
+    doc_date_field = "uploaded_at"
+    user_date_field = "date_joined"
 
-    # Сегодня/вчера как локальные даты (таймзона берётся из настроек Django)
     today, yesterday = _today_dates()
 
-    # Документы
-    docs_today = _count_by_date(ScannedDocument, doc_date_field, today)
-    docs_yesterday = _count_by_date(ScannedDocument, doc_date_field, yesterday)
-    docs_7d = _count_last_n_days(ScannedDocument, doc_date_field, 7)
-    docs_30d = _count_last_n_days(ScannedDocument, doc_date_field, 30)
+    qs_all      = ScannedDocument.objects.all()
+    qs_today    = _qs_by_date(ScannedDocument, doc_date_field, today)
+    qs_yesterday= _qs_by_date(ScannedDocument, doc_date_field, yesterday)
+    qs_7d       = _qs_last_n_days(ScannedDocument, doc_date_field, 7)
+    qs_30d      = _qs_last_n_days(ScannedDocument, doc_date_field, 30)
 
-    # Уникальные пользователи, которые сканировали (исключая id 1 и 2) — за всё время
+    docs_today      = qs_today.count()
+    docs_yesterday  = qs_yesterday.count()
+    docs_7d         = qs_7d.count()
+    docs_30d        = qs_30d.count()
+    total_docs      = qs_all.count()
+
+    err_today       = _count_errors_in_qs(qs_today)
+    err_yesterday   = _count_errors_in_qs(qs_yesterday)
+    err_7d          = _count_errors_in_qs(qs_7d)
+    err_30d         = _count_errors_in_qs(qs_30d)
+    err_total       = _count_errors_in_qs(qs_all)
+
+    ok_today        = max(docs_today - err_today, 0)
+    ok_yesterday    = max(docs_yesterday - err_yesterday, 0)
+    ok_7d           = max(docs_7d - err_7d, 0)
+    ok_30d          = max(docs_30d - err_30d, 0)
+    ok_total        = max(total_docs - err_total, 0)
+
+    # уникальные пользователи (пример из твоей версии)
     start_today = timezone.make_aware(datetime.combine(today, time.min))
-    end_today = timezone.make_aware(datetime.combine(today, time.max))
-
+    end_today   = timezone.make_aware(datetime.combine(today, time.max))
     unique_users_excl_1_2_today = (
         ScannedDocument.objects
         .exclude(user_id__in=[1, 2])
-        .filter(uploaded_at__range=(start_today, end_today))
+        .filter(**{f"{doc_date_field}__range": (start_today, end_today)})
         .values("user_id").distinct().count()
     )
 
-    # Новые пользователи (регистрации) — сегодня/вчера/7/30 дней
-    new_users_today = _count_by_date(CustomUser, user_date_field, today)
-    new_users_yesterday = _count_by_date(CustomUser, user_date_field, yesterday)
-    new_users_7d = _count_last_n_days(CustomUser, user_date_field, 7)
-    new_users_30d = _count_last_n_days(CustomUser, user_date_field, 30)
+    # пользователи/регистрации
+    new_users_today      = _count_by_date(CustomUser, user_date_field, today)
+    new_users_yesterday  = _count_by_date(CustomUser, user_date_field, yesterday)
+    new_users_7d         = _qs_last_n_days(CustomUser, user_date_field, 7).count()
+    new_users_30d        = _qs_last_n_days(CustomUser, user_date_field, 30).count()
+    total_users          = CustomUser.objects.count()
 
-    # (Опционально) всего пользователей, всего документов
-    total_users = CustomUser.objects.count()
-    total_docs = ScannedDocument.objects.count()
+    # разбивка по типам
+    st_sumiskai = qs_all.filter(scan_type="sumiskai").count()
+    st_detaliai = qs_all.filter(scan_type="detaliai").count()
 
     data = {
         "documents": {
-            "today": docs_today,
-            "yesterday": docs_yesterday,
-            "last_7_days": docs_7d,
-            "last_30_days": docs_30d,
-            "unique_users_excluding_1_2": unique_users_excl_1_2_today,
-            "total": total_docs,
+            "today":            {"count": docs_today,     "errors": err_today},
+            "yesterday":        {"count": docs_yesterday, "errors": err_yesterday},
+            "last_7_days":      {"count": docs_7d,        "errors": err_7d},
+            "last_30_days":     {"count": docs_30d,       "errors": err_30d},
+            "total":            {"count": total_docs,     "errors": err_total},
+
+            # ✅ Новый блок — Success rate (без ошибок)
+            "success_rate": {
+                "today":        _rate(ok_today,     docs_today),
+                "yesterday":    _rate(ok_yesterday, docs_yesterday),
+                "last_7_days":  _rate(ok_7d,        docs_7d),
+                "last_30_days": _rate(ok_30d,       docs_30d),
+                "total":        _rate(ok_total,     total_docs),
+            },
+
+            "unique_users_excluding_1_2_today": unique_users_excl_1_2_today,
+            "scan_types": {
+                "sumiskai": {"count": st_sumiskai, "pct": _pct(st_sumiskai, total_docs)},
+                "detaliai": {"count": st_detaliai, "pct": _pct(st_detaliai, total_docs)},
+            },
         },
         "users": {
-            "new_today": new_users_today,
-            "new_yesterday": new_users_yesterday,
-            "new_last_7_days": new_users_7d,
+            "new_today":        new_users_today,
+            "new_yesterday":    new_users_yesterday,
+            "new_last_7_days":  new_users_7d,
             "new_last_30_days": new_users_30d,
-            "total": total_users,
+            "total":            total_users,
         },
         "meta": {
             "timezone": str(timezone.get_current_timezone()),
@@ -163,6 +232,7 @@ def superuser_dashboard_stats(request):
         },
     }
     return Response(data)
+
 
 
 
@@ -1470,3 +1540,124 @@ def subscription_status(request):
     except Exception as e:
         # Обработка ошибок и возврат сообщения
         return Response({'error': str(e)}, status=500)
+    
+
+
+
+
+#DLIA SUPERUSEROV!!!:
+
+
+def _ensure_dict(maybe_json):
+    """Возвращает dict из объекта: если str — парсит JSON, иначе {} при ошибке."""
+    if not maybe_json:
+        return {}
+    if isinstance(maybe_json, dict):
+        return maybe_json
+    if isinstance(maybe_json, str):
+        try:
+            return json.loads(maybe_json)
+        except Exception:
+            return {}
+    # иногда приходит Decimal/None/списки — нам нужен именно dict
+    return {}
+
+def summarize_doc_issues(doc_struct):
+    """Определяем, есть ли ошибки в документе (по логам и флагам)."""
+    doc_struct = _ensure_dict(doc_struct)
+
+    logs = doc_struct.get("_global_validation_log") or []
+    # защита: если логи пришли строкой — обернём в список
+    if isinstance(logs, str):
+        logs = [logs]
+
+    replaced = sum(bool(doc_struct.get(k)) for k in [
+        "_total_replaced","_vat_replaced","_subtotal_replaced"
+    ])
+    dedup = sum(bool(doc_struct.get(k)) for k in [
+        "_dedup_invoice_discount_with_vat","_dedup_invoice_discount_wo_vat"
+    ])
+    reconciled = bool(doc_struct.get("_doc_totals_replaced_by_lineitems"))
+
+    badges = []
+    if reconciled: badges.append("Σ→doc")
+    if doc_struct.get("_total_replaced"):   badges.append("TOTAL↑")
+    if doc_struct.get("_vat_replaced"):     badges.append("VAT↑")
+    if doc_struct.get("_subtotal_replaced"):badges.append("SUB↑")
+    if doc_struct.get("_dedup_invoice_discount_with_vat"): badges.append("disc(w)↓")
+    if doc_struct.get("_dedup_invoice_discount_wo_vat"):  badges.append("disc(nw)↓")
+
+    # line_items может быть чем угодно — нормализуем в список
+    line_items = doc_struct.get("line_items") or []
+    if isinstance(line_items, str):
+        try:
+            line_items = json.loads(line_items)
+        except Exception:
+            line_items = []
+    if not isinstance(line_items, list):
+        line_items = []
+
+    line_logs = 0
+    for it in line_items:
+        if not isinstance(it, dict):
+            continue
+        log = it.get("_lineitem_calc_log") or []
+        if isinstance(log, str):
+            log = [log]
+        if any(("ЗАМЕНЯЕМ" in s) or ("из " in s) for s in log):
+            line_logs += 1
+    if line_logs:
+        badges.append(f"LI×{line_logs}")
+
+    bang_lines = [s for s in logs if isinstance(s, str) and s.strip().startswith("❗")]
+    first_bang = bang_lines[0] if bang_lines else None
+
+    issue_count = len(bang_lines) + replaced + dedup + (1 if reconciled else 0)
+
+    return {
+        "has_issues": bool(first_bang or reconciled or replaced or dedup),
+        "issue_badges": " ".join(badges),
+        "issue_summary": (first_bang or " ".join(badges) or "")[:300],
+        "issue_count": issue_count,
+    }
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def admin_documents_with_errors(request):
+    """Для superuser — документы всех пользователей с ошибками (все, без ограничения по дате)."""
+    user = request.user
+    if not user.is_superuser:
+        return Response({"detail": "Not authorized"}, status=status.HTTP_403_FORBIDDEN)
+
+    # фильтр по статусу — опционально
+    status_filter = request.GET.get('status')
+
+    qs = ScannedDocument.objects.all()
+
+    if status_filter:
+        qs = qs.filter(status=status_filter)
+
+    # сортировка по времени загрузки (новые первыми)
+    qs = qs.order_by('-uploaded_at')
+
+    ser = ScannedDocumentListSerializer(qs, many=True)
+
+    data = []
+    for obj, row in zip(qs, ser.data):
+        doc_struct_raw = getattr(obj, 'structured_json', None) or getattr(obj, 'gpt_raw_json', None)
+        issues = summarize_doc_issues(doc_struct_raw)
+        if not issues["has_issues"]:
+            continue
+
+        r = dict(row)
+        r["owner_email"]   = getattr(obj.user, "email", None)
+        r["issue_has"]     = issues["has_issues"]
+        r["issue_badges"]  = issues["issue_badges"]
+        r["issue_summary"] = issues["issue_summary"]
+        r["issue_count"]   = issues["issue_count"]
+        data.append(r)
+
+    return Response(data)
+
+

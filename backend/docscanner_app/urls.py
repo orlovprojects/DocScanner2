@@ -18,6 +18,7 @@ from .views import (
     update_view_mode,
     download_apskaita5_adapter,
     superuser_dashboard_stats,
+    admin_documents_with_errors
 )
 
 from docscanner_app.views import export_documents
@@ -146,4 +147,9 @@ urlpatterns = [
 
     # # Proveriajet status subscriptionsa usera dlia content restictions
     # path('subscription-status/', subscription_status, name='subscription_status'),
+
+
+#DLIA SUPERUSEROV!!!:
+
+    path('admin/documents_with_errors/', admin_documents_with_errors, name='admin_documents_with_errors'),
 ]
