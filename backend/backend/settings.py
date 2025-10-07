@@ -50,9 +50,25 @@ INSTALLED_APPS = [
     "corsheaders",
     "rest_framework",
     "rest_framework_simplejwt",
+
+    # Wagtail blog
+    "wagtail.contrib.forms",
+    "wagtail.contrib.redirects",
+    "wagtail.embeds",
+    "wagtail.sites",
+    "wagtail.users",
+    "wagtail.snippets",
+    "wagtail.documents",
+    "wagtail.images",
+    "wagtail.search",
+    "wagtail.admin",
+    "wagtail",
+    "modelcluster",
+    "taggit",
+    "wagtail.api.v2",
 ]
 
-WAGTAIL_SITE_NAME = "AtlyginimoSkaiciuokle"
+WAGTAIL_SITE_NAME = "DokSkenas"
 
 
 # Middleware
@@ -65,6 +81,8 @@ MIDDLEWARE = [
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
+
+    "wagtail.contrib.redirects.middleware.RedirectMiddleware",
 ]
 
 # Django REST Framework настройки

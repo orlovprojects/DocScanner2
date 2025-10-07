@@ -568,7 +568,7 @@ export default function NustatymaiPage() {
 
   return (
     <Box p={4} maxWidth={900}>
-      <Helmet><title>Nustatymai</title></Helmet>
+      <Helmet><title>Nustatymai - DokSkenas</title></Helmet>
 
       <Typography variant="h5" gutterBottom>Nustatymai</Typography>
 

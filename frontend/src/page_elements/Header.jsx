@@ -106,6 +106,7 @@ const Header = () => {
         // NEW: админ-пункты (показываем только если суперюзер)
         ...(isSuper ? [
           { text: "Klaidų suvestinė", onClick: () => nav("/admin-suvestine") },
+          { text: "Visi failai", onClick: () => nav("/admin-visi-failai") },
           { text: "Analytics", onClick: () => nav("/admin-dashboard") },
         ] : []),
       ]
@@ -256,6 +257,9 @@ const Header = () => {
           <>
             <MenuItem onClick={() => { handleClose(); nav("/admin-suvestine"); }}>
               Klaidų suvestinė
+            </MenuItem>
+            <MenuItem onClick={() => { handleClose(); nav("/admin-visi-failai"); }}>
+              Visi failai
             </MenuItem>
             <MenuItem onClick={() => { handleClose(); nav("/admin-dashboard"); }}>
               Analytics

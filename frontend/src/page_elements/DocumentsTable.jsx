@@ -31,6 +31,7 @@ export default function DocumentsTable({
   reloadDocuments,
   allowUnknownDirection = false, // из UploadPage: user?.view_mode === "multi"
   onDeleteDoc, // новый проп — поднимаем удаление в родителя
+  showOwnerColumns = false, // <— показывать первые два столбца: User ID и Email
 }) {
   const [anchorEl, setAnchorEl] = useState(null);
   const [menuRowId, setMenuRowId] = useState(null);
@@ -142,6 +143,9 @@ export default function DocumentsTable({
     return dir.charAt(0).toUpperCase() + dir.slice(1);
   };
 
+  const baseColCount = 7; // чекбокс + 6 твоих столбцов
+  const extraOwnerCols = showOwnerColumns ? 2 : 0;
+
   return (
     <TableContainer component={Paper} sx={{ maxHeight: 580 }}>
       <Table stickyHeader size="small">
@@ -161,6 +165,14 @@ export default function DocumentsTable({
                 inputProps={{ "aria-label": "select all exportable" }}
               />
             </TableCell>
+
+            {showOwnerColumns && (
+              <>
+                <TableCell sx={{ fontWeight: 600 }}>User ID</TableCell>
+                <TableCell sx={{ fontWeight: 600 }}>Email</TableCell>
+              </>
+            )}
+
             <TableCell sx={{ fontWeight: 600 }}>Failas</TableCell>
             <TableCell sx={{ fontWeight: 600 }}>Skaitmenizavimo tipas</TableCell>
             <TableCell sx={{ fontWeight: 600 }}>Pirkimas / pardavimas</TableCell>
@@ -169,10 +181,11 @@ export default function DocumentsTable({
             <TableCell align="right"></TableCell>
           </TableRow>
         </TableHead>
+
         <TableBody>
           {loading ? (
             <TableRow>
-              <TableCell colSpan={7} align="center">
+              <TableCell colSpan={baseColCount + extraOwnerCols} align="center">
                 <CircularProgress size={24} />
               </TableCell>
             </TableRow>
@@ -187,6 +200,13 @@ export default function DocumentsTable({
                     inputProps={{ "aria-label": "select row" }}
                   />
                 </TableCell>
+
+                {showOwnerColumns && (
+                  <>
+                    <TableCell>{d.user_id ?? "—"}</TableCell>
+                    <TableCell>{d.owner_email || "—"}</TableCell>
+                  </>
+                )}
 
                 <TableCell
                   sx={{ cursor: "pointer", color: "primary.main" }}
@@ -241,10 +261,7 @@ export default function DocumentsTable({
 
 
 
-
-
-
-// import { useState, useEffect } from "react";
+// import { useState } from "react";
 // import { api } from "../api/endpoints";
 // import {
 //   TableContainer,
@@ -276,14 +293,12 @@ export default function DocumentsTable({
 //   isRowExportable,
 //   reloadDocuments,
 //   allowUnknownDirection = false, // из UploadPage: user?.view_mode === "multi"
+//   onDeleteDoc, // новый проп — поднимаем удаление в родителя
 // }) {
 //   const [anchorEl, setAnchorEl] = useState(null);
 //   const [menuRowId, setMenuRowId] = useState(null);
-//   const [localRows, setLocalRows] = useState(filtered || []);
 
-//   useEffect(() => {
-//     setLocalRows(filtered || []);
-//   }, [filtered]);
+//   const rows = filtered || [];
 
 //   const handleMenuOpen = (event, rowId) => {
 //     setAnchorEl(event.currentTarget);
@@ -296,13 +311,15 @@ export default function DocumentsTable({
 //   };
 
 //   const handleDeleteRow = async (rowId) => {
-//     setLocalRows((rows) => rows.filter((row) => row.id !== rowId));
 //     handleMenuClose();
+//     // оптимистично убираем запись в родителе
+//     onDeleteDoc?.(rowId);
 //     try {
 //       await api.delete("/documents/bulk-delete/", { data: { ids: [rowId] } });
-//       if (typeof reloadDocuments === "function") reloadDocuments();
+//       reloadDocuments?.();
 //     } catch (e) {
 //       alert("Įvyko klaida trinant dokumentą.");
+//       reloadDocuments?.();
 //     }
 //   };
 
@@ -311,14 +328,14 @@ export default function DocumentsTable({
 //     d.val_vat_match === false ||
 //     d.val_total_match === false;
 
-//   // ----- ВАЖНО: берём направление из effective_direction (если задано), иначе из бэкенда
+//   // направление — из effective_direction (если задано), иначе из бэкенда
 //   const getDirectionToShow = (d) => {
 //     const raw =
 //       typeof d.effective_direction !== "undefined"
 //         ? d.effective_direction
 //         : (d.pirkimas_pardavimas || "").toLowerCase();
 
-//     if (raw === "") return ""; // контрагент не выбран — показываем пусто
+//     if (raw === "") return ""; // контрагент не выбран — пустая ячейка
 
 //     const v = (raw || "").toLowerCase();
 //     if (!v || v === "nezinoma") return "nezinoma";
@@ -333,7 +350,7 @@ export default function DocumentsTable({
 //     return dir === "pirkimas" || dir === "pardavimas";
 //   };
 
-//   const exportableRows = localRows.filter(canExport);
+//   const exportableRows = rows.filter(canExport);
 
 //   const statusLabel = (d) => {
 //     if (d.status === "exported") return "Atliktas (Eksportuotas)";
@@ -371,7 +388,6 @@ export default function DocumentsTable({
 //     const dir = getDirectionToShow(d);
 
 //     if (dir === "") {
-//       // контрагент не выбран — показываем пустую ячейку
 //       return <span>&nbsp;</span>;
 //     }
 
@@ -386,7 +402,6 @@ export default function DocumentsTable({
 //       );
 //     }
 
-//     // pirkimas / pardavimas -> с заглавной
 //     return dir.charAt(0).toUpperCase() + dir.slice(1);
 //   };
 
@@ -425,8 +440,8 @@ export default function DocumentsTable({
 //               </TableCell>
 //             </TableRow>
 //           ) : (
-//             localRows.map((d, idx) => (
-//               <TableRow key={d.id || idx} hover>
+//             rows.map((d) => (
+//               <TableRow key={String(d.id)} hover>
 //                 <TableCell padding="checkbox">
 //                   <Checkbox
 //                     checked={selectedRows.includes(d.id)}
@@ -486,5 +501,4 @@ export default function DocumentsTable({
 //     </TableContainer>
 //   );
 // }
-
 

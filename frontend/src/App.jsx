@@ -13,6 +13,11 @@ import AtlyginimoSkaiciuokle2026 from './pages/AtlyginimoSkaiciuokle2026';
 
 import AdminDashboard from "./pages/AdminDashboard";
 import AdminSuvestine from "./pages/AdminSuvestine";
+import AdminVisiFailai from "./pages/AdminVisiFailai";
+
+import NaudojimoGidas from './pages/NaudojimoGidas';
+import GidoCategories from './pages/GidoCategories';
+import GidoArticle from './pages/GidoArticle';
 
 import AuthProvider from './contexts/useAuth';
 import PrivateRoute from './components/private_route';
@@ -80,6 +85,9 @@ function App() {
         <Route path="/saskaitu-skaitmenizavimas-dokskenas" element={<Dokskenas />} />
         <Route path="/pvm-skaiciuokle" element={<PvmCalculator />} />
         <Route path="/gpm-skaiciuokle" element={<GpmSkaiciuokle />} />
+        {/* <Route path="/naudojimo-gidas" element={<NaudojimoGidas />} />
+        <Route path="/kategorija/:slug" element={<GidoCategories />} />
+        <Route path="/straipsnis/:slug" element={<GidoArticle />} /> */}
         <Route
           path="/suvestine"
           element={
@@ -116,20 +124,9 @@ function App() {
         />
         <Route path="/privatumo-politika" element={<Privacy />} />
         <Route path="/naudojimo-taisykles" element={<Terms />} />
-        <Route path="/admin-dashboard" element={
-          <RequireSuperuser loginPath="/login" forbiddenPath="/403">
-            <AdminDashboard />
-          </RequireSuperuser>
-        }
-        />
-        <Route
-          path="/admin-suvestine"
-          element={
-            <RequireSuperuser>
-              <AdminSuvestine />
-            </RequireSuperuser>
-          }
-        />
+        <Route path="/admin-dashboard" element={<RequireSuperuser loginPath="/login" forbiddenPath="/403"><AdminDashboard /></RequireSuperuser>} />
+        <Route path="/admin-visi-failai" element={<RequireSuperuser loginPath="/login" forbiddenPath="/403"><AdminVisiFailai /></RequireSuperuser>} />
+        <Route path="/admin-suvestine" element={<RequireSuperuser loginPath="/login" forbiddenPath="/403"><AdminSuvestine /></RequireSuperuser>} />
       </Routes>
       <Footer />
     </AuthProvider>

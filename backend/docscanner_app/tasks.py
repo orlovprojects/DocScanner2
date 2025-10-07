@@ -237,23 +237,34 @@ def process_uploaded_file_task(user_id, doc_id, scan_type):
 
         # 9) Похожесть с другими документами пользователя — по склеенному тексту
         t0 = _t()
-        similarity_percent = calculate_max_similarity_percent(doc.raw_text or "", user, exclude_doc_id=doc.pk)
+        similarity_percent, similar_doc_id = calculate_max_similarity_percent(
+            doc.glued_raw_text or "",  # <--- склеенный текст, не raw_json
+            user=user,
+            exclude_doc_id=doc.pk
+        )
         _log_t("Calculate similarity", t0)
 
         t0 = _t()
         doc.similarity_percent = similarity_percent
-        doc.save(update_fields=['similarity_percent'])
+        # Если есть поле в модели, можно сохранить и ID:
+        # doc.similar_doc_id = similar_doc_id
+        doc.save(update_fields=['similarity_percent'])  # , 'similar_doc_id'
         _log_t("Save similarity", t0)
 
-        if similarity_percent > 95:
+        if similarity_percent > 98:
             t0 = _t()
-            doc.status = 'rejected'
-            doc.error_message = "Potencialus dublikatas (>95% panasumas)"
+            if similar_doc_id:
+                doc.status = 'rejected'
+                doc.error_message = f"Potencialus dublikatas (>98% panašumas) su dokumentu ID {similar_doc_id}"
+            else:
+                doc.status = 'rejected'
+                doc.error_message = "Potencialus dublikatas (>98% panašumas)"
             doc.save(update_fields=['status', 'error_message'])
             _log_t("Save rejected (duplicate)", t0)
-            logger.info("[TASK] Rejected as duplicate")
+            logger.info(f"[TASK] Rejected as duplicate{f' of document {similar_doc_id}' if similar_doc_id else ''}")
             _log_t("TOTAL", total_start)
             return
+
 
         # 10) LLM: Gemini → GPT fallback (скармливаем склеенный текст)
         t0 = _t()

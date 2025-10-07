@@ -7,6 +7,58 @@ import logging
 logger = logging.getLogger("celery")
 
 # ---- твои базовые парсеры (оставь как есть) ----
+
+def normalize_code_field(value: str) -> str:
+    """
+    Унифицирует поля вроде document_number или document_series:
+      - убирает пробелы и неалфанумерные символы,
+      - приводит к верхнему регистру.
+    """
+    if not value:
+        return ""
+
+    v = str(value).strip().upper()
+
+    # Убираем всё, кроме букв и цифр
+    v = re.sub(r"[^A-Z0-9]", "", v)
+
+    return v
+
+
+def normalize_unit(value: str) -> str:
+    """
+    Унифицирует обозначение единицы измерения:
+      - приводит к нижнему регистру,
+      - убирает точки, запятые, тире, пробелы и прочие символы,
+      - заменяет '²'/'³'/'^2'/'^3' на цифры,
+      - конвертирует 'kv.m', 'kvadratiniai metrai' → 'm2',
+        'kub.m', 'kubiniai metrai' → 'm3'.
+    """
+    if not value:
+        return ""
+
+    v = str(value).strip().lower()
+
+    # 1. заменяем надстрочные символы и степени
+    v = v.replace("²", "2").replace("³", "3")
+    v = v.replace("^2", "2").replace("^3", "3")
+
+    # 2. убираем точки, запятые, тире, подчеркивания и пробелы
+    v = re.sub(r"[.\-_,\s]+", "", v)
+
+    # 3. обработка типовых текстовых обозначений
+    # квадратные метры
+    if any(x in v for x in ["kvm", "kvmetrai", "kvadratinis", "kvadratiniaimetrai", "kvadratinismetras"]):
+        return "m2"
+
+    # кубические метры
+    if any(x in v for x in ["kubm", "kubiniai", "kubiniai", "kubiniai", "kubinis"]):
+        return "m3"
+
+    # 4. итоговое значение
+    return v
+
+
 def parse_date_lit(s: str):
     if not s:
         return None

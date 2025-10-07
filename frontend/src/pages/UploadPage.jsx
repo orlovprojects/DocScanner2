@@ -421,7 +421,7 @@ export default function UploadPage() {
   return (
     <Box p={4}>
       <Helmet>
-        <title>Suvestinė</title>
+        <title>Suvestinė - DokSkenas</title>
         <meta name="description" content="Įkelkite dokumentus skaitmenizavimui" />
       </Helmet>
 

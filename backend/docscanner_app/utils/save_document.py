@@ -24,6 +24,8 @@ from ..utils.parsers import (
     sanitize_document_struct,
     sanitize_line_item,
     convert_for_json,
+    normalize_unit,
+    normalize_code_field,
 )
 from ..validators.extra_validators import apply_user_extra_settings
 
@@ -89,8 +91,8 @@ def _apply_top_level_fields(
     db_doc.invoice_date = doc_struct.get("invoice_date")
     db_doc.due_date = doc_struct.get("due_date")
     db_doc.operation_date = doc_struct.get("operation_date")
-    db_doc.document_series = doc_struct.get("document_series")
-    db_doc.document_number = doc_struct.get("document_number")
+    db_doc.document_series = normalize_code_field(doc_struct.get("document_series"))
+    db_doc.document_number = normalize_code_field(doc_struct.get("document_number"))
     db_doc.order_number = doc_struct.get("order_number")
 
     db_doc.amount_wo_vat = doc_struct.get("amount_wo_vat")
@@ -450,7 +452,7 @@ def _save_line_items(db_doc, doc_struct: Dict[str, Any], scan_type: str):
                 prekes_pavadinimas=item.get("product_name"),
                 prekes_tipas=item.get("prekes_tipas"),
                 preke_paslauga=item.get("preke_paslauga"),
-                unit=item.get("unit"),
+                unit=normalize_unit(item.get("unit")),
                 quantity=item.get("quantity"),
                 price=item.get("price"),
                 subtotal=item.get("subtotal"),
@@ -545,6 +547,11 @@ def update_scanned_document(
 
     if "line_items" in doc_struct and isinstance(doc_struct["line_items"], list):
         doc_struct["line_items"] = [sanitize_line_item(li) for li in doc_struct["line_items"]]
+
+        # normalize units early
+        for li in doc_struct["line_items"]:
+            if "unit" in li:
+                li["unit"] = normalize_unit(li.get("unit"))
 
     # 1.5) Дедупликация скидок ДО расчётов
     doc_struct = dedupe_document_discounts(doc_struct)

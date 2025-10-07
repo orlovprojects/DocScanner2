@@ -76,7 +76,7 @@ const Subscribe = () => {
   return (
     <Box sx={{ p: 2, bgcolor: '#f5f5f5', minHeight: '100vh', pb: '70px' }}>
       <Helmet>
-        <title>Pirkti kreditus</title>
+        <title>Pirkti kreditus - DokSkenas</title>
         <meta name="description" content="Įsigykite kreditų dokumentams skaitmenizuoti." />
       </Helmet>
 

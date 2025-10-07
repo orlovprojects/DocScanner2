@@ -7,6 +7,15 @@ import hashlib
 from django.conf import settings
 from django.utils import timezone
 
+#wagtail importy
+from wagtail.models import Page
+from wagtail.fields import StreamField, RichTextField
+from wagtail.admin.panels import FieldPanel
+from wagtail import blocks
+from wagtail.api import APIField
+from wagtail.images.blocks import ImageChooserBlock
+from wagtail.embeds.blocks import EmbedBlock
+
 
 
 
@@ -553,3 +562,131 @@ class Payments(models.Model):
 
     # Raw
     created_at = models.DateTimeField(auto_now_add=True)
+
+
+
+
+#Wagtail modeli
+from django.db import models
+from wagtail.models import Page
+from wagtail.fields import StreamField, RichTextField
+from wagtail.admin.panels import FieldPanel
+from wagtail import blocks
+# (опционально) from wagtail.api import APIField  # если используешь API
+
+
+class GuideIndexPage(Page):
+    subpage_types = ["docscanner_app.GuideCategoryPage"]
+
+
+
+class GuideCategoryPage(Page):
+    # кастомные
+    description = RichTextField(blank=True)
+    cat_image = models.ForeignKey(
+        "wagtailimages.Image",
+        null=True, blank=True,
+        on_delete=models.SET_NULL,
+        related_name="+",
+    )
+    order = models.PositiveIntegerField(default=0)
+
+    content_panels = Page.content_panels + [
+        FieldPanel("description"),
+        FieldPanel("cat_image"),
+        FieldPanel("order"),
+    ]
+
+    parent_page_types = ["docscanner_app.GuideIndexPage"]
+    subpage_types = ["docscanner_app.GuidePage"]
+
+    # что отдаём в API (включая встроенные поля)
+    api_fields = [
+        APIField("title"),              # встроенное
+        APIField("slug"),               # встроенное (Promote)
+        APIField("seo_title"),          # встроенное (Promote)
+        APIField("search_description"), # встроенное (аналог "seo_description")
+        APIField("description"),        # кастом
+        APIField("cat_image"),          # кастом
+        APIField("order"),              # кастом
+    ]
+
+
+
+
+
+class GuidePage(Page):
+    # 🔹 Основное содержимое статьи
+    body = StreamField(
+        [
+            # Текстовые блоки
+            ("heading", blocks.CharBlock(form_classname="full title")),
+            ("paragraph", blocks.RichTextBlock(features=[
+                "h2", "h3", "h4", "h5",
+                "bold", "italic", "link", "ol", "ul", "image", "blockquote"
+            ])),
+
+            # Медиа
+            ("image", ImageChooserBlock()),
+            ("youtube", EmbedBlock(help_text="Вставь YouTube ссылку")),
+
+            # Код
+            ("code", blocks.TextBlock(help_text="Вставь кодовый блок")),
+
+            # Цитата
+            ("quote", blocks.BlockQuoteBlock()),
+
+            # Таблица
+            ("table", blocks.StructBlock([
+                ("caption", blocks.CharBlock(required=False)),
+                ("data", blocks.StreamBlock([
+                    ("row", blocks.ListBlock(blocks.CharBlock())),
+                ])),
+            ])),
+
+            # Разделитель
+            ("divider", blocks.StaticBlock(label="Space line")),
+
+        ],
+        use_json_field=True,
+        blank=True,
+    )
+
+    # 🔹 Изображение и автор
+    main_image = models.ForeignKey(
+        "wagtailimages.Image",
+        null=True, blank=True,
+        on_delete=models.SET_NULL,
+        related_name="+",
+    )
+
+    author_name = models.CharField(max_length=100, blank=True)
+    last_updated = models.DateTimeField(auto_now=True)
+
+    # 🔹 Панели Wagtail Admin
+    content_panels = Page.content_panels + [
+        FieldPanel("body"),
+        FieldPanel("main_image"),
+        FieldPanel("author_name"),
+    ]
+
+    # 🔹 Структура Wagtail
+    parent_page_types = ["docscanner_app.GuideCategoryPage"]
+    subpage_types = []
+
+    # 🔹 Поля, доступные в API
+    api_fields = [
+        APIField("id"),
+        APIField("title"),
+        APIField("slug"),
+        APIField("content_type"),
+        APIField("live"),
+        APIField("seo_title"),
+        APIField("search_description"),
+        APIField("first_published_at"),
+        APIField("last_published_at"),
+        APIField("body"),
+        APIField("main_image"),
+        APIField("author_name"),
+    ]
+

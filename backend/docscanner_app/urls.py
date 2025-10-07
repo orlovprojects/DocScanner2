@@ -18,7 +18,8 @@ from .views import (
     update_view_mode,
     download_apskaita5_adapter,
     superuser_dashboard_stats,
-    admin_documents_with_errors
+    admin_documents_with_errors,
+    admin_all_documents,
 )
 
 from docscanner_app.views import export_documents
@@ -91,8 +92,6 @@ urlpatterns = [
 
     path("view-mode/", update_view_mode, name="user-view-mode"),
 
-    path("superuser/dashboard-stats/", superuser_dashboard_stats, name="superuser_dashboard_stats"),
-
 
 
 
@@ -112,6 +111,7 @@ urlpatterns = [
 
     # Proveriajet status subscriptionsa usera dlia content restictions
     path('subscription-status/', subscription_status, name='subscription_status'),
+
 
 
 
@@ -152,4 +152,6 @@ urlpatterns = [
 #DLIA SUPERUSEROV!!!:
 
     path('admin/documents_with_errors/', admin_documents_with_errors, name='admin_documents_with_errors'),
+    path('superuser/dashboard-stats/', superuser_dashboard_stats, name="superuser_dashboard_stats"),
+    path('admin/visi-failai/', admin_all_documents, name='admin_all_documents'),
 ]

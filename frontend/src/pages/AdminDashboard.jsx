@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Helmet } from 'react-helmet';
 import {
   Box,
   Card,
@@ -188,6 +189,9 @@ export default function AdminDashboard() {
 
   return (
     <Box sx={{ p: 4, bgcolor: "grey.50", minHeight: "100vh" }}>
+      <Helmet>
+        <title>Analytics</title>
+      </Helmet>
       <Paper elevation={0} sx={{ p: 3, mb: 4, borderRadius: 3, border: 1, borderColor: "divider" }}>
         <Box display="flex" alignItems="center" justifyContent="space-between" flexWrap="wrap" gap={2}>
           <Box>

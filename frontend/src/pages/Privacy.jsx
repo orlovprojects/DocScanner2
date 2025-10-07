@@ -42,7 +42,7 @@ const Section = ({ title, children, number }) => (
 const Privacy = () => (
   <Container maxWidth="md" sx={{ marginTop: 6, marginBottom: 12, minHeight: '70vh' }}>
     <Helmet>
-      <title>Privatumo politika</title>
+      <title>Privatumo politika - DokSkenas</title>
       <meta name="description" content="Sužinokite apie mūsų privatumo politiką" />
     </Helmet>
     <Typography
