@@ -113,6 +113,9 @@ CORS_EXPOSE_HEADERS = [
     "content-disposition",
 ]
 
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+APPEND_SLASH = True
+
 # Templates
 TEMPLATES = [
     {
