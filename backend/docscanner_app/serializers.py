@@ -2,6 +2,7 @@ from rest_framework import serializers
 from .models import CustomUser
 from .models import ScannedDocument, LineItem, ProductAutocomplete, ClientAutocomplete, AdClick, GuideCategoryPage, GuidePage
 import json
+from typing import Optional
 
 
 class LineItemSerializer(serializers.ModelSerializer):
@@ -619,6 +620,15 @@ def rendition_url(img, spec="fill-800x450|jpegquality-70") -> str:
             return img.file.url
         except Exception:
             return ""
+        
+
+
+def _get_category_of(obj) -> Optional[GuideCategoryPage]:
+    try:
+        parent = obj.get_parent().specific
+    except Exception:
+        return None
+    return parent if isinstance(parent, GuideCategoryPage) else None
 
 
 # ==========================
@@ -651,6 +661,9 @@ class GuideCategoryListSerializer(serializers.ModelSerializer):
 # ==========================
 class GuideArticleListSerializer(serializers.ModelSerializer):
     main_image_url = serializers.SerializerMethodField()
+    # 🔹 ново:
+    category_slug = serializers.SerializerMethodField()
+    category_title = serializers.SerializerMethodField()
 
     class Meta:
         model = GuidePage
@@ -662,10 +675,23 @@ class GuideArticleListSerializer(serializers.ModelSerializer):
             "first_published_at",
             "last_published_at",
             "main_image_url",
+            # 🔹 ново:
+            "category_slug",
+            "category_title",
         )
 
     def get_main_image_url(self, obj):
         return rendition_url(obj.main_image, spec="fill-800x450|jpegquality-70")
+
+    # 🔹 ново:
+    def get_category_slug(self, obj):
+        cat = _get_category_of(obj)
+        return cat.slug if cat else None
+
+    def get_category_title(self, obj):
+        cat = _get_category_of(obj)
+        return cat.title if cat else None
+
 
 
 # (опционально) Детальная категория с вшитыми статьями
@@ -709,7 +735,10 @@ def _rendition_url(img, spec="fill-1200x675|jpegquality-70"):
 
 class GuideArticleDetailSerializer(serializers.ModelSerializer):
     main_image_url = serializers.SerializerMethodField()
-    body = serializers.SerializerMethodField()   # DRF будет вызывать def get_body(...)
+    body = serializers.SerializerMethodField()
+    # 🔹 ново:
+    category_slug = serializers.SerializerMethodField()
+    category_title = serializers.SerializerMethodField()
 
     class Meta:
         model = GuidePage
@@ -724,6 +753,9 @@ class GuideArticleDetailSerializer(serializers.ModelSerializer):
             "last_published_at",
             "main_image_url",
             "body",
+            # 🔹 ново:
+            "category_slug",
+            "category_title",
         )
 
     def get_main_image_url(self, obj):
@@ -777,6 +809,15 @@ class GuideArticleDetailSerializer(serializers.ModelSerializer):
 
         # 6) Ничего
         return []
+    
+
+    def get_category_slug(self, obj):
+        cat = _get_category_of(obj)
+        return cat.slug if cat else None
+
+    def get_category_title(self, obj):
+        cat = _get_category_of(obj)
+        return cat.title if cat else None
 
 
 

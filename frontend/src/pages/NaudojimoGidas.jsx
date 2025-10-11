@@ -192,21 +192,30 @@ export default function NaudojimoGidas() {
         <Box sx={{ mb: 6, display: "flex", justifyContent: "center" }}>
           <Box sx={{ position: "relative", width: "100%", maxWidth: 520 }}>
             <TextField
-              placeholder="Ieškoti gidų..."
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              onFocus={() => setOpen(results.length > 0)}
-              onBlur={() => setTimeout(() => setOpen(false), 150)}
-              onKeyDown={onKeyDown}
-              fullWidth
-              sx={{
-                "& .MuiOutlinedInput-root": {
-                  pl: 6,
-                  borderRadius: 3,
-                  backgroundColor: "#ffffff",
+            name="custom_search_field"
+            placeholder="Ieškoti gidų..."
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onFocus={() => setOpen(results.length > 0)}
+            onBlur={() => setTimeout(() => setOpen(false), 150)}
+            onKeyDown={onKeyDown}
+            fullWidth
+            autoComplete="off"
+            slotProps={{
+                input: {
+                autoComplete: 'off',
+                'aria-autocomplete': 'none',
                 },
-              }}
+            }}
+            sx={{
+                "& .MuiOutlinedInput-root": {
+                pl: 6,
+                borderRadius: 3,
+                backgroundColor: "#ffffff",
+                },
+            }}
             />
+
             <SearchIcon
               sx={{
                 position: "absolute",
@@ -311,7 +320,7 @@ export default function NaudojimoGidas() {
             Kaip pradėti su DokSkenu?
           </Typography>
           <Typography
-            variant="body2"
+            variant="body1"
             color="text.secondary"
             align="center"
             sx={{ mb: 4, maxWidth: 660, mx: "auto", lineHeight: 1.7 }}
