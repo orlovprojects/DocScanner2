@@ -196,7 +196,7 @@ export default function AdminDashboard() {
         <Box display="flex" alignItems="center" justifyContent="space-between" flexWrap="wrap" gap={2}>
           <Box>
             <Typography variant="h4" fontWeight={800} gutterBottom>
-              Administratoriaus Valdymo Skydelis
+              Admin'o Valdymo Skydelis
             </Typography>
             <Box display="flex" alignItems="center" gap={2} flexWrap="wrap">
               <Chip

@@ -30,6 +30,7 @@ from .views import TrackAdClickView
 from rest_framework.routers import DefaultRouter
 from .views import GuideCategoryViewSet, GuideArticleViewSet
 
+
 router = DefaultRouter()
 router.register(r"guides/categories", GuideCategoryViewSet, basename="guides-categories")
 
