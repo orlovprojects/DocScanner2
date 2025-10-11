@@ -79,6 +79,17 @@ from .validators.vat_klas import auto_select_pvm_code
 from django.db.models import Count
 from .permissions import IsSuperUser
 
+#wagtail imports
+from rest_framework import viewsets, mixins
+from .models import GuidePage, GuideCategoryPage
+from rest_framework.decorators import action
+from .serializers import (
+    GuideCategoryListSerializer,
+    GuideCategoryDetailSerializer,
+    GuideArticleListSerializer,
+    GuideArticleDetailSerializer,
+)
+
 
 # --- Logging setup ---
 logging.config.dictConfig(settings.LOGGING)
@@ -435,13 +446,13 @@ def export_documents(request):
         # 2) ПИРКИМАИ (I06/I07)
         if pirkimai_docs:
             logger.info("[EXP] RIVILE exporting pirkimai: %d docs", len(pirkimai_docs))
-            pirkimai_xml = export_pirkimai_group_to_rivile(pirkimai_docs)
+            pirkimai_xml = export_pirkimai_group_to_rivile(pirkimai_docs, request.user)
             files_to_export.append(('pirkimai.eip', pirkimai_xml))
 
         # 3) ПАРДАВИМАИ (I06/I07)
         if pardavimai_docs:
             logger.info("[EXP] RIVILE exporting pardavimai: %d docs", len(pardavimai_docs))
-            pardavimai_xml = export_pardavimai_group_to_rivile(pardavimai_docs)
+            pardavimai_xml = export_pardavimai_group_to_rivile(pardavimai_docs, request.user)
             files_to_export.append(('pardavimai.eip', pardavimai_xml))
 
         # 4) N17/N25
@@ -2194,5 +2205,85 @@ def admin_all_documents(request):
         data.append(enriched_row)
 
     return paginator.get_paginated_response(data)
+
+
+
+
+#Wagtail blog
+class GuideCategoryViewSet(viewsets.ReadOnlyModelViewSet):
+    """
+    /guides-api/v2/guide-categories/                 -> список категорий
+    /guides-api/v2/guide-categories/<slug>/          -> категория + articles[] (детально)
+    /guides-api/v2/guide-categories/<slug>/articles/ -> только список статей категории
+    """
+    permission_classes = [AllowAny]
+    lookup_field = "slug"
+    queryset = GuideCategoryPage.objects.live().public().order_by("order", "title")
+
+    def get_serializer_class(self):
+        # list -> короткий сериализатор
+        # retrieve -> детальный (с вложенным массивом статей)
+        return (
+            GuideCategoryDetailSerializer
+            if self.action == "retrieve"
+            else GuideCategoryListSerializer
+        )
+
+    @action(detail=True, methods=["get"], url_path="articles")
+    def articles(self, request, slug=None):
+        """
+        Вернёт список статей одной категории (удобно для пагинации фронта).
+        GET-параметры: ?limit=12&offset=0
+        """
+        category = self.get_object()
+
+        try:
+            limit = int(request.query_params.get("limit", 100))
+            offset = int(request.query_params.get("offset", 0))
+        except ValueError:
+            limit, offset = 100, 0
+
+        qs = (
+            GuidePage.objects.child_of(category)
+            .live()
+            .public()
+            .specific()
+            .order_by("-first_published_at")
+        )
+        total = qs.count()
+        items = qs[offset : offset + limit]
+
+        data = GuideArticleListSerializer(items, many=True, context={"request": request}).data
+        return Response(
+            {
+                "count": total,
+                "limit": limit,
+                "offset": offset,
+                "results": data,
+            }
+        )
+
+
+class GuideArticleViewSet(viewsets.ReadOnlyModelViewSet):
+    """
+    /guides-api/v2/guides/           -> (опц.) список всех статей (короткие карточки)
+    /guides-api/v2/guides/<slug>/    -> детальная статья
+    """
+    permission_classes = [AllowAny]
+    lookup_field = "slug"
+
+    def get_queryset(self):
+        return GuidePage.objects.live().public().specific()
+
+    def get_serializer_class(self):
+        return (
+            GuideArticleDetailSerializer
+            if self.action == "retrieve"
+            else GuideArticleListSerializer
+        )
+
+
+
+
 
 

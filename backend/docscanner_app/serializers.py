@@ -1,8 +1,7 @@
 from rest_framework import serializers
 from .models import CustomUser
-from .models import ScannedDocument, LineItem, ProductAutocomplete, ClientAutocomplete, AdClick
+from .models import ScannedDocument, LineItem, ProductAutocomplete, ClientAutocomplete, AdClick, GuideCategoryPage, GuidePage
 import json
-
 
 
 class LineItemSerializer(serializers.ModelSerializer):
@@ -600,6 +599,237 @@ class CustomUserSerializer(serializers.ModelSerializer):
         instance.sales_defaults = cur_sd
         instance.save()
         return instance
+    
+
+
+
+
+# Wagtail serializers
+# ---------- helpers ----------
+def rendition_url(img, spec="fill-800x450|jpegquality-70") -> str:
+    """
+    Безопасно вернуть URL рендишна Wagtail Image.
+    """
+    if not img:
+        return ""
+    try:
+        return img.get_rendition(spec).url
+    except Exception:
+        try:
+            return img.file.url
+        except Exception:
+            return ""
+
+
+# ==========================
+# 1) СПИСОК КАТЕГОРИЙ
+# ==========================
+class GuideCategoryListSerializer(serializers.ModelSerializer):
+    cat_image_url = serializers.SerializerMethodField()
+    articles_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = GuideCategoryPage
+        fields = (
+            "title",
+            "slug",
+            "description",
+            "order",
+            "cat_image_url",
+            "articles_count",
+        )
+
+    def get_cat_image_url(self, obj):
+        return rendition_url(obj.cat_image, spec="fill-800x450|jpegquality-70")
+
+    def get_articles_count(self, obj):
+        return GuidePage.objects.child_of(obj).live().public().count()
+
+
+# ==========================
+# 2) СПИСОК СТАТЕЙ (карточки)
+# ==========================
+class GuideArticleListSerializer(serializers.ModelSerializer):
+    main_image_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = GuidePage
+        fields = (
+            "id",
+            "title",
+            "slug",
+            "author_name",
+            "first_published_at",
+            "last_published_at",
+            "main_image_url",
+        )
+
+    def get_main_image_url(self, obj):
+        return rendition_url(obj.main_image, spec="fill-800x450|jpegquality-70")
+
+
+# (опционально) Детальная категория с вшитыми статьями
+# Можно использовать для эндпоинта /guide-categories/<slug>/
+class GuideCategoryDetailSerializer(GuideCategoryListSerializer):
+    articles = serializers.SerializerMethodField()
+
+    class Meta(GuideCategoryListSerializer.Meta):
+        fields = GuideCategoryListSerializer.Meta.fields + ("articles",)
+
+    def get_articles(self, obj):
+        request = self.context.get("request")
+        limit = int(request.query_params.get("limit", 100)) if request else 100
+        offset = int(request.query_params.get("offset", 0)) if request else 0
+
+        qs = (
+            GuidePage.objects.child_of(obj)
+            .live()
+            .public()
+            .specific()
+            .order_by("-first_published_at")
+        )
+        items = qs[offset : offset + limit]
+        return GuideArticleListSerializer(items, many=True, context=self.context).data
+
+
+# ==========================
+# 3) ДЕТАЛЬ СТАТЬИ
+# ==========================
+
+def _rendition_url(img, spec="fill-1200x675|jpegquality-70"):
+    if not img:
+        return ""
+    try:
+        return img.get_rendition(spec).url
+    except Exception:
+        try:
+            return img.file.url
+        except Exception:
+            return ""
+
+class GuideArticleDetailSerializer(serializers.ModelSerializer):
+    main_image_url = serializers.SerializerMethodField()
+    body = serializers.SerializerMethodField()   # DRF будет вызывать def get_body(...)
+
+    class Meta:
+        model = GuidePage
+        fields = (
+            "id",
+            "title",
+            "slug",
+            "seo_title",
+            "search_description",
+            "author_name",
+            "first_published_at",
+            "last_published_at",
+            "main_image_url",
+            "body",
+        )
+
+    def get_main_image_url(self, obj):
+        return _rendition_url(obj.main_image)
+
+    def get_body(self, obj):
+        """
+        Возвращаем body как list[{'type': ..., 'value': ...}],
+        убирая несериализуемые внутренние объекты Wagtail.
+        """
+        val = obj.body
+
+        # 1) Обычный StreamValue у Wagtail
+        if hasattr(val, "stream_data"):
+            try:
+                return val.stream_data  # уже список словарей
+            except Exception:
+                pass
+            try:
+                # форсируем в prep_value
+                return [b.get_prep_value() for b in val]
+            except Exception:
+                pass
+
+        # 2) Уже list
+        if isinstance(val, list):
+            return val
+
+        # 3) Обёртка dict ({'stream': [...]} или {'blocks': [...]})
+        if isinstance(val, dict):
+            stream = val.get("stream")
+            blocks = val.get("blocks")
+            if isinstance(stream, list):
+                return stream
+            if isinstance(blocks, list):
+                return blocks
+
+        # 4) Бывает RawDataView в raw_data → приводим к dict
+        if hasattr(val, "raw_data"):
+            try:
+                return [dict(item) for item in val.raw_data]
+            except Exception:
+                try:
+                    return [b.get_prep_value() for b in val]
+                except Exception:
+                    pass
+
+        # 5) Строка → параграф
+        if isinstance(val, str) and val.strip():
+            return [{"type": "paragraph", "value": val}]
+
+        # 6) Ничего
+        return []
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# class GuideCategorySerializer(serializers.ModelSerializer):
+#     cat_image_url = serializers.SerializerMethodField()
+
+#     class Meta:
+#         model = GuideCategoryPage
+#         fields = ("title", "slug", "description", "order", "cat_image_url")
+
+#     def get_cat_image_url(self, obj):
+#         # Если есть картинка — вернём удобный рендишн (быстрее и легче),
+#         # иначе пустую строку.
+#         if getattr(obj, "cat_image", None):
+#             try:
+#                 # Подбери размер под карточку (16:9). Можно 800x450.
+#                 rendition = obj.cat_image.get_rendition("fill-800x450|jpegquality-70")
+#                 return rendition.url
+#             except Exception:
+#                 # Fallback на оригинал (редко потребуется)
+#                 try:
+#                     return obj.cat_image.file.url
+#                 except Exception:
+#                     return ""
+#         return ""
+
+# class GuideCategoryViewSet(viewsets.ReadOnlyModelViewSet):
+#     """
+#     Публичный read-only список категорий гида.
+#     Возвращает только опубликованные страницы.
+#     """
+#     queryset = GuideCategoryPage.objects.live().public().order_by("order", "title")
+#     serializer_class = GuideCategorySerializer
+
+
+
+
+
+
+
+
+
 
 
 # class CustomUserSerializer(serializers.ModelSerializer):

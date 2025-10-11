@@ -3,12 +3,41 @@ import logging
 from django.utils.encoding import smart_str
 from .formatters import format_date, vat_to_int_str, get_price_or_zero, expand_empty_tags
 from ..models import CurrencyRate
+from decimal import Decimal, InvalidOperation
+
 
 logger = logging.getLogger(__name__)
 
 # =========================
 # Helpers
 # =========================
+
+def get_rivile_fraction(user):
+    """
+    Берём фракцию только из user.extra_settings['rivile_fraction'].
+    Разрешены: 1, 10, 100, 1000. Иначе -> 1.
+    """
+    try:
+        es = getattr(user, "extra_settings", {}) or {}
+        val = int(es.get("rivile_fraction", 1))
+        return val if val in (1, 10, 100, 1000) else 1
+    except Exception:
+        return 1
+
+def _scale_qty(qty, frac):
+    """qty (None/str/Decimal/float) * frac -> str без экспоненты, без лишних нулей."""
+    if qty in (None, ""):
+        qty = "1"
+    try:
+        q = Decimal(str(qty))
+    except (InvalidOperation, ValueError):
+        q = Decimal("1")
+    v = q * Decimal(frac)
+    # безопасный вывод без экспоненты:
+    s = format(v, "f")            # '1234.0000'
+    s = s.rstrip('0').rstrip('.') # '1234'
+    return s or "0"
+
 
 def _s(v):
     """Безопасная строка с strip()."""
@@ -282,9 +311,12 @@ def export_prekes_paslaugos_kodai_group_to_rivile(documents):
 # =========================================================
 # 2) PIRKIMAI (I06/I07)
 # =========================================================
-def export_pirkimai_group_to_rivile(documents):
+def export_pirkimai_group_to_rivile(documents, user):
     elements = []
     for doc in documents or []:
+        frac = get_rivile_fraction(user)
+        use_frac = (frac != 1)
+
         i06 = ET.Element("I06")
         currency = getattr(doc, 'currency', 'EUR') or 'EUR'
         op_date = getattr(doc, 'operation_date', None) or getattr(doc, 'invoice_date', None)
@@ -346,7 +378,11 @@ def export_pirkimai_group_to_rivile(documents):
 
                 ET.SubElement(i07, "I07_MOKESTIS").text   = "1"
                 ET.SubElement(i07, "I07_MOKESTIS_P").text = vat_to_int_str(getattr(item, "vat_percent", None))
-                ET.SubElement(i07, "T_KIEKIS").text       = str(getattr(item, "quantity", None) or "1")
+                # ET.SubElement(i07, "T_KIEKIS").text       = str(getattr(item, "quantity", None) or "1")
+                qty_scaled = _scale_qty(getattr(item, "quantity", None), frac) if use_frac else str(getattr(item, "quantity", None) or "1")
+                ET.SubElement(i07, "T_KIEKIS").text = qty_scaled
+                if use_frac:
+                    ET.SubElement(i07, "I07_FRAKCIJA").text = str(frac)
 
                 # источники кода без fallback’ов
                 if line_map is not None:  # multi
@@ -373,7 +409,11 @@ def export_pirkimai_group_to_rivile(documents):
 
             ET.SubElement(i07, "I07_MOKESTIS").text   = "1"
             ET.SubElement(i07, "I07_MOKESTIS_P").text = vat_to_int_str(getattr(doc, "vat_percent", None))
-            ET.SubElement(i07, "T_KIEKIS").text       = "1"
+            # ET.SubElement(i07, "T_KIEKIS").text       = "1"
+            qty_scaled = _scale_qty(1, frac) if use_frac else "1"
+            ET.SubElement(i07, "T_KIEKIS").text = qty_scaled
+            if use_frac:
+                ET.SubElement(i07, "I07_FRAKCIJA").text = str(frac)
             ET.SubElement(i07, "I07_KODAS_KL").text   = smart_str(getattr(doc, "pvm_kodas", None) or "")
             added = 1
 
@@ -389,9 +429,12 @@ def export_pirkimai_group_to_rivile(documents):
 # =========================================================
 # 3) PARDAVIMAI (I06/I07)
 # =========================================================
-def export_pardavimai_group_to_rivile(documents):
+def export_pardavimai_group_to_rivile(documents, user):
     elements = []
     for doc in documents or []:
+        frac = get_rivile_fraction(user)
+        use_frac = (frac != 1)
+
         i06 = ET.Element("I06")
         currency = getattr(doc, 'currency', 'EUR') or 'EUR'
         op_date = getattr(doc, 'operation_date', None) or getattr(doc, 'invoice_date', None)
@@ -451,9 +494,13 @@ def export_pardavimai_group_to_rivile(documents):
                     ET.SubElement(i07, "I07_PVM_VAL").text    = get_price_or_zero(getattr(item, "vat", None))
                     ET.SubElement(i07, "I07_SUMA_VAL").text   = get_price_or_zero(getattr(item, "subtotal", None))
 
-                ET.SubElement(i07, "I07_MOKESTИС").text   = "1"
+                ET.SubElement(i07, "I07_MOKESTIS").text   = "1"
                 ET.SubElement(i07, "I07_MOKESTIS_P").text = vat_to_int_str(getattr(item, "vat_percent", None))
-                ET.SubElement(i07, "T_KIEKIS").text       = str(getattr(item, "quantity", None) or "1")
+                # ET.SubElement(i07, "T_KIEKIS").text       = str(getattr(item, "quantity", None) or "1")
+                qty_scaled = _scale_qty(getattr(item, "quantity", None), frac) if use_frac else str(getattr(item, "quantity", None) or "1")
+                ET.SubElement(i07, "T_KIEKIS").text = qty_scaled
+                if use_frac:
+                    ET.SubElement(i07, "I07_FRAKCIJA").text = str(frac)
 
                 # источники кода без fallback’ов
                 if line_map is not None:  # multi
@@ -480,7 +527,11 @@ def export_pardavimai_group_to_rivile(documents):
 
             ET.SubElement(i07, "I07_MOKESTIS").text   = "1"
             ET.SubElement(i07, "I07_MOKESTIS_P").text = vat_to_int_str(getattr(doc, "vat_percent", None))
-            ET.SubElement(i07, "T_KIEKIS").text       = "1"
+            # ET.SubElement(i07, "T_KIEKIS").text       = "1"
+            qty_scaled = _scale_qty(1, frac) if use_frac else "1"
+            ET.SubElement(i07, "T_KIEKIS").text = qty_scaled
+            if use_frac:
+                ET.SubElement(i07, "I07_FRAKCIJA").text = str(frac)
             ET.SubElement(i07, "I07_KODAS_KL").text   = smart_str(getattr(doc, "pvm_kodas", None) or "")
             added = 1
 

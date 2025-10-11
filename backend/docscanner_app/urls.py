@@ -1,9 +1,11 @@
-from django.urls import path
+from django.urls import path, include
 from .views import logout, CustomTokenObtainPairView, CustomRefreshTokenView, is_authenticated, register, subscription_status, process_image
 from .stripe.subs_views   import StripeCreditCheckoutView
 from .stripe.webhooks    import StripeWebhookView
-from .views import get_user_documents, get_document_detail, user_profile
 from .views import (
+    get_user_documents,
+    get_document_detail,
+    user_profile,
     update_scanned_document_extra_fields,
     update_own_company_details,
     autocomplete_products,
@@ -20,10 +22,16 @@ from .views import (
     superuser_dashboard_stats,
     admin_documents_with_errors,
     admin_all_documents,
+    export_documents
 )
 
-from docscanner_app.views import export_documents
 from .views import TrackAdClickView
+
+from rest_framework.routers import DefaultRouter
+from .views import GuideCategoryViewSet, GuideArticleViewSet
+
+router = DefaultRouter()
+router.register(r"guides/categories", GuideCategoryViewSet, basename="guides-categories")
 
 urlpatterns = [
 
@@ -154,4 +162,6 @@ urlpatterns = [
     path('admin/documents_with_errors/', admin_documents_with_errors, name='admin_documents_with_errors'),
     path('superuser/dashboard-stats/', superuser_dashboard_stats, name="superuser_dashboard_stats"),
     path('admin/visi-failai/', admin_all_documents, name='admin_all_documents'),
+
+    path("", include(router.urls)),
 ]

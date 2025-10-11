@@ -85,9 +85,9 @@ function App() {
         <Route path="/saskaitu-skaitmenizavimas-dokskenas" element={<Dokskenas />} />
         <Route path="/pvm-skaiciuokle" element={<PvmCalculator />} />
         <Route path="/gpm-skaiciuokle" element={<GpmSkaiciuokle />} />
-        {/* <Route path="/naudojimo-gidas" element={<NaudojimoGidas />} />
+        <Route path="/naudojimo-gidas" element={<NaudojimoGidas />} />
         <Route path="/kategorija/:slug" element={<GidoCategories />} />
-        <Route path="/straipsnis/:slug" element={<GidoArticle />} /> */}
+        <Route path="/straipsnis/:slug" element={<GidoArticle />} />
         <Route
           path="/suvestine"
           element={

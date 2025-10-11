@@ -2,6 +2,7 @@ import { Box, Typography, Link, Divider, Stack, IconButton } from '@mui/material
 import Grid2 from '@mui/material/Grid2';
 import FacebookIcon from '@mui/icons-material/Facebook';
 import YouTubeIcon from '@mui/icons-material/YouTube';
+import InstagramIcon from '@mui/icons-material/Instagram';
 import { Link as RouterLink } from 'react-router-dom';
 
 const Footer = () => {
@@ -45,6 +46,16 @@ const Footer = () => {
           sx={{ color: 'inherit' }}
         >
           <YouTubeIcon sx={{ fontSize: { xs: 28, md: 30 } }} />
+        </IconButton>
+        <IconButton 
+          component="a" 
+          href="https://www.instagram.com/dokskenas/" 
+          target="_blank" 
+          rel="noopener noreferrer" 
+          aria-label="Instagram" 
+          sx={{ color: 'inherit' }}
+        >
+          <InstagramIcon sx={{ fontSize: { xs: 28, md: 30 } }} />
         </IconButton>
       </Box>
 
@@ -112,9 +123,9 @@ const Footer = () => {
                   spacing={1.25} 
                   alignItems={{ xs: 'center', md: 'center' }}
                 >
-                  {/* <Link href="/naudojimo-gidas" underline="none" color="inherit" sx={linkSx}>
+                  <Link href="/naudojimo-gidas" underline="none" color="inherit" sx={linkSx}>
                     Naudojimo gidas
-                  </Link> */}
+                  </Link>
                   <Link href="/susisiekti" underline="none" color="inherit" sx={linkSx}>
                     Susisiekti
                   </Link>

@@ -284,6 +284,8 @@ export default function NustatymaiPage() {
   const [program, setProgram] = useState("");
   const [saving, setSaving] = useState(false);
   const [success, setSuccess] = useState(false);
+  const [rivileSaved, setRivileSaved] = useState(false);
+
 
   // Company details
   const [companyName, setCompanyName] = useState("");
@@ -566,6 +568,31 @@ export default function NustatymaiPage() {
     }
   };
 
+  // Papildomi nustatymai: Rivilė: frakcija
+  const rivileFracKey = "rivile_fraction";
+  const rivileFraction = Number(extraSettings?.[rivileFracKey] ?? 1);
+
+  const setRivileFraction = async (value) => {
+    const prev = extraSettings || {};
+    const next = { ...prev };
+
+    if (value === 1) {
+      if (rivileFracKey in next) delete next[rivileFracKey];
+    } else {
+      next[rivileFracKey] = value;
+    }
+
+    setExtraSettings(next);
+    try {
+      await api.patch("/profile/", { extra_settings: next }, { withCredentials: true });
+      setRivileSaved(true);
+      setTimeout(() => setRivileSaved(false), 1800);
+    } catch {
+      setExtraSettings(prev);
+      alert("Nepavyko išsaugoti frakcijos.");
+    }
+  };
+
   return (
     <Box p={4} maxWidth={900}>
       <Helmet><title>Nustatymai - DokSkenas</title></Helmet>
@@ -766,6 +793,45 @@ export default function NustatymaiPage() {
           control={<Switch checked={isOpDateFromDoc} onChange={toggleOpDateFromDoc} />}
           label="Operacijos datą imti iš sąskaitos datos"
         />
+        {program === "rivile" && (
+          <Box sx={{ mt: 2 }}>
+            {/* Заголовок с иконкой-подсказкой справа */}
+            <Typography
+              variant="body1"
+              sx={{ display: "flex", alignItems: "center", gap: 0.5 }}
+            >
+              Matavimo vienetų frakcija
+              <Tooltip
+                arrow
+                enterTouchDelay={0}
+                leaveTouchDelay={4000}
+                title="Frakcija turi atitikti nustatytai frakcijai matavimo vienetams jūsų Rivilė Gama programoje (Kortelės -> Matavimo vienetai). Kitaip kiekis gali būti apvalinamas."
+              >
+                <HelpOutlineIcon fontSize="small" sx={{ color: "text.secondary" }} />
+              </Tooltip>
+            </Typography>
+
+            {/* Выпадающий список под текстом */}
+            <FormControl sx={{ mt: 1.5, minWidth: 240 }} size="small">
+              <Select
+                value={rivileFraction}
+                onChange={(e) => setRivileFraction(Number(e.target.value))}
+              >
+                <MenuItem value={1}>1</MenuItem>
+                <MenuItem value={10}>10</MenuItem>
+                <MenuItem value={100}>100</MenuItem>
+                <MenuItem value={1000}>1000</MenuItem>
+              </Select>
+            </FormControl>
+
+            {/* Тост «Išsaugota!» после успешного PATCH */}
+            {rivileSaved && (
+              <Alert severity="success" sx={{ mt: 1, py: 0.5 }}>
+                Išsaugota!
+              </Alert>
+            )}
+          </Box>
+        )}
       </Paper>
     </Box>
   );

@@ -102,6 +102,7 @@ const Header = () => {
   const menuItemsCenter = isAuthenticated
     ? [
         { text: "Suvestinė", onClick: () => nav("/suvestine") },
+        { text: "Kaip naudotis?", onClick: () => nav("/naudojimo-gidas") },
         { text: "Papildyti", onClick: () => nav("/papildyti") },
         // NEW: админ-пункты (показываем только если суперюзер)
         ...(isSuper ? [
@@ -340,6 +341,15 @@ const Header = () => {
                   button
                   onClick={() => {
                     setIsDrawerOpen(false);
+                    nav("/naudojimo-gidas");
+                  }}
+                >
+                  <ListItemText primary="Kaip naudotis?" />
+                </ListItem>
+                <ListItem
+                  button
+                  onClick={() => {
+                    setIsDrawerOpen(false);
                     nav("/papildyti");
                   }}
                 >
@@ -357,7 +367,16 @@ const Header = () => {
                         nav("/admin-suvestine");
                       }}
                     >
-                      <ListItemText primary="Admin suvestinė" />
+                      <ListItemText primary="Klaidų suvestinė" />
+                    </ListItem>
+                    <ListItem
+                      button
+                      onClick={() => {
+                        setIsDrawerOpen(false);
+                        nav("/admin-visi-failai");
+                      }}
+                    >
+                      <ListItemText primary="Visi failai" />
                     </ListItem>
                     <ListItem
                       button
@@ -366,7 +385,7 @@ const Header = () => {
                         nav("/admin-dashboard");
                       }}
                     >
-                      <ListItemText primary="Admin dashboard" />
+                      <ListItemText primary="Analytics" />
                     </ListItem>
                   </>
                 )}

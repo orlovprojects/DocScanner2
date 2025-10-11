@@ -15,8 +15,42 @@ from wagtail import blocks
 from wagtail.api import APIField
 from wagtail.images.blocks import ImageChooserBlock
 from wagtail.embeds.blocks import EmbedBlock
+from wagtail.images.api.fields import ImageRenditionField
+from wagtail.api import APIField
+
+#search
+from django.utils.html import strip_tags
 
 
+#helpers
+def _body_to_text(stream_value) -> str:
+    parts = []
+    try:
+        items = getattr(stream_value, "stream_data", None) or list(stream_value)
+    except Exception:
+        items = stream_value
+    if isinstance(items, dict):
+        items = items.get("stream") or items.get("blocks") or []
+    if isinstance(items, str):
+        return strip_tags(items)
+    for blk in items or []:
+        btype = getattr(blk, "block_type", None) or getattr(blk, "type", None)
+        bval = getattr(blk, "value", None)
+        if btype is None and isinstance(blk, dict):
+            btype = blk.get("type"); bval = blk.get("value")
+        if btype in {"heading", "paragraph", "quote", "code"} and bval:
+            parts.append(strip_tags(str(bval)))
+        elif btype == "table" and isinstance(bval, dict):
+            data = bval.get("data") or {}
+            stream = data.get("stream") or data.get("blocks") or data
+            try:
+                for row in stream:
+                    row_val = getattr(row, "value", None) or row
+                    if isinstance(row_val, list):
+                        parts.append(" ".join([strip_tags(str(x)) for x in row_val]))
+            except Exception:
+                pass
+    return " ".join(p for p in parts if p).strip()
 
 
 def user_upload_path(instance, filename):
@@ -581,7 +615,6 @@ class GuideIndexPage(Page):
 
 
 class GuideCategoryPage(Page):
-    # кастомные
     description = RichTextField(blank=True)
     cat_image = models.ForeignKey(
         "wagtailimages.Image",
@@ -590,6 +623,13 @@ class GuideCategoryPage(Page):
         related_name="+",
     )
     order = models.PositiveIntegerField(default=0)
+    search_text = models.TextField(blank=True, default="")
+
+    def save(self, *args, **kwargs):
+        title = self.title or ""
+        desc = strip_tags(self.description or "")
+        self.search_text = f"{title}\n{desc}".strip()
+        super().save(*args, **kwargs)
 
     content_panels = Page.content_panels + [
         FieldPanel("description"),
@@ -600,15 +640,17 @@ class GuideCategoryPage(Page):
     parent_page_types = ["docscanner_app.GuideIndexPage"]
     subpage_types = ["docscanner_app.GuidePage"]
 
-    # что отдаём в API (включая встроенные поля)
     api_fields = [
-        APIField("title"),              # встроенное
-        APIField("slug"),               # встроенное (Promote)
-        APIField("seo_title"),          # встроенное (Promote)
-        APIField("search_description"), # встроенное (аналог "seo_description")
-        APIField("description"),        # кастом
-        APIField("cat_image"),          # кастом
-        APIField("order"),              # кастом
+        APIField("title"),
+        APIField("slug"),
+        APIField("seo_title"),
+        APIField("search_description"),
+        APIField("description"),
+        APIField(
+            "cat_image_rendition",
+            serializer=ImageRenditionField("fill-800x450|jpegquality-70", source="cat_image"),
+        ),
+        APIField("order"),
     ]
 
 
@@ -662,6 +704,14 @@ class GuidePage(Page):
 
     author_name = models.CharField(max_length=100, blank=True)
     last_updated = models.DateTimeField(auto_now=True)
+
+    search_text = models.TextField(blank=True, default="")
+
+    def save(self, *args, **kwargs):
+        title = self.title or ""
+        body_txt = _body_to_text(self.body)
+        self.search_text = f"{title}\n{body_txt}".strip()
+        super().save(*args, **kwargs)
 
     # 🔹 Панели Wagtail Admin
     content_panels = Page.content_panels + [
