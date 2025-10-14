@@ -18,7 +18,7 @@ from .utils.file_converter import normalize_uploaded_file
 from .utils.llm_json import parse_llm_json_robust
 from .utils.duplicates import is_duplicate_by_series_number
 from .utils.save_document import _apply_sumiskai_defaults_from_user
-
+from celery.exceptions import SoftTimeLimitExceeded
 
 import os
 import logging
@@ -68,7 +68,7 @@ def ask_llm_with_fallback(raw_text: str, scan_type: str, logger):
     return resp, "gpt"
 
 
-@shared_task
+@shared_task(bind=True, soft_time_limit=600, time_limit=630, acks_late=True)
 def process_uploaded_file_task(user_id, doc_id, scan_type):
     """
     Полный пайплайн:
