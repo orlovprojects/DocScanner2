@@ -69,7 +69,7 @@ def ask_llm_with_fallback(raw_text: str, scan_type: str, logger):
 
 
 @shared_task(bind=True, soft_time_limit=600, time_limit=630, acks_late=True)
-def process_uploaded_file_task(user_id, doc_id, scan_type):
+def process_uploaded_file_task(self, user_id, doc_id, scan_type):
     """
     Полный пайплайн:
     - OCR: Google Vision (компактный JSON параграфов + склеенный текст) → fallback Gemini OCR (только текст)
@@ -80,6 +80,11 @@ def process_uploaded_file_task(user_id, doc_id, scan_type):
     - Парсинг JSON, валидации, сохранение
     """
     total_start = _t()
+    logger.info(
+        "[TASK] Celery limits: soft=%ss hard=%ss",
+        getattr(self.request, "soft_time_limit", None),
+        getattr(self.request, "time_limit", None),
+    )
     try:
         # 1) Загрузка пользователя и документа
         t0 = _t()
@@ -412,6 +417,31 @@ def process_uploaded_file_task(user_id, doc_id, scan_type):
         _log_t("Deduct credits & save user", t0)
 
         _log_t("TOTAL", total_start)
+
+    except SoftTimeLimitExceeded as e:
+        logger.error(
+            "[TASK] Soft time limit exceeded for doc_id=%s (soft=%ss, hard=%ss): %s",
+            doc_id,
+            getattr(self.request, "soft_time_limit", None),
+            getattr(self.request, "time_limit", None),
+            e,
+        )
+        try:
+            t0 = _t()
+            doc = ScannedDocument.objects.filter(pk=doc_id).first()
+            if doc:
+                doc.status = 'rejected'
+                doc.error_message = "Operacija nutraukta: viršytas užduoties laiko limitas (soft time limit)."
+                if not getattr(doc, "preview_url", None):
+                    try:
+                        doc.preview_url = f"{settings.SITE_URL_BACKEND}/media/{doc.file.name}"
+                    except Exception:
+                        pass
+                doc.save(update_fields=['status', 'error_message', 'preview_url'])
+            _log_t("Save rejected (soft time limit)", t0)
+        finally:
+            _log_t("TOTAL (soft time limit path)", total_start)
+        return
 
     except Exception as e:
         logger.exception(f"[TASK] Error processing document ID: {doc_id}")
