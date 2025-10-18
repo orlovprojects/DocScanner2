@@ -93,7 +93,6 @@ from .serializers import (
 )
 
 #emails
-from .tasks import task_siusti_sveikinimo_laiska
 from .emails import siusti_sveikinimo_laiska
 
 from time import perf_counter
