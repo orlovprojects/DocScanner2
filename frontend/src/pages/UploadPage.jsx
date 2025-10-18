@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Helmet } from 'react-helmet';
 import {
   Box, Button, Typography, Alert, TextField, MenuItem, Dialog, DialogTitle, DialogContent, LinearProgress,
-  List, ListItemButton, ListItemText, IconButton, Divider, InputAdornment
+  List, ListItemButton, ListItemText, IconButton, Divider, InputAdornment, Tooltip
 } from "@mui/material";
 import {
   CloudUpload, HourglassEmpty, Cancel, CheckCircleOutline,
@@ -469,8 +469,50 @@ export default function UploadPage() {
           </Button>
         </Alert>
       )}
-
       <Box display="flex" alignItems="center" justifyContent="space-between" mb={2}>
+        <Typography variant="h5">Sąskaitų faktūrų suvestinė</Typography>
+
+        {(() => {
+          // причина дизейбла (показываем в tooltip)
+          let disabledReason = "";
+          if (!isCompanyReady) {
+            disabledReason = "Pirmiausia užpildykite savo įmonės duomenis ir pasirinkite buhalterinę programą nustatymuose";
+          } else if (user?.view_mode === "multi" && !selectedCpKey) {
+            disabledReason = "Pasirinkite kontrahentą iš sąrašo, tada pažymėkite failus ir tik tada spauskite „Eksportuoti“";
+          } else if (selectedRows.length === 0) {
+            disabledReason = "Pažymėkite bent vieną dokumentą eksportui";
+          }
+
+          const exportDisabled = Boolean(disabledReason);
+          const selectedExportableCount = selectedRows.filter(
+            id => exportableRows.some(row => row.id === id)
+          ).length;
+
+          return (
+            <Tooltip
+              title={exportDisabled ? disabledReason : ""}
+              placement="bottom"
+              disableHoverListener={!exportDisabled}
+            >
+              {/* span нужен, чтобы Tooltip работал поверх disabled Button */}
+              <span style={{ display: "inline-flex" }}>
+                <Button
+                  variant="outlined"
+                  color="primary"
+                  sx={{ ml: 2 }}
+                  onClick={handleExport}
+                  disabled={exportDisabled}
+                >
+                  Eksportuoti
+                  {selectedExportableCount ? ` (${selectedExportableCount})` : ""} į {programLabel}
+                </Button>
+              </span>
+            </Tooltip>
+          );
+        })()}
+      </Box>
+
+      {/* <Box display="flex" alignItems="center" justifyContent="space-between" mb={2}>
         <Typography variant="h5">Sąskaitų faktūrų suvestinė</Typography>
         <Button
           variant="outlined"
@@ -489,7 +531,7 @@ export default function UploadPage() {
             : ''
           } į {programLabel}
         </Button>
-      </Box>
+      </Box> */}
 
       {/* Верхняя панель: скан-тип + аплоад */}
       <Box mb={2} display="flex" alignItems="center" gap={2}>

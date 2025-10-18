@@ -64,7 +64,9 @@ from .serializers import (
     ScannedDocumentDetailSerializer,
     ScannedDocumentAdminDetailSerializer,
     AdClickSerializer,
+    LineItemSerializer,
 )
+from django.db.models import Prefetch
 
 
 from .tasks import process_uploaded_file_task
@@ -77,7 +79,7 @@ from .validators.vat_klas import auto_select_pvm_code
 
 #dlia superuser dashboard
 from django.db.models import Count
-from .permissions import IsSuperUser
+from .permissions import IsSuperUser, IsOwner
 
 #wagtail imports
 from rest_framework import viewsets, mixins
@@ -89,6 +91,12 @@ from .serializers import (
     GuideArticleListSerializer,
     GuideArticleDetailSerializer,
 )
+
+#emails
+from .tasks import task_siusti_sveikinimo_laiska
+from .emails import siusti_sveikinimo_laiska
+
+from time import perf_counter
 
 
 # --- Logging setup ---
@@ -1165,6 +1173,59 @@ def get_user_documents(request):
 
 
 
+# @api_view(['GET'])
+# @permission_classes([IsAuthenticated])
+# def get_document_detail(request, pk):
+#     """
+#     Детали документа.
+#     - Superuser: может смотреть ЛЮБОЙ документ; если view_mode == "multi", добавляем preview.
+#     - Обычный пользователь:
+#         * single-режим — просто данные из БД;
+#         * multi-режим — добавляем preview (ничего в БД не пишем).
+#     """
+#     user = request.user
+
+#     # --- Суперюзер ---
+#     if user.is_superuser:
+#         doc = get_object_or_404(ScannedDocument, pk=pk)
+#         ser = ScannedDocumentAdminDetailSerializer(doc, context={'request': request})
+#         data = ser.data
+
+#         if getattr(user, "view_mode", None) == "multi":
+#             cp_key = request.query_params.get("cp_key")
+#             preview = build_preview(
+#                 doc,
+#                 user,
+#                 cp_key=cp_key,
+#                 view_mode="multi",
+#                 base_vat_percent=data.get("vat_percent"),
+#                 base_preke_paslauga=data.get("preke_paslauga"),
+#             )
+#             data["preview"] = preview
+
+#         return Response(data)
+
+#     # --- Обычный пользователь (только свои документы) ---
+#     doc = get_object_or_404(ScannedDocument, pk=pk, user=user)
+#     ser = ScannedDocumentDetailSerializer(doc, context={'request': request})
+#     data = ser.data
+
+#     # preview только в multi-режиме
+#     if getattr(user, "view_mode", None) != "multi":
+#         return Response(data)
+
+#     cp_key = request.query_params.get("cp_key")
+#     preview = build_preview(
+#         doc,
+#         user,
+#         cp_key=cp_key,
+#         view_mode="multi",
+#         base_vat_percent=data.get("vat_percent"),
+#         base_preke_paslauga=data.get("preke_paslauga"),
+#     )
+#     data["preview"] = preview
+#     return Response(data)
+
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def get_document_detail(request, pk):
@@ -1177,9 +1238,18 @@ def get_document_detail(request, pk):
     """
     user = request.user
 
+    # Prefetch с сортировкой для line_items
+    line_items_prefetch = Prefetch(
+        'line_items',
+        queryset=LineItem.objects.order_by('id')
+    )
+
     # --- Суперюзер ---
     if user.is_superuser:
-        doc = get_object_or_404(ScannedDocument, pk=pk)
+        doc = get_object_or_404(
+            ScannedDocument.objects.prefetch_related(line_items_prefetch),
+            pk=pk
+        )
         ser = ScannedDocumentAdminDetailSerializer(doc, context={'request': request})
         data = ser.data
 
@@ -1198,7 +1268,11 @@ def get_document_detail(request, pk):
         return Response(data)
 
     # --- Обычный пользователь (только свои документы) ---
-    doc = get_object_or_404(ScannedDocument, pk=pk, user=user)
+    doc = get_object_or_404(
+        ScannedDocument.objects.prefetch_related(line_items_prefetch),
+        pk=pk,
+        user=user
+    )
     ser = ScannedDocumentDetailSerializer(doc, context={'request': request})
     data = ser.data
 
@@ -1957,6 +2031,36 @@ def register(request):
             # Создаём триал-подписку для нового пользователя
             create_trial_subscription(user)
 
+            # 3️⃣ Ставим welcome email в очередь Celery (после коммита)
+
+            try:
+                t0 = perf_counter()
+                siusti_sveikinimo_laiska(user)
+                t1 = perf_counter()
+                logger.info(f"Welcome email išsiųstas vartotojui {user.email} per {t1 - t0:.4f}s (be Celery).")
+            except Exception as mail_err:
+                logger.exception(f"Nepavyko išsiųsti welcome email be Celery: {mail_err}")
+
+            # try:
+            #     t_reg = perf_counter()
+
+            #     def _enqueue():
+            #         t0 = perf_counter()
+            #         logger.info(f"[ENQUEUE] on_commit fired; start apply_async for {user.email}")
+            #         try:
+            #             task_siusti_sveikinimo_laiska.apply_async(args=[user.id], ignore_result=True)
+            #         finally:
+            #             t1 = perf_counter()
+            #             logger.info(f"[ENQUEUE] apply_async_time={t1 - t0:.4f}s for {user.email}")
+
+            #     transaction.on_commit(_enqueue)
+
+            #     t_reg_done = perf_counter()
+            #     logger.info(f"Queued welcome email for {user.email}. on_commit_registration_time={t_reg_done - t_reg:.4f}s")
+
+            # except Exception as mail_err:
+            #     logger.exception(f"Не удалось поставить welcome email в очередь: {mail_err}")
+
             return Response({
                 "message": "User successfully registered!",
                 "user": {
@@ -2283,7 +2387,95 @@ class GuideArticleViewSet(viewsets.ReadOnlyModelViewSet):
         )
 
 
+# Update doc and item field in Preview
+
+# --- разрешённые поля ---
+ALLOWED_DOC_FIELDS = {
+    "invoice_date","due_date","operation_date","document_series","document_number","order_number",
+    "amount_wo_vat","vat_amount","vat_percent","amount_with_vat","currency","paid_by_cash",
+    "buyer_name","buyer_id","buyer_vat_code","seller_name","seller_id","seller_vat_code",
+    "prekes_kodas","prekes_pavadinimas","prekes_barkodas", "invoice_discount_wo_vat", "invoice_discount_with_vat"
+}
+
+ALLOWED_LINE_FIELDS = {
+    "prekes_kodas","prekes_pavadinimas","prekes_barkodas",
+    "unit","quantity","price","subtotal","vat","vat_percent","total",
+}
 
 
+class InlineDocUpdateView(APIView):
+    permission_classes = [IsOwner]
 
+    def patch(self, request, doc_id):
+        doc = get_object_or_404(ScannedDocument, pk=doc_id, user=request.user)
+        field = request.data.get("field")
+        value = request.data.get("value")
+
+        if field not in ALLOWED_DOC_FIELDS:
+            return Response({"detail": "Field not allowed"}, status=400)
+
+        # null/пустые значения
+        if value in ("", None):
+            value = None
+
+        setattr(doc, field, value)
+        doc.save(update_fields=[field])  # ✅ убрали updated_at
+
+        return Response({
+            "ok": True,
+            "id": doc.id,
+            field: getattr(doc, field),
+        })
+
+
+class InlineLineUpdateView(APIView):
+    permission_classes = [IsOwner]
+
+    def patch(self, request, doc_id, line_id):
+        doc = get_object_or_404(ScannedDocument, pk=doc_id, user=request.user)
+        line = get_object_or_404(LineItem, pk=line_id, document=doc)
+
+        field = request.data.get("field")
+        value = request.data.get("value")
+
+        if field not in ALLOWED_LINE_FIELDS:
+            return Response({"detail": "Field not allowed"}, status=400)
+
+        if value in ("", None):
+            value = None
+
+        setattr(line, field, value)
+        line.save(update_fields=[field])  # ✅ убрали updated_at
+
+        return Response({
+            "ok": True,
+            "id": line.id,
+            field: getattr(line, field),
+        })
+
+
+# Add / delete lineitem in Preview
+
+class ScannedDocumentViewSet(viewsets.ModelViewSet):
+    queryset = ScannedDocument.objects.all()
+    serializer_class = ScannedDocumentDetailSerializer
+    permission_classes = [IsAuthenticated]
+
+    # --- ДОБАВИТЬ ПУСТОЙ LINE ITEM ---
+    @action(detail=True, methods=["post"], url_path="add-lineitem")
+    def add_lineitem(self, request, pk=None):
+        doc = self.get_object()
+        line = LineItem.objects.create(document=doc)
+        return Response(LineItemSerializer(line).data, status=status.HTTP_201_CREATED)
+
+    # --- УДАЛИТЬ LINE ITEM ---
+    @action(detail=True, methods=["delete"], url_path="delete-lineitem/(?P<line_id>[^/.]+)")
+    def delete_lineitem(self, request, pk=None, line_id=None):
+        doc = self.get_object()
+        try:
+            line = doc.line_items.get(id=line_id)
+            line.delete()
+            return Response(status=status.HTTP_204_NO_CONTENT)
+        except LineItem.DoesNotExist:
+            return Response({"detail": "Line item not found"}, status=status.HTTP_404_NOT_FOUND)
 

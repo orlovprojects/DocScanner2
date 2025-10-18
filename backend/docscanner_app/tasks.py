@@ -25,6 +25,7 @@ import logging
 import logging.config
 import time
 
+
 logging.config.dictConfig(settings.LOGGING)
 logger = logging.getLogger('docscanner_app')
 
@@ -455,8 +456,6 @@ def process_uploaded_file_task(self, user_id, doc_id, scan_type):
             _log_t("Save rejected (exception path)", t0)
         finally:
             _log_t("TOTAL (exception path)", total_start)
-
-
 
 
 

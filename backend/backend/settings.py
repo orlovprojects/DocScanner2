@@ -66,6 +66,8 @@ INSTALLED_APPS = [
     "modelcluster",
     "taggit",
     "wagtail.api.v2",
+
+    "anymail",
 ]
 
 WAGTAIL_SITE_NAME = "DokSkenas"
@@ -120,7 +122,7 @@ APPEND_SLASH = True
 TEMPLATES = [
     {
         "BACKEND": "django.template.backends.django.DjangoTemplates",
-        "DIRS": [],
+        "DIRS": [BASE_DIR / "templates"],
         "APP_DIRS": True,
         "OPTIONS": {
             "context_processors": [
@@ -186,6 +188,17 @@ STATIC_ROOT = os.path.join(BASE_DIR, "static")
 STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY")
 STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET")
 
+# MailJet
+EMAIL_BACKEND = "anymail.backends.mailjet.EmailBackend"
+DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", "dokskenas@atlyginimoskaiciuokle.com")
+SERVER_EMAIL = os.getenv("SERVER_EMAIL", DEFAULT_FROM_EMAIL)
+
+ANYMAIL = {
+    "MAILJET_API_KEY": os.getenv("MAILJET_API_KEY"),
+    "MAILJET_SECRET_KEY": os.getenv("MAILJET_SECRET_KEY"),
+}
+
+
 # Авто ID
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
@@ -194,6 +207,7 @@ CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", "redis://localhost:6379/0")
 CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND", "redis://localhost:6379/1")
 CELERY_ACCEPT_CONTENT = ["json"]
 CELERY_TASK_SERIALIZER = "json"
+
 
 # Логирование
 LOGGING = {

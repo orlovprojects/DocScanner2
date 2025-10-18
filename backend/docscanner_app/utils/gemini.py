@@ -36,6 +36,7 @@ gemini_client = genai.Client(
 # =========================
 # 2) ПРОМПТЫ ДЛЯ GEMINI
 # =========================
+
 GEMINI_DEFAULT_PROMPT = """You will receive raw OCR text from one or more scanned financial documents, which may include invoices, receipts, or similar forms.
 
 1. First, analyze the text and determine **how many separate documents** are present. Return this number as an integer in the field "docs".
@@ -88,46 +89,11 @@ Assign the detected type to the field "document_type".
 
 All boolean fields (seller_is_person, buyer_is_person, with_receipt, separate_vat, paid_by_cash) must be returned as true/false, not as strings.
 
-**Return the result as a valid JSON object with this structure:**
-```json
-{
-  "docs": <number_of_documents>,
-  "documents": [
-    {
-      "document_type": "",
-      "seller_id": "",
-      "seller_name": "",
-      "seller_vat_code": "",
-      "seller_address": "",
-      "seller_country": "",
-      "seller_country_iso": "",
-      "seller_iban": "",
-      "seller_is_person": "",
-      "buyer_id": "",
-      "buyer_name": "",
-      "buyer_vat_code": "",
-      "buyer_address": "",
-      "buyer_country": "",
-      "buyer_country_iso": "",
-      "buyer_iban": "",
-      "buyer_is_person": "",
-      "invoice_date": "",
-      "due_date": "",
-      "operation_date": "",
-      "document_series": "",
-      "document_number": "",
-      "order_number": "",
-      "amount_wo_vat": "",
-      "vat_amount": "",
-      "vat_percent": "",
-      "amount_with_vat": "",
-      "separate_vat": "",
-      "currency": "",
-      "with_receipt": "",
-      "paid_by_cash": "",
-    }
-  ]
-}
+*Return ONLY a valid JSON object in a SINGLE LINE (compact form): no newlines, no \n, no \r, no tabs, and no spaces outside string values. Do not use Markdown or code fences. No trailing commas. Do NOT wrap in quotes or escape characters. Do NOT include any explanations, comments, or extra text outside the JSON. The output must be directly parsable by JSON.parse().
+
+Example (structure and field names; values may be empty strings, booleans must be true/false, numbers should be numbers when available):
+{"docs":<number_of_documents>,"documents":[{"document_type":"","seller_id":"","seller_name":"","seller_vat_code":"","seller_address":"","seller_country":"","seller_country_iso":"","seller_iban":"","seller_is_person":false,"buyer_id":"","buyer_name":"","buyer_vat_code":"","buyer_address":"","buyer_country":"","buyer_country_iso":"","buyer_iban":"","buyer_is_person":false,"invoice_date":"","due_date":"","operation_date":"","document_series":"","document_number":"","order_number":"","amount_wo_vat":"","vat_amount":"","vat_percent":"","amount_with_vat":"","separate_vat":false,"currency":"","with_receipt":false,"paid_by_cash":false}]}
+
 Format dates as yyyy-mm-dd. Delete country from addresses. seller_country and buyer_country must be full country name in language of address provided. country_iso must be 2-letter code.
 If 2 or more different VAT '%' in doc, separate_vat must be True, otherwise False.
 
@@ -136,20 +102,246 @@ If there are any signs of cash payment, for example, 'gryni', 'grąža' or simil
 If the document is a kasos čekis (cash receipt), for example, a fuel (kuro) receipt, buyer info is often at the bottom as a line with company name, company code, and VAT code—extract these as buyer details. For line items, find the quantity and unit next to price (like “50,01 l” for litres). Product name is usually above this line. document_number is usually next to kvitas, ignore long numer below "kasininkas" at the bottom of document but don't ignore date at the bottom.
 Extract all lineitems in kuro cekis, if item has units, it must be extracted as lineitem. For lineitems in kuro cekis, prices are usually stated including VAT, while discounts are usually including VAT but with minus symbol (don't extract discounts them as separate lineitems).
 
-Return ONLY a valid JSON object according to the provided structure. Do NOT include any explanations, comments, or extra text outside the JSON. Do NOT add any markdown formatting (do not wrap in code fences, do not use json or triple backticks). Do NOT wrap the JSON in quotes or escape characters. Do NOT include \n, \" or any other escape sequences — use actual newlines and plain quotes. The output must be valid and directly parsable by JSON.parse().
+If you cannot extract any documents, return exactly (one line):
+{"docs":0,"documents":[]}
 
-If you cannot extract any documents, return exactly:
-{
-  "docs": 0,
-  "documents": []
-}
-
-If you identified > 1 documents, no detailed data is needed, return only this:
-{
-  "docs": <number_of_documents>,
-  "documents": []
-}
+If you identified more than 1 document, return only the count (one line):
+{"docs":<number_of_documents>,"documents":[]}
 """
+
+
+
+
+
+
+# GEMINI_DEFAULT_PROMPT = """You will receive raw OCR text from one or more scanned financial documents, which may include invoices, receipts, or similar forms.
+
+# 1. First, analyze the text and determine **how many separate documents** are present. Return this number as an integer in the field "docs".
+
+# 2. For each document, determine its type. The possible document types (Galimi tipai) are:
+# - PVM sąskaita faktūra
+# - Sąskaita faktūra
+# - Kreditinė sąskaita faktūra
+# - Debetinė sąskaita faktūra
+# - Išankstinė sąskaita faktūra
+# - Kasos čekis
+# - ES PVM sąskaita faktūra
+# - ES sąskaita faktūra
+# - Užsienietiška sąskaita faktūra
+# - Kitas
+
+# Assign the detected type to the field "document_type".
+
+# 3. For each document, extract the following fields (leave empty if not found):
+# - seller_id
+# - seller_name
+# - seller_vat_code
+# - seller_address
+# - seller_country
+# - seller_country_iso
+# - seller_iban
+# - seller_is_person
+# - buyer_id
+# - buyer_name
+# - buyer_vat_code
+# - buyer_address
+# - buyer_country
+# - buyer_country_iso
+# - buyer_iban
+# - buyer_is_person
+# - invoice_date
+# - due_date
+# - operation_date
+# - document_series
+# - document_number
+# - order_number
+# - amount_wo_vat
+# - vat_amount
+# - vat_percent
+# - amount_with_vat
+# - separate_vat
+# - currency
+# - with_receipt
+# - paid_by_cash
+
+# All boolean fields (seller_is_person, buyer_is_person, with_receipt, separate_vat, paid_by_cash) must be returned as true/false, not as strings.
+
+# **Return the result as a valid JSON object with this structure:**
+# ```json
+# {
+#   "docs": <number_of_documents>,
+#   "documents": [
+#     {
+#       "document_type": "",
+#       "seller_id": "",
+#       "seller_name": "",
+#       "seller_vat_code": "",
+#       "seller_address": "",
+#       "seller_country": "",
+#       "seller_country_iso": "",
+#       "seller_iban": "",
+#       "seller_is_person": "",
+#       "buyer_id": "",
+#       "buyer_name": "",
+#       "buyer_vat_code": "",
+#       "buyer_address": "",
+#       "buyer_country": "",
+#       "buyer_country_iso": "",
+#       "buyer_iban": "",
+#       "buyer_is_person": "",
+#       "invoice_date": "",
+#       "due_date": "",
+#       "operation_date": "",
+#       "document_series": "",
+#       "document_number": "",
+#       "order_number": "",
+#       "amount_wo_vat": "",
+#       "vat_amount": "",
+#       "vat_percent": "",
+#       "amount_with_vat": "",
+#       "separate_vat": "",
+#       "currency": "",
+#       "with_receipt": "",
+#       "paid_by_cash": "",
+#     }
+#   ]
+# }
+# Format dates as yyyy-mm-dd. Delete country from addresses. seller_country and buyer_country must be full country name in language of address provided. country_iso must be 2-letter code.
+# If 2 or more different VAT '%' in doc, separate_vat must be True, otherwise False.
+
+# If there are any signs of cash payment, for example, 'gryni', 'grąža' or similar, return paid_by_cash as True.
+
+# If the document is a kasos čekis (cash receipt), for example, a fuel (kuro) receipt, buyer info is often at the bottom as a line with company name, company code, and VAT code—extract these as buyer details. For line items, find the quantity and unit next to price (like “50,01 l” for litres). Product name is usually above this line. document_number is usually next to kvitas, ignore long numer below "kasininkas" at the bottom of document but don't ignore date at the bottom.
+# Extract all lineitems in kuro cekis, if item has units, it must be extracted as lineitem. For lineitems in kuro cekis, prices are usually stated including VAT, while discounts are usually including VAT but with minus symbol (don't extract discounts them as separate lineitems).
+
+# Return ONLY a valid JSON object according to the provided structure. Do NOT include any explanations, comments, or extra text outside the JSON. Do NOT add any markdown formatting (do not wrap in code fences, do not use json or triple backticks). Do NOT wrap the JSON in quotes or escape characters. Do NOT include \n, \" or any other escape sequences — use actual newlines and plain quotes. The output must be valid and directly parsable by JSON.parse().
+
+# If you cannot extract any documents, return exactly:
+# {
+#   "docs": 0,
+#   "documents": []
+# }
+
+# If you identified > 1 documents, no detailed data is needed, return only this:
+# {
+#   "docs": <number_of_documents>,
+#   "documents": []
+# }
+# """
+
+
+
+
+
+
+
+# GEMINI_DETAILED_PROMPT = """
+# You will receive raw OCR text from one or more scanned financial documents, which may include invoices, receipts, or similar forms.
+
+# 1. First, analyze the text and determine **how many separate documents** are present. Return this number as an integer in the field "docs". Then, count the total number of line items (products/services) across all documents and return this number as an integer in the field total_lines.
+
+# 2. For each document, after extracting all line items, calculate the sum of their subtotal, vat, and total fields. Then compare these sums with the document amount_wo_vat, vat_amount, and amount_with_vat fields. If the absolute difference for each sum is ≤ 0.05 (use four decimals), set "ar_sutapo": true; otherwise, false.
+
+# 3. For each document, determine its type. The possible document types (Galimi tipai) are:
+# - PVM sąskaita faktūra
+# - Sąskaita faktūra
+# - Kreditinė sąskaita faktūra
+# - Debetinė sąskaita faktūra
+# - Išankstinė sąskaita faktūra
+# - Kasos čekis
+# - ES PVM sąskaita faktūra
+# - ES sąskaita faktūra
+# - Užsienietiška sąskaita faktūra
+# - Pavedimo kopija
+# - Receipt
+# - Kitas
+
+# Assign the detected type to the field "document_type".
+
+# 4. For each document, extract the following fields (leave empty if not found):
+# - seller_id
+# - seller_name
+# - seller_vat_code
+# - seller_address
+# - seller_country
+# - seller_country_iso
+# - seller_iban
+# - seller_is_person
+# - buyer_id
+# - buyer_name
+# - buyer_vat_code
+# - buyer_address
+# - buyer_country
+# - buyer_country_iso
+# - buyer_iban
+# - buyer_is_person
+# - invoice_date
+# - due_date
+# - operation_date
+# - document_series
+# - document_number
+# - order_number
+# - amount_wo_vat
+# - invoice_discount_wo_vat
+# - invoice_discount_with_vat
+# - vat_amount
+# - vat_percent
+# - amount_with_vat
+# - separate_vat
+# - currency
+# - with_receipt
+# - paid_by_cash
+
+# All boolean fields (seller_is_person, buyer_is_person, with_receipt, separate_vat, paid_by_cash) must be returned as true/false, not as strings.
+# If there are any signs of cash payment, for example, 'gryni', 'grąža' or similar, return paid_by_cash as True.
+
+# 5. For each document, also extract an array of line items (products or services) if present. For each line item, extract the following fields (leave empty if not found):
+
+# - line_id
+# - type
+# - product_code
+# - product_barcode
+# - product_name
+# - unit
+# - quantity
+# - price
+# - subtotal
+# - discount without VAT (discount_wo_vat)
+# - vat
+# - vat_percent
+# - discount with VAT (discount_with_vat)
+# - total
+# - preke_paslauga (if lineitem is product, return preke; if lineitem is service, return paslauga)
+
+# **IMPORTANT:**
+# - Each document must have a "line_items" field containing an array of line items (may be empty if not found).
+
+# - If a discount (“nuolaida”) is present for any line item, first identify whether the discount amount is stated with VAT (“su PVM”) or without VAT (“be PVM”). Extract the discount amount and assign it to the "discount" field of the corresponding line item. If the discount includes VAT, set its value in the "discount_with_vat" field; if the discount excludes VAT, set its value in the "discount_wo_vat" field. Always subtract the discount from the line item's “subtotal” and “total”. If it is not clear to which product or service a discount/credit applies, add it as an **invoice-level discount** (invoice_discount_wo_vat or invoice_discount_with_vat), but do not create a line item for it. Never apply the same discount to both lineitem and invoice-level.
+
+# - Do not add discounts as separate line items, always attach them to the relevant product or service.
+
+# - If document includes any fees (such as shipping, transaction, payment processing, etc.), each fee must be extracted as a separate line item.
+
+# - Do not mix up fees, discounts, or credits with VAT. VAT must be extracted only if it is explicitly and clearly stated with '%' in the document.
+
+# - If document doesn't have obvious line items but has a table or list of payments/transactions, use them as line items.
+
+# - Do **NOT** treat “Subtotal”, “Total”, “VAT”, “Billing cycle”, “Billed for”, “Payment method”, “Transaction credit”, “Transaction fees”, “Apps”, or any similar summary, heading, or informational lines as separate line items. Only extract as line items actual paid products/services, subscriptions, and app charges, NOT summary rows or section headings.
+
+# - If you see “Transaction credit” or any line with a negative amount (such as “-$0.02”), **do not create a separate line item** for it. Instead, treat it as a discount (“nuolaida”).
+
+# - If line item doesn't clearly show total, don't use it for that line item.
+
+# **Return the result as a valid JSON object in a single compact line, without spaces, indentation, or line breaks. Do not add any markdown, code fences, or explanations. The entire output must be directly parsable by JSON.parse() and must not contain escape sequences or extra characters. Omit any field that is empty or not found.**
+
+# **Example format:**
+# {"docs":1,"total_lines":12,"ar_sutapo":true,"documents":[{"document_type":"Sąskaita faktūra","seller_name":"UAB Pavyzdys","buyer_name":"UAB Klientas","invoice_date":"2025-01-01","amount_wo_vat":100.0,"vat_amount":21.0,"amount_with_vat":121.0,"currency":"EUR","separate_vat":false,"with_receipt":false,"paid_by_cash":false,"line_items":[{"line_id":"1","product_name":"Prekė","unit":"vnt","quantity":1,"price":100.0,"vat_percent":21,"total":121.0,"preke_paslauga":"preke"}]}]}
+
+# If you cannot extract any documents, return exactly: {"docs":0,"documents":[]}
+# If you identified more than one document but detailed data is not required, return only: {"docs":<number_of_documents>,"documents":[]}
+# """
+
+
 
 GEMINI_DETAILED_PROMPT = """
 You will receive raw OCR text from one or more scanned financial documents, which may include invoices, receipts, or similar forms.
@@ -248,69 +440,12 @@ If there are any signs of cash payment, for example, 'gryni', 'grąža' or simil
 
 - If line item doesn't clearly show total, don't use it for that line item. 
 
+*Return ONLY a valid JSON object in a SINGLE LINE (compact form): no newlines, no \n, no \r, no tabs, and no spaces outside string values. Do not use Markdown or code fences. No trailing commas. Do NOT wrap in quotes or escape characters. Do NOT include any explanations, comments, or extra text outside the JSON. The output must be directly parsable by JSON.parse().
 
-**Return the result as a valid JSON object with this structure:**
-{
-  "docs": <number_of_documents>,
-  "total_lines": <total_number_of_lines>,
-  "ar_sutapo": "",
-  "documents": [
-    {
-      "document_type": "",
-      "seller_id": "",
-      "seller_name": "",
-      "seller_vat_code": "",
-      "seller_address": "",
-      "seller_country": "",
-      "seller_country_iso": "",
-      "seller_iban": "",
-      "seller_is_person": "",
-      "buyer_id": "",
-      "buyer_name": "",
-      "buyer_vat_code": "",
-      "buyer_address": "",
-      "buyer_country": "",
-      "buyer_country_iso": "",
-      "buyer_iban": "",
-      "buyer_is_person": "",
-      "invoice_date": "",
-      "due_date": "",
-      "operation_date": "",
-      "document_series": "",
-      "document_number": "",
-      "order_number": "",
-      "invoice_discount_wo_vat": "",
-      "invoice_discount_with_vat": "",
-      "amount_wo_vat": "",
-      "vat_amount": "",
-      "vat_percent": "",
-      "amount_with_vat": "",
-      "separate_vat": "",
-      "currency": "",
-      "with_receipt": "",
-      "paid_by_cash": "",
-      "line_items": [
-        {
-          "line_id": "",
-          "type": "",
-          "product_code": "",
-          "product_barcode": "",
-          "product_name": "",
-          "unit": "",
-          "quantity": "",
-          "price": "",
-          "subtotal": "",
-          "discount_wo_vat": "",
-          "vat": "",
-          "vat_percent": "",
-          "discount_with_vat": "",
-          "total": "",
-          "preke_paslauga": ""
-        }
-      ]
-    }
-  ]
-}
+Example (structure and field names; values may be empty strings, booleans must be true/false, numbers should be numbers when available):
+{"docs":<number_of_documents>,"total_lines":<total_number_of_lines>,"ar_sutapo":<true_or_false>,"documents":[{"document_type":"","seller_id":"","seller_name":"","seller_vat_code":"","seller_address":"","seller_country":"","seller_country_iso":"","seller_iban":"","seller_is_person":false,"buyer_id":"","buyer_name":"","buyer_vat_code":"","buyer_address":"","buyer_country":"","buyer_country_iso":"","buyer_iban":"","buyer_is_person":false,"invoice_date":"","due_date":"","operation_date":"","document_series":"","document_number":"","order_number":"","invoice_discount_wo_vat":"","invoice_discount_with_vat":"","amount_wo_vat":"","vat_amount":"","vat_percent":"","amount_with_vat":"","separate_vat":false,"currency":"","with_receipt":false,"paid_by_cash":false,"line_items":[{"line_id":"","product_code":"","product_barcode":"","product_name":"","unit":"","quantity":"","price":"","subtotal":"","discount_wo_vat":"","vat":"","vat_percent":"","discount_with_vat":"","total":"","preke_paslauga":""}]}]}
+
+If any of values are empty, don't include them in JSON. For example, if "product_barcode" is empty, don't return it for that lineitem.
 
 Format dates as yyyy-mm-dd. Delete country from addresses. seller_country and buyer_country must be full country name in language of address provided. country_iso must be 2-letter code. 
 If 2 or more different VAT '%' in doc, separate_vat must be True, otherwise False.
@@ -318,20 +453,11 @@ For unit, try to identify any of these vnt kg g mg kompl t ct m cm mm km l ml m2
 
 If the document is a kasos čekis (cash receipt), for example, a fuel (kuro) receipt, buyer info is often at the bottom as a line with company name, company code, and VAT code—extract these as buyer details. For line items, find the quantity and unit next to price (like “50,01 l” for litres). Product name is usually above this line. document_number is usually next to kvitas, ignore long numer below "kasininkas" at the bottom of document but don't ignore date at the bottom.
 
-Return ONLY a valid JSON object according to the provided structure. Do NOT include any explanations, comments, or extra text outside the JSON. Do NOT add any markdown formatting (do not wrap in code fences, do not use json or triple backticks). Do NOT wrap the JSON in quotes or escape characters. Do NOT include \n, \" or any other escape sequences — use actual newlines and plain quotes. The output must be valid and directly parsable by JSON.parse().
+If you cannot extract any documents, return exactly (one line):
+{"docs":0,"documents":[]}
 
-
-If you cannot extract any documents, return exactly:
-{
-  "docs": 0,
-  "documents": []
-}
-
-If you identified > 1 documents, no detailed data is needed, return only this:
-{
-  "docs": <number_of_documents>,
-  "documents": []
-}
+If you identified more than 1 document, return only the count (one line):
+{"docs":<number_of_documents>,"documents":[]}
 """
 
 # =========================

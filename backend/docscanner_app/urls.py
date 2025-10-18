@@ -22,7 +22,10 @@ from .views import (
     superuser_dashboard_stats,
     admin_documents_with_errors,
     admin_all_documents,
-    export_documents
+    export_documents,
+    InlineDocUpdateView,
+    InlineLineUpdateView,
+    ScannedDocumentViewSet,
 )
 
 from .views import TrackAdClickView
@@ -33,6 +36,8 @@ from .views import GuideCategoryViewSet, GuideArticleViewSet
 
 router = DefaultRouter()
 router.register(r"guides/categories", GuideCategoryViewSet, basename="guides-categories")
+router.register(r"scanned-documents", ScannedDocumentViewSet, basename="scanned-document") 
+
 
 urlpatterns = [
 
@@ -100,6 +105,9 @@ urlpatterns = [
     path("scanned-documents/<int:pk>/lineitem/<int:lineitem_id>/clear-product/", clear_lineitem_product),
 
     path("view-mode/", update_view_mode, name="user-view-mode"),
+
+    path("scanned-documents/<int:doc_id>/inline/", InlineDocUpdateView.as_view()),
+    path("scanned-documents/<int:doc_id>/lineitem/<int:line_id>/inline/", InlineLineUpdateView.as_view()),
 
 
 

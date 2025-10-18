@@ -3,6 +3,9 @@ from .models import CustomUser
 from .models import ScannedDocument, LineItem, ProductAutocomplete, ClientAutocomplete, AdClick, GuideCategoryPage, GuidePage
 import json
 from typing import Optional
+from django.db.models import IntegerField, Value
+from django.db.models.functions import Cast
+from django.db.models import Case, When
 
 
 class LineItemSerializer(serializers.ModelSerializer):
@@ -191,8 +194,22 @@ class ScannedDocumentListSerializer(serializers.ModelSerializer):
         ]
 
 
+# class ScannedDocumentDetailSerializer(serializers.ModelSerializer):
+#     line_items = LineItemSerializer(many=True, read_only=True)
+
+#     class Meta:
+#         model = ScannedDocument
+#         fields = "__all__"
+#         extra_kwargs = {
+#             "file": {"write_only": True},
+#             "gpt_raw_json": {"write_only": True},
+#             "raw_text": {"write_only": True},
+#             "structured_json": {"write_only": True},
+#             "glued_raw_text": {"write_only": True},
+#         }
+
 class ScannedDocumentDetailSerializer(serializers.ModelSerializer):
-    line_items = LineItemSerializer(many=True, read_only=True)
+    line_items = serializers.SerializerMethodField()
 
     class Meta:
         model = ScannedDocument
@@ -204,6 +221,11 @@ class ScannedDocumentDetailSerializer(serializers.ModelSerializer):
             "structured_json": {"write_only": True},
             "glued_raw_text": {"write_only": True},
         }
+
+    def get_line_items(self, obj):
+        # Просто сортируем по id, чтобы порядок всегда был стабильный
+        qs = obj.line_items.order_by("id")
+        return LineItemSerializer(qs, many=True).data
 
 
 
