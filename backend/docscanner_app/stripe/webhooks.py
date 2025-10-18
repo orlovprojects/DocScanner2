@@ -4,7 +4,9 @@ import stripe
 from django.conf import settings
 from django.db import transaction, IntegrityError
 from django.http import HttpResponse, HttpResponseBadRequest
+from datetime import datetime, timezone as dt_timezone
 from django.utils import timezone
+
 from django.views.decorators.csrf import csrf_exempt
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny
@@ -143,7 +145,10 @@ def StripeWebhookView(request):
 
     # 9) Атомарно: начислить кредиты + создать Payments
     paid_at_ts = session.get("created")
-    paid_at = timezone.datetime.fromtimestamp(paid_at_ts, tz=timezone.utc) if paid_at_ts else timezone.now()
+    paid_at = (
+    datetime.fromtimestamp(paid_at_ts, tz=dt_timezone.utc)   # aware UTC datetime
+    if paid_at_ts else timezone.now()
+    )
 
     try:
         with transaction.atomic():
