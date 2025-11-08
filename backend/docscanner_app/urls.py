@@ -26,6 +26,7 @@ from .views import (
     InlineDocUpdateView,
     InlineLineUpdateView,
     ScannedDocumentViewSet,
+    admin_users_simple,
 )
 
 from .views import TrackAdClickView
@@ -171,6 +172,7 @@ urlpatterns = [
     path('admin/documents_with_errors/', admin_documents_with_errors, name='admin_documents_with_errors'),
     path('superuser/dashboard-stats/', superuser_dashboard_stats, name="superuser_dashboard_stats"),
     path('admin/visi-failai/', admin_all_documents, name='admin_all_documents'),
+    path("admin/users/", admin_users_simple, name="admin_users_simple"),
 
     path("", include(router.urls)),
 ]

@@ -3,7 +3,8 @@ import logging
 from django.utils.encoding import smart_str
 from .formatters import format_date, vat_to_int_str, get_price_or_zero, expand_empty_tags
 from ..models import CurrencyRate
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+import xml.etree.ElementTree as ET
 
 
 logger = logging.getLogger(__name__)
@@ -11,6 +12,44 @@ logger = logging.getLogger(__name__)
 # =========================
 # Helpers
 # =========================
+
+def _safe_D(x):
+    try:
+        return Decimal(str(x))
+    except Exception:
+        return Decimal("0")
+    
+def compute_global_invoice_discount_pct(doc):
+    """
+    Возвращает Decimal с 2 знаками — процент скидки по документу (0..99.99),
+    рассчитанный как invoice_discount_wo_vat / сумма_нетто_по_строкам * 100.
+    Если нечего применять — вернёт None.
+    Предполагается, что item.price — цена БЕЗ НДС и УЖЕ с учётом всех построчных скидок,
+    но БЕЗ учёта документной скидки.
+    """
+    disc = _safe_D(getattr(doc, "invoice_discount_wo_vat", 0) or 0)
+    if disc <= 0:
+        return None
+
+    line_items = getattr(doc, "line_items", None)
+    if line_items and hasattr(line_items, "all") and line_items.exists():
+        base_total = Decimal("0")
+        for it in line_items.all():
+            qty   = _safe_D(getattr(it, "quantity", 1) or 1)
+            price = _safe_D(getattr(it, "price", 0) or 0)  # нетто, уже после всех line скидок
+            base_total += (price * qty)
+    else:
+        # документ без строк: берём сумму нетто по документу
+        base_total = _safe_D(getattr(doc, "amount_wo_vat", 0) or 0)
+
+    if base_total <= 0:
+        return None
+
+    pct = (disc / base_total) * Decimal("100")
+    if pct < 0: pct = Decimal("0")
+    if pct > Decimal("99.99"): pct = Decimal("99.99")
+    return pct.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    
 
 def get_rivile_fraction(user):
     """
@@ -79,11 +118,72 @@ def prettify_no_header(elem):
     return pretty_xml.encode("utf-8")
 
 
+def _indent(elem, level=0):
+    i = "\n" + "  " * level
+    if len(elem):
+        if not (elem.text and elem.text.strip()):
+            elem.text = i + "  "
+        for ch in elem:
+            _indent(ch, level + 1)
+        if not (elem.tail and elem.tail.strip()):
+            elem.tail = i
+    else:
+        if not (elem.tail and elem.tail.strip()):
+            elem.tail = i
+
+def elem_to_bytes_utf8(elem) -> bytes:
+    """Один элемент → bytes UTF-8 (без BOM, без заголовка)."""
+    _indent(elem)
+    return ET.tostring(elem, encoding="utf-8", xml_declaration=False)
+
+def join_records_utf8(elements) -> bytes:
+    """Склеить элементы в один файл с ОДНИМ заголовком UTF-8 (без BOM)."""
+    header = b'<?xml version="1.0" encoding="UTF-8"?>\n'
+    body = b"\n".join(elem_to_bytes_utf8(el) for el in elements)
+    return header + body + b"\n"
+
+
+# def build_dok_nr(series: str, number: str) -> str:
+#     """
+#     Формирует DOK_NR строго как 'series-number', если series не пустая.
+#     - Пустая series -> number
+#     - Если number начинается с series (с дефисом или без) -> нормализует в 'series-number'
+#     """
+#     s = (series or "").strip()
+#     n = (number or "").strip()
+
+#     if not s:
+#         res = n
+#         logger.info("[RIVILE:DOK_NR] s='', n=%r -> %r", n, res)
+#         return res
+#     if not n:
+#         logger.info("[RIVILE:DOK_NR] n='', s=%r -> %r", s, s)
+#         return s
+
+#     if n.startswith(s):
+#         tail = n[len(s):]
+#         if tail.startswith("-"):
+#             tail = tail[1:]
+#         res = f"{s}-{tail}"
+#         logger.info("[RIVILE:DOK_NR] n startswith s: s=%r n=%r -> %r", s, n, res)
+#         return res
+
+#     res = f"{s}-{n}"
+#     logger.info("[RIVILE:DOK_NR] s=%r n=%r -> %r", s, n, res)
+#     return res
+
 def build_dok_nr(series: str, number: str) -> str:
     """
-    Формирует DOK_NR строго как 'series-number', если series не пустая.
-    - Пустая series -> number
-    - Если number начинается с series (с дефисом или без) -> нормализует в 'series-number'
+    Формирует DOK_NR как конкатенацию 'series' + 'number' (БЕЗ дефиса).
+    Правила:
+    - Если series пустая -> вернуть number.
+    - Если number пустой -> вернуть series.
+    - Если number начинается с series (с дефисом/пробелом/слэшем или без) -> убираем повтор и разделитель.
+      Примеры:
+        series='AB', number='AB-123'  -> 'AB123'
+        series='AB', number='AB123'   -> 'AB123'
+        series='AB', number='123'     -> 'AB123'
+        series=''  , number='123'     -> '123'
     """
     s = (series or "").strip()
     n = (number or "").strip()
@@ -96,17 +196,18 @@ def build_dok_nr(series: str, number: str) -> str:
         logger.info("[RIVILE:DOK_NR] n='', s=%r -> %r", s, s)
         return s
 
+    # если номер начинается с серии — убираем повтор и ведущие разделители
     if n.startswith(s):
         tail = n[len(s):]
-        if tail.startswith("-"):
-            tail = tail[1:]
-        res = f"{s}-{tail}"
+        tail = tail.lstrip("-/ .")  # любые типичные разделители после серии
+        res = f"{s}{tail}"
         logger.info("[RIVILE:DOK_NR] n startswith s: s=%r n=%r -> %r", s, n, res)
         return res
 
-    res = f"{s}-{n}"
+    res = f"{s}{n}"
     logger.info("[RIVILE:DOK_NR] s=%r n=%r -> %r", s, n, res)
     return res
+
 
 
 # ===== ЕДИНЫЙ РЕЗОЛВЕР КОДА КЛИЕНТА/ПОСТАВЩИКА БЕЗ КЭША И РАНДОМА =====
@@ -182,6 +283,52 @@ def normalize_preke_paslauga_tipas(value: object) -> str:
         return "3"
     logger.info("[RIVILE:TIPAS] fallback for %r -> '1'", s)
     return "1"
+
+
+EU_ISO2 = {
+    "AT","BE","BG","HR","CY","CZ","DK","EE","FI","FR","DE","GR","HU","IE",
+    "IT","LV","LT","LU","MT","NL","PL","PT","RO","SK","SI","ES","SE"
+}
+
+def _is_eu_country(iso: object) -> bool:
+    """True только для явных ISO2 из списка ЕС. Пустое значение -> False."""
+    if not iso:
+        return False
+    return str(iso).strip().upper() in EU_ISO2
+
+def _is_zero(v) -> bool:
+    """Нулевая ставка НДС? None/'' считаем как 0 для этого правила."""
+    try:
+        return Decimal(str(v)) == 0
+    except Exception:
+        return True
+    
+def _pick_isaf_for_purchase(doc):
+    """
+    Возвращает:
+      - '12' -> Neformuoti (НЕ включать в i.SAF)
+      - None  -> не ставить тег вовсе (включать по умолчанию)
+
+    Правило:
+      если (seller_country_iso пусто ИЛИ не-ЕС) И ВСЕ ставки vat_percent по строкам == 0
+      -> '12', иначе None.
+    """
+    country = getattr(doc, "seller_country_iso", "") or ""
+    is_eu = _is_eu_country(country)          # пусто даст False
+    non_eu_or_empty = not is_eu
+
+    # определяем "все строки 0%"
+    line_items = getattr(doc, "line_items", None)
+    if line_items and hasattr(line_items, "all") and line_items.exists():
+        vat_zero_all = all(_is_zero(getattr(it, "vat_percent", None)) for it in line_items.all())
+    else:
+        vat_zero_all = _is_zero(getattr(doc, "vat_percent", None))
+
+    if non_eu_or_empty and vat_zero_all:
+        return "12"
+
+    return None
+
 
 
 # =========================================================
@@ -292,9 +439,12 @@ def export_prekes_paslaugos_kodai_group_to_rivile(documents):
                 elif tipas == '3':
                     add_n25_record(kodai_dict, doc)
 
-    prekes_xml = b"".join(prettify_no_header(el) + b"\n" for el in prekes_dict.values())
-    paslaugos_xml = b"".join(prettify_no_header(el) + b"\n" for el in paslaugos_dict.values())
-    kodai_xml = b"".join(prettify_no_header(el) + b"\n" for el in kodai_dict.values())
+    # prekes_xml = b"".join(prettify_no_header(el) + b"\n" for el in prekes_dict.values())
+    # paslaugos_xml = b"".join(prettify_no_header(el) + b"\n" for el in paslaugos_dict.values())
+    # kodai_xml = b"".join(prettify_no_header(el) + b"\n" for el in kodai_dict.values())
+    prekes_xml    = join_records_utf8(list(prekes_dict.values()))    if prekes_dict    else b""
+    paslaugos_xml = join_records_utf8(list(paslaugos_dict.values())) if paslaugos_dict else b""
+    kodai_xml     = join_records_utf8(list(kodai_dict.values()))     if kodai_dict     else b""
 
     if prekes_xml.strip():
         prekes_xml = expand_empty_tags(prekes_xml)
@@ -326,6 +476,8 @@ def export_pirkimai_group_to_rivile(documents, user):
         number = smart_str(getattr(doc, "document_number", "") or "")
         dok_num = build_dok_nr(series, number)
 
+        discount_pct = compute_global_invoice_discount_pct(doc)  # Decimal('x.xx') или None
+
         if currency.upper() != "EUR":
             ET.SubElement(i06, "I06_VAL_POZ").text = "1"
             ET.SubElement(i06, "I06_KODAS_VL").text = currency.upper()
@@ -349,8 +501,13 @@ def export_pirkimai_group_to_rivile(documents, user):
         ET.SubElement(i06, "I06_KODAS_KS").text = smart_str(seller_code)
         logger.info("[RIVILE:I06] doc=%s dir=pirkimas KODAS_KS=%r DOK_NR=%r CUR=%s",
                     getattr(doc, "pk", None), seller_code, dok_num, currency)
+        
 
-        ET.SubElement(i06, "I06_DOK_REG").text    = smart_str(getattr(doc, 'document_number', '') or '')
+        ET.SubElement(i06, "I06_DOK_REG").text    = dok_num
+        code_isaf = _pick_isaf_for_purchase(doc)
+        if code_isaf == "12":
+            ET.SubElement(i06, "I06_ISAF").text = "12"
+
         ET.SubElement(i06, "I06_APRASYMAS1").text = smart_str(getattr(doc, 'preview_url', '') or '')
 
         line_items = getattr(doc, "line_items", None)
@@ -376,6 +533,8 @@ def export_pirkimai_group_to_rivile(documents, user):
                     ET.SubElement(i07, "I07_PVM_VAL").text   = get_price_or_zero(getattr(item, "vat", None))
                     ET.SubElement(i07, "I07_SUMA_VAL").text  = get_price_or_zero(getattr(item, "subtotal", None))
 
+                if discount_pct is not None:
+                    ET.SubElement(i07, "I07_NUOLAIDA").text = f"{discount_pct:.2f}"
                 ET.SubElement(i07, "I07_MOKESTIS").text   = "1"
                 ET.SubElement(i07, "I07_MOKESTIS_P").text = vat_to_int_str(getattr(item, "vat_percent", None))
                 # ET.SubElement(i07, "T_KIEKIS").text       = str(getattr(item, "quantity", None) or "1")
@@ -420,9 +579,11 @@ def export_pirkimai_group_to_rivile(documents, user):
         logger.info("[RIVILE:I07] doc=%s lines=%d", getattr(doc, "pk", None), added)
         elements.append(i06)
 
-    xml = b""
-    for el in elements:
-        xml += prettify_no_header(el) + b"\n"
+    # xml = b""
+    # for el in elements:
+    #     xml += prettify_ansi(el) + b"\n"
+    # return expand_empty_tags(xml)
+    xml = join_records_utf8(elements) if elements else b""
     return expand_empty_tags(xml)
 
 
@@ -442,6 +603,8 @@ def export_pardavimai_group_to_rivile(documents, user):
         series = smart_str(getattr(doc, "document_series", "") or "")
         number = smart_str(getattr(doc, "document_number", "") or "")
         dok_num = build_dok_nr(series, number)
+
+        discount_pct = compute_global_invoice_discount_pct(doc)  # Decimal('x.xx') или None
 
         ET.SubElement(i06, "I06_OP_TIP").text = "51"
         if currency.upper() != "EUR":
@@ -494,6 +657,9 @@ def export_pardavimai_group_to_rivile(documents, user):
                     ET.SubElement(i07, "I07_PVM_VAL").text    = get_price_or_zero(getattr(item, "vat", None))
                     ET.SubElement(i07, "I07_SUMA_VAL").text   = get_price_or_zero(getattr(item, "subtotal", None))
 
+                if discount_pct is not None:
+                    ET.SubElement(i07, "I07_NUOLAIDA").text = f"{discount_pct:.2f}"
+
                 ET.SubElement(i07, "I07_MOKESTIS").text   = "1"
                 ET.SubElement(i07, "I07_MOKESTIS_P").text = vat_to_int_str(getattr(item, "vat_percent", None))
                 # ET.SubElement(i07, "T_KIEKIS").text       = str(getattr(item, "quantity", None) or "1")
@@ -538,9 +704,11 @@ def export_pardavimai_group_to_rivile(documents, user):
         logger.info("[RIVILE:I07] doc=%s lines=%d", getattr(doc, "pk", None), added)
         elements.append(i06)
 
-    xml = b""
-    for el in elements:
-        xml += prettify_no_header(el) + b"\n"
+    # xml = b""
+    # for el in elements:
+    #     xml += prettify_ansi(el) + b"\n"
+    # return expand_empty_tags(xml)
+    xml = join_records_utf8(elements) if elements else b""
     return expand_empty_tags(xml)
 
 
@@ -673,9 +841,11 @@ def export_clients_group_to_rivile(clients=None, documents=None):
 
     # --- 3) Склеиваем и возвращаем XML ---
     logger.info("[RIVILE:N08] total unique clients: %d", len(elements))
-    xml = b""
-    for el in elements:
-        xml += prettify_no_header(el) + b"\n"
+    # xml = b""
+    # for el in elements:
+    #     xml += prettify_ansi(el) + b"\n"
+    # return expand_empty_tags(xml)
+    xml = join_records_utf8(elements) if elements else b""
     return expand_empty_tags(xml)
 
 

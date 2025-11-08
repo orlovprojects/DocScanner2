@@ -8,21 +8,55 @@ logger = logging.getLogger("celery")
 
 # ---- твои базовые парсеры (оставь как есть) ----
 
-def normalize_code_field(value: str) -> str:
+# def normalize_code_field(value: str) -> str:
+#     """
+#     Унифицирует поля вроде document_number или document_series:
+#       - убирает пробелы и неалфанумерные символы,
+#       - приводит к верхнему регистру.
+#     """
+#     if not value:
+#         return ""
+
+#     v = str(value).strip().upper()
+
+#     # Убираем всё, кроме букв и цифр
+#     v = re.sub(r"[^A-Z0-9]", "", v)
+
+#     return v
+
+# заранее компилируем паттерны
+_BY_UKBY_PATTERNS = [
+    re.compile(r'(?i)\bby\s*=\s*ukby\b'),  # "by = ukby"
+    re.compile(r'(?i)\bbyukby\b'),         # "byukby" слитно
+]
+
+def normalize_code_field(value: Optional[str]) -> str:
     """
-    Унифицирует поля вроде document_number или document_series:
-      - убирает пробелы и неалфанумерные символы,
-      - приводит к верхнему регистру.
+    Унифицирует поля вроде document_number/document_series:
+      1) удаляет мусорные подписи вида 'by=ukby' (в любом регистре и с пробелами),
+      2) тримит,
+      3) приводит к верхнему регистру,
+      4) оставляет только буквы (любые Unicode) и цифры.
     """
     if not value:
         return ""
 
-    v = str(value).strip().upper()
+    s = str(value)
 
-    # Убираем всё, кроме букв и цифр
-    v = re.sub(r"[^A-Z0-9]", "", v)
+    # 1) убрать мусор "by=ukby" (и слитно "byukby")
+    for pat in _BY_UKBY_PATTERNS:
+        s = pat.sub("", s)
 
-    return v
+    # 2) схлопнуть пробелы и подрезать края от явных разделителей
+    s = re.sub(r'\s{2,}', ' ', s).strip().strip(' -_/.,')
+
+    # 3) в верхний регистр (Unicode-safe)
+    s = s.upper()
+
+    # 4) оставить только буквы/цифры (Unicode)
+    s = "".join(ch for ch in s if ch.isalnum())
+
+    return s
 
 
 def normalize_unit(value: str) -> str:

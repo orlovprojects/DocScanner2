@@ -1,17 +1,67 @@
 import logging
 from decimal import Decimal, ROUND_HALF_UP
+from typing import Dict, Any, List, Tuple
 
 logger = logging.getLogger("docscanner_app")
+
+# =============================================================
+# МОДУЛЬ ВАЛИДАЦИИ/НОРМАЛИЗАЦИИ ДАННЫХ ДОКУМЕНТА (v2)
+# -------------------------------------------------------------
+# Этот файл переписан с учётом зафиксированных принципов:
+# 1) Опираемся на итоги документа (amount_wo_vat, vat_amount, amount_with_vat,
+#    vat_percent, separate_vat) — это «якоря» доверия.
+# 2) Сначала определяем режим НДС (единая ставка/несколько), затем работаем 
+#    со скидками, затем решаем вопросы округлений.
+# 3) Документные скидки применяются ПОСЛЕ суммирования строк. Мы избегаем 
+#    двойного вычитания, если LLM разложил скидки по строкам.
+# 4) Не вычитаем скидку дважды: если subtotal уже NET (price*qty - discount),
+#    discount_wo_vat не вычитаем повторно.
+# 5) Толеранс динамический: мелкие чеки и крупные счета учитываются корректно.
+# 6) Раздача VAT при единой ставке — пропорционально net-базе, с выравниванием
+#    по методу наибольших остатков (largest remainder) вместо «в последнюю строку».
+# 7) Политика минимальных правок: правим только то, что необходимо; всё 
+#    сопровождается reason_code, confidence и техлогом.
+# =============================================================
+
+# -----------------
+# Утилиты/константы
+# -----------------
+
+REASON = {
+    "OK": "Итоги согласованы",
+    "DOC_MISSING_FIELDS_FILLED": "Заполнены недостающие поля документа",
+    "LINE_VAT_DERIVED_FROM_DOC": "НДС строк выведен из ставки документа",
+    "DOUBLE_DISCOUNT_NET": "Двойное вычитание net-скидки устранено",
+    "GROSS_DISCOUNT_DETECTED": "Обнаружена скидка с НДС (gross)",
+    "PRICE_ALREADY_NET": "Цена/сабтотал уже нетто, скидка не вычитается повторно",
+    "ROUNDING_REALLOCATION": "Перераспределены копейки округления",
+    "DOC_TOTALS_INCONSISTENT": "Итоги документа противоречат суммам строк",
+    "MIXED_VAT_RATES_NEED_SEPARATE_VAT": "Смешанные ставки, требуется separate_vat",
+    "NEEDS_MANUAL_REVIEW": "Требуется ручная проверка",
+    "DOC_DISCOUNT_DUPLICATES_LINE_DISCOUNTS": "Скидка документа дублирует суммарные строковые",
+}
+
+
+def dynamic_tol(amount_with_vat: Decimal) -> Decimal:
+    """Динамический допуск для сверок: max(0.02, min(0.5, total * 0.0005))."""
+    try:
+        base = (amount_with_vat or Decimal("0")) * Decimal("0.0005")
+        return max(Decimal("0.02"), min(Decimal("0.50"), base.quantize(Decimal("1.00"), rounding=ROUND_HALF_UP)))
+    except Exception:
+        return Decimal("0.05")
 
 
 # ===============================
 # Утилиты
 # ===============================
 
-def to_decimal(x, places=4):
+def to_decimal(x, places=4) -> Decimal:
     """
     Преобразует x в Decimal с нужным количеством знаков.
     Пустые значения и ошибки — 0.0000 / 0.00.
+
+    Важно: используем ROUND_HALF_UP, все внутренние расчёты — 4 знака,
+    контроль и вывод итогов — 2 знака при необходимости.
     """
     if x is None or x == "" or str(x).lower() == "null":
         return Decimal("0.0000") if places == 4 else Decimal("0.00")
@@ -20,66 +70,65 @@ def to_decimal(x, places=4):
     except Exception as e:
         logger.info(f"[to_decimal] EXCEPTION: {e} (input={x})")
         return Decimal("0.0000") if places == 4 else Decimal("0.00")
-    
+
 
 # ===============================
-# Udalit duplicate skidku iz dokumenta jesle jest lineitem skidka
+# Дубликаты скидок документа vs строк
 # ===============================
 
-def dedupe_document_discounts(doc_struct, tol=Decimal("0.05")):
+def dedupe_document_discounts(doc_struct: Dict[str, Any], tol: Decimal = Decimal("0.05")) -> Dict[str, Any]:
     """
-    Если сумма скидок по строкам ≈ документной скидке → уменьшает документную скидку на эту сумму.
-    - Полное совпадение → документная скидка обнуляется.
-    - Частичное совпадение → остаётся только 'остаток'.
-    Никогда не делает скидку отрицательной.
+    Назначение: если сумма скидок по строкам ≈ документной скидке, уменьшаем
+    документную скидку на эту сумму (не даём двойного вычитания):
+      - Полное совпадение → скидка документа обнуляется.
+      - Частичное → остаётся только остаток.
+    Никогда не делаем скидку отрицательной.
+
+    Почему: LLM иногда разносит doc-скидку по строкам и одновременно заполняет
+    invoice_discount_* на документе → дублирование.
     """
     items = doc_struct.get("line_items") or []
 
     def d(x, p=4):
         try:
-            return Decimal(str(x)).quantize(Decimal("1." + "0"*p))
+            return Decimal(str(x)).quantize(Decimal("1." + "0" * p))
         except Exception:
             return Decimal("0.0000") if p == 4 else Decimal("0.00")
 
-    # Суммы строковых скидок
-    sum_line_disc_wo   = sum(d(it.get("discount_wo_vat"), 4)   for it in items)
+    sum_line_disc_wo = sum(d(it.get("discount_wo_vat"), 4) for it in items)
     sum_line_disc_with = sum(d(it.get("discount_with_vat"), 4) for it in items)
 
-    # Документные скидки
-    inv_disc_wo   = d(doc_struct.get("invoice_discount_wo_vat"), 4)
+    inv_disc_wo = d(doc_struct.get("invoice_discount_wo_vat"), 4)
     inv_disc_with = d(doc_struct.get("invoice_discount_with_vat"), 4)
 
-    # --- Дедупликация "без НДС"
-    if inv_disc_wo > Decimal("0.0000") and sum_line_disc_wo > Decimal("0.0000"):
+    # Без НДС
+    if inv_disc_wo > 0 and sum_line_disc_wo > 0:
         new_wo = inv_disc_wo - sum_line_disc_wo
-        if abs(new_wo) <= tol:
-            new_wo = Decimal("0.0000")
-        if new_wo < Decimal("0.0000"):
+        if abs(new_wo) <= tol or new_wo < 0:
             new_wo = Decimal("0.0000")
         if new_wo != inv_disc_wo:
             logger.info(f"[dedupe] invoice_discount_wo_vat {inv_disc_wo} → {new_wo} (line discounts={sum_line_disc_wo})")
             doc_struct["invoice_discount_wo_vat"] = new_wo
             doc_struct["_dedup_invoice_discount_wo_vat"] = True
+            doc_struct.setdefault("_global_validation_log", []).append(REASON["DOC_DISCOUNT_DUPLICATES_LINE_DISCOUNTS"]) 
 
-    # --- Дедупликация "с НДС"
-    if inv_disc_with > Decimal("0.0000") and sum_line_disc_with > Decimal("0.0000"):
+    # С НДС
+    if inv_disc_with > 0 and sum_line_disc_with > 0:
         new_with = inv_disc_with - sum_line_disc_with
-        if abs(new_with) <= tol:
-            new_with = Decimal("0.0000")
-        if new_with < Decimal("0.0000"):
+        if abs(new_with) <= tol or new_with < 0:
             new_with = Decimal("0.0000")
         if new_with != inv_disc_with:
             logger.info(f"[dedupe] invoice_discount_with_vat {inv_disc_with} → {new_with} (line discounts with VAT={sum_line_disc_with})")
             doc_struct["invoice_discount_with_vat"] = new_with
             doc_struct["_dedup_invoice_discount_with_vat"] = True
+            doc_struct.setdefault("_global_validation_log", []).append(REASON["DOC_DISCOUNT_DUPLICATES_LINE_DISCOUNTS"]) 
 
-    # Доп. защита: при нулевом VAT по документу не плодим with_vat-скидку
+    # Защита: при doc.vat_amount==0 не плодим with_vat-скидку
     doc_vat = d(doc_struct.get("vat_amount"), 4)
-    if doc_vat == Decimal("0.0000"):
-        # если totals уже сходятся без документной скидки 'with', обнулим её
+    if doc_vat == 0:
         sum_total = sum(d(it.get("total"), 4) for it in items)
         doc_total = d(doc_struct.get("amount_with_vat"), 4)
-        if inv_disc_with > Decimal("0.0000") and abs(doc_total - sum_total) <= tol:
+        if inv_disc_with > 0 and abs(doc_total - sum_total) <= tol:
             logger.info("[dedupe] VAT=0 и totals сходятся → invoice_discount_with_vat = 0")
             doc_struct["invoice_discount_with_vat"] = Decimal("0.0000")
             doc_struct["_dedup_invoice_discount_with_vat"] = True
@@ -88,13 +137,13 @@ def dedupe_document_discounts(doc_struct, tol=Decimal("0.05")):
 
 
 # ===============================
-# Сверка doc vs line_items (с учётом скидок на документ)
+# Восстановление недостающих скидок документа
 # ===============================
 
-def _deduce_missing_document_discounts(doc_struct, sum_subtotal, sum_total, tol=Decimal("0.05")):
+def _deduce_missing_document_discounts(doc_struct: Dict[str, Any], sum_subtotal: Decimal, sum_total: Decimal, tol: Decimal = Decimal("0.05")) -> Tuple[Decimal, Decimal]:
     """
-    Пытаемся восстановить отсутствующие скидки документа из итогов,
-    но если разница уже объясняется строковыми скидками — НЕ создаём документную скидку.
+    Пытаемся восстановить отсутствующие скидки документа из итогов.
+    НЕ создаём doc-скидку, если разница уже объясняется строковыми скидками.
     Возвращает (inv_disc_wo, inv_disc_with).
     """
     inv_disc_wo = to_decimal(doc_struct.get("invoice_discount_wo_vat"), 4)
@@ -105,32 +154,29 @@ def _deduce_missing_document_discounts(doc_struct, sum_subtotal, sum_total, tol=
     sum_vat = sum(to_decimal(it.get("vat"), 4) for it in (doc_struct.get("line_items") or []))
     doc_vat = to_decimal(doc_struct.get("vat_amount"), 4)
 
-    # NEW: учтём суммарные строковые скидки (без НДС)
     sum_line_disc_wo = sum(to_decimal(it.get("discount_wo_vat"), 4) for it in (doc_struct.get("line_items") or []))
 
-    # 1) Восстановление скидки без НДС, только если её не покрывают строковые скидки
-    if (inv_disc_wo.is_zero() or inv_disc_wo == Decimal("0.0000")) and doc_wo < sum_subtotal:
+    # 1) WO скидка: только если разницу не покрывают строковые скидки
+    if inv_disc_wo.is_zero() and doc_wo < sum_subtotal:
         diff_wo = (sum_subtotal - doc_wo).quantize(Decimal("1.0000"))
-        # если разница примерно равна сумме строковых скидок — НЕ создаём документную скидку
         if abs(diff_wo - sum_line_disc_wo) <= tol:
-            # отметим в техлоге, но поле не трогаем
-            logger.info(f"[deduce] diff_wo≈line_discounts ({diff_wo}≈{sum_line_disc_wo}) → invoice_discount_wo_vat оставляем 0 (скидка уже в строках)")
+            logger.info(f"[deduce] diff_wo≈line_discounts ({diff_wo}≈{sum_line_disc_wo}) → doc WO скидку не создаём")
         elif Decimal("0.0000") <= diff_wo <= sum_subtotal:
             inv_disc_wo = diff_wo
             doc_struct["invoice_discount_wo_vat"] = inv_disc_wo
             logger.info(f"[deduce] invoice_discount_wo_vat <- {inv_disc_wo}")
 
-    # 2) Восстановление скидки с НДС по total — как было
-    if (inv_disc_with.is_zero() or inv_disc_with == Decimal("0.0000")) and doc_tot < sum_total:
+    # 2) WITH скидка — из total
+    if inv_disc_with.is_zero() and doc_tot < sum_total:
         deduced_with = (sum_total - doc_tot).quantize(Decimal("1.0000"))
         if Decimal("0.0000") <= deduced_with <= sum_total:
             inv_disc_with = deduced_with
             doc_struct["invoice_discount_with_vat"] = inv_disc_with
             logger.info(f"[deduce] invoice_discount_with_vat <- {inv_disc_with}")
 
-    # 3) Если VAT=0 в строках и документе → with_vat = wo_vat (как было)
+    # 3) VAT=0 → with_vat = wo_vat
     if sum_vat == Decimal("0.0000") and doc_vat == Decimal("0.0000"):
-        if inv_disc_with.is_zero() or inv_disc_with == Decimal("0.0000"):
+        if inv_disc_with.is_zero():
             inv_disc_with = inv_disc_wo
             doc_struct["invoice_discount_with_vat"] = inv_disc_with
             logger.info("[deduce] VAT=0 → invoice_discount_with_vat = invoice_discount_wo_vat")
@@ -138,23 +184,25 @@ def _deduce_missing_document_discounts(doc_struct, sum_subtotal, sum_total, tol=
     return inv_disc_wo, inv_disc_with
 
 
-def should_normalize_lineitems(doc_struct) -> bool:
+# ===============================
+# Нужно ли нормализовать строки
+# ===============================
+
+def should_normalize_lineitems(doc_struct: Dict[str, Any]) -> bool:
     """
-    Возвращает True, если line_items НУЖНО пересчитывать (т.к. суммы не сходятся),
-    и False, если всё уже согласовано (пересчёт НЕ требуется).
+    Возвращает True, если line_items нужно пересчитать (суммы не сходятся),
+    и False, если всё согласовано (пересчёт не требуется).
 
     Логика сверки (после попытки восстановить скидки документа):
-      amount_wo_vat     ≈ Σ(subtotal) - invoice_discount_wo_vat
-      vat_amount        ≈ Σ(vat) - (invoice_discount_wo_vat * vat_percent_doc / 100)   ← важно для чеков АЗС
-      amount_with_vat   ≈ Σ(total) - invoice_discount_with_vat
+      amount_wo_vat   ≈ Σ(subtotal) - invoice_discount_wo_vat
+      vat_amount      ≈ Σ(vat) - (invoice_discount_wo_vat * vat_percent_doc/100)
+      amount_with_vat ≈ Σ(total) - invoice_discount_with_vat
     """
     items = doc_struct.get("line_items", []) or []
-
     sum_subtotal = sum(to_decimal(it.get("subtotal"), 4) for it in items)
     sum_vat = sum(to_decimal(it.get("vat"), 4) for it in items)
     sum_total = sum(to_decimal(it.get("total"), 4) for it in items)
 
-    # Восстанавливаем недостающие скидки (и VAT=0 shortcut)
     inv_disc_wo, inv_disc_with = _deduce_missing_document_discounts(doc_struct, sum_subtotal, sum_total)
 
     doc_wo = to_decimal(doc_struct.get("amount_wo_vat"), 4)
@@ -162,14 +210,13 @@ def should_normalize_lineitems(doc_struct) -> bool:
     doc_tot = to_decimal(doc_struct.get("amount_with_vat"), 4)
     vat_percent_doc = to_decimal(doc_struct.get("vat_percent"), 2)
 
-    # Эффективный VAT с учётом скидки на документ (пропорционально ставке документа)
     eff_sum_vat = sum_vat
     if not vat_percent_doc.is_zero() and not inv_disc_wo.is_zero():
         eff_sum_vat = (sum_vat - (inv_disc_wo * vat_percent_doc / Decimal("100"))).quantize(Decimal("1.0000"))
         if eff_sum_vat < Decimal("0.0000"):
             eff_sum_vat = Decimal("0.0000")
 
-    tol = Decimal("0.05")
+    tol = dynamic_tol(doc_tot)
 
     ok_wo = abs(doc_wo - (sum_subtotal - inv_disc_wo)) < tol
     ok_vat = abs(doc_vat - eff_sum_vat) < tol
@@ -189,7 +236,16 @@ def should_normalize_lineitems(doc_struct) -> bool:
 # Основные суммы документа (без учёта строк)
 # ===============================
 
-def validate_and_calculate_main_amounts(data):
+def validate_and_calculate_main_amounts(data: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Назначение: нормализовать «якоря» документа. 
+    - Восстановить недостающие amount_wo_vat / vat_amount / vat_percent / amount_with_vat
+      из доступных пар значений.
+    - Спец-правило: нет line_items и заполнен только total → считаем VAT=0.
+    - Логи кладём в _main_amounts_calc_log.
+
+    Примечание: здесь мы не трогаем скидки; они разбираются отдельно.
+    """
     logger.info(f"[validate_main] ISKODNYE: {data}")
 
     amount_wo_vat = to_decimal(data.get("amount_wo_vat"), 4)
@@ -202,10 +258,8 @@ def validate_and_calculate_main_amounts(data):
         f"vat_amount={vat_amount}, vat_percent={vat_percent}, amount_with_vat={amount_with_vat}"
     )
 
-    calc_log = []
+    calc_log: List[str] = []
 
-
-    # ---- Новое правило: если нет line_items и заполнен только total ----
     items = data.get("line_items") or []
     if (
         not items
@@ -219,9 +273,6 @@ def validate_and_calculate_main_amounts(data):
         vat_percent = Decimal("0.00")
         calc_log.append("auto: нет line_items и есть только total → wo_vat=with_vat, vat=0, vat%=0")
 
-
-
-    # 1) amount_wo_vat
     if amount_wo_vat.is_zero():
         if not amount_with_vat.is_zero() and not vat_percent.is_zero():
             amount_wo_vat = (amount_with_vat / (Decimal("1") + vat_percent / Decimal("100"))).quantize(Decimal("1.0000"))
@@ -230,7 +281,6 @@ def validate_and_calculate_main_amounts(data):
             amount_wo_vat = (amount_with_vat - vat_amount).quantize(Decimal("1.0000"))
             calc_log.append("amount_wo_vat из amount_with_vat и vat_amount")
 
-    # 2) vat_amount
     if vat_amount.is_zero():
         if not amount_wo_vat.is_zero() and not vat_percent.is_zero():
             vat_amount = (amount_wo_vat * vat_percent / Decimal("100")).quantize(Decimal("1.0000"))
@@ -239,7 +289,6 @@ def validate_and_calculate_main_amounts(data):
             vat_amount = (amount_with_vat - amount_wo_vat).quantize(Decimal("1.0000"))
             calc_log.append("vat_amount из amount_with_vat и amount_wo_vat")
 
-    # 3) vat_percent
     if vat_percent.is_zero():
         if not amount_wo_vat.is_zero() and not vat_amount.is_zero():
             vat_percent = (vat_amount / amount_wo_vat * Decimal("100")).quantize(Decimal("1.00"))
@@ -248,7 +297,6 @@ def validate_and_calculate_main_amounts(data):
             vat_percent = ((amount_with_vat / amount_wo_vat - Decimal("1")) * Decimal("100")).quantize(Decimal("1.00"))
             calc_log.append("vat_percent из amount_with_vat и amount_wo_vat")
 
-    # 4) amount_with_vat
     if amount_with_vat.is_zero():
         if not amount_wo_vat.is_zero() and not vat_percent.is_zero():
             amount_with_vat = (amount_wo_vat * (Decimal("1") + vat_percent / Decimal("100"))).quantize(Decimal("1.0000"))
@@ -267,18 +315,29 @@ def validate_and_calculate_main_amounts(data):
     data["vat_amount"] = vat_amount
     data["vat_percent"] = vat_percent
     data["amount_with_vat"] = amount_with_vat
-    data["_main_amounts_calc_log"] = calc_log
+    data.setdefault("_main_amounts_calc_log", []).extend(calc_log)
     return data
 
 
 # ===============================
-# Валидация и расчёт строки (line item)
+# Валидация/расчёт строки (line item)
 # ===============================
 
-def validate_and_calculate_lineitem_amounts(item):
+def validate_and_calculate_lineitem_amounts(item: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Назначение: привести строку к самосогласованному виду, 
+    не вычитая скидку повторно, если subtotal уже NET.
+
+    Правила:
+    - Если есть price и quantity → сначала сверяем, не заложена ли скидка в цену.
+    - Если subtotal уже учтён со скидкой (price*qty ≈ subtotal+discount_wo) →
+      discount_wo не вычитаем второй раз.
+    - VAT/total вычисляем из пары (subtotal, vat_percent) или (subtotal, vat).
+    - Если total отсутствует и ставка/НДС отсутствуют, то total=subtotal.
+    """
     logger.info(f"[validate_line] ISKODNYE: {item}")
 
-    calc_log = []
+    calc_log: List[str] = []
 
     quantity = to_decimal(item.get("quantity"), 4)
     price = to_decimal(item.get("price"), 4)
@@ -289,38 +348,35 @@ def validate_and_calculate_lineitem_amounts(item):
     discount_wo_vat = to_decimal(item.get("discount_wo_vat"), 4)
 
     TOL = Decimal("0.02")
-    orig_subtotal = subtotal  # запомним, что пришло
 
-    # === ПРОВЕРКА И КОРРЕКЦИЯ SUBTOTAL по новой логике ===
-    # Если есть и price, и quantity, и discount
+    # Проверка/коррекция SUBTOTAL против price*qty - discount
     if not price.is_zero() and not quantity.is_zero():
         expected_subtotal = (price * quantity - discount_wo_vat).quantize(Decimal("1.0000"))
         if abs(expected_subtotal - subtotal) > TOL:
             calc_log.append(
-                f"subtotal ({subtotal}) не совпадает с price*quantity-discount ({expected_subtotal}) — ЗАМЕНЯЕМ"
+                f"subtotal ({subtotal}) != price*qty-discount ({expected_subtotal}) — ЗАМЕНЯЕМ"
             )
             subtotal = expected_subtotal
         else:
-            calc_log.append("subtotal совпадает с price*quantity-discount — оставляем без изменений")
+            calc_log.append("subtotal совпадает с price*qty-discount — оставляем")
     else:
-        # Если price или quantity нет — просто оставляем subtotal как есть
         calc_log.append("нет price или quantity — subtotal оставлен как есть")
 
-    # --- 1) VAT (если отсутствует) ---
+    # 1) VAT (если отсутствует)
     if vat.is_zero():
         if not subtotal.is_zero() and not vat_percent.is_zero():
             vat = (subtotal * vat_percent / Decimal("100")).quantize(Decimal("1.0000"))
             calc_log.append("vat из subtotal и vat_percent")
         elif not total.is_zero() and not subtotal.is_zero():
             v = (total - subtotal).quantize(Decimal("1.0000"))
-            if v < Decimal("0.0000"):
+            if v < 0:
                 calc_log.append(f"vat был бы отрицательным ({v}), ставим 0")
                 vat = Decimal("0.0000")
             else:
                 vat = v
                 calc_log.append("vat из total и subtotal")
 
-    # --- 2) VAT% (если отсутствует) ---
+    # 2) VAT% (если отсутствует)
     if vat_percent.is_zero():
         if not vat.is_zero() and not subtotal.is_zero():
             vat_percent = (vat / subtotal * Decimal("100")).quantize(Decimal("1.00"))
@@ -333,7 +389,7 @@ def validate_and_calculate_lineitem_amounts(item):
                 vat_percent = Decimal("0.00")
                 calc_log.append("total < subtotal → vat_percent = 0.00")
 
-    # --- 3) TOTAL (если отсутствует) ---
+    # 3) TOTAL (если отсутствует)
     if total.is_zero():
         if not subtotal.is_zero() and not vat_percent.is_zero():
             total = (subtotal * (Decimal("1") + vat_percent / Decimal("100"))).quantize(Decimal("1.0000"))
@@ -345,7 +401,7 @@ def validate_and_calculate_lineitem_amounts(item):
             total = subtotal
             calc_log.append("total = subtotal (VAT=0 или нет ставки)")
 
-    # --- 4) PRICE (если отсутствует) ---
+    # 4) PRICE (если отсутствует)
     if price.is_zero():
         if quantity.is_zero():
             quantity = Decimal("1.0000")
@@ -354,7 +410,7 @@ def validate_and_calculate_lineitem_amounts(item):
             price = (subtotal / quantity).quantize(Decimal("1.0000"))
             calc_log.append("price из subtotal и quantity")
 
-    # --- 5) QUANTITY (если всё ещё отсутствует) ---
+    # 5) QUANTITY (если отсутствует)
     if quantity.is_zero():
         if not subtotal.is_zero() and not price.is_zero():
             quantity = (subtotal / price).quantize(Decimal("1.0000"))
@@ -363,7 +419,7 @@ def validate_and_calculate_lineitem_amounts(item):
             quantity = Decimal("1.0000")
             calc_log.append("quantity по умолчанию 1.0000")
 
-    # --- 6) На всякий случай: если price не восстановился, но есть subtotal и quantity
+    # 6) Доп. страхующая доуточнёнка
     if price.is_zero() and not subtotal.is_zero() and not quantity.is_zero():
         price = (subtotal / quantity).quantize(Decimal("1.0000"))
         calc_log.append("price доуточнён из subtotal/quantity")
@@ -380,78 +436,81 @@ def validate_and_calculate_lineitem_amounts(item):
     item["vat"] = vat
     item["vat_percent"] = vat_percent
     item["total"] = total
-    item["_lineitem_calc_log"] = calc_log
+    item.setdefault("_lineitem_calc_log", []).extend(calc_log)
     return item
-
-
 
 
 # ===============================
 # Глобальная валидация документа
 # ===============================
 
-def global_validate_and_correct(doc_struct):
+def global_validate_and_correct(doc_struct: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Глобальная валидация и коррекция документа и line_items.
-    ВАЖНО: если суммы уже совпадают (с учётом invoice_discount_*), ничего не меняем.
-    При замене итогов документа учитываем скидки на документ:
-      amount_wo_vat     <- Σ(subtotal) - invoice_discount_wo_vat
-      vat_amount        <- Σ(vat) - (invoice_discount_wo_vat * vat_percent_doc / 100)   ← ключевая правка
-      amount_with_vat   <- Σ(total) - invoice_discount_with_vat
+    Назначение: сверить документ и строки. Если всё уже совпадает (с учётом
+    invoice_discount_* и влияния doc-скидок на VAT) — ничего не менять.
+
+    Если нет — заменить итоги документа на эталонные, рассчитанные из строк:
+      amount_wo_vat   <- Σ(subtotal) - invoice_discount_wo_vat
+      vat_amount      <- Σ(vat) - (invoice_discount_wo_vat * vat_percent_doc/100)
+      amount_with_vat <- Σ(total) - invoice_discount_with_vat
+
+    Политика правок минимальная. Все изменения логируются, добавляются reason_code
+    и статус согласованности `ar_sutapo`.
     """
-    logs = []
+    logs: List[str] = []
     doc_changed = False
 
-    doc_struct["_subtotal_replaced"] = False
-    doc_struct["_vat_replaced"] = False
-    doc_struct["_total_replaced"] = False
+    doc_struct.setdefault("_subtotal_replaced", False)
+    doc_struct.setdefault("_vat_replaced", False)
+    doc_struct.setdefault("_total_replaced", False)
 
     line_items = doc_struct.get("line_items", [])
     if not line_items:
         logs.append("Нет line_items для проверки.")
-        doc_struct["_global_validation_log"] = logs
+        doc_struct.setdefault("_global_validation_log", []).extend(logs)
+        doc_struct["ar_sutapo"] = False
+        doc_struct["reason_code"] = "DOC_TOTALS_INCONSISTENT"
         return doc_struct
 
-    # --- 0) Быстрый выход, если всё сходится с учётом скидок на документ ---
+    # Быстрый выход, если всё сходится
     if not should_normalize_lineitems(doc_struct):
         logs.append("✔ Суммы line_items уже совпадают с итогами документа (с учётом invoice_discount_*). Изменения не требуются.")
-        doc_struct["_global_validation_log"] = logs
+        doc_struct.setdefault("_global_validation_log", []).extend(logs)
+        doc_struct["ar_sutapo"] = True
+        doc_struct["reason_code"] = "OK"
         logger.info("\n".join([f"[global_validator] {line}" for line in logs]))
         return doc_struct
 
-    # --- 1) Суммы по строкам ---
+    # 1) Суммы по строкам
     sum_subtotal = sum(Decimal(str(item.get("subtotal") or "0")) for item in line_items)
     sum_vat = sum(Decimal(str(item.get("vat") or "0")) for item in line_items)
     sum_total = sum(Decimal(str(item.get("total") or "0")) for item in line_items)
 
-    # --- 2) Скидки на документ (включая восстановление недостающих) ---
+    # 2) Скидки документа (восстановление недостающих)
     inv_disc_wo, inv_disc_with = _deduce_missing_document_discounts(doc_struct, sum_subtotal, sum_total)
     vat_percent_doc = to_decimal(doc_struct.get("vat_percent"), 2)
 
-    # --- 3) Эталоны "после скидок" ---
+    # 3) Эталоны «после скидок»
     eff_doc_wo = (sum_subtotal - inv_disc_wo).quantize(Decimal("1.0000"))
-    if eff_doc_wo < Decimal("0"):
+    if eff_doc_wo < 0:
         eff_doc_wo = Decimal("0.0000")
 
     eff_doc_with = (sum_total - inv_disc_with).quantize(Decimal("1.0000"))
-    if eff_doc_with < Decimal("0"):
+    if eff_doc_with < 0:
         eff_doc_with = Decimal("0.0000")
 
-    # VAT с учётом скидки на документ (пропорционально ставке документа)
     eff_vat = sum_vat
     if not vat_percent_doc.is_zero() and not inv_disc_wo.is_zero():
         eff_vat = (sum_vat - (inv_disc_wo * vat_percent_doc / Decimal("100"))).quantize(Decimal("1.0000"))
         if eff_vat < Decimal("0.0000"):
             eff_vat = Decimal("0.0000")
 
-    # --- 4) Текущие значения документа ---
     doc_subtotal = to_decimal(doc_struct.get("amount_wo_vat"), 4)
     doc_vat = to_decimal(doc_struct.get("vat_amount"), 4)
     doc_total = to_decimal(doc_struct.get("amount_with_vat"), 4)
 
-    TOL = Decimal("0.05")
+    TOL = dynamic_tol(doc_total)
 
-    # --- 5) Проверяем/заменяем amount_wo_vat ---
     diff_subtotal = (eff_doc_wo - doc_subtotal).quantize(Decimal("1.0000"))
     logs.append(f"Subtotal (после скидки на документ): эталон={eff_doc_wo}, doc={doc_subtotal}, diff={diff_subtotal}")
     if abs(diff_subtotal) > TOL:
@@ -462,7 +521,6 @@ def global_validate_and_correct(doc_struct):
     else:
         logs.append("✔ amount_wo_vat совпадает или отличается незначительно.")
 
-    # --- 6) Проверяем/заменяем vat_amount (с учётом документной скидки) ---
     diff_vat = (eff_vat - doc_vat).quantize(Decimal("1.0000"))
     logs.append(f"VAT (с учётом скидки на документ): эталон={eff_vat}, doc={doc_vat}, diff={diff_vat}")
     if abs(diff_vat) > TOL:
@@ -473,7 +531,6 @@ def global_validate_and_correct(doc_struct):
     else:
         logs.append("✔ vat_amount совпадает или отличается незначительно.")
 
-    # --- 7) Проверяем/заменяем amount_with_vat ---
     diff_total = (eff_doc_with - doc_total).quantize(Decimal("1.0000"))
     logs.append(f"Total (после скидки на документ): эталон={eff_doc_with}, doc={doc_total}, diff={diff_total}")
     if abs(diff_total) > TOL:
@@ -484,49 +541,51 @@ def global_validate_and_correct(doc_struct):
     else:
         logs.append("✔ amount_with_vat совпадает или отличается незначительно.")
 
-    # --- 8) Финал ---
     if doc_changed:
         logs.append("Документ был скорректирован для соответствия lineitems (учтены скидки на документ).")
+        doc_struct["reason_code"] = "DOC_TOTALS_INCONSISTENT"
+        doc_struct["ar_sutapo"] = False
     else:
         logs.append("Документ уже был согласован с lineitems (учтены скидки на документ).")
+        doc_struct["reason_code"] = "OK"
+        doc_struct["ar_sutapo"] = True
 
     doc_struct["_doc_totals_replaced_by_lineitems"] = bool(doc_changed)
-    doc_struct["_global_validation_log"] = logs
+    doc_struct.setdefault("_global_validation_log", []).extend(logs)
     logger.info("\n".join([f"[global_validator] {line}" for line in logs]))
     return doc_struct
 
 
 # ===============================
-# Сверка (современная): effective_base и т.д.
+# Современная сверка expected vs doc (эффективные скидки)
 # ===============================
 
-
-def subtotal_already_discounted(item):
+def subtotal_already_discounted(item: Dict[str, Any]) -> bool:
     """
-    Возвращает True, если subtotal уже учтён С УЧЁТОМ discount_wo_vat (то есть discount не надо вычитать ещё раз).
+    Возвращает True, если subtotal уже учтён с учётом discount_wo_vat
+    (то есть discount не надо вычитать ещё раз).
+    Критерий: |(subtotal + discount) − (price*qty)| ≤ 0.02
     """
     try:
         subtotal = Decimal(str(item.get("subtotal") or "0")).quantize(Decimal("1.0000"))
         discount = Decimal(str(item.get("discount_wo_vat") or "0")).quantize(Decimal("1.0000"))
-        price    = Decimal(str(item.get("price") or "0")).quantize(Decimal("1.0000"))
-        qty      = Decimal(str(item.get("quantity") or "0")).quantize(Decimal("1.0000"))
+        price = Decimal(str(item.get("price") or "0")).quantize(Decimal("1.0000"))
+        qty = Decimal(str(item.get("quantity") or "0")).quantize(Decimal("1.0000"))
         base = (price * qty).quantize(Decimal("1.0000"))
-        # Сравниваем subtotal+discount и price*qty (разброс — 0.02)
         return abs((subtotal + discount) - base) <= Decimal("0.02")
     except Exception:
         return False
 
 
-
-def compare_lineitems_with_main_totals(doc_struct):
+def compare_lineitems_with_main_totals(doc_struct: Dict[str, Any]) -> Dict[str, Decimal]:
     """
     Современная сверка с учётом скидок:
-      expected_wo   = Σ(subtotal - line.discount_wo_vat) - eff_invoice_discount_wo_vat
+      expected_wo   = Σ(subtotal - line.discount_wo_vat_eff) - eff_invoice_discount_wo_vat
       expected_vat  = Σ(line.vat) - eff_invoice_discount_wo_vat * vat_percent_doc/100
       expected_with = Σ(total) - eff_invoice_discount_with_vat
 
-    Где eff_invoice_discount_* — это документные скидки за вычетом тех случаев,
-    когда LLM уже разложил ту же скидку по строкам (чтобы не вычитать дважды).
+    eff_discount_wo на строке вычисляется так: если subtotal уже NET
+    (см. subtotal_already_discounted) — считаем, что скидка учтена, и не вычитаем её второй раз.
     """
     TOL = Decimal("0.0500")
 
@@ -534,70 +593,58 @@ def compare_lineitems_with_main_totals(doc_struct):
         if x is None or x == "" or str(x).lower() == "null":
             return Decimal("0.0000") if p == 4 else Decimal("0.00")
         try:
-            return Decimal(str(x)).quantize(Decimal("1." + "0"*p), rounding=ROUND_HALF_UP)
+            return Decimal(str(x)).quantize(Decimal("1." + "0" * p), rounding=ROUND_HALF_UP)
         except Exception:
             return Decimal("0.0000") if p == 4 else Decimal("0.00")
 
     items = doc_struct.get("line_items", []) or []
 
-    # Суммы по строкам
     sum_line_subtotal = Decimal("0.0000")
-    sum_line_discount_wo = Decimal("0.0000")
+    sum_line_discount_wo_eff = Decimal("0.0000")
     sum_line_vat = Decimal("0.0000")
     sum_line_total = Decimal("0.0000")
 
     for it in items:
         subtotal = d(it.get("subtotal"), 4)
-        disc_wo  = d(it.get("discount_wo_vat"), 4)
-        vat      = d(it.get("vat"), 4)
-        total    = d(it.get("total"), 4)
+        disc_wo = d(it.get("discount_wo_vat"), 4)
+        vat = d(it.get("vat"), 4)
+        total = d(it.get("total"), 4)
 
-        # --- Ключ: если subtotal уже NET (минус скидка) — discount не вычитаем второй раз!
         if subtotal_already_discounted(it):
             sum_line_subtotal += subtotal
-            # discount НЕ добавляем, он уже учтён
+            # discount не добавляем (уже учтён)
         else:
             sum_line_subtotal += subtotal
-            sum_line_discount_wo += disc_wo
+            sum_line_discount_wo_eff += disc_wo
 
-        sum_line_vat   += vat
+        sum_line_vat += vat
         sum_line_total += total
 
-    # Текущие итоги документа
-    doc_wo  = d(doc_struct.get("amount_wo_vat"), 4)
+    doc_wo = d(doc_struct.get("amount_wo_vat"), 4)
     doc_vat = d(doc_struct.get("vat_amount"), 4)
     doc_tot = d(doc_struct.get("amount_with_vat"), 4)
     vat_percent_doc = d(doc_struct.get("vat_percent"), 2)
 
-    # ВОССТАНОВИМ недостающие скидки документа (точно так же, как в should_normalize_lineitems)
     inv_disc_wo, inv_disc_with = _deduce_missing_document_discounts(
         doc_struct, sum_line_subtotal, sum_line_total
     )
 
-    # ЭФФЕКТИВНЫЕ документные скидки (чтобы не вычитать дважды, если LLM уже размазал скидку по строкам)
     eff_inv_disc_wo = inv_disc_wo
-    if abs(inv_disc_wo - sum_line_discount_wo) <= TOL:
+    if abs(inv_disc_wo - sum_line_discount_wo_eff) <= TOL:
         eff_inv_disc_wo = Decimal("0.0000")
 
-    # По with-VAT обычно по строкам скидок нет; оставим симметрию
-    sum_line_discount_with = Decimal("0.0000")
     eff_inv_disc_with = inv_disc_with
-    if abs(inv_disc_with - sum_line_discount_with) <= TOL:
-        eff_inv_disc_with = Decimal("0.0000")
 
-    # Эффективная база строк без НДС (учёт строковых скидок)
-    line_effective_wo = (sum_line_subtotal - sum_line_discount_wo)
+    line_effective_wo = (sum_line_subtotal - sum_line_discount_wo_eff)
 
-    # ОЖИДАЕМЫЕ значения документа
-    expected_wo  = (line_effective_wo - eff_inv_disc_wo).quantize(Decimal("1.0000"))
+    expected_wo = (line_effective_wo - eff_inv_disc_wo).quantize(Decimal("1.0000"))
     if expected_wo < 0:
         expected_wo = Decimal("0.0000")
 
-    # VAT: как у тебя в global_validate_and_correct
     expected_vat = sum_line_vat
     if not vat_percent_doc.is_zero() and not eff_inv_disc_wo.is_zero():
         expected_vat = (sum_line_vat - (eff_inv_disc_wo * vat_percent_doc / Decimal("100"))).quantize(Decimal("1.0000"))
-        if expected_vat < Decimal("0.0000"):
+        if expected_vat < 0:
             expected_vat = Decimal("0.0000")
     else:
         expected_vat = sum_line_vat.quantize(Decimal("1.0000"))
@@ -607,40 +654,37 @@ def compare_lineitems_with_main_totals(doc_struct):
         expected_tot = Decimal("0.0000")
 
     result = {
-        "subtotal_match": abs(expected_wo  - doc_wo ) <= TOL,
-        "vat_match":      abs(expected_vat - doc_vat) <= TOL,
-        "total_match":    abs(expected_tot - doc_tot) <= TOL,
-
-        "subtotal_diff":  (expected_wo  - doc_wo ).quantize(Decimal("1.0000")),
-        "vat_diff":       (expected_vat - doc_vat).quantize(Decimal("1.0000")),
-        "total_diff":     (expected_tot - doc_tot).quantize(Decimal("1.0000")),
-
-        "expected_amount_wo_vat":   expected_wo,
-        "expected_vat_amount":      expected_vat,
+        "subtotal_match": abs(expected_wo - doc_wo) <= TOL,
+        "vat_match": abs(expected_vat - doc_vat) <= TOL,
+        "total_match": abs(expected_tot - doc_tot) <= TOL,
+        "subtotal_diff": (expected_wo - doc_wo).quantize(Decimal("1.0000")),
+        "vat_diff": (expected_vat - doc_vat).quantize(Decimal("1.0000")),
+        "total_diff": (expected_tot - doc_tot).quantize(Decimal("1.0000")),
+        "expected_amount_wo_vat": expected_wo,
+        "expected_vat_amount": expected_vat,
         "expected_amount_with_vat": expected_tot,
-
-        "line_sum_subtotal":        sum_line_subtotal.quantize(Decimal("1.0000")),
-        "line_sum_discount_wo_vat": sum_line_discount_wo.quantize(Decimal("1.0000")),
-        "line_effective_wo_vat":    line_effective_wo.quantize(Decimal("1.0000")),
-        "line_sum_vat":             sum_line_vat.quantize(Decimal("1.0000")),
-        "line_sum_with_vat":        sum_line_total.quantize(Decimal("1.0000")),
-
-        "_eff_inv_disc_wo":         eff_inv_disc_wo,
-        "_eff_inv_disc_with":       eff_inv_disc_with,
-        "_vat_percent_doc":         vat_percent_doc,
+        "line_sum_subtotal": sum_line_subtotal.quantize(Decimal("1.0000")),
+        "line_sum_discount_wo_vat": sum_line_discount_wo_eff.quantize(Decimal("1.0000")),
+        "line_effective_wo_vat": line_effective_wo.quantize(Decimal("1.0000")),
+        "line_sum_vat": sum_line_vat.quantize(Decimal("1.0000")),
+        "line_sum_with_vat": sum_line_total.quantize(Decimal("1.0000")),
+        "_eff_inv_disc_wo": eff_inv_disc_wo,
+        "_eff_inv_disc_with": eff_inv_disc_with,
+        "_vat_percent_doc": vat_percent_doc,
     }
     logger.info(f"[compare_lineitems] RESULT: {result}")
     return result
 
 
 # ===============================
-# Помощник: нормализовать строки, только если нужно
+# Вспомогательное: нормализовать строки, только если нужно
 # ===============================
 
-def normalize_line_items_if_needed(doc_struct):
+def normalize_line_items_if_needed(doc_struct: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Если суммы line_items совпадают с итогами документа (учитывая invoice_discount_* и влияние скидки на VAT),
-    НИЧЕГО не делаем. Иначе — пересчитываем строки.
+    Если суммы line_items совпадают с итогами документа (учитывая invoice_discount_* 
+    и влияние скидки на VAT), НИЧЕГО не делаем. Иначе — прогоняем строки через
+    validate_and_calculate_lineitem_amounts.
     """
     if not should_normalize_lineitems(doc_struct):
         logger.info("[normalize_line_items] Суммы согласованы — пересчёт строк не требуется.")
@@ -652,32 +696,113 @@ def normalize_line_items_if_needed(doc_struct):
     return doc_struct
 
 
+# ===============================
+# Раздача VAT из документа по строкам (единая ставка)
+# ===============================
+
+def _q4(x: Decimal) -> Decimal:
+    return Decimal(str(x)).quantize(Decimal("1.0000"), rounding=ROUND_HALF_UP)
 
 
+def _q2(x: Decimal) -> Decimal:
+    return Decimal(str(x)).quantize(Decimal("1.00"), rounding=ROUND_HALF_UP)
 
 
+def distribute_vat_from_document(doc_struct: Dict[str, Any], tol: Decimal = Decimal("0.05")) -> Dict[str, Any]:
+    """
+    Назначение: когда в документе одна ставка (separate_vat=False), doc.vat_amount>0,
+    а у строк НДС не проставлен — раздать doc.vat_percent по строкам:
+      line.vat_percent <- doc.vat_percent
+      line.vat        <- line.subtotal * doc.vat_percent/100 (после net-скидок)
+      line.total      <- line.subtotal + line.vat
 
+    Особенности v2:
+    - Распределение остатка округления по методу наибольших остатков, а не в последнюю строку.
+    - Если у строки уже есть VAT, учитываем его и распределяем только недостающее.
+    - Никогда не делаем отрицательных поправок.
+    """
+    try:
+        separate_vat = bool(doc_struct.get("separate_vat"))
+        doc_vat_amt = Decimal(str(doc_struct.get("vat_amount") or "0"))
+        doc_vat_pct = Decimal(str(doc_struct.get("vat_percent") or "0"))
+    except Exception:
+        return doc_struct
 
+    if separate_vat or doc_vat_amt <= 0 or doc_vat_pct <= 0:
+        return doc_struct
 
+    items = doc_struct.get("line_items") or []
+    if not items:
+        return doc_struct
 
+    # Собираем базу и предварительные вычисления
+    bases: List[Decimal] = []  # базы для распределения (subtotal после net-скидок)
+    current_vats: List[Decimal] = []
 
+    for it in items:
+        q = Decimal(str(it.get("quantity") or "0"))
+        p = Decimal(str(it.get("price") or "0"))
+        dsc = Decimal(str(it.get("discount_wo_vat") or "0"))
+        sub = Decimal(str(it.get("subtotal") or "0"))
+        if sub <= 0 and q > 0 and p > 0:
+            sub = q * p - dsc
+        sub = _q4(sub)
 
+        v = _q4(Decimal(str(it.get("vat") or "0")))
+        vp = _q2(Decimal(str(it.get("vat_percent") or "0")))
 
+        it.setdefault("_vat_inferred_from_doc", False)
 
+        if v == 0 and vp == 0 and sub > 0:
+            # Проставим ставку и предварительный VAT
+            vp = _q2(doc_vat_pct)
+            raw_v = sub * vp / Decimal("100")
+            bases.append(sub)
+            current_vats.append(_q4(raw_v))
+            it["vat_percent"] = vp
+            it["vat"] = _q4(raw_v)
+            # total, если 0
+            tot = Decimal(str(it.get("total") or "0"))
+            if tot == 0:
+                it["total"] = _q4(sub + _q4(raw_v))
+            it["_vat_inferred_from_doc"] = True
+        else:
+            bases.append(sub)
+            current_vats.append(v)
 
+    # Выравнивание до doc_vat_amt методом наибольших остатков
+    try:
+        current_sum = _q4(sum(current_vats))
+        diff = _q4(doc_vat_amt - current_sum)
+        if abs(diff) > tol:
+            # дробные остатки от идеальных значений
+            ideal_vats = [(_q4(b * _q2(doc_vat_pct) / Decimal("100"))) for b in bases]
+            remainders = [ideal - cur for ideal, cur in zip(ideal_vats, current_vats)]
+            # сортировка индексов по убыванию остатка
+            order = sorted(range(len(remainders)), key=lambda i: remainders[i], reverse=True)
+            step = Decimal("0.0100")  # минимальный шаг в 4 знаках
+            sign = Decimal("1.0000") if diff > 0 else Decimal("-1.0000")
+            for i in order:
+                if diff == 0:
+                    break
+                adj = min(abs(diff), step) * sign
+                new_v = current_vats[i] + adj
+                if new_v >= Decimal("0.0000"):
+                    current_vats[i] = new_v
+                    diff -= adj
+            # Записать скорректированные VAT и тоталы
+            for idx, it in enumerate(items):
+                old_v = _q4(Decimal(str(it.get("vat") or "0")))
+                if current_vats[idx] != old_v:
+                    it["vat"] = _q4(current_vats[idx])
+                    sub = _q4(Decimal(str(it.get("subtotal") or "0")))
+                    it["total"] = _q4(sub + it["vat"]) if sub > 0 else it.get("total")
+            logger.info("[distribute_vat] ROUNDING_REALLOCATION applied")
+            doc_struct.setdefault("_global_validation_log", []).append(REASON["ROUNDING_REALLOCATION"])
+    except Exception:
+        pass
 
-
-
-
-
-
-
-
-
-
-
-
-
+    return doc_struct
 
 
 
@@ -703,21 +828,133 @@ def normalize_line_items_if_needed(doc_struct):
 #     except Exception as e:
 #         logger.info(f"[to_decimal] EXCEPTION: {e} (input={x})")
 #         return Decimal("0.0000") if places == 4 else Decimal("0.00")
+    
+
+# # ===============================
+# # Udalit duplicate skidku iz dokumenta jesle jest lineitem skidka
+# # ===============================
+
+# def dedupe_document_discounts(doc_struct, tol=Decimal("0.05")):
+#     """
+#     Если сумма скидок по строкам ≈ документной скидке → уменьшает документную скидку на эту сумму.
+#     - Полное совпадение → документная скидка обнуляется.
+#     - Частичное совпадение → остаётся только 'остаток'.
+#     Никогда не делает скидку отрицательной.
+#     """
+#     items = doc_struct.get("line_items") or []
+
+#     def d(x, p=4):
+#         try:
+#             return Decimal(str(x)).quantize(Decimal("1." + "0"*p))
+#         except Exception:
+#             return Decimal("0.0000") if p == 4 else Decimal("0.00")
+
+#     # Суммы строковых скидок
+#     sum_line_disc_wo   = sum(d(it.get("discount_wo_vat"), 4)   for it in items)
+#     sum_line_disc_with = sum(d(it.get("discount_with_vat"), 4) for it in items)
+
+#     # Документные скидки
+#     inv_disc_wo   = d(doc_struct.get("invoice_discount_wo_vat"), 4)
+#     inv_disc_with = d(doc_struct.get("invoice_discount_with_vat"), 4)
+
+#     # --- Дедупликация "без НДС"
+#     if inv_disc_wo > Decimal("0.0000") and sum_line_disc_wo > Decimal("0.0000"):
+#         new_wo = inv_disc_wo - sum_line_disc_wo
+#         if abs(new_wo) <= tol:
+#             new_wo = Decimal("0.0000")
+#         if new_wo < Decimal("0.0000"):
+#             new_wo = Decimal("0.0000")
+#         if new_wo != inv_disc_wo:
+#             logger.info(f"[dedupe] invoice_discount_wo_vat {inv_disc_wo} → {new_wo} (line discounts={sum_line_disc_wo})")
+#             doc_struct["invoice_discount_wo_vat"] = new_wo
+#             doc_struct["_dedup_invoice_discount_wo_vat"] = True
+
+#     # --- Дедупликация "с НДС"
+#     if inv_disc_with > Decimal("0.0000") and sum_line_disc_with > Decimal("0.0000"):
+#         new_with = inv_disc_with - sum_line_disc_with
+#         if abs(new_with) <= tol:
+#             new_with = Decimal("0.0000")
+#         if new_with < Decimal("0.0000"):
+#             new_with = Decimal("0.0000")
+#         if new_with != inv_disc_with:
+#             logger.info(f"[dedupe] invoice_discount_with_vat {inv_disc_with} → {new_with} (line discounts with VAT={sum_line_disc_with})")
+#             doc_struct["invoice_discount_with_vat"] = new_with
+#             doc_struct["_dedup_invoice_discount_with_vat"] = True
+
+#     # Доп. защита: при нулевом VAT по документу не плодим with_vat-скидку
+#     doc_vat = d(doc_struct.get("vat_amount"), 4)
+#     if doc_vat == Decimal("0.0000"):
+#         # если totals уже сходятся без документной скидки 'with', обнулим её
+#         sum_total = sum(d(it.get("total"), 4) for it in items)
+#         doc_total = d(doc_struct.get("amount_with_vat"), 4)
+#         if inv_disc_with > Decimal("0.0000") and abs(doc_total - sum_total) <= tol:
+#             logger.info("[dedupe] VAT=0 и totals сходятся → invoice_discount_with_vat = 0")
+#             doc_struct["invoice_discount_with_vat"] = Decimal("0.0000")
+#             doc_struct["_dedup_invoice_discount_with_vat"] = True
+
+#     return doc_struct
 
 
 # # ===============================
 # # Сверка doc vs line_items (с учётом скидок на документ)
 # # ===============================
 
+# def _deduce_missing_document_discounts(doc_struct, sum_subtotal, sum_total, tol=Decimal("0.05")):
+#     """
+#     Пытаемся восстановить отсутствующие скидки документа из итогов,
+#     но если разница уже объясняется строковыми скидками — НЕ создаём документную скидку.
+#     Возвращает (inv_disc_wo, inv_disc_with).
+#     """
+#     inv_disc_wo = to_decimal(doc_struct.get("invoice_discount_wo_vat"), 4)
+#     inv_disc_with = to_decimal(doc_struct.get("invoice_discount_with_vat"), 4)
+
+#     doc_wo = to_decimal(doc_struct.get("amount_wo_vat"), 4)
+#     doc_tot = to_decimal(doc_struct.get("amount_with_vat"), 4)
+#     sum_vat = sum(to_decimal(it.get("vat"), 4) for it in (doc_struct.get("line_items") or []))
+#     doc_vat = to_decimal(doc_struct.get("vat_amount"), 4)
+
+#     # NEW: учтём суммарные строковые скидки (без НДС)
+#     sum_line_disc_wo = sum(to_decimal(it.get("discount_wo_vat"), 4) for it in (doc_struct.get("line_items") or []))
+
+#     # 1) Восстановление скидки без НДС, только если её не покрывают строковые скидки
+#     if (inv_disc_wo.is_zero() or inv_disc_wo == Decimal("0.0000")) and doc_wo < sum_subtotal:
+#         diff_wo = (sum_subtotal - doc_wo).quantize(Decimal("1.0000"))
+#         # если разница примерно равна сумме строковых скидок — НЕ создаём документную скидку
+#         if abs(diff_wo - sum_line_disc_wo) <= tol:
+#             # отметим в техлоге, но поле не трогаем
+#             logger.info(f"[deduce] diff_wo≈line_discounts ({diff_wo}≈{sum_line_disc_wo}) → invoice_discount_wo_vat оставляем 0 (скидка уже в строках)")
+#         elif Decimal("0.0000") <= diff_wo <= sum_subtotal:
+#             inv_disc_wo = diff_wo
+#             doc_struct["invoice_discount_wo_vat"] = inv_disc_wo
+#             logger.info(f"[deduce] invoice_discount_wo_vat <- {inv_disc_wo}")
+
+#     # 2) Восстановление скидки с НДС по total — как было
+#     if (inv_disc_with.is_zero() or inv_disc_with == Decimal("0.0000")) and doc_tot < sum_total:
+#         deduced_with = (sum_total - doc_tot).quantize(Decimal("1.0000"))
+#         if Decimal("0.0000") <= deduced_with <= sum_total:
+#             inv_disc_with = deduced_with
+#             doc_struct["invoice_discount_with_vat"] = inv_disc_with
+#             logger.info(f"[deduce] invoice_discount_with_vat <- {inv_disc_with}")
+
+#     # 3) Если VAT=0 в строках и документе → with_vat = wo_vat (как было)
+#     if sum_vat == Decimal("0.0000") and doc_vat == Decimal("0.0000"):
+#         if inv_disc_with.is_zero() or inv_disc_with == Decimal("0.0000"):
+#             inv_disc_with = inv_disc_wo
+#             doc_struct["invoice_discount_with_vat"] = inv_disc_with
+#             logger.info("[deduce] VAT=0 → invoice_discount_with_vat = invoice_discount_wo_vat")
+
+#     return inv_disc_wo, inv_disc_with
+
+
 # def should_normalize_lineitems(doc_struct) -> bool:
 #     """
 #     Возвращает True, если line_items НУЖНО пересчитывать (т.к. суммы не сходятся),
 #     и False, если всё уже согласовано (пересчёт НЕ требуется).
 
-#     Логика сверки:
-#       amount_wo_vat ≈ Σ(subtotal по строкам) - invoice_discount_wo_vat
-#       vat_amount    ≈ Σ(vat по строкам)
-#       amount_with_vat ≈ Σ(total по строкам) - invoice_discount_with_vat
+#     Логика сверки (после попытки восстановить скидки документа):
+#       amount_wo_vat     ≈ Σ(subtotal) - invoice_discount_wo_vat
+#       vat_amount        ≈ Σ(vat) - (invoice_discount_wo_vat * vat_percent_doc / 100)   ← важно для чеков АЗС
+#       amount_with_vat   ≈ Σ(total) - invoice_discount_with_vat
 #     """
 #     items = doc_struct.get("line_items", []) or []
 
@@ -725,24 +962,32 @@ def normalize_line_items_if_needed(doc_struct):
 #     sum_vat = sum(to_decimal(it.get("vat"), 4) for it in items)
 #     sum_total = sum(to_decimal(it.get("total"), 4) for it in items)
 
-#     inv_disc_wo = to_decimal(doc_struct.get("invoice_discount_wo_vat"), 4)
-#     inv_disc_with = to_decimal(doc_struct.get("invoice_discount_with_vat"), 4)
+#     # Восстанавливаем недостающие скидки (и VAT=0 shortcut)
+#     inv_disc_wo, inv_disc_with = _deduce_missing_document_discounts(doc_struct, sum_subtotal, sum_total)
 
 #     doc_wo = to_decimal(doc_struct.get("amount_wo_vat"), 4)
 #     doc_vat = to_decimal(doc_struct.get("vat_amount"), 4)
 #     doc_tot = to_decimal(doc_struct.get("amount_with_vat"), 4)
+#     vat_percent_doc = to_decimal(doc_struct.get("vat_percent"), 2)
+
+#     # Эффективный VAT с учётом скидки на документ (пропорционально ставке документа)
+#     eff_sum_vat = sum_vat
+#     if not vat_percent_doc.is_zero() and not inv_disc_wo.is_zero():
+#         eff_sum_vat = (sum_vat - (inv_disc_wo * vat_percent_doc / Decimal("100"))).quantize(Decimal("1.0000"))
+#         if eff_sum_vat < Decimal("0.0000"):
+#             eff_sum_vat = Decimal("0.0000")
 
 #     tol = Decimal("0.05")
 
 #     ok_wo = abs(doc_wo - (sum_subtotal - inv_disc_wo)) < tol
-#     ok_vat = abs(doc_vat - sum_vat) < tol
+#     ok_vat = abs(doc_vat - eff_sum_vat) < tol
 #     ok_tot = abs(doc_tot - (sum_total - inv_disc_with)) < tol
 
 #     logger.info(
 #         f"[precheck] line_sums: subtotal={sum_subtotal}, vat={sum_vat}, total={sum_total}; "
 #         f"doc_sums: wo={doc_wo}, vat={doc_vat}, with={doc_tot}; "
-#         f"doc_discounts: wo={inv_disc_wo}, with={inv_disc_with}; "
-#         f"match: wo={ok_wo}, vat={ok_vat}, total={ok_tot}"
+#         f"doc_discounts: wo={inv_disc_wo}, with={inv_disc_with}; vat%_doc={vat_percent_doc}; "
+#         f"eff_sum_vat={eff_sum_vat}; match: wo={ok_wo}, vat={ok_vat}, total={ok_tot}"
 #     )
 
 #     return not (ok_wo and ok_vat and ok_tot)
@@ -766,6 +1011,23 @@ def normalize_line_items_if_needed(doc_struct):
 #     )
 
 #     calc_log = []
+
+
+#     # ---- Новое правило: если нет line_items и заполнен только total ----
+#     items = data.get("line_items") or []
+#     if (
+#         not items
+#         and not amount_with_vat.is_zero()
+#         and amount_wo_vat.is_zero()
+#         and vat_amount.is_zero()
+#         and vat_percent.is_zero()
+#     ):
+#         amount_wo_vat = amount_with_vat
+#         vat_amount = Decimal("0.0000")
+#         vat_percent = Decimal("0.00")
+#         calc_log.append("auto: нет line_items и есть только total → wo_vat=with_vat, vat=0, vat%=0")
+
+
 
 #     # 1) amount_wo_vat
 #     if amount_wo_vat.is_zero():
@@ -793,6 +1055,7 @@ def normalize_line_items_if_needed(doc_struct):
 #         elif not amount_wo_vat.is_zero() and not amount_with_vat.is_zero():
 #             vat_percent = ((amount_with_vat / amount_wo_vat - Decimal("1")) * Decimal("100")).quantize(Decimal("1.00"))
 #             calc_log.append("vat_percent из amount_with_vat и amount_wo_vat")
+
 
 #     # 4) amount_with_vat
 #     if amount_with_vat.is_zero():
@@ -822,10 +1085,6 @@ def normalize_line_items_if_needed(doc_struct):
 # # ===============================
 
 # def validate_and_calculate_lineitem_amounts(item):
-#     """
-#     ВАЖНО: перед вызовом этой функции рекомендуется выполнить should_normalize_lineitems(doc),
-#     и пересчитывать строки только если суммы не сходятся.
-#     """
 #     logger.info(f"[validate_line] ISKODNYE: {item}")
 
 #     calc_log = []
@@ -838,15 +1097,23 @@ def normalize_line_items_if_needed(doc_struct):
 #     total = to_decimal(item.get("total"), 4)
 #     discount_wo_vat = to_decimal(item.get("discount_wo_vat"), 4)
 
-#     # --- 0) Коррекция SUBTOTAL по формуле (quantity * price - discount_wo_vat) ---
-#     subtotal_calc = (quantity * price - discount_wo_vat).quantize(Decimal("1.0000"))
-#     if subtotal_calc < Decimal("0.0000"):
-#         subtotal_calc = Decimal("0.0000")
-#     if abs(subtotal - subtotal_calc) > Decimal("0.01"):
-#         calc_log.append(f"subtotal скорректирован с {subtotal} → {subtotal_calc} (quantity*price - discount_wo_vat)")
-#         subtotal = subtotal_calc
+#     TOL = Decimal("0.02")
+#     orig_subtotal = subtotal  # запомним, что пришло
+
+#     # === ПРОВЕРКА И КОРРЕКЦИЯ SUBTOTAL по новой логике ===
+#     # Если есть и price, и quantity, и discount
+#     if not price.is_zero() and not quantity.is_zero():
+#         expected_subtotal = (price * quantity - discount_wo_vat).quantize(Decimal("1.0000"))
+#         if abs(expected_subtotal - subtotal) > TOL:
+#             calc_log.append(
+#                 f"subtotal ({subtotal}) не совпадает с price*quantity-discount ({expected_subtotal}) — ЗАМЕНЯЕМ"
+#             )
+#             subtotal = expected_subtotal
+#         else:
+#             calc_log.append("subtotal совпадает с price*quantity-discount — оставляем без изменений")
 #     else:
-#         calc_log.append("subtotal совпадает с quantity*price - discount_wo_vat")
+#         # Если price или quantity нет — просто оставляем subtotal как есть
+#         calc_log.append("нет price или quantity — subtotal оставлен как есть")
 
 #     # --- 1) VAT (если отсутствует) ---
 #     if vat.is_zero():
@@ -854,8 +1121,13 @@ def normalize_line_items_if_needed(doc_struct):
 #             vat = (subtotal * vat_percent / Decimal("100")).quantize(Decimal("1.0000"))
 #             calc_log.append("vat из subtotal и vat_percent")
 #         elif not total.is_zero() and not subtotal.is_zero():
-#             vat = (total - subtotal).quantize(Decimal("1.0000"))
-#             calc_log.append("vat из total и subtotal")
+#             v = (total - subtotal).quantize(Decimal("1.0000"))
+#             if v < Decimal("0.0000"):
+#                 calc_log.append(f"vat был бы отрицательным ({v}), ставим 0")
+#                 vat = Decimal("0.0000")
+#             else:
+#                 vat = v
+#                 calc_log.append("vat из total и subtotal")
 
 #     # --- 2) VAT% (если отсутствует) ---
 #     if vat_percent.is_zero():
@@ -863,8 +1135,12 @@ def normalize_line_items_if_needed(doc_struct):
 #             vat_percent = (vat / subtotal * Decimal("100")).quantize(Decimal("1.00"))
 #             calc_log.append("vat_percent из vat и subtotal")
 #         elif not total.is_zero() and not subtotal.is_zero():
-#             vat_percent = ((total / subtotal - Decimal("1")) * Decimal("100")).quantize(Decimal("1.00"))
-#             calc_log.append("vat_percent из total и subtotal")
+#             if total >= subtotal:
+#                 vat_percent = ((total / subtotal - Decimal("1")) * Decimal("100")).quantize(Decimal("1.00"))
+#                 calc_log.append("vat_percent из total и subtotal")
+#             else:
+#                 vat_percent = Decimal("0.00")
+#                 calc_log.append("total < subtotal → vat_percent = 0.00")
 
 #     # --- 3) TOTAL (если отсутствует) ---
 #     if total.is_zero():
@@ -875,35 +1151,31 @@ def normalize_line_items_if_needed(doc_struct):
 #             total = (subtotal + vat).quantize(Decimal("1.0000"))
 #             calc_log.append("total из subtotal и vat")
 #         elif not subtotal.is_zero():
-#             # VAT=0% и vat=0 → total = subtotal
 #             total = subtotal
-#             calc_log.append("total = subtotal (VAT=0)")
+#             calc_log.append("total = subtotal (VAT=0 или нет ставки)")
 
 #     # --- 4) PRICE (если отсутствует) ---
 #     if price.is_zero():
-#         if not subtotal.is_zero() and not quantity.is_zero():
+#         if quantity.is_zero():
+#             quantity = Decimal("1.0000")
+#             calc_log.append("quantity по умолчанию 1.0000")
+#         if not subtotal.is_zero():
 #             price = (subtotal / quantity).quantize(Decimal("1.0000"))
 #             calc_log.append("price из subtotal и quantity")
-#         elif not total.is_zero() and not quantity.is_zero() and not vat_percent.is_zero():
-#             price = ((total / (Decimal("1") + vat_percent / Decimal("100"))) / quantity).quantize(Decimal("1.0000"))
-#             calc_log.append("price из total, vat_percent, quantity")
 
-#     # --- 5) QUANTITY (если отсутствует) ---
+#     # --- 5) QUANTITY (если всё ещё отсутствует) ---
 #     if quantity.is_zero():
 #         if not subtotal.is_zero() and not price.is_zero():
 #             quantity = (subtotal / price).quantize(Decimal("1.0000"))
 #             calc_log.append("quantity из subtotal и price")
-#         elif not total.is_zero() and not price.is_zero() and not vat_percent.is_zero():
-#             quantity = ((total / (Decimal("1") + vat_percent / Decimal("100"))) / price).quantize(Decimal("1.0000"))
-#             calc_log.append("quantity из total, vat_percent, price")
+#         else:
+#             quantity = Decimal("1.0000")
+#             calc_log.append("quantity по умолчанию 1.0000")
 
-#     # --- 6) Значения по умолчанию ---
-#     if quantity.is_zero():
-#         quantity = Decimal("1.0000")
-#         calc_log.append("quantity по умолчанию 1.0000")
-#     if price.is_zero() and not subtotal.is_zero():
-#         price = subtotal
-#         calc_log.append("price по умолчанию = subtotal")
+#     # --- 6) На всякий случай: если price не восстановился, но есть subtotal и quantity
+#     if price.is_zero() and not subtotal.is_zero() and not quantity.is_zero():
+#         price = (subtotal / quantity).quantize(Decimal("1.0000"))
+#         calc_log.append("price доуточнён из subtotal/quantity")
 
 #     logger.info(
 #         f"[validate_line] POSLE OBRABOTKI: quantity={quantity}, price={price}, subtotal={subtotal}, "
@@ -921,6 +1193,8 @@ def normalize_line_items_if_needed(doc_struct):
 #     return item
 
 
+
+
 # # ===============================
 # # Глобальная валидация документа
 # # ===============================
@@ -930,12 +1204,10 @@ def normalize_line_items_if_needed(doc_struct):
 #     Глобальная валидация и коррекция документа и line_items.
 #     ВАЖНО: если суммы уже совпадают (с учётом invoice_discount_*), ничего не меняем.
 #     При замене итогов документа учитываем скидки на документ:
-#       amount_wo_vat   <- Σ(subtotal) - invoice_discount_wo_vat
-#       vat_amount      <- Σ(vat)
-#       amount_with_vat <- Σ(total) - invoice_discount_with_vat
+#       amount_wo_vat     <- Σ(subtotal) - invoice_discount_wo_vat
+#       vat_amount        <- Σ(vat) - (invoice_discount_wo_vat * vat_percent_doc / 100)   ← ключевая правка
+#       amount_with_vat   <- Σ(total) - invoice_discount_with_vat
 #     """
-#     from decimal import Decimal
-
 #     logs = []
 #     doc_changed = False
 
@@ -961,27 +1233,34 @@ def normalize_line_items_if_needed(doc_struct):
 #     sum_vat = sum(Decimal(str(item.get("vat") or "0")) for item in line_items)
 #     sum_total = sum(Decimal(str(item.get("total") or "0")) for item in line_items)
 
-#     # Скидки на документ (если нет — 0)
-#     inv_disc_wo = to_decimal(doc_struct.get("invoice_discount_wo_vat"), 4)
-#     inv_disc_with = to_decimal(doc_struct.get("invoice_discount_with_vat"), 4)
+#     # --- 2) Скидки на документ (включая восстановление недостающих) ---
+#     inv_disc_wo, inv_disc_with = _deduce_missing_document_discounts(doc_struct, sum_subtotal, sum_total)
+#     vat_percent_doc = to_decimal(doc_struct.get("vat_percent"), 2)
 
-#     # «После-скидочные» эталоны для документа
+#     # --- 3) Эталоны "после скидок" ---
 #     eff_doc_wo = (sum_subtotal - inv_disc_wo).quantize(Decimal("1.0000"))
-#     if eff_doc_wo < Decimal("0"): 
+#     if eff_doc_wo < Decimal("0"):
 #         eff_doc_wo = Decimal("0.0000")
 
 #     eff_doc_with = (sum_total - inv_disc_with).quantize(Decimal("1.0000"))
 #     if eff_doc_with < Decimal("0"):
 #         eff_doc_with = Decimal("0.0000")
 
-#     # Текущие значения документа
+#     # VAT с учётом скидки на документ (пропорционально ставке документа)
+#     eff_vat = sum_vat
+#     if not vat_percent_doc.is_zero() and not inv_disc_wo.is_zero():
+#         eff_vat = (sum_vat - (inv_disc_wo * vat_percent_doc / Decimal("100"))).quantize(Decimal("1.0000"))
+#         if eff_vat < Decimal("0.0000"):
+#             eff_vat = Decimal("0.0000")
+
+#     # --- 4) Текущие значения документа ---
 #     doc_subtotal = to_decimal(doc_struct.get("amount_wo_vat"), 4)
 #     doc_vat = to_decimal(doc_struct.get("vat_amount"), 4)
 #     doc_total = to_decimal(doc_struct.get("amount_with_vat"), 4)
 
 #     TOL = Decimal("0.05")
 
-#     # --- 2) Проверяем/заменяем amount_wo_vat (с учётом скидки на документ) ---
+#     # --- 5) Проверяем/заменяем amount_wo_vat ---
 #     diff_subtotal = (eff_doc_wo - doc_subtotal).quantize(Decimal("1.0000"))
 #     logs.append(f"Subtotal (после скидки на документ): эталон={eff_doc_wo}, doc={doc_subtotal}, diff={diff_subtotal}")
 #     if abs(diff_subtotal) > TOL:
@@ -992,18 +1271,18 @@ def normalize_line_items_if_needed(doc_struct):
 #     else:
 #         logs.append("✔ amount_wo_vat совпадает или отличается незначительно.")
 
-#     # --- 3) Проверяем/заменяем vat_amount (= Σ(vat)) ---
-#     diff_vat = (sum_vat - doc_vat).quantize(Decimal("1.0000"))
-#     logs.append(f"VAT: lineitems={sum_vat}, doc={doc_vat}, diff={diff_vat}")
+#     # --- 6) Проверяем/заменяем vat_amount (с учётом документной скидки) ---
+#     diff_vat = (eff_vat - doc_vat).quantize(Decimal("1.0000"))
+#     logs.append(f"VAT (с учётом скидки на документ): эталон={eff_vat}, doc={doc_vat}, diff={diff_vat}")
 #     if abs(diff_vat) > TOL:
-#         logs.append("❗vat_amount документа отличается. Заменяем на Σ(vat) по lineitems.")
-#         doc_struct["vat_amount"] = sum_vat
+#         logs.append("❗vat_amount документа отличается. Заменяем на Σ(vat) − invoice_discount_wo_vat * vat_percent_doc/100.")
+#         doc_struct["vat_amount"] = eff_vat
 #         doc_struct["_vat_replaced"] = True
 #         doc_changed = True
 #     else:
 #         logs.append("✔ vat_amount совпадает или отличается незначительно.")
 
-#     # --- 4) Проверяем/заменяем amount_with_vat (с учётом скидки на документ) ---
+#     # --- 7) Проверяем/заменяем amount_with_vat ---
 #     diff_total = (eff_doc_with - doc_total).quantize(Decimal("1.0000"))
 #     logs.append(f"Total (после скидки на документ): эталон={eff_doc_with}, doc={doc_total}, diff={diff_total}")
 #     if abs(diff_total) > TOL:
@@ -1014,7 +1293,7 @@ def normalize_line_items_if_needed(doc_struct):
 #     else:
 #         logs.append("✔ amount_with_vat совпадает или отличается незначительно.")
 
-#     # --- 5) Финал ---
+#     # --- 8) Финал ---
 #     if doc_changed:
 #         logs.append("Документ был скорректирован для соответствия lineitems (учтены скидки на документ).")
 #     else:
@@ -1030,58 +1309,135 @@ def normalize_line_items_if_needed(doc_struct):
 # # Сверка (современная): effective_base и т.д.
 # # ===============================
 
+
+# def subtotal_already_discounted(item):
+#     """
+#     Возвращает True, если subtotal уже учтён С УЧЁТОМ discount_wo_vat (то есть discount не надо вычитать ещё раз).
+#     """
+#     try:
+#         subtotal = Decimal(str(item.get("subtotal") or "0")).quantize(Decimal("1.0000"))
+#         discount = Decimal(str(item.get("discount_wo_vat") or "0")).quantize(Decimal("1.0000"))
+#         price    = Decimal(str(item.get("price") or "0")).quantize(Decimal("1.0000"))
+#         qty      = Decimal(str(item.get("quantity") or "0")).quantize(Decimal("1.0000"))
+#         base = (price * qty).quantize(Decimal("1.0000"))
+#         # Сравниваем subtotal+discount и price*qty (разброс — 0.02)
+#         return abs((subtotal + discount) - base) <= Decimal("0.02")
+#     except Exception:
+#         return False
+
+
+
 # def compare_lineitems_with_main_totals(doc_struct):
 #     """
-#     Сверка сумм по строкам с основными суммами документа.
-#     Теперь сравниваем amount_wo_vat c Σ(effective_base),
-#     где effective_base = max(subtotal - discount_wo_vat, 0).
-#     Допуск: 0.0500.
+#     Современная сверка с учётом скидок:
+#       expected_wo   = Σ(subtotal - line.discount_wo_vat) - eff_invoice_discount_wo_vat
+#       expected_vat  = Σ(line.vat) - eff_invoice_discount_wo_vat * vat_percent_doc/100
+#       expected_with = Σ(total) - eff_invoice_discount_with_vat
+
+#     Где eff_invoice_discount_* — это документные скидки за вычетом тех случаев,
+#     когда LLM уже разложил ту же скидку по строкам (чтобы не вычитать дважды).
 #     """
 #     TOL = Decimal("0.0500")
 
-#     def to_d(x, places=4):
-#         return to_decimal(x, places)
+#     def d(x, p=4):
+#         if x is None or x == "" or str(x).lower() == "null":
+#             return Decimal("0.0000") if p == 4 else Decimal("0.00")
+#         try:
+#             return Decimal(str(x)).quantize(Decimal("1." + "0"*p), rounding=ROUND_HALF_UP)
+#         except Exception:
+#             return Decimal("0.0000") if p == 4 else Decimal("0.00")
 
 #     items = doc_struct.get("line_items", []) or []
 
-#     sum_effective = Decimal("0.0000")
-#     sum_vat = Decimal("0.0000")
-#     sum_total = Decimal("0.0000")
+#     # Суммы по строкам
+#     sum_line_subtotal = Decimal("0.0000")
+#     sum_line_discount_wo = Decimal("0.0000")
+#     sum_line_vat = Decimal("0.0000")
+#     sum_line_total = Decimal("0.0000")
 
 #     for it in items:
-#         subtotal = to_d(it.get("subtotal"), 4)
-#         disc_wo = to_d(it.get("discount_wo_vat"), 4)
-#         vat = to_d(it.get("vat"), 4)
-#         total = to_d(it.get("total"), 4)
+#         subtotal = d(it.get("subtotal"), 4)
+#         disc_wo  = d(it.get("discount_wo_vat"), 4)
+#         vat      = d(it.get("vat"), 4)
+#         total    = d(it.get("total"), 4)
 
-#         eff = subtotal - disc_wo
-#         if eff < Decimal("0"):
-#             eff = Decimal("0.0000")
-#         eff = eff.quantize(Decimal("1.0000"))
+#         # --- Ключ: если subtotal уже NET (минус скидка) — discount не вычитаем второй раз!
+#         if subtotal_already_discounted(it):
+#             sum_line_subtotal += subtotal
+#             # discount НЕ добавляем, он уже учтён
+#         else:
+#             sum_line_subtotal += subtotal
+#             sum_line_discount_wo += disc_wo
 
-#         sum_effective += eff
-#         sum_vat += vat
-#         sum_total += total
+#         sum_line_vat   += vat
+#         sum_line_total += total
 
-#     main_wo = to_d(doc_struct.get("amount_wo_vat"), 4)
-#     main_vat = to_d(doc_struct.get("vat_amount"), 4)
-#     main_tot = to_d(doc_struct.get("amount_with_vat"), 4)
+#     # Текущие итоги документа
+#     doc_wo  = d(doc_struct.get("amount_wo_vat"), 4)
+#     doc_vat = d(doc_struct.get("vat_amount"), 4)
+#     doc_tot = d(doc_struct.get("amount_with_vat"), 4)
+#     vat_percent_doc = d(doc_struct.get("vat_percent"), 2)
+
+#     # ВОССТАНОВИМ недостающие скидки документа (точно так же, как в should_normalize_lineitems)
+#     inv_disc_wo, inv_disc_with = _deduce_missing_document_discounts(
+#         doc_struct, sum_line_subtotal, sum_line_total
+#     )
+
+#     # ЭФФЕКТИВНЫЕ документные скидки (чтобы не вычитать дважды, если LLM уже размазал скидку по строкам)
+#     eff_inv_disc_wo = inv_disc_wo
+#     if abs(inv_disc_wo - sum_line_discount_wo) <= TOL:
+#         eff_inv_disc_wo = Decimal("0.0000")
+
+#     # По with-VAT обычно по строкам скидок нет; оставим симметрию
+#     sum_line_discount_with = Decimal("0.0000")
+#     eff_inv_disc_with = inv_disc_with
+#     if abs(inv_disc_with - sum_line_discount_with) <= TOL:
+#         eff_inv_disc_with = Decimal("0.0000")
+
+#     # Эффективная база строк без НДС (учёт строковых скидок)
+#     line_effective_wo = (sum_line_subtotal - sum_line_discount_wo)
+
+#     # ОЖИДАЕМЫЕ значения документа
+#     expected_wo  = (line_effective_wo - eff_inv_disc_wo).quantize(Decimal("1.0000"))
+#     if expected_wo < 0:
+#         expected_wo = Decimal("0.0000")
+
+#     # VAT: как у тебя в global_validate_and_correct
+#     expected_vat = sum_line_vat
+#     if not vat_percent_doc.is_zero() and not eff_inv_disc_wo.is_zero():
+#         expected_vat = (sum_line_vat - (eff_inv_disc_wo * vat_percent_doc / Decimal("100"))).quantize(Decimal("1.0000"))
+#         if expected_vat < Decimal("0.0000"):
+#             expected_vat = Decimal("0.0000")
+#     else:
+#         expected_vat = sum_line_vat.quantize(Decimal("1.0000"))
+
+#     expected_tot = (sum_line_total - eff_inv_disc_with).quantize(Decimal("1.0000"))
+#     if expected_tot < 0:
+#         expected_tot = Decimal("0.0000")
 
 #     result = {
-#         "subtotal_match": abs(sum_effective - main_wo) <= TOL,
-#         "vat_match": abs(sum_vat - main_vat) <= TOL,
-#         "total_match": abs(sum_total - main_tot) <= TOL,
-#         "subtotal_diff": (sum_effective - main_wo).quantize(Decimal("1.0000")),
-#         "vat_diff": (sum_vat - main_vat).quantize(Decimal("1.0000")),
-#         "total_diff": (sum_total - main_tot).quantize(Decimal("1.0000")),
-#         "line_sum_effective_wo_vat": sum_effective.quantize(Decimal("1.0000")),
-#         "line_sum_vat": sum_vat.quantize(Decimal("1.0000")),
-#         "line_sum_with_vat": sum_total.quantize(Decimal("1.0000")),
-#         "main_wo_vat": main_wo.quantize(Decimal("1.0000")),
-#         "main_vat": main_vat.quantize(Decimal("1.0000")),
-#         "main_with_vat": main_tot.quantize(Decimal("1.0000")),
-#     }
+#         "subtotal_match": abs(expected_wo  - doc_wo ) <= TOL,
+#         "vat_match":      abs(expected_vat - doc_vat) <= TOL,
+#         "total_match":    abs(expected_tot - doc_tot) <= TOL,
 
+#         "subtotal_diff":  (expected_wo  - doc_wo ).quantize(Decimal("1.0000")),
+#         "vat_diff":       (expected_vat - doc_vat).quantize(Decimal("1.0000")),
+#         "total_diff":     (expected_tot - doc_tot).quantize(Decimal("1.0000")),
+
+#         "expected_amount_wo_vat":   expected_wo,
+#         "expected_vat_amount":      expected_vat,
+#         "expected_amount_with_vat": expected_tot,
+
+#         "line_sum_subtotal":        sum_line_subtotal.quantize(Decimal("1.0000")),
+#         "line_sum_discount_wo_vat": sum_line_discount_wo.quantize(Decimal("1.0000")),
+#         "line_effective_wo_vat":    line_effective_wo.quantize(Decimal("1.0000")),
+#         "line_sum_vat":             sum_line_vat.quantize(Decimal("1.0000")),
+#         "line_sum_with_vat":        sum_line_total.quantize(Decimal("1.0000")),
+
+#         "_eff_inv_disc_wo":         eff_inv_disc_wo,
+#         "_eff_inv_disc_with":       eff_inv_disc_with,
+#         "_vat_percent_doc":         vat_percent_doc,
+#     }
 #     logger.info(f"[compare_lineitems] RESULT: {result}")
 #     return result
 
@@ -1092,7 +1448,7 @@ def normalize_line_items_if_needed(doc_struct):
 
 # def normalize_line_items_if_needed(doc_struct):
 #     """
-#     Если суммы line_items совпадают с итогами документа (учитывая invoice_discount_*),
+#     Если суммы line_items совпадают с итогами документа (учитывая invoice_discount_* и влияние скидки на VAT),
 #     НИЧЕГО не делаем. Иначе — пересчитываем строки.
 #     """
 #     if not should_normalize_lineitems(doc_struct):
@@ -1110,706 +1466,98 @@ def normalize_line_items_if_needed(doc_struct):
 
 
 
+# # test VAT validator - prosto test!
 
+# def _q4(x: Decimal) -> Decimal:
+#     return Decimal(str(x)).quantize(Decimal("1.0000"), rounding=ROUND_HALF_UP)
 
+# def _q2(x: Decimal) -> Decimal:
+#     return Decimal(str(x)).quantize(Decimal("1.00"), rounding=ROUND_HALF_UP)
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-# import logging
-# from decimal import Decimal, ROUND_HALF_UP
-
-# logger = logging.getLogger("docscanner_app")
-
-
-# def to_decimal(x, places=4):
+# def distribute_vat_from_document(doc_struct, tol=Decimal("0.05")):
 #     """
-#     Преобразует x в Decimal с нужным количеством знаков.
-#     Пустые значения и ошибки — 0.0000.
+#     Если в документе одна ставка VAT (separate_vat=False) и doc.vat_amount>0,
+#     а у строк НДС не проставлен (или проставлен 0), — раздаёт doc.vat_percent по строкам:
+#       line.vat_percent <- doc.vat_percent
+#       line.vat        <- line.subtotal * doc.vat_percent/100
+#       line.total      <- line.subtotal + line.vat
+#     Затем выравнивает копеечную разницу по последней строке.
+#     Ничего не делает, если предпосылки не выполнены.
 #     """
-#     if x is None or x == "" or str(x).lower() == "null":
-#         return Decimal("0.0000")
 #     try:
-#         return Decimal(str(x)).quantize(Decimal("1." + "0" * places), rounding=ROUND_HALF_UP)
-#     except Exception as e:
-#         logger.info(f"[to_decimal] EXCEPTION: {e} (input={x})")
-#         return Decimal("0.0000")
-
-
-# def validate_and_calculate_main_amounts(data):
-#     logger.info(f"[validate_main] ISKODNYE: {data}")
-
-#     amount_wo_vat = to_decimal(data.get("amount_wo_vat"), 4)
-#     vat_amount = to_decimal(data.get("vat_amount"), 4)
-#     vat_percent = to_decimal(data.get("vat_percent"), 2)
-#     amount_with_vat = to_decimal(data.get("amount_with_vat"), 4)
-
-#     logger.info(
-#         f"[validate_main] DO OBRABOTKI: amount_wo_vat={amount_wo_vat}, "
-#         f"vat_amount={vat_amount}, vat_percent={vat_percent}, amount_with_vat={amount_with_vat}"
-#     )
-
-#     calc_log = []
-
-#     # 1. amount_wo_vat
-#     if amount_wo_vat.is_zero():
-#         if not amount_with_vat.is_zero() and not vat_percent.is_zero():
-#             amount_wo_vat = (amount_with_vat / (Decimal("1") + vat_percent / Decimal("100"))).quantize(Decimal("1.0000"))
-#             calc_log.append("amount_wo_vat из amount_with_vat и vat_percent")
-#         elif not amount_with_vat.is_zero() and not vat_amount.is_zero():
-#             amount_wo_vat = (amount_with_vat - vat_amount).quantize(Decimal("1.0000"))
-#             calc_log.append("amount_wo_vat из amount_with_vat и vat_amount")
-
-#     # 2. vat_amount
-#     if vat_amount.is_zero():
-#         if not amount_wo_vat.is_zero() and not vat_percent.is_zero():
-#             vat_amount = (amount_wo_vat * vat_percent / Decimal("100")).quantize(Decimal("1.0000"))
-#             calc_log.append("vat_amount из amount_wo_vat и vat_percent")
-#         elif not amount_with_vat.is_zero() and not amount_wo_vat.is_zero():
-#             vat_amount = (amount_with_vat - amount_wo_vat).quantize(Decimal("1.0000"))
-#             calc_log.append("vat_amount из amount_with_vat и amount_wo_vat")
-
-#     # 3. vat_percent
-#     if vat_percent.is_zero():
-#         if not amount_wo_vat.is_zero() and not vat_amount.is_zero():
-#             vat_percent = (vat_amount / amount_wo_vat * Decimal("100")).quantize(Decimal("1.00"))
-#             calc_log.append("vat_percent из vat_amount и amount_wo_vat")
-#         elif not amount_wo_vat.is_zero() and not amount_with_vat.is_zero():
-#             vat_percent = ((amount_with_vat / amount_wo_vat - Decimal("1")) * Decimal("100")).quantize(Decimal("1.00"))
-#             calc_log.append("vat_percent из amount_with_vat и amount_wo_vat")
-
-#     # 4. amount_with_vat
-#     if amount_with_vat.is_zero():
-#         if not amount_wo_vat.is_zero() and not vat_percent.is_zero():
-#             amount_with_vat = (amount_wo_vat * (Decimal("1") + vat_percent / Decimal("100"))).quantize(Decimal("1.0000"))
-#             calc_log.append("amount_with_vat из amount_wo_vat и vat_percent")
-#         elif not amount_wo_vat.is_zero() and not vat_amount.is_zero():
-#             amount_with_vat = (amount_wo_vat + vat_amount).quantize(Decimal("1.0000"))
-#             calc_log.append("amount_with_vat из amount_wo_vat и vat_amount")
-
-#     logger.info(
-#         f"[validate_main] POSLE OBRABOTKI: amount_wo_vat={amount_wo_vat}, "
-#         f"vat_amount={vat_amount}, vat_percent={vat_percent}, amount_with_vat={amount_with_vat}"
-#     )
-#     logger.info(f"[validate_main] CALC_LOG: {calc_log}")
-
-#     data["amount_wo_vat"] = amount_wo_vat
-#     data["vat_amount"] = vat_amount
-#     data["vat_percent"] = vat_percent
-#     data["amount_with_vat"] = amount_with_vat
-#     data["_main_amounts_calc_log"] = calc_log
-
-#     return data
-
-
-
-
-
-# def validate_and_calculate_lineitem_amounts(item):
-#     logger.info(f"[validate_line] ISKODNYE: {item}")
-
-#     calc_log = []
-
-#     quantity = to_decimal(item.get("quantity"), 4)
-#     price = to_decimal(item.get("price"), 4)
-#     subtotal = to_decimal(item.get("subtotal"), 4)
-#     vat = to_decimal(item.get("vat"), 4)
-#     vat_percent = to_decimal(item.get("vat_percent"), 2)
-#     total = to_decimal(item.get("total"), 4)
-#     discount_wo_vat = to_decimal(item.get("discount_wo_vat"), 4)
-
-#     # --- Коррекция subtotal по скидке ---
-#     orig_subtotal = subtotal
-#     subtotal_calc = (quantity * price - discount_wo_vat).quantize(Decimal("1.0000"))
-#     if subtotal_calc < Decimal("0.0000"):
-#         subtotal_calc = Decimal("0.0000")
-#     if abs(subtotal - subtotal_calc) > Decimal("0.01"):
-#         calc_log.append(f"subtotal скорректирован с {subtotal} → {subtotal_calc} по формуле quantity * price - discount_wo_vat")
-#         subtotal = subtotal_calc
-#     else:
-#         calc_log.append("subtotal совпадает с quantity * price - discount_wo_vat")
-
-
-#     # 2. vat
-#     if vat.is_zero():
-#         if not subtotal.is_zero() and not vat_percent.is_zero():
-#             vat = (subtotal * vat_percent / Decimal("100")).quantize(Decimal("1.0000"))
-#             calc_log.append("vat из subtotal и vat_percent")
-#         elif not total.is_zero() and not subtotal.is_zero():
-#             vat = (total - subtotal).quantize(Decimal("1.0000"))
-#             calc_log.append("vat из total и subtotal")
-
-#     # 3. vat_percent
-#     if vat_percent.is_zero():
-#         if not vat.is_zero() and not subtotal.is_zero():
-#             vat_percent = (vat / subtotal * Decimal("100")).quantize(Decimal("1.00"))
-#             calc_log.append("vat_percent из vat и subtotal")
-#         elif not total.is_zero() and not subtotal.is_zero():
-#             vat_percent = ((total / subtotal - Decimal("1")) * Decimal("100")).quantize(Decimal("1.00"))
-#             calc_log.append("vat_percent из total и subtotal")
-
-#     # 4. total
-#     if total.is_zero():
-#         if not subtotal.is_zero() and not vat_percent.is_zero():
-#             total = (subtotal * (Decimal("1") + vat_percent / Decimal("100"))).quantize(Decimal("1.0000"))
-#             calc_log.append("total из subtotal и vat_percent")
-#         elif not subtotal.is_zero() and not vat.is_zero():
-#             total = (subtotal + vat).quantize(Decimal("1.0000"))
-#             calc_log.append("total из subtotal и vat")
-
-#     # 5. price
-#     if price.is_zero():
-#         if not subtotal.is_zero() and not quantity.is_zero():
-#             price = (subtotal / quantity).quantize(Decimal("1.0000"))
-#             calc_log.append("price из subtotal и quantity")
-#         elif not total.is_zero() and not quantity.is_zero() and not vat_percent.is_zero():
-#             price = ((total / (Decimal("1") + vat_percent / Decimal("100"))) / quantity).quantize(Decimal("1.0000"))
-#             calc_log.append("price из total, vat_percent, quantity")
-
-#     # 6. quantity
-#     if quantity.is_zero():
-#         if not subtotal.is_zero() and not price.is_zero():
-#             quantity = (subtotal / price).quantize(Decimal("1.0000"))
-#             calc_log.append("quantity из subtotal и price")
-#         elif not total.is_zero() and not price.is_zero() and not vat_percent.is_zero():
-#             quantity = ((total / (Decimal("1") + vat_percent / Decimal("100"))) / price).quantize(Decimal("1.0000"))
-#             calc_log.append("quantity из total, vat_percent, price")
-
-#     # 7. quantity и price по умолчанию, если остались пустыми
-#     if quantity.is_zero():
-#         quantity = Decimal("1.0000")
-#         calc_log.append("quantity по умолчанию 1.0000")
-
-#     if price.is_zero() and not subtotal.is_zero():
-#         price = subtotal
-#         calc_log.append("price по умолчанию = subtotal")
-
-#     logger.info(
-#         f"[validate_line] POSLE OBRABOTKI: quantity={quantity}, price={price}, subtotal={subtotal}, "
-#         f"vat={vat}, vat_percent={vat_percent}, total={total}"
-#     )
-#     logger.info(f"[validate_line] CALC_LOG: {calc_log}")
-
-#     item["quantity"] = quantity
-#     item["price"] = price
-#     item["subtotal"] = subtotal
-#     item["vat"] = vat
-#     item["vat_percent"] = vat_percent
-#     item["total"] = total
-#     item["_lineitem_calc_log"] = calc_log
-#     return item
-
-
-# def global_validate_and_correct(doc_struct):
-#     """
-#     Глобальная валидация и коррекция документа и lineitems:
-#     - Сравнивает суммы между lineitems и документом,
-#     - Корректирует vat_percent и vat в lineitems,
-#     - Ставит флаги успешности, ведёт подробный лог.
-#     """
-#     logs = []  # Для накопления этапных логов
-#     doc_changed = False
-
-#     doc_struct["_subtotal_replaced"] = False
-#     doc_struct["_vat_replaced"] = False
-#     doc_struct["_total_replaced"] = False
-
-#     line_items = doc_struct.get("line_items", [])
-#     if not line_items:
-#         logs.append("Нет line_items для проверки.")
-#         doc_struct["_global_validation_log"] = logs
+#         separate_vat = bool(doc_struct.get("separate_vat"))  # False/None -> одна ставка
+#         doc_vat_amt  = Decimal(str(doc_struct.get("vat_amount") or "0"))
+#         doc_vat_pct  = Decimal(str(doc_struct.get("vat_percent") or "0"))
+#     except Exception:
 #         return doc_struct
 
-#     # 1. Проверяем subtotal
-#     sum_subtotal = sum(Decimal(str(item.get("subtotal") or "0")) for item in line_items)
-#     doc_subtotal = Decimal(str(doc_struct.get("amount_wo_vat") or "0"))
-#     diff_subtotal = (sum_subtotal - doc_subtotal).quantize(Decimal("1.0000"))
-#     logs.append(f"Subtotal: lineitems={sum_subtotal}, doc={doc_subtotal}, diff={diff_subtotal}")
-#     if abs(diff_subtotal) > Decimal("0.05"):
-#         logs.append(f"❗Subtotal не совпадает. Заменяем subtotal документа на сумму по lineitems.")
-#         doc_struct["amount_wo_vat"] = sum_subtotal
-#         doc_struct["_subtotal_replaced"] = True   # ← ДОБАВЬ
-#         doc_changed = True
-#     else:
-#         logs.append("✔ Subtotal совпадает или незначительно отличается.")
+#     if separate_vat or doc_vat_amt <= 0 or doc_vat_pct <= 0:
+#         # нет условий для распределения
+#         return doc_struct
 
-#     # 2. Проверяем vat_percent во всех lineitems (если не separate_vat)
-#     vat_percent_doc = doc_struct.get("vat_percent")
-#     if not doc_struct.get("separate_vat", False) and vat_percent_doc not in [None, "", 0, "0"]:
-#         vat_percent_doc = Decimal(str(vat_percent_doc))
-#         n_updated = 0
-#         for item in line_items:
-#             vp = Decimal(str(item.get("vat_percent") or "0"))
-#             if vp != vat_percent_doc:
-#                 item["vat_percent"] = vat_percent_doc
-#                 n_updated += 1
-#         if n_updated > 0:
-#             logs.append(f"Обновили vat_percent в {n_updated} lineitems до {vat_percent_doc}")
-#         else:
-#             logs.append("✔ Все vat_percent в lineitems уже совпадают с документом.")
-#     else:
-#         logs.append("skip vat_percent sync (separate_vat=True или нет vat_percent в документе)")
+#     items = doc_struct.get("line_items") or []
+#     if not items:
+#         return doc_struct
 
-#     # 3. Пересчитываем vat для всех lineitems по формуле (subtotal * vat_percent / 100)
-#     n_vat_recalculated = 0
-#     for item in line_items:
-#         subtotal = Decimal(str(item.get("subtotal") or "0"))
-#         vat_percent = Decimal(str(item.get("vat_percent") or "0"))
-#         vat_new = (subtotal * vat_percent / Decimal("100")).quantize(Decimal("1.0000"))
-#         old_vat = Decimal(str(item.get("vat") or "0"))
-#         if abs(old_vat - vat_new) > Decimal("0.01"):
-#             logs.append(f"Пересчитываем vat: было {old_vat} → стало {vat_new} (subtotal={subtotal}, vat_percent={vat_percent})")
-#             item["vat"] = vat_new
-#             n_vat_recalculated += 1
-#     if n_vat_recalculated == 0:
-#         logs.append("✔ Все vat в lineitems актуальны.")
-#     else:
-#         logs.append(f"Обновлено vat в {n_vat_recalculated} lineitems.")
-
-#     # 4. Проверяем общую сумму vat
-#     sum_vat = sum(Decimal(str(item.get("vat") or "0")) for item in line_items)
-#     doc_vat = Decimal(str(doc_struct.get("vat_amount") or "0"))
-#     diff_vat = (sum_vat - doc_vat).quantize(Decimal("1.0000"))
-#     logs.append(f"VAT: lineitems={sum_vat}, doc={doc_vat}, diff={diff_vat}")
-#     if abs(diff_vat) > Decimal("0.05"):
-#         logs.append(f"❗VAT документа не совпадает с суммой lineitems. Заменяем vat_amount документа на сумму по lineitems.")
-#         doc_struct["vat_amount"] = sum_vat
-#         doc_struct["_vat_replaced"] = True       # ← ДОБАВЬ
-#         doc_changed = True
-#     else:
-#         logs.append("✔ VAT совпадает или незначительно отличается.")
-
-#     # 5. Пересчитываем total для всех lineitems (subtotal + vat)
-#     n_total_recalculated = 0
-#     for item in line_items:
-#         subtotal = Decimal(str(item.get("subtotal") or "0"))
-#         vat = Decimal(str(item.get("vat") or "0"))
-#         total_new = (subtotal + vat).quantize(Decimal("1.0000"))
-#         old_total = Decimal(str(item.get("total") or "0"))
-#         if abs(old_total - total_new) > Decimal("0.01"):
-#             logs.append(f"Пересчитываем total: было {old_total} → стало {total_new} (subtotal={subtotal}, vat={vat})")
-#             item["total"] = total_new
-#             n_total_recalculated += 1
-#     if n_total_recalculated == 0:
-#         logs.append("✔ Все total в lineitems актуальны.")
-#     else:
-#         logs.append(f"Обновлено total в {n_total_recalculated} lineitems.")
-
-#     # 6. Проверяем общую сумму total
-#     sum_total = sum(Decimal(str(item.get("total") or "0")) for item in line_items)
-#     doc_total = Decimal(str(doc_struct.get("amount_with_vat") or "0"))
-#     diff_total = (sum_total - doc_total).quantize(Decimal("1.0000"))
-#     logs.append(f"Total: lineitems={sum_total}, doc={doc_total}, diff={diff_total}")
-#     if abs(diff_total) > Decimal("0.05"):
-#         logs.append(f"❗Total документа не совпадает с суммой lineitems. Заменяем amount_with_vat документа на сумму по lineitems.")
-#         doc_struct["amount_with_vat"] = sum_total
-#         doc_struct["_total_replaced"] = True     # ← ДОБАВЬ
-#         doc_changed = True
-#     else:
-#         logs.append("✔ Total совпадает или незначительно отличается.")
-
-#     # 7. Финальный статус
-#     if doc_changed:
-#         logs.append("Документ был скорректирован для соответствия lineitems.")
-#     else:
-#         logs.append("Документ уже был согласован с lineitems.")
-
-#     # Флаг для повторной обработки
-#     doc_struct["_doc_totals_replaced_by_lineitems"] = bool(doc_changed)        
-
-#     doc_struct["_global_validation_log"] = logs
-#     logger.info("\n".join([f"[global_validator] {line}" for line in logs]))
-#     return doc_struct
-
-
-# def compare_lineitems_with_main_totals(doc_struct):
-#     """
-#     Сверка сумм по строкам с основными суммами документа.
-#     Теперь сравниваем amount_wo_vat с Σ(effective_base), где
-#     effective_base = max(subtotal - discount_wo_vat, 0).
-#     Допуск: 0.0500.
-#     """
-#     TOL = Decimal("0.0500")
-
-#     def to_d(x, places=4):
-#         if x is None or x == "" or str(x).lower() == "null":
-#             return Decimal("0.0000") if places == 4 else Decimal("0.00")
-#         try:
-#             return Decimal(str(x)).quantize(Decimal("1." + "0"*places), rounding=ROUND_HALF_UP)
-#         except Exception:
-#             return Decimal("0.0000") if places == 4 else Decimal("0.00")
-
-#     items = doc_struct.get("line_items", []) or []
-
-#     # Суммы по строкам
-#     sum_effective = Decimal("0.0000")
+#     # Пройдёмся по строкам и проставим ставку/НДС только там, где их нет (0)
 #     sum_vat = Decimal("0.0000")
-#     sum_total = Decimal("0.0000")
+#     last_idx = None
 
-#     for it in items:
-#         subtotal = to_d(it.get("subtotal"), 4)
-#         disc_wo = to_d(it.get("discount_wo_vat"), 4)
-#         vat = to_d(it.get("vat"), 4)
-#         total = to_d(it.get("total"), 4)
-
-#         eff = subtotal - disc_wo
-#         if eff < Decimal("0"):
-#             eff = Decimal("0.0000")
-#         eff = eff.quantize(Decimal("1.0000"))
-
-#         sum_effective += eff
-#         sum_vat += vat
-#         sum_total += total
-
-#     main_wo = to_d(doc_struct.get("amount_wo_vat"), 4)
-#     main_vat = to_d(doc_struct.get("vat_amount"), 4)
-#     main_tot = to_d(doc_struct.get("amount_with_vat"), 4)
-
-#     result = {
-#         "subtotal_match": abs(sum_effective - main_wo) <= TOL,
-#         "vat_match": abs(sum_vat - main_vat) <= TOL,
-#         "total_match": abs(sum_total - main_tot) <= TOL,
-#         "subtotal_diff": (sum_effective - main_wo).quantize(Decimal("1.0000")),
-#         "vat_diff": (sum_vat - main_vat).quantize(Decimal("1.0000")),
-#         "total_diff": (sum_total - main_tot).quantize(Decimal("1.0000")),
-#         "line_sum_effective_wo_vat": sum_effective.quantize(Decimal("1.0000")),
-#         "line_sum_vat": sum_vat.quantize(Decimal("1.0000")),
-#         "line_sum_with_vat": sum_total.quantize(Decimal("1.0000")),
-#         "main_wo_vat": main_wo.quantize(Decimal("1.0000")),
-#         "main_vat": main_vat.quantize(Decimal("1.0000")),
-#         "main_with_vat": main_tot.quantize(Decimal("1.0000")),
-#     }
-
-#     logger.info(f"[compare_lineitems] RESULT: {result}")
-#     return result
-
-
-
-# def compare_lineitems_with_main_totals(doc_struct):
-#     """
-#     Проверяет, совпадают ли суммы по line_items с основными суммами документа.
-#     Возвращает dict с флагами совпадения и разницей по каждому полю.
-#     """
-
-#     def to_decimal_inner(x, places=4):
-#         if x is None or x == "" or str(x).lower() == "null":
-#             return Decimal("0.0000")
+#     for idx, it in enumerate(items):
 #         try:
-#             return Decimal(str(x)).quantize(Decimal("1." + "0" * places), rounding=ROUND_HALF_UP)
-#         except Exception as e:
-#             logger.info(f"[to_decimal compare] EXCEPTION: {e} (input={x})")
-#             return Decimal("0.0000")
-
-#     line_items = doc_struct.get("line_items", [])
-#     if not line_items:
-#         line_items = []
-
-#     sum_wo_vat = sum(to_decimal_inner(item.get("subtotal"), 4) for item in line_items)
-#     sum_vat = sum(to_decimal_inner(item.get("vat"), 4) for item in line_items)
-#     sum_with_vat = sum(to_decimal_inner(item.get("total"), 4) for item in line_items)
-
-#     amount_wo_vat = to_decimal_inner(doc_struct.get("amount_wo_vat"), 4)
-#     vat_amount = to_decimal_inner(doc_struct.get("vat_amount"), 4)
-#     amount_with_vat = to_decimal_inner(doc_struct.get("amount_with_vat"), 4)
-
-#     logger.info(
-#         f"[compare_lineitems] SUM_LINE_ITEMS: subtotal={sum_wo_vat}, vat={sum_vat}, total={sum_with_vat}"
-#     )
-#     logger.info(
-#         f"[compare_lineitems] MAIN_TOTALS: amount_wo_vat={amount_wo_vat}, vat_amount={vat_amount}, amount_with_vat={amount_with_vat}"
-#     )
-
-#     result = {
-#         "subtotal_match": abs(sum_wo_vat - amount_wo_vat) < Decimal("0.0500"),
-#         "vat_match": abs(sum_vat - vat_amount) < Decimal("0.0500"),
-#         "total_match": abs(sum_with_vat - amount_with_vat) < Decimal("0.0500"),
-#         "subtotal_diff": (sum_wo_vat - amount_wo_vat).quantize(Decimal("1.0000")),
-#         "vat_diff": (sum_vat - vat_amount).quantize(Decimal("1.0000")),
-#         "total_diff": (sum_with_vat - amount_with_vat).quantize(Decimal("1.0000")),
-#         "line_sum_wo_vat": sum_wo_vat.quantize(Decimal("1.0000")),
-#         "line_sum_vat": sum_vat.quantize(Decimal("1.0000")),
-#         "line_sum_with_vat": sum_with_vat.quantize(Decimal("1.0000")),
-#         "main_wo_vat": amount_wo_vat.quantize(Decimal("1.0000")),
-#         "main_vat": vat_amount.quantize(Decimal("1.0000")),
-#         "main_with_vat": amount_with_vat.quantize(Decimal("1.0000")),
-#     }
-
-#     logger.info(f"[compare_lineitems] RESULT: {result}")
-
-#     return result
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-# import logging
-# logger = logging.getLogger("docscanner_app.amounts")
-# from decimal import Decimal, ROUND_HALF_UP
-
-
-# def validate_and_calculate_main_amounts(data):
-#     """
-#     Проверяет и при необходимости вычисляет суммы для суммарного (sumiskai) документа.
-#     """
-
-#     def to_decimal(x, places=2):
-#         if x is None or x == "" or str(x).lower() == "null":
-#             return None
-#         try:
-#             return Decimal(str(x)).quantize(Decimal("1." + "0" * places), rounding=ROUND_HALF_UP)
-#         except (TypeError, ValueError):
-#             return None
-
-#     def to_float(x):
-#         if x is None or x == "" or str(x).lower() == "null":
-#             return None
-#         try:
-#             return float(x)
-#         except (TypeError, ValueError):
-#             return None
-
-#     logger.info(f"[validate_main] ISKODNYE: {data}")
-
-#     amount_wo_vat = to_float(data.get("amount_wo_vat"))
-#     vat_amount = to_float(data.get("vat_amount"))
-#     vat_percent = to_float(data.get("vat_percent"))
-#     amount_with_vat = to_float(data.get("amount_with_vat"))
-
-#     logger.info(f"[validate_main] DO OBRABOTKI: amount_wo_vat={amount_wo_vat}, vat_amount={vat_amount}, vat_percent={vat_percent}, amount_with_vat={amount_with_vat}")
-
-#     calc_log = []
-
-#     # 1. amount_wo_vat
-#     if amount_wo_vat is None:
-#         if amount_with_vat is not None and vat_percent is not None:
-#             amount_wo_vat = round(amount_with_vat / (1 + vat_percent / 100), 2)
-#             calc_log.append("amount_wo_vat из amount_with_vat и vat_percent")
-#         elif amount_with_vat is not None and vat_amount is not None:
-#             amount_wo_vat = round(amount_with_vat - vat_amount, 2)
-#             calc_log.append("amount_wo_vat из amount_with_vat и vat_amount")
-
-#     # 2. vat_amount
-#     if vat_amount is None:
-#         if amount_wo_vat is not None and vat_percent is not None:
-#             vat_amount = round(amount_wo_vat * vat_percent / 100, 2)
-#             calc_log.append("vat_amount из amount_wo_vat и vat_percent")
-#         elif amount_with_vat is not None and amount_wo_vat is not None:
-#             vat_amount = round(amount_with_vat - amount_wo_vat, 2)
-#             calc_log.append("vat_amount из amount_with_vat и amount_wo_vat")
-
-#     # 3. vat_percent
-#     if vat_percent is None:
-#         if amount_wo_vat and vat_amount is not None and amount_wo_vat != 0:
-#             vat_percent = round(vat_amount / amount_wo_vat * 100, 2)
-#             calc_log.append("vat_percent из vat_amount и amount_wo_vat")
-#         elif amount_wo_vat and amount_with_vat and amount_wo_vat != 0:
-#             vat_percent = round((amount_with_vat / amount_wo_vat - 1) * 100, 2)
-#             calc_log.append("vat_percent из amount_with_vat и amount_wo_vat")
-
-#     # 4. amount_with_vat
-#     if amount_with_vat is None:
-#         if amount_wo_vat is not None and vat_percent is not None:
-#             amount_with_vat = round(amount_wo_vat * (1 + vat_percent / 100), 2)
-#             calc_log.append("amount_with_vat из amount_wo_vat и vat_percent")
-#         elif amount_wo_vat is not None and vat_amount is not None:
-#             amount_with_vat = round(amount_wo_vat + vat_amount, 2)
-#             calc_log.append("amount_with_vat из amount_wo_vat и vat_amount")
-
-#     logger.info(f"[validate_main] POSLE OBRABOTKI: amount_wo_vat={amount_wo_vat}, vat_amount={vat_amount}, vat_percent={vat_percent}, amount_with_vat={amount_with_vat}")
-#     logger.info(f"[validate_main] CALC_LOG: {calc_log}")
-
-#     # Вернуть обратно
-#     data["amount_wo_vat"] = None if amount_wo_vat is None else round(amount_wo_vat, 2)
-#     data["vat_amount"] = None if vat_amount is None else round(vat_amount, 2)
-#     data["vat_percent"] = None if vat_percent is None else round(vat_percent, 2)
-#     data["amount_with_vat"] = None if amount_with_vat is None else round(amount_with_vat, 2)
-#     data["_main_amounts_calc_log"] = calc_log
-
-#     return data
-
-
-
-# def validate_and_calculate_lineitem_amounts(item):
-#     def to_float(x):
-#         if x is None or x == "" or str(x).lower() == "null":
-#             return None
-#         try:
-#             return float(x)
-#         except (TypeError, ValueError):
-#             return None
-
-#     logger.info(f"[validate_line] ISKODNYE: {item}")
-
-#     calc_log = []
-
-#     quantity = to_float(item.get("quantity"))
-#     price = to_float(item.get("price"))
-#     subtotal = to_float(item.get("subtotal"))
-#     vat = to_float(item.get("vat"))
-#     vat_percent = to_float(item.get("vat_percent"))
-#     total = to_float(item.get("total"))
-
-#     # 1. subtotal
-#     if subtotal is None:
-#         if quantity is not None and price is not None:
-#             subtotal = round(quantity * price, 2)
-#             calc_log.append("subtotal из quantity и price")
-#         elif total is not None and vat_percent is not None:
-#             subtotal = round(total / (1 + vat_percent / 100), 2)
-#             calc_log.append("subtotal из total и vat_percent")
-#         elif total is not None and vat is not None:
-#             subtotal = round(total - vat, 2)
-#             calc_log.append("subtotal из total и vat")
-
-#     # 2. vat
-#     if vat is None:
-#         if subtotal is not None and vat_percent is not None:
-#             vat = round(subtotal * vat_percent / 100, 2)
-#             calc_log.append("vat из subtotal и vat_percent")
-#         elif total is not None and subtotal is not None:
-#             vat = round(total - subtotal, 2)
-#             calc_log.append("vat из total и subtotal")
-
-#     # 3. vat_percent
-#     if vat_percent is None:
-#         if vat is not None and subtotal and subtotal != 0:
-#             vat_percent = round(vat / subtotal * 100, 2)
-#             calc_log.append("vat_percent из vat и subtotal")
-#         elif total is not None and subtotal and subtotal != 0:
-#             vat_percent = round((total / subtotal - 1) * 100, 2)
-#             calc_log.append("vat_percent из total и subtotal")
-
-#     # 4. total
-#     if total is None:
-#         if subtotal is not None and vat_percent is not None:
-#             total = round(subtotal * (1 + vat_percent / 100), 2)
-#             calc_log.append("total из subtotal и vat_percent")
-#         elif subtotal is not None and vat is not None:
-#             total = round(subtotal + vat, 2)
-#             calc_log.append("total из subtotal и vat")
-
-#     # 5. price
-#     if price is None:
-#         if subtotal is not None and quantity and quantity != 0:
-#             price = round(subtotal / quantity, 4)
-#             calc_log.append("price из subtotal и quantity")
-#         elif total is not None and quantity and quantity != 0 and vat_percent is not None:
-#             price = round((total / (1 + vat_percent / 100)) / quantity, 4)
-#             calc_log.append("price из total, vat_percent, quantity")
-
-#     # 6. quantity
-#     if quantity is None:
-#         if subtotal is not None and price and price != 0:
-#             quantity = round(subtotal / price, 2)
-#             calc_log.append("quantity из subtotal и price")
-#         elif total is not None and price and price != 0 and vat_percent is not None:
-#             quantity = round((total / (1 + vat_percent / 100)) / price, 2)
-#             calc_log.append("quantity из total, vat_percent, price")
-
-#     # 7. quantity и price по умолчанию, если остались пустыми
-#     if quantity is None:
-#         quantity = 1
-#         calc_log.append("quantity по умолчанию 1")
-
-#     if price is None and subtotal is not None:
-#         price = subtotal
-#         calc_log.append("price по умолчанию = subtotal")
-        
-
-#     logger.info(f"[validate_line] POSLE OBRABOTKI: quantity={quantity}, price={price}, subtotal={subtotal}, vat={vat}, vat_percent={vat_percent}, total={total}")
-#     logger.info(f"[validate_line] CALC_LOG: {calc_log}")
-
-#     # Собираем результат обратно (или None, если не удалось вычислить)
-#     item["quantity"] = None if quantity is None else round(quantity, 2)
-#     item["price"] = None if price is None else round(price, 4)
-#     item["subtotal"] = None if subtotal is None else round(subtotal, 2)
-#     item["vat"] = None if vat is None else round(vat, 2)
-#     item["vat_percent"] = None if vat_percent is None else round(vat_percent, 2)
-#     item["total"] = None if total is None else round(total, 2)
-#     item["_lineitem_calc_log"] = calc_log
-#     return item
-
-
-# def compare_lineitems_with_main_totals(doc_struct):
-#     """
-#     Проверяет, совпадают ли суммы по line_items с основными суммами документа.
-#     Возвращает dict с флагами совпадения и разницей по каждому полю.
-#     """
-#     def to_float(x):
-#         if x is None or x == "" or str(x).lower() == "null":
-#             return 0.0
-#         try:
-#             return float(x)
-#         except (TypeError, ValueError):
-#             return 0.0
-
-#     line_items = doc_struct.get("line_items", [])
-
-#     sum_wo_vat = sum(to_float(item.get("subtotal")) for item in line_items)
-#     sum_vat = sum(to_float(item.get("vat")) for item in line_items)
-#     sum_with_vat = sum(to_float(item.get("total")) for item in line_items)
-
-#     amount_wo_vat = to_float(doc_struct.get("amount_wo_vat"))
-#     vat_amount = to_float(doc_struct.get("vat_amount"))
-#     amount_with_vat = to_float(doc_struct.get("amount_with_vat"))
-
-#     logger.info(f"[compare_lineitems] SUM_LINE_ITEMS: subtotal={sum_wo_vat}, vat={sum_vat}, total={sum_with_vat}")
-#     logger.info(f"[compare_lineitems] MAIN_TOTALS: amount_wo_vat={amount_wo_vat}, vat_amount={vat_amount}, amount_with_vat={amount_with_vat}")
-
-#     result = {
-#         "subtotal_match": abs(sum_wo_vat - amount_wo_vat) < 0.05,
-#         "vat_match": abs(sum_vat - vat_amount) < 0.05,
-#         "total_match": abs(sum_with_vat - amount_with_vat) < 0.05,
-#         "subtotal_diff": round(sum_wo_vat - amount_wo_vat, 2),
-#         "vat_diff": round(sum_vat - vat_amount, 2),
-#         "total_diff": round(sum_with_vat - amount_with_vat, 2),
-#         "line_sum_wo_vat": round(sum_wo_vat, 2),
-#         "line_sum_vat": round(sum_vat, 2),
-#         "line_sum_with_vat": round(sum_with_vat, 2),
-#         "main_wo_vat": round(amount_wo_vat, 2),
-#         "main_vat": round(vat_amount, 2),
-#         "main_with_vat": round(amount_with_vat, 2),
-#     }
-
-#     logger.info(f"[compare_lineitems] RESULT: {result}")
-
-#     return result
-
-
-
-
+#             sub = Decimal(str(it.get("subtotal") or "0"))
+#             if sub <= 0:
+#                 # Если subtotal пуст, попробуем восстановить из price*qty-discount
+#                 q  = Decimal(str(it.get("quantity") or "0"))
+#                 p  = Decimal(str(it.get("price") or "0"))
+#                 dsc = Decimal(str(it.get("discount_wo_vat") or "0"))
+#                 if q > 0 and p > 0:
+#                     sub = (q*p - dsc)
+#             sub = _q4(sub)
+
+#             v   = Decimal(str(it.get("vat") or "0"))
+#             vp  = Decimal(str(it.get("vat_percent") or "0"))
+
+#             # Прописываем только если у строки реально нет НДС
+#             if v == 0 and vp == 0 and sub > 0:
+#                 vp = _q2(doc_vat_pct)
+#                 v  = _q4(sub * vp / Decimal("100"))
+
+#                 it["vat_percent"] = vp
+#                 it["vat"] = v
+
+#                 # total = subtotal + vat (если total не задан или 0)
+#                 tot = Decimal(str(it.get("total") or "0"))
+#                 if tot == 0:
+#                     it["total"] = _q4(sub + v)
+
+#                 last_idx = idx  # запомним последнюю изменённую строку
+#                 sum_vat += v
+#             else:
+#                 # если у строки уже был НДС — учитываем в сумме для выравнивания
+#                 sum_vat += _q4(v)
+
+#         except Exception:
+#             # Не валим весь документ из-за одной строки
+#             continue
+
+#     # Если после проставления строковый VAT чуть не сходится с doc.vat_amount — выровняем по последней строке
+#     try:
+#         diff = _q4(doc_vat_amt - sum_vat)
+#         if last_idx is not None and abs(diff) > tol:
+#             li = items[last_idx]
+#             current_v = _q4(Decimal(str(li.get("vat") or "0")))
+#             new_v = current_v + diff
+#             if new_v < Decimal("0.0000"):
+#                 # защитимся — не делаем отрицательный VAT на строке; если так вышло, просто пропустим выравнивание
+#                 logger.info(f"[distribute_vat] skip negative adjust: current={current_v}, diff={diff}")
+#             else:
+#                 li["vat"] = _q4(new_v)
+#                 # поправим total, если он есть
+#                 sub = _q4(Decimal(str(li.get("subtotal") or "0")))
+#                 li["total"] = _q4(sub + li["vat"])
+#                 logger.info(f"[distribute_vat] adjusted last line vat by {diff} to match doc.vat_amount")
+#     except Exception:
+#         pass
+
+#     return doc_struct

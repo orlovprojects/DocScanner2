@@ -14,6 +14,7 @@ import AtlyginimoSkaiciuokle2026 from './pages/AtlyginimoSkaiciuokle2026';
 import AdminDashboard from "./pages/AdminDashboard";
 import AdminSuvestine from "./pages/AdminSuvestine";
 import AdminVisiFailai from "./pages/AdminVisiFailai";
+import AdminKlientai from "./pages/AdminKlientai";
 
 import NaudojimoGidas from './pages/NaudojimoGidas';
 import GidoCategories from './pages/GidoCategories';
@@ -127,6 +128,7 @@ function App() {
         <Route path="/admin-dashboard" element={<RequireSuperuser loginPath="/login" forbiddenPath="/403"><AdminDashboard /></RequireSuperuser>} />
         <Route path="/admin-visi-failai" element={<RequireSuperuser loginPath="/login" forbiddenPath="/403"><AdminVisiFailai /></RequireSuperuser>} />
         <Route path="/admin-suvestine" element={<RequireSuperuser loginPath="/login" forbiddenPath="/403"><AdminSuvestine /></RequireSuperuser>} />
+        <Route path="/admin-klientai" element={<RequireSuperuser loginPath="/login" forbiddenPath="/403"><AdminKlientai /></RequireSuperuser>} />
       </Routes>
       <Footer />
     </AuthProvider>

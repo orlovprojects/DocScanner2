@@ -48,6 +48,9 @@ from .exports.rivile_erp import (
     export_prekes_and_paslaugos_to_rivile_erp_xlsx,
     export_documents_to_rivile_erp_xlsx,
 )
+from .validators.required_fields_checker import check_required_fields_for_export
+from .validators.math_validator_for_export import validate_document_math_for_export
+
 from .models import (
     CustomUser,
     ScannedDocument,
@@ -65,6 +68,7 @@ from .serializers import (
     ScannedDocumentAdminDetailSerializer,
     AdClickSerializer,
     LineItemSerializer,
+    CustomUserAdminListSerializer,
 )
 from django.db.models import Prefetch
 
@@ -1340,7 +1344,8 @@ def update_scanned_document_extra_fields(request, pk):
     from .serializers import ScannedDocumentSerializer
     from .utils.pirkimas_pardavimas import determine_pirkimas_pardavimas
     from .validators.vat_klas import auto_select_pvm_code
-    from .utils.save_document import _apply_sumiskai_defaults_from_user  # обновлённая версия
+    from .utils.save_document import _apply_sumiskai_defaults_from_user
+    from .validators.required_fields_checker import check_required_fields_for_export  # ДОБАВИТЬ
 
     log = logging.getLogger("docscanner_app.api.update_extra_fields")
 
@@ -1357,15 +1362,25 @@ def update_scanned_document_extra_fields(request, pk):
     ]
 
     # helpers
+    # def _is_cleared(prefix: str) -> bool:
+    #     keys = [
+    #         f"{prefix}_name", f"{prefix}_id", f"{prefix}_vat_code",
+    #         f"{prefix}_iban", f"{prefix}_address", f"{prefix}_country_iso",
+    #     ]
+    #     touched = any(k in request.data for k in keys)
+    #     if not touched:
+    #         return False
+    #     return all(not str(request.data.get(k) or "").strip() for k in keys)
+
     def _is_cleared(prefix: str) -> bool:
         keys = [
             f"{prefix}_name", f"{prefix}_id", f"{prefix}_vat_code",
             f"{prefix}_iban", f"{prefix}_address", f"{prefix}_country_iso",
         ]
-        touched = any(k in request.data for k in keys)
-        if not touched:
+        provided = [k for k in keys if k in request.data]  # только реально присланные
+        if not provided:
             return False
-        return all(not str(request.data.get(k) or "").strip() for k in keys)
+        return all(not str(request.data.get(k) or "").strip() for k in provided)
 
     def _to_bool_allow(x):
         if x is None: return None
@@ -1460,6 +1475,17 @@ def update_scanned_document_extra_fields(request, pk):
                 log.info("pk=%s: cleared LineItem.pvm_kodas for %d items", pk, cleared)
 
             doc.save(update_fields=update_fields_now)
+            
+            # ============ ДОБАВИТЬ ВАЛИДАЦИЮ ПЕРЕД РАННИМ ВОЗВРАТОМ ============
+            try:
+                is_valid = check_required_fields_for_export(doc)
+                doc.ready_for_export = is_valid
+                doc.save(update_fields=['ready_for_export'])
+                log.info("pk=%s: validated after clear, ready_for_export=%s", pk, is_valid)
+            except Exception as e:
+                log.error("pk=%s: validation error after clear: %s", pk, str(e))
+            # ====================================================================
+            
             log.info("pk=%s: PVM cleared due to party clear, early return", pk)
             return Response(ScannedDocumentSerializer(doc).data)
 
@@ -1560,6 +1586,23 @@ def update_scanned_document_extra_fields(request, pk):
 
         doc.save(update_fields=list(update_set))
         log.info("pk=%s: saved fields=%s", pk, sorted(update_set))
+
+    # ============ ДОБАВИТЬ ВАЛИДАЦИЮ В КОНЦЕ ============
+    try:
+        # Проверяем изменились ли поля buyer/seller
+        buyer_seller_changed = any(
+            k.startswith(('buyer_', 'seller_')) 
+            for k in request.data.keys()
+        )
+        
+        if buyer_seller_changed:
+            is_valid = check_required_fields_for_export(doc)
+            doc.ready_for_export = is_valid
+            doc.save(update_fields=['ready_for_export'])
+            log.info("pk=%s: validated after update, ready_for_export=%s", pk, is_valid)
+    except Exception as e:
+        log.error("pk=%s: validation error: %s", pk, str(e))
+    # =====================================================
 
     return Response(ScannedDocumentSerializer(doc).data)
 
@@ -2111,76 +2154,95 @@ def subscription_status(request):
 #1) dlia admin-suvestine
 
 
-def _ensure_dict(maybe_json):
-    """Возвращает dict из объекта: если str — парсит JSON, иначе {} при ошибке."""
-    if not maybe_json:
+def _ensure_dict(x):
+    if x is None:
         return {}
-    if isinstance(maybe_json, dict):
-        return maybe_json
-    if isinstance(maybe_json, str):
+    if isinstance(x, dict):
+        return x
+    if isinstance(x, str):
         try:
-            return json.loads(maybe_json)
+            return json.loads(x)
         except Exception:
             return {}
-    # иногда приходит Decimal/None/списки — нам нужен именно dict
     return {}
 
 def summarize_doc_issues(doc_struct):
-    """Определяем, есть ли ошибки в документе (по логам и флагам)."""
-    doc_struct = _ensure_dict(doc_struct)
+    """
+    Возвращает только 'error' на основании жестких критериев:
+      - _check_minimum_anchors_ok == False
+      - _doc_amounts_consistent == False
+      - ar_sutapo == False И (любой из _lines_sum_matches_wo/with/vat == False)
+      - 'красные' hints (DOC-LINES-NOT-MATCHING-*, LI-PRICE-MISMATCH, LI-ZERO-VAT-DISCOUNTS-MISMATCH)
+      - в логах есть строки, начинающиеся на '❗'
+    """
+    doc = _ensure_dict(doc_struct)
 
-    logs = doc_struct.get("_global_validation_log") or []
-    # защита: если логи пришли строкой — обернём в список
+    # --- логи / хинты ---
+    logs = doc.get("_global_validation_log") or []
     if isinstance(logs, str):
         logs = [logs]
+    hints = doc.get("_lines_structured_hints") or []
+    if isinstance(hints, str):
+        hints = [hints]
 
-    replaced = sum(bool(doc_struct.get(k)) for k in [
-        "_total_replaced","_vat_replaced","_subtotal_replaced"
-    ])
-    dedup = sum(bool(doc_struct.get(k)) for k in [
-        "_dedup_invoice_discount_with_vat","_dedup_invoice_discount_wo_vat"
-    ])
-    reconciled = bool(doc_struct.get("_doc_totals_replaced_by_lineitems"))
+    bang = [s for s in logs if isinstance(s, str) and s.strip().startswith("❗")]
+    red_hints = [h for h in hints if (
+        isinstance(h, str) and (
+            h.startswith("DOC-LINES-NOT-MATCHING-")
+            or "LI-PRICE-MISMATCH" in h
+            or "LI-ZERO-VAT-DISCOUNTS-MISMATCH" in h
+        )
+    )]
 
+    # --- флаги согласованности ---
+    min_ok        = bool(doc.get("_check_minimum_anchors_ok", True))
+    doc_consistent= bool(doc.get("_doc_amounts_consistent", True))
+    ar_sutapo     = bool(doc.get("ar_sutapo", True))
+
+    match_wo   = doc.get("_lines_sum_matches_wo")
+    match_with = doc.get("_lines_sum_matches_with")
+    match_vat  = doc.get("_lines_sum_matches_vat")
+
+    separate_vat = bool(doc.get("separate_vat"))
+    vat_failed = (match_vat is False) if not separate_vat else False
+
+    lines_failed = (match_wo is False) or (match_with is False) or vat_failed
+    lines_block  = (not ar_sutapo) and lines_failed
+
+    # --- error-условия ---
+    errors = []
+    if not min_ok:
+        errors.append("min-anchors")
+    if not doc_consistent:
+        errors.append("doc-core")
+    if lines_block:
+        errors.append("lines-vs-doc")
+    if red_hints:
+        errors.append("hints")
+    if bang:
+        errors.append("bang")
+
+    has_error = bool(errors)
+
+    # --- оформление результата ---
     badges = []
-    if reconciled: badges.append("Σ→doc")
-    if doc_struct.get("_total_replaced"):   badges.append("TOTAL↑")
-    if doc_struct.get("_vat_replaced"):     badges.append("VAT↑")
-    if doc_struct.get("_subtotal_replaced"):badges.append("SUB↑")
-    if doc_struct.get("_dedup_invoice_discount_with_vat"): badges.append("disc(w)↓")
-    if doc_struct.get("_dedup_invoice_discount_wo_vat"):  badges.append("disc(nw)↓")
+    if not min_ok:        badges.append("min⊄")
+    if not doc_consistent:badges.append("core✗")
+    if lines_block:       badges.append("Σ(lines)≠doc")
+    if red_hints:         badges.append("hint!")
+    if bang:              badges.append(f"❗×{len(bang)}")
 
-    # line_items может быть чем угодно — нормализуем в список
-    line_items = doc_struct.get("line_items") or []
-    if isinstance(line_items, str):
-        try:
-            line_items = json.loads(line_items)
-        except Exception:
-            line_items = []
-    if not isinstance(line_items, list):
-        line_items = []
+    # краткая сводка: приоритет — красный хинт → '❗' → бейджи
+    summary = (red_hints[0] if red_hints else (bang[0] if bang else " ".join(badges)))[:300]
 
-    line_logs = 0
-    for it in line_items:
-        if not isinstance(it, dict):
-            continue
-        log = it.get("_lineitem_calc_log") or []
-        if isinstance(log, str):
-            log = [log]
-        if any(("ЗАМЕНЯЕМ" in s) or ("из " in s) for s in log):
-            line_logs += 1
-    if line_logs:
-        badges.append(f"LI×{line_logs}")
-
-    bang_lines = [s for s in logs if isinstance(s, str) and s.strip().startswith("❗")]
-    first_bang = bang_lines[0] if bang_lines else None
-
-    issue_count = len(bang_lines) + replaced + dedup + (1 if reconciled else 0)
+    issue_count = int(len(red_hints) + len(bang)
+                      + (not min_ok) + (not doc_consistent) + (1 if lines_block else 0))
 
     return {
-        "has_issues": bool(first_bang or reconciled or replaced or dedup),
+        "has_issues": has_error,
+        "severity": "error" if has_error else "ok",
         "issue_badges": " ".join(badges),
-        "issue_summary": (first_bang or " ".join(badges) or "")[:300],
+        "issue_summary": summary,
         "issue_count": issue_count,
     }
 
@@ -2310,6 +2372,21 @@ def admin_all_documents(request):
     return paginator.get_paginated_response(data)
 
 
+#3) Dlia users
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def admin_users_simple(request):
+    """
+    Для superuser — список всех пользователей (CustomUser).
+    Без подписочных полей, без фильтров, без пагинации.
+    """
+    if not request.user.is_superuser:
+        return Response({"detail": "Not authorized"}, status=status.HTTP_403_FORBIDDEN)
+
+    qs = CustomUser.objects.all().order_by("-date_joined")
+    ser = CustomUserAdminListSerializer(qs, many=True, context={'request': request})
+    return Response(ser.data)
+
 
 
 #Wagtail blog
@@ -2401,6 +2478,22 @@ ALLOWED_LINE_FIELDS = {
     "unit","quantity","price","subtotal","vat","vat_percent","total",
 }
 
+REQUIRED_FIELDS = {
+    'invoice_date', 'document_number', 'amount_wo_vat', 'vat_amount', 
+    'amount_with_vat', 'currency', 'seller_name', 'seller_vat_code', 
+    'buyer_name', 'buyer_vat_code', 'seller_id', 'buyer_id'
+}
+
+MATH_FIELDS = {
+    'amount_wo_vat', 'vat_amount', 'amount_with_vat', 'vat_percent',
+    'invoice_discount_wo_vat', 'invoice_discount_with_vat'
+}
+
+LINE_MATH_FIELDS = {
+    'quantity', 'price', 'subtotal', 'vat', 'vat_percent', 'total',
+    'discount_wo_vat', 'discount_with_vat'
+}
+
 
 class InlineDocUpdateView(APIView):
     permission_classes = [IsOwner]
@@ -2413,18 +2506,42 @@ class InlineDocUpdateView(APIView):
         if field not in ALLOWED_DOC_FIELDS:
             return Response({"detail": "Field not allowed"}, status=400)
 
-        # null/пустые значения
         if value in ("", None):
             value = None
 
         setattr(doc, field, value)
-        doc.save(update_fields=[field])  # ✅ убрали updated_at
+        doc.save(update_fields=[field])
 
-        return Response({
+        # Валидация
+        response_data = {
             "ok": True,
             "id": doc.id,
             field: getattr(doc, field),
-        })
+        }
+        
+        try:
+            if field in REQUIRED_FIELDS:
+                is_valid = check_required_fields_for_export(doc)
+                doc.ready_for_export = is_valid
+                response_data['ready_for_export'] = is_valid
+            
+            if field in MATH_FIELDS:
+                is_valid, _ = validate_document_math_for_export(doc)
+                doc.math_validation_passed = is_valid
+                response_data['math_validation_passed'] = is_valid
+            
+            if field in REQUIRED_FIELDS or field in MATH_FIELDS:
+                update_fields = []
+                if field in REQUIRED_FIELDS:
+                    update_fields.append('ready_for_export')
+                if field in MATH_FIELDS:
+                    update_fields.append('math_validation_passed')
+                if update_fields:
+                    doc.save(update_fields=update_fields)
+        except Exception as e:
+            logger.error(f"Validation error: {str(e)}")
+        
+        return Response(response_data)
 
 
 class InlineLineUpdateView(APIView):
@@ -2444,13 +2561,25 @@ class InlineLineUpdateView(APIView):
             value = None
 
         setattr(line, field, value)
-        line.save(update_fields=[field])  # ✅ убрали updated_at
+        line.save(update_fields=[field])
 
-        return Response({
+        # Валидация
+        response_data = {
             "ok": True,
             "id": line.id,
             field: getattr(line, field),
-        })
+        }
+        
+        try:
+            if field in LINE_MATH_FIELDS:
+                is_valid, _ = validate_document_math_for_export(doc)
+                doc.math_validation_passed = is_valid
+                doc.save(update_fields=['math_validation_passed'])
+                response_data['math_validation_passed'] = is_valid
+        except Exception as e:
+            logger.error(f"Validation error: {str(e)}")
+        
+        return Response(response_data)
 
 
 # Add / delete lineitem in Preview

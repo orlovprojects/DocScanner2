@@ -108,6 +108,7 @@ const Header = () => {
         ...(isSuper ? [
           { text: "Klaidų suvestinė", onClick: () => nav("/admin-suvestine") },
           { text: "Visi failai", onClick: () => nav("/admin-visi-failai") },
+          { text: "Klientai", onClick: () => nav("/admin-klientai") },
           { text: "Analytics", onClick: () => nav("/admin-dashboard") },
         ] : []),
       ]
@@ -262,6 +263,9 @@ const Header = () => {
             <MenuItem onClick={() => { handleClose(); nav("/admin-visi-failai"); }}>
               Visi failai
             </MenuItem>
+            <MenuItem onClick={() => { handleClose(); nav("/admin-klientai"); }}>
+              Klientai
+            </MenuItem>
             <MenuItem onClick={() => { handleClose(); nav("/admin-dashboard"); }}>
               Analytics
             </MenuItem>
@@ -377,6 +381,15 @@ const Header = () => {
                       }}
                     >
                       <ListItemText primary="Visi failai" />
+                    </ListItem>
+                    <ListItem
+                      button
+                      onClick={() => {
+                        setIsDrawerOpen(false);
+                        nav("/admin-klientai");
+                      }}
+                    >
+                      <ListItemText primary="Klientai" />
                     </ListItem>
                     <ListItem
                       button

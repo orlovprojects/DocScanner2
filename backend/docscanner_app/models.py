@@ -195,6 +195,8 @@ class ScannedDocument(models.Model):
     val_subtotal_match = models.BooleanField(null=True, blank=True)
     val_vat_match = models.BooleanField(null=True, blank=True)
     val_total_match = models.BooleanField(null=True, blank=True)
+    ready_for_export = models.BooleanField(null=True, blank=True, default=None)
+    math_validation_passed = models.BooleanField(null=True, blank=True, default=None)
 
     class Meta:
         indexes = [

@@ -190,6 +190,8 @@ class ScannedDocumentListSerializer(serializers.ModelSerializer):
             'val_total_match',
             'pirkimas_pardavimas',
             'scan_type',
+            'ready_for_export',
+            'math_validation_passed',
             # ...и т.п., без тяжелых полей и line_items
         ]
 
@@ -237,7 +239,7 @@ class ScannedDocumentAdminDetailSerializer(serializers.ModelSerializer):
         fields = "__all__"
         extra_kwargs = {
             "file": {"write_only": True},
-            "gpt_raw_json": {"write_only": True},
+            # "gpt_raw_json": {"write_only": True},
             "raw_text": {"write_only": True},
             # ВАЖНО: НЕ помечаем как write_only, чтобы суперюзер их видел:
             # "structured_json": {"write_only": True},   # ← не ставим
@@ -622,7 +624,27 @@ class CustomUserSerializer(serializers.ModelSerializer):
         instance.sales_defaults = cur_sd
         instance.save()
         return instance
-    
+
+
+
+class CustomUserAdminListSerializer(CustomUserSerializer):
+    """
+    Упрощённый сериалайзер для страницы суперюзера:
+    без подписочных и Stripe-полей, без password.
+    """
+    class Meta(CustomUserSerializer.Meta):
+        model = CustomUser
+        fields = [
+            'id','email','first_name','last_name',
+            'is_active','is_staff','is_superuser',
+            'date_joined','last_login',
+            'credits','default_accounting_program',
+            'company_name','company_code','vat_code',
+            'company_iban','company_address','company_country_iso',
+            'purchase_defaults','sales_defaults','view_mode',
+            'extra_settings',
+        ]
+        read_only_fields = getattr(CustomUserSerializer.Meta, 'read_only_fields', ('credits',))
 
 
 
