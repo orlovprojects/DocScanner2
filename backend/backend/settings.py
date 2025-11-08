@@ -36,7 +36,12 @@ DATA_UPLOAD_MAX_MEMORY_SIZE = 200 * 1024 * 1024  # 200 MB
 # Poppler (оставь пустым, если на сервере не нужен или путь другой)
 POPPLER_PATH = os.getenv("POPPLER_PATH", "")
 
-LIBREOFFICE_PATH = os.environ.get("LIBREOFFICE_PATH")
+LIBREOFFICE_PATH = os.getenv('LIBREOFFICE_PATH', "")
+
+RARFILE_UNRAR_TOOL = os.getenv('RARFILE_UNRAR_TOOL', None)
+if RARFILE_UNRAR_TOOL:
+    import rarfile
+    rarfile.UNRAR_TOOL = RARFILE_UNRAR_TOOL
 
 # Приложения
 INSTALLED_APPS = [
