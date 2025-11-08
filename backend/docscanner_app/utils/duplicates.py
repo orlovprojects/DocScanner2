@@ -80,15 +80,21 @@ def is_duplicate_by_series_number(
     buyer_name: str | None = None,
     seller_name: str | None = None,
     buyer_vat_code: str | None = None,
-    seller_vat_code: str | None = None
+    seller_vat_code: str | None = None,
+    check_parties: bool = True  # ← НОВЫЙ параметр
 ) -> bool:
     """
     Дубликат, если:
-    1. Совпадают серия/номер (по той же логике, что и раньше)
-    2. И совпадает хотя бы одна пара buyer/seller (не пустая)
+    1. Совпадают серия/номер (по канонизированным значениям)
+    2. Если check_parties=True: И совпадает хотя бы одна пара buyer/seller (не пустая)
+    3. Если check_parties=False: Проверяем только серию/номер без контрагентов
     
     Сравнение ведётся по канонизированным/нормализованным значениям.
     Документы со статусом 'rejected' не считаются источником дублей.
+    
+    Параметры:
+    - check_parties: если False, проверяется только серия/номер (для ранней проверки)
+                     если True, дополнительно проверяются контрагенты (полная проверка)
     """
     from ..models import ScannedDocument
     
@@ -102,7 +108,25 @@ def is_duplicate_by_series_number(
     if exclude_doc_id:
         qs = qs.exclude(pk=exclude_doc_id)
     
-    # Загружаем все нужные поля
+    # Если проверка контрагентов отключена, проверяем только серию/номер
+    if not check_parties:
+        for row in qs.values_list('document_number', 'document_series'):
+            db_num, db_ser = row
+            
+            db_num_can = _canon(db_num)
+            db_ser_can = _canon(db_ser)
+            
+            if db_num_can != in_num:
+                continue
+            
+            if in_ser and db_ser_can != in_ser:
+                continue
+                
+            return True  # Найден дубликат только по серии/номеру
+        
+        return False
+    
+    # Полная проверка с контрагентами
     fields = [
         'document_number', 'document_series',
         'buyer_id', 'seller_id',
@@ -120,9 +144,8 @@ def is_duplicate_by_series_number(
         if db_num_can != in_num:
             continue
         
-        if in_ser:
-            if db_ser_can != in_ser:
-                continue
+        if in_ser and db_ser_can != in_ser:
+            continue
         
         # Серия/номер совпали, теперь проверяем buyer/seller
         if _check_party_match(

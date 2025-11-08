@@ -606,12 +606,24 @@ def process_uploaded_file_task(self, user_id, doc_id, scan_type):
                 data = _extract_json_object(resp or "")
                 series_ex = normalize_code_field((data.get("document_series") or "")) or None
                 number_ex = normalize_code_field((data.get("document_number") or "")) or None
+                
+                logger.info(f"[DUP-CHECK] Extracted: series={repr(series_ex)}, number={repr(number_ex)}")
 
                 if not series_ex and not number_ex:
                     logger.info("[DUP-CHECK] gemini-lite returned empty → skip duplicate check")
                 else:
                     t1 = _t()
-                    if is_duplicate_by_series_number(user, number_ex, series_ex, exclude_doc_id=doc.pk):
+                    # Проверяем только серию/номер без контрагентов (они еще не распознаны)
+                    is_dup = is_duplicate_by_series_number(
+                        user, 
+                        number_ex, 
+                        series_ex, 
+                        exclude_doc_id=doc.pk,
+                        check_parties=False  # ← КЛЮЧЕВОЕ ИЗМЕНЕНИЕ
+                    )
+                    logger.info(f"[DUP-CHECK] is_duplicate_by_series_number(check_parties=False) returned: {is_dup}")
+                    
+                    if is_dup:
                         doc.status = 'rejected'
                         doc.error_message = ("Dublikatas: dokumentas su tokia serija ir numeriu jau buvo įkeltas"
                                             if series_ex else
