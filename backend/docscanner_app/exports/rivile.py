@@ -501,7 +501,6 @@ def export_pirkimai_group_to_rivile(documents, user):
         ET.SubElement(i06, "I06_KODAS_KS").text = smart_str(seller_code)
         logger.info("[RIVILE:I06] doc=%s dir=pirkimas KODAS_KS=%r DOK_NR=%r CUR=%s",
                     getattr(doc, "pk", None), seller_code, dok_num, currency)
-        
 
         ET.SubElement(i06, "I06_DOK_REG").text    = dok_num
         code_isaf = _pick_isaf_for_purchase(doc)
@@ -525,19 +524,22 @@ def export_pirkimai_group_to_rivile(documents, user):
                 ET.SubElement(i07, "I07_TIPAS").text = tipas
 
                 if currency.upper() == "EUR":
-                    ET.SubElement(i07, "I07_KAINA_BE").text  = get_price_or_zero(getattr(item, "price", None))
-                    ET.SubElement(i07, "I07_PVM").text       = get_price_or_zero(getattr(item, "vat", None))
-                    ET.SubElement(i07, "I07_SUMA").text      = get_price_or_zero(getattr(item, "subtotal", None))
+                    ET.SubElement(i07, "I07_KAINA_BE").text = get_price_or_zero(getattr(item, "price", None))
+                    if discount_pct is None:
+                        ET.SubElement(i07, "I07_PVM").text  = get_price_or_zero(getattr(item, "vat", None))
+                        ET.SubElement(i07, "I07_SUMA").text = get_price_or_zero(getattr(item, "subtotal", None))
                 else:
                     ET.SubElement(i07, "I07_VAL_KAINA").text = get_price_or_zero(getattr(item, "price", None))
-                    ET.SubElement(i07, "I07_PVM_VAL").text   = get_price_or_zero(getattr(item, "vat", None))
-                    ET.SubElement(i07, "I07_SUMA_VAL").text  = get_price_or_zero(getattr(item, "subtotal", None))
+                    if discount_pct is None:
+                        ET.SubElement(i07, "I07_PVM_VAL").text  = get_price_or_zero(getattr(item, "vat", None))
+                        ET.SubElement(i07, "I07_SUMA_VAL").text = get_price_or_zero(getattr(item, "subtotal", None))
 
                 if discount_pct is not None:
                     ET.SubElement(i07, "I07_NUOLAIDA").text = f"{discount_pct:.2f}"
+
                 ET.SubElement(i07, "I07_MOKESTIS").text   = "1"
                 ET.SubElement(i07, "I07_MOKESTIS_P").text = vat_to_int_str(getattr(item, "vat_percent", None))
-                # ET.SubElement(i07, "T_KIEKIS").text       = str(getattr(item, "quantity", None) or "1")
+
                 qty_scaled = _scale_qty(getattr(item, "quantity", None), frac) if use_frac else str(getattr(item, "quantity", None) or "1")
                 ET.SubElement(i07, "T_KIEKIS").text = qty_scaled
                 if use_frac:
@@ -558,17 +560,22 @@ def export_pirkimai_group_to_rivile(documents, user):
             ET.SubElement(i07, "I07_TIPAS").text = normalize_preke_paslauga_tipas(getattr(doc, "preke_paslauga", None))
 
             if currency.upper() == "EUR":
-                ET.SubElement(i07, "I07_KAINA_BE").text  = get_price_or_zero(getattr(doc, "amount_wo_vat", None))
-                ET.SubElement(i07, "I07_PVM").text       = get_price_or_zero(getattr(doc, "vat_amount", None))
-                ET.SubElement(i07, "I07_SUMA").text      = get_price_or_zero(getattr(doc, "amount_wo_vat", None))
+                ET.SubElement(i07, "I07_KAINA_BE").text = get_price_or_zero(getattr(doc, "amount_wo_vat", None))
+                if discount_pct is None:
+                    ET.SubElement(i07, "I07_PVM").text  = get_price_or_zero(getattr(doc, "vat_amount", None))
+                    ET.SubElement(i07, "I07_SUMA").text = get_price_or_zero(getattr(doc, "amount_wo_vat", None))
             else:
                 ET.SubElement(i07, "I07_VAL_KAINA").text = get_price_or_zero(getattr(doc, "amount_wo_vat", None))
-                ET.SubElement(i07, "I07_PVM_VAL").text   = get_price_or_zero(getattr(doc, "vat_amount", None))
-                ET.SubElement(i07, "I07_SUMA_VAL").text  = get_price_or_zero(getattr(doc, "amount_wo_vat", None))
+                if discount_pct is None:
+                    ET.SubElement(i07, "I07_PVM_VAL").text  = get_price_or_zero(getattr(doc, "vat_amount", None))
+                    ET.SubElement(i07, "I07_SUMA_VAL").text = get_price_or_zero(getattr(doc, "amount_wo_vat", None))
+
+            if discount_pct is not None:
+                ET.SubElement(i07, "I07_NUOLAIDA").text = f"{discount_pct:.2f}"
 
             ET.SubElement(i07, "I07_MOKESTIS").text   = "1"
             ET.SubElement(i07, "I07_MOKESTIS_P").text = vat_to_int_str(getattr(doc, "vat_percent", None))
-            # ET.SubElement(i07, "T_KIEKIS").text       = "1"
+
             qty_scaled = _scale_qty(1, frac) if use_frac else "1"
             ET.SubElement(i07, "T_KIEKIS").text = qty_scaled
             if use_frac:
@@ -579,10 +586,6 @@ def export_pirkimai_group_to_rivile(documents, user):
         logger.info("[RIVILE:I07] doc=%s lines=%d", getattr(doc, "pk", None), added)
         elements.append(i06)
 
-    # xml = b""
-    # for el in elements:
-    #     xml += prettify_ansi(el) + b"\n"
-    # return expand_empty_tags(xml)
     xml = join_records_utf8(elements) if elements else b""
     return expand_empty_tags(xml)
 
@@ -649,20 +652,22 @@ def export_pardavimai_group_to_rivile(documents, user):
                 ET.SubElement(i07, "I07_TIPAS").text = tipas
 
                 if currency.upper() == "EUR":
-                    ET.SubElement(i07, "I07_KAINA_BE").text  = get_price_or_zero(getattr(item, "price", None))
-                    ET.SubElement(i07, "I07_PVM").text       = get_price_or_zero(getattr(item, "vat", None))
-                    ET.SubElement(i07, "I07_SUMA").text      = get_price_or_zero(getattr(item, "subtotal", None))
+                    ET.SubElement(i07, "I07_KAINA_BE").text = get_price_or_zero(getattr(item, "price", None))
+                    if discount_pct is None:
+                        ET.SubElement(i07, "I07_PVM").text  = get_price_or_zero(getattr(item, "vat", None))
+                        ET.SubElement(i07, "I07_SUMA").text = get_price_or_zero(getattr(item, "subtotal", None))
                 else:
                     ET.SubElement(i07, "I07_VAL_KAINA").text  = get_price_or_zero(getattr(item, "price", None))
-                    ET.SubElement(i07, "I07_PVM_VAL").text    = get_price_or_zero(getattr(item, "vat", None))
-                    ET.SubElement(i07, "I07_SUMA_VAL").text   = get_price_or_zero(getattr(item, "subtotal", None))
+                    if discount_pct is None:
+                        ET.SubElement(i07, "I07_PVM_VAL").text    = get_price_or_zero(getattr(item, "vat", None))
+                        ET.SubElement(i07, "I07_SUMA_VAL").text   = get_price_or_zero(getattr(item, "subtotal", None))
 
                 if discount_pct is not None:
                     ET.SubElement(i07, "I07_NUOLAIDA").text = f"{discount_pct:.2f}"
 
                 ET.SubElement(i07, "I07_MOKESTIS").text   = "1"
                 ET.SubElement(i07, "I07_MOKESTIS_P").text = vat_to_int_str(getattr(item, "vat_percent", None))
-                # ET.SubElement(i07, "T_KIEKIS").text       = str(getattr(item, "quantity", None) or "1")
+
                 qty_scaled = _scale_qty(getattr(item, "quantity", None), frac) if use_frac else str(getattr(item, "quantity", None) or "1")
                 ET.SubElement(i07, "T_KIEKIS").text = qty_scaled
                 if use_frac:
@@ -683,17 +688,22 @@ def export_pardavimai_group_to_rivile(documents, user):
             ET.SubElement(i07, "I07_TIPAS").text = normalize_preke_paslauga_tipas(getattr(doc, "preke_paslauga", None))
 
             if currency.upper() == "EUR":
-                ET.SubElement(i07, "I07_KAINA_BE").text  = get_price_or_zero(getattr(doc, "amount_wo_vat", None))
-                ET.SubElement(i07, "I07_PVM").text       = get_price_or_zero(getattr(doc, "vat_amount", None))
-                ET.SubElement(i07, "I07_SUMA").text      = get_price_or_zero(getattr(doc, "amount_wo_vat", None))
+                ET.SubElement(i07, "I07_KAINA_BE").text = get_price_or_zero(getattr(doc, "amount_wo_vat", None))
+                if discount_pct is None:
+                    ET.SubElement(i07, "I07_PVM").text  = get_price_or_zero(getattr(doc, "vat_amount", None))
+                    ET.SubElement(i07, "I07_SUMA").text = get_price_or_zero(getattr(doc, "amount_wo_vat", None))
             else:
                 ET.SubElement(i07, "I07_VAL_KAINA").text  = get_price_or_zero(getattr(doc, "amount_wo_vat", None))
-                ET.SubElement(i07, "I07_PVM_VAL").text    = get_price_or_zero(getattr(doc, "vat_amount", None))
-                ET.SubElement(i07, "I07_SUMA_VAL").text   = get_price_or_zero(getattr(doc, "amount_wo_vat", None))
+                if discount_pct is None:
+                    ET.SubElement(i07, "I07_PVM_VAL").text    = get_price_or_zero(getattr(doc, "vat_amount", None))
+                    ET.SubElement(i07, "I07_SUMA_VAL").text   = get_price_or_zero(getattr(doc, "amount_wo_vat", None))
+
+            if discount_pct is not None:
+                ET.SubElement(i07, "I07_NUOLAIDA").text = f"{discount_pct:.2f}"
 
             ET.SubElement(i07, "I07_MOKESTIS").text   = "1"
             ET.SubElement(i07, "I07_MOKESTIS_P").text = vat_to_int_str(getattr(doc, "vat_percent", None))
-            # ET.SubElement(i07, "T_KIEKIS").text       = "1"
+
             qty_scaled = _scale_qty(1, frac) if use_frac else "1"
             ET.SubElement(i07, "T_KIEKIS").text = qty_scaled
             if use_frac:
@@ -704,10 +714,6 @@ def export_pardavimai_group_to_rivile(documents, user):
         logger.info("[RIVILE:I07] doc=%s lines=%d", getattr(doc, "pk", None), added)
         elements.append(i06)
 
-    # xml = b""
-    # for el in elements:
-    #     xml += prettify_ansi(el) + b"\n"
-    # return expand_empty_tags(xml)
     xml = join_records_utf8(elements) if elements else b""
     return expand_empty_tags(xml)
 
