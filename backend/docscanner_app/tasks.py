@@ -933,9 +933,14 @@ def process_uploaded_file_task(self, user_id, doc_id, scan_type):
                 if file_size > 150_000:  # > 150KB
                     logger.info(f"[TASK] Optimizing preview: {file_size} bytes")
                     optimize_preview_for_document(doc)
+                    # ВАЖНО: обновляем preview_url после оптимизации
+                    preview_url = f"{settings.SITE_URL_BACKEND}/media/{doc.file.name}"
+                    doc.preview_url = preview_url
+                    doc.save(update_fields=['preview_url'])
+                    logger.info(f"[TASK] Updated preview_url after optimization: {preview_url}")
         except Exception as e:
             logger.warning(f"[TASK] Preview optimization failed: {e}")
-        _log_t("Optimize preview", t0)
+        _log_t("Optimize preview", t0)                          
 
         # 17) Списание кредитов
         t0 = _t()

@@ -247,9 +247,9 @@ def _validate_line_items(line_items, separate_vat, report):
 
 def _validate_aggregates(db_doc, line_items, separate_vat, report):
     """
-    CHECK 1: Σ(subtotal) = amount_wo_vat - invoice_discount_wo_vat
+    CHECK 1: Σ(subtotal) = amount_wo_vat
     CHECK 2: Σ(vat) = vat_amount (если separate_vat=False)
-    CHECK 3: Σ(total) = amount_with_vat
+    CHECK 3: Σ(total) С УЧЁТОМ invoice_discount_wo_vat = amount_with_vat
     """
     # Суммы из строк
     sum_subtotal = sum(_d(li.subtotal) for li in line_items)
@@ -259,26 +259,28 @@ def _validate_aggregates(db_doc, line_items, separate_vat, report):
     # Суммы из документа
     amount_wo = _d(db_doc.amount_wo_vat)
     discount_wo = _d(db_doc.invoice_discount_wo_vat)
+    discount_with = _d(db_doc.invoice_discount_with_vat)
     vat_amount = _d(db_doc.vat_amount)
     amount_with = _d(db_doc.amount_with_vat)
     
     errors = []
+    has_doc_discount = (discount_wo != 0 or discount_with != 0)
     
-    # CHECK 1: Σ(subtotal) = amount_wo_vat - invoice_discount_wo_vat
-    expected_wo = amount_wo - discount_wo
-    delta_wo = abs(sum_subtotal - expected_wo)
+    # CHECK 1: Σ(subtotal) = amount_wo_vat
+    delta_wo = abs(sum_subtotal - amount_wo)
     match_wo = delta_wo <= DOC_TOLERANCE
     
     report["aggregate_checks"]["sum_wo_vat"] = {
         "sum_lines": float(sum_subtotal),
-        "doc_value": float(expected_wo),
+        "doc_value": float(amount_wo),
         "delta": float(delta_wo),
-        "match": match_wo
+        "match": match_wo,
+        "status": "PASS" if match_wo else "FAIL"
     }
     
     if not match_wo:
         errors.append(
-            f"Σsubtotal: {sum_subtotal:.2f} ≠ doc {expected_wo:.2f} (Δ={delta_wo:.4f})"
+            f"Σsubtotal: {sum_subtotal:.2f} ≠ doc {amount_wo:.2f} (Δ={delta_wo:.4f})"
         )
     
     # CHECK 2: Σ(vat) = vat_amount (только если separate_vat=False)
@@ -290,7 +292,8 @@ def _validate_aggregates(db_doc, line_items, separate_vat, report):
             "sum_lines": float(sum_vat),
             "doc_value": float(vat_amount),
             "delta": float(delta_vat),
-            "match": match_vat
+            "match": match_vat,
+            "status": "PASS" if match_vat else "FAIL"
         }
         
         if not match_vat:
@@ -303,20 +306,59 @@ def _validate_aggregates(db_doc, line_items, separate_vat, report):
             "reason": "separate_vat=True"
         }
     
-    # CHECK 3: Σ(total) = amount_with_vat
+    # ✅ CHECK 3: Σ(total) С УЧЁТОМ ДОКУМЕНТНЫХ СКИДОК
     delta_with = abs(sum_total - amount_with)
-    match_with = delta_with <= DOC_TOLERANCE
+    match_with = False
+    validation_note = None
+    
+    if has_doc_discount:
+        # Проверяем сценарии A и B
+        # Сценарий A: wo - discount_wo + vat ≈ with (скидка по нетто)
+        expected_with_A = amount_wo - discount_wo + vat_amount
+        scenario_A_valid = abs(expected_with_A - amount_with) <= DOC_TOLERANCE
+        
+        # Сценарий B: wo + vat ≈ with + discount_with (скидка по брутто)
+        expected_left_B = amount_wo + vat_amount
+        expected_right_B = amount_with + discount_with
+        scenario_B_valid = abs(expected_left_B - expected_right_B) <= DOC_TOLERANCE
+        
+        if scenario_A_valid:
+            # Строки должны быть "до скидки по нетто"
+            # Ожидаемая сумма строк = amount_with + discount_wo
+            expected_sum_with = amount_with + discount_wo
+            match_with = abs(sum_total - expected_sum_with) <= DOC_TOLERANCE
+            validation_note = f"doc-level WO discount ({discount_wo:.2f}): Σtotal should be {expected_sum_with:.2f} (before discount)"
+            
+        elif scenario_B_valid:
+            # Строки должны быть "до скидки по брутто"
+            # Ожидаемая сумма строк = amount_with + discount_with
+            expected_sum_with = amount_with + discount_with
+            match_with = abs(sum_total - expected_sum_with) <= DOC_TOLERANCE
+            validation_note = f"doc-level WITH discount ({discount_with:.2f}): Σtotal should be {expected_sum_with:.2f} (before discount)"
+            
+        else:
+            # Скидки есть, но не согласуются с документом — прямое сравнение
+            match_with = delta_with <= DOC_TOLERANCE
+            validation_note = f"doc-level discount exists but position unclear (wo={discount_wo:.2f}, with={discount_with:.2f})"
+    else:
+        # Нет документных скидок — прямое сравнение
+        match_with = delta_with <= DOC_TOLERANCE
+        validation_note = "no doc-level discounts"
     
     report["aggregate_checks"]["sum_with_vat"] = {
         "sum_lines": float(sum_total),
         "doc_value": float(amount_with),
         "delta": float(delta_with),
-        "match": match_with
+        "match": match_with,
+        "status": "PASS" if match_with else "FAIL",
+        "note": validation_note,
+        "doc_discount_wo": float(discount_wo) if has_doc_discount else None,
+        "doc_discount_with": float(discount_with) if has_doc_discount else None
     }
     
     if not match_with:
         errors.append(
-            f"Σtotal: {sum_total:.2f} ≠ doc {amount_with:.2f} (Δ={delta_with:.4f})"
+            f"Σtotal: {sum_total:.2f} ≠ doc {amount_with:.2f} (with discounts) (Δ={delta_with:.4f})"
         )
     
     if errors:
