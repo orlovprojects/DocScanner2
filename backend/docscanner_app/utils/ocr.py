@@ -34,7 +34,8 @@ except Exception:
     vision = None
 
 from sklearn.cluster import DBSCAN
-
+import logging
+logger = logging.getLogger("docscanner_app")
 
 # ---------- Константы для склейки по словам ----------
 
@@ -473,9 +474,15 @@ def get_ocr_text(
         try:
             joined_text, skew_deg = _join_words_to_lines(
                 words_flat,
-                use_proportional_spaces=True,  # НОВЫЙ ПАРАМЕТР
-                max_spaces=15                   # НОВЫЙ ПАРАМЕТР
+                use_skew=True,
+                gap_scale=(0.4, 1.2, 3.0),
+                hard_space_px=(15, 50, 150),
             )
+            # joined_text, skew_deg = _join_words_to_lines(
+            #     words_flat,
+            #     use_proportional_spaces=True,  # НОВЫЙ ПАРАМЕТР
+            #     max_spaces=15                   # НОВЫЙ ПАРАМЕТР
+            # )
             plain_text = joined_text
             metrics["detected_skew_deg"] = float(skew_deg)
         except Exception as e:

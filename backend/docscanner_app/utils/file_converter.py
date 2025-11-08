@@ -52,9 +52,9 @@ MAX_BYTES              = 2_000_000
 JPG_QUALITY            = 85
 PNG_COMPRESS           = 9
 TIFF_COMPRESSION       = "tiff_adobe_deflate"
-MAX_ARCHIVE_FILES      = 50
-MAX_ARCHIVE_TOTAL_BYTES = 100 * 1024 * 1024  # 100 MB
-MAX_SINGLE_FILE_BYTES   = 20 * 1024 * 1024   # 20 MB для одного файла
+MAX_ARCHIVE_FILES      = 200
+MAX_ARCHIVE_TOTAL_BYTES = 500 * 1024 * 1024  # 500 MB
+MAX_SINGLE_FILE_BYTES   = 50 * 1024 * 1024   # 50 MB для одного файла
 LIBREOFFICE_PATH       = None
 POPPLER_PATH           = None
 # ===================================
