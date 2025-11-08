@@ -923,7 +923,21 @@ def process_uploaded_file_task(self, user_id, doc_id, scan_type):
             ])
         _log_t("apply defaults (post party enrichment)", t0)
 
-        # 16) Списание кредитов
+        # 16) НОВОЕ: Оптимизация preview
+        t0 = _t()
+        try:
+            from .utils.preview_optimizer import optimize_preview_for_document
+            
+            if doc.file and os.path.exists(doc.file.path):
+                file_size = os.path.getsize(doc.file.path)
+                if file_size > 150_000:  # > 150KB
+                    logger.info(f"[TASK] Optimizing preview: {file_size} bytes")
+                    optimize_preview_for_document(doc)
+        except Exception as e:
+            logger.warning(f"[TASK] Preview optimization failed: {e}")
+        _log_t("Optimize preview", t0)
+
+        # 17) Списание кредитов
         t0 = _t()
         credits_per_doc = Decimal("1.3") if scan_type == "detaliai" else Decimal("1")
         user.credits -= credits_per_doc
