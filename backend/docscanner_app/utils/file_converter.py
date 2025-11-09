@@ -11,6 +11,8 @@ from typing import List, Dict, Optional, Tuple
 from pdf2image import convert_from_bytes
 from PIL import Image, ImageOps, UnidentifiedImageError
 
+logger = logging.getLogger("docscanner_app")
+
 # HEIC/HEIF
 try:
     import pillow_heif
@@ -30,6 +32,15 @@ try:
     RARFILE_AVAILABLE = True
 except ImportError:
     RARFILE_AVAILABLE = False
+# Попробуем задать путь к unrar из окружения (например .env -> RARFILE_UNRAR_TOOL)
+if RARFILE_AVAILABLE:
+    rar_tool = os.environ.get('RARFILE_UNRAR_TOOL') or os.environ.get('UNRAR_TOOL')
+    if rar_tool:
+        try:
+            rarfile.UNRAR_TOOL = rar_tool
+            logger.info(f"rarfile: set UNRAR_TOOL = {rar_tool}")
+        except Exception:
+            logger.debug("Could not set rarfile.UNRAR_TOOL from env")
 
 # 7Z
 try:
@@ -353,75 +364,147 @@ def _normalize_zip(raw: bytes, name: str) -> List[Dict]:
     return results
 
 def _normalize_rar(raw: bytes, name: str) -> List[Dict]:
+    """
+    Robust RAR processing:
+      - ensure rarfile is available
+      - try to open from bytes with fileobj=io.BytesIO(raw)
+      - fallback: write to temp file and open that (more reliable for some backends)
+      - read members via rf.open(ri)
+    """
     if not RARFILE_AVAILABLE:
         raise ValueError("RAR support not installed. Install: pip install rarfile && apt-get install unrar")
+
+    rf = None
+    tmp_path = None
+    
+    # 1) Попытка открыть из памяти
     try:
         rf = rarfile.RarFile(io.BytesIO(raw))
-    except (rarfile.BadRarFile, rarfile.NotRarFile):
-        raise ValueError(f"Invalid RAR archive: {name}")
-
-    infos = rf.infolist()
-    logger.info(f"RAR archive {name} contains {len(infos)} entries")
-    if len(infos) > MAX_ARCHIVE_FILES:
-        logger.warning(f"RAR contains {len(infos)} files, limiting to {MAX_ARCHIVE_FILES}")
-        infos = infos[:MAX_ARCHIVE_FILES]
-
-    total_bytes = 0
-    processed_count = 0
-    skipped_unsupported = 0
-    skipped_system = 0
-    results: List[Dict] = []
-
-    for ri in infos:
-        if ri.isdir():
-            continue
-        fname = ri.filename
-        basename = os.path.basename(fname)
-        if not _is_safe_path(fname):
-            logger.warning(f"Unsafe path in RAR, skipping: {fname}")
-            continue
-        if _is_system_file(fname):
-            skipped_system += 1
-            continue
-        if not _is_supported_format(fname):
-            skipped_unsupported += 1
-            logger.debug(f"Skip unsupported format in RAR: {fname}")
-            continue
-        if ri.file_size > MAX_SINGLE_FILE_BYTES:
-            logger.warning(f"File too large in RAR ({ri.file_size} bytes), skipping: {fname}")
-            continue
+    except Exception as e_mem:
+        logger.debug(f"Opening RAR from memory failed: {e_mem!r}; will try temporary file fallback.")
+        # 2) Fallback — сохраняем во временный файл
         try:
-            chunk = rf.read(ri.filename)
-        except Exception as e:
-            logger.warning(f"Failed to read from RAR {fname}: {e}")
-            continue
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.rar') as tmp:
+                tmp.write(raw)
+                tmp_path = tmp.name
+            rf = rarfile.RarFile(tmp_path)
+        except Exception as e_file:
+            logger.warning(f"Opening RAR from temp file also failed: {e_file!r}")
+            # Удаляем временный файл в случае ошибки
+            if tmp_path and os.path.exists(tmp_path):
+                try:
+                    os.unlink(tmp_path)
+                except Exception:
+                    pass
+            raise ValueError(
+                f"Invalid RAR archive or missing backend (unrar/unar). Archive: {name}"
+            ) from e_file
 
-        total_bytes += len(chunk)
-        if total_bytes > MAX_ARCHIVE_TOTAL_BYTES:
-            logger.warning("RAR total bytes exceeded limit; stopping")
-            break
+    try:
+        # Теперь rf должен быть открыт
+        infos = rf.infolist()
+        logger.info(f"RAR archive {name} contains {len(infos)} entries")
+        if len(infos) > MAX_ARCHIVE_FILES:
+            logger.warning(f"RAR contains {len(infos)} files, limiting to {MAX_ARCHIVE_FILES}")
+            infos = infos[:MAX_ARCHIVE_FILES]
 
-        fake_upload = type('TmpUpload', (), {
-            'name': basename,
-            'content_type': '',
-            '_data': chunk,
-            'read': lambda self: self._data
-        })()
-        result = _process_archive_member(fake_upload, fname, processed_count)
-        if result:
-            if isinstance(result, list):
-                results.extend(result)
-            else:
-                results.append(result)
-            processed_count += 1
+        total_bytes = 0
+        processed_count = 0
+        skipped_unsupported = 0
+        skipped_system = 0
+        results: List[Dict] = []
 
-    logger.info(
-        f"RAR {name} processing complete: processed={processed_count}, "
-        f"skipped_unsupported={skipped_unsupported}, skipped_system={skipped_system}"
-    )
-    if not results:
-        raise ValueError(f"No supported files found in RAR archive: {name}")
-    return results
+        for ri in infos:
+            # безопасная проверка директории
+            try:
+                is_dir = ri.isdir() if hasattr(ri, 'isdir') else False
+            except Exception:
+                logger.debug(f"Can't determine isdir for RAR entry: {getattr(ri, 'filename', repr(ri))}, skipping")
+                continue
+            if is_dir:
+                continue
+
+            fname = getattr(ri, 'filename', None) or getattr(ri, 'name', None)
+            if not fname:
+                logger.debug("RAR entry without filename, skipping")
+                continue
+            basename = os.path.basename(fname)
+
+            if not _is_safe_path(fname):
+                logger.warning(f"Unsafe path in RAR, skipping: {fname}")
+                continue
+            if _is_system_file(fname):
+                skipped_system += 1
+                continue
+            if not _is_supported_format(fname):
+                skipped_unsupported += 1
+                logger.debug(f"Skip unsupported format in RAR: {fname}")
+                continue
+
+            size = getattr(ri, 'file_size', getattr(ri, 'size', None)) or 0
+            if size and size > MAX_SINGLE_FILE_BYTES:
+                logger.warning(f"File too large in RAR ({size} bytes), skipping: {fname}")
+                continue
+
+            try:
+                # Используем rf.open(ri) — обычно надёжнее
+                with rf.open(ri) as f:
+                    chunk = f.read()
+            except Exception as e:
+                logger.warning(f"Failed to read from RAR {fname}: {e}")
+                continue
+
+            if len(chunk) > MAX_SINGLE_FILE_BYTES:
+                logger.warning(f"File too large in RAR ({len(chunk)} bytes), skipping: {fname}")
+                continue
+
+            total_bytes += len(chunk)
+            if total_bytes > MAX_ARCHIVE_TOTAL_BYTES:
+                logger.warning("RAR total bytes exceeded limit; stopping")
+                break
+
+            fake_upload = type('TmpUpload', (), {
+                'name': basename,
+                'content_type': '',
+                '_data': chunk,
+                'read': lambda self: self._data
+            })()
+            result = _process_archive_member(fake_upload, fname, processed_count)
+            if result:
+                if isinstance(result, list):
+                    results.extend(result)
+                else:
+                    results.append(result)
+                processed_count += 1
+
+        logger.info(
+            f"RAR {name} processing complete: processed={processed_count}, "
+            f"skipped_unsupported={skipped_unsupported}, skipped_system={skipped_system}"
+        )
+        
+        if not results:
+            raise ValueError(f"No supported files found in RAR archive: {name}")
+        
+        return results
+        
+    finally:
+        # Закрываем архив и удаляем временный файл
+        try:
+            if rf:
+                rf.close()
+        except Exception:
+            pass
+        
+        # Удаляем временный файл только после завершения работы с ним
+        if tmp_path and os.path.exists(tmp_path):
+            try:
+                os.unlink(tmp_path)
+                logger.debug(f"Cleaned up temporary RAR file: {tmp_path}")
+            except Exception as e:
+                logger.warning(f"Failed to cleanup temporary RAR file {tmp_path}: {e}")
+
+
+                
 
 def _normalize_7z(raw: bytes, name: str) -> List[Dict]:
     if not PY7ZR_AVAILABLE:
@@ -571,6 +654,27 @@ def _normalize_tar(raw: bytes, name: str) -> List[Dict]:
         raise ValueError(f"No supported files found in TAR archive: {name}")
     return results
 
+
+
+def _normalize_archive(raw: bytes, name: str) -> List[Dict]:
+    """
+    Маршрутизирует обработку архива к соответствующей функции в зависимости от расширения
+    """
+    ext = _ext(name)
+    
+    if ext == '.zip':
+        return _normalize_zip(raw, name)
+    elif ext == '.rar':
+        return _normalize_rar(raw, name)
+    elif ext == '.7z':
+        return _normalize_7z(raw, name)
+    elif ext in {'.tar', '.tgz', '.tar.gz', '.tar.bz2', '.tar.xz', '.tbz2'}:
+        return _normalize_tar(raw, name)
+    else:
+        raise ValueError(f"Unsupported archive format: {ext}")
+
+
+
 # ============ Главная точка входа ============
 
 def normalize_any(uploaded_file) -> List[Dict] | Dict:
@@ -609,7 +713,28 @@ def normalize_any(uploaded_file) -> List[Dict] | Dict:
             f"archives ({supported_list})"
         )
 
-    raw = uploaded_file.read()
+    raw = None
+    try:
+        # Если объект имеет путь на диске (обычно FileField.file), читаем файл по пути — это самый надёжный вариант
+        file_path = getattr(uploaded_file, 'path', None) or getattr(uploaded_file, 'temporary_file_path', None)
+        if file_path and os.path.exists(file_path):
+            with open(file_path, 'rb') as f:
+                raw = f.read()
+                logger.debug(f"Read raw bytes from file path: {file_path} ({len(raw)} bytes)")
+        else:
+            # fallback — читаем через .read()
+            raw = uploaded_file.read()
+            logger.debug(f"Read raw bytes via uploaded_file.read() ({len(raw)} bytes)")
+    except Exception as e:
+        logger.exception(f"Failed to read uploaded file bytes: {e}")
+        raise
+
+    # Для диагностики — покажем первые байты (hex) если файл очень маленький
+    if raw is None:
+        raise ValueError("Failed to read file content")
+    logger.info(f"normalize_any: {name} (ext={ext}, bytes={len(raw)})")
+    if len(raw) < 100:
+        logger.debug(f"Content head (hex): {raw[:64].hex()} ; ascii: {raw[:64]!r}")
     logger.info(f"normalize_any: {name} (ext={ext}, bytes={len(raw)})")
 
     # Архивы
@@ -622,7 +747,7 @@ def normalize_any(uploaded_file) -> List[Dict] | Dict:
 
     # Office
     if ext in OFFICE_EXTS:
-        soffice = LIBREOFFICE_PATH or r"C:\Program Files\LibreOffice\program\soffice.exe"
+        soffice = LIBREOFFICE_PATH
         return _from_office_bytes(raw, name, soffice)
 
     # Изображения
