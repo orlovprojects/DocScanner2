@@ -1,13 +1,80 @@
+# docscanner_app/emails.py
 from django.core.mail import EmailMultiAlternatives
 from django.template.loader import render_to_string
 from django.conf import settings
 from email.utils import formataddr
+from django.utils.timezone import now
 
 import logging
 import logging.config
 
 logging.config.dictConfig(settings.LOGGING)
 logger = logging.getLogger('docscanner_app')
+
+
+
+def siusti_kontakto_laiska(*, vardas: str, email: str, zinute: str, tema: str | None = None):
+    """
+    Paprasta kontaktinės formos laiško siuntimo funkcija.
+
+    :param vardas: siuntėjo vardas
+    :param email: siuntėjo el. paštas (Reply-To bus nustatytas į šį adresą)
+    :param zinute: žinutės tekstas
+    :param tema: (neprivaloma) tema; jei nepaduota – bus naudota generinė
+    """
+    subject = (tema or "Nauja žinutė iš kontaktų formos").strip()
+
+    # Tekstinė versija
+    text_body = (
+        f"Nauja žinutė iš kontaktų formos\n\n"
+        f"Vardas: {vardas}\n"
+        f"El. paštas: {email}\n"
+        f"Tema: {subject}\n\n"
+        f"Žinutė:\n{zinute}\n\n"
+        f"Gauta: {now().strftime('%Y-%m-%d %H:%M:%S')}"
+    )
+
+    # Minimalus HTML (be šablono – paprastai)
+    html_body = (
+        "<!doctype html><html><body style='font-family:Arial,Helvetica,sans-serif;'>"
+        "<h2>Nauja žinutė iš kontaktų formos</h2>"
+        f"<p><strong>Vardas:</strong> {vardas}</p>"
+        f"<p><strong>El. paštas:</strong> {email}</p>"
+        f"<p><strong>Tema:</strong> {subject}</p>"
+        "<hr>"
+        f"<pre style='white-space:pre-wrap;font-family:inherit;'>{zinute}</pre>"
+        f"<p style='color:#888;'>Gauta: {now().strftime('%Y-%m-%d %H:%M:%S')}</p>"
+        "</body></html>"
+    )
+
+    try:
+        logger.info(f"[CONTACT EMAIL START] from={email} to={getattr(settings, 'CONTACT_EMAIL', None)}")
+        msg = EmailMultiAlternatives(
+            subject=subject,
+            body=text_body,
+            from_email=formataddr(("Atlyginimo Skaičiuoklė", settings.DEFAULT_FROM_EMAIL)),
+            to=[getattr(settings, "CONTACT_EMAIL", settings.DEFAULT_FROM_EMAIL)],
+            reply_to=[f"{vardas} <{email}>"],  # ← «Atsakyti» keliaus siuntėjui
+        )
+        msg.attach_alternative(html_body, "text/html")
+
+        # (neprivaloma) žymos/metadata – jei jūsų ESP jas palaiko
+        try:
+            msg.tags = ["contact"]
+            msg.metadata = {"event": "contact_form"}
+        except Exception:
+            pass
+
+        msg.send()
+        logger.info("[CONTACT EMAIL SUCCESS]")
+        return True
+    except Exception as e:
+        logger.exception(f"[CONTACT EMAIL ERROR] {e}")
+        return False
+
+
+
+
 
 
 def siusti_sveikinimo_laiska(vartotojas):

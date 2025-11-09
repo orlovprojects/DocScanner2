@@ -27,6 +27,7 @@ from .views import (
     InlineLineUpdateView,
     ScannedDocumentViewSet,
     admin_users_simple,
+    contact_form,
 )
 
 from .views import TrackAdClickView
@@ -109,6 +110,8 @@ urlpatterns = [
 
     path("scanned-documents/<int:doc_id>/inline/", InlineDocUpdateView.as_view()),
     path("scanned-documents/<int:doc_id>/lineitem/<int:line_id>/inline/", InlineLineUpdateView.as_view()),
+
+    path("api/contact/", contact_form, name="contact_form"),
 
 
 

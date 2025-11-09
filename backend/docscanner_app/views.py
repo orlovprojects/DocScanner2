@@ -97,7 +97,7 @@ from .serializers import (
 )
 
 #emails
-from .emails import siusti_sveikinimo_laiska
+from .emails import siusti_sveikinimo_laiska, siusti_kontakto_laiska
 
 from time import perf_counter
 
@@ -2607,3 +2607,21 @@ class ScannedDocumentViewSet(viewsets.ModelViewSet):
         except LineItem.DoesNotExist:
             return Response({"detail": "Line item not found"}, status=status.HTTP_404_NOT_FOUND)
 
+
+# contact email sender
+@api_view(["POST"])
+@permission_classes([AllowAny])
+def contact_form(request):
+    vardas  = (request.data.get("name") or "").strip()
+    email   = (request.data.get("email") or "").strip()
+    zinute  = (request.data.get("message") or "").strip()
+    # subject nėra formoje – paliekame None (bus generinė)
+
+    if not vardas or not email or len(zinute) < 10:
+        return Response({"detail": "Klaida formoje"}, status=status.HTTP_400_BAD_REQUEST)
+
+    ok = siusti_kontakto_laiska(vardas=vardas, email=email, zinute=zinute, tema=None)
+    if ok:
+        return Response({"detail": "Žinutė sėkmingai išsiųsta. Ačiū!"})
+    return Response({"detail": "Nepavyko išsiųsti žinutės. Pabandykite vėliau."},
+                    status=status.HTTP_500_INTERNAL_SERVER_ERROR)
