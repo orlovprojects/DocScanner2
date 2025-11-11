@@ -1914,31 +1914,61 @@ def _check_against_doc(doc: Dict[str, Any], sum_wo: Decimal, sum_vat: Decimal, s
     doc_with = d(doc.get("amount_with_vat"), 2)            # ← 2 знака
     separate_vat = bool(doc.get("separate_vat"))
 
-    inv_wo = d(doc.get("invoice_discount_wo_vat"), 2)      # ← 2 знака
-    inv_w  = d(doc.get("invoice_discount_with_vat"), 2)    # ← 2 знака
+    inv_wo = d(doc.get("invoice_discount_wo_vat"), 2)
+    inv_w  = d(doc.get("invoice_discount_with_vat"), 2)
 
-    # 1) Базовые сравнения "как есть" (без каких-либо поправок)
+    # 1) Базовые сравнения "как есть"
     match_wo   = _approx(sum_wo,   doc_wo)
     match_with = _approx(sum_with, doc_with)
     match_vat  = (None if separate_vat else _approx(sum_vat, doc_vat))
 
-    # 2) Если есть документные скидки и базовые сравнения не прошли — пробуем скидочную сверку
+    # 2) Если есть документные скидки — пробуем скидочную сверку
     if (inv_wo != 0 or inv_w != 0) and (not match_wo or not match_with or (match_vat is False)):
-        # Проверяем тождества документа (как в _final_checks):
-        # A: wo - inv_wo + vat ≈ with  (скидка по нетто)
-        coreA = _approx(Q2(doc_wo - inv_wo + doc_vat), doc_with) if inv_wo != 0 else False  # ← Q2 вместо Q4
-        # B: wo + vat ≈ with - inv_w   (скидка по брутто)
-        coreB = _approx(Q2(doc_wo + doc_vat), Q2(doc_with - inv_w)) if inv_w != 0 else False  # ← Q2 вместо Q4
+        # Документные тождества
+        coreA = _approx(Q2(doc_wo - inv_wo + doc_vat), doc_with) if inv_wo != 0 else False
+        coreB = _approx(Q2(doc_wo + doc_vat), Q2(doc_with - inv_w)) if inv_w != 0 else False
 
-        if coreA:
-            # Строки, скорее всего, "доскидочные" по нетто:
-            # тогда with для строк должен совпасть с (док.with + inv_wo)
-            exp_wo, exp_with, exp_vat = doc_wo, Q2(doc_with + inv_wo), doc_vat  # ← Q2 вместо Q4
-            match_wo   = _approx(sum_wo,   exp_wo)
+        if coreA or coreB:
+            # Ожидаемые суммы строк (строки "до скидок документа")
+            exp_with = Q2(doc_with + (inv_wo if coreA else inv_w))
+            # ВАЖНО: при сценарии A нетто строк должны быть на inv_wo БОЛЬШЕ документа
+            exp_wo   = Q2(doc_wo + (inv_wo if coreA else Decimal("0.00")))
+            # VAT строк «до скидок» отличается на (with - wo)
+            exp_vat  = Q2(doc_vat + (inv_w - inv_wo))
+
             match_with = _approx(sum_with, exp_with)
+            match_wo   = _approx(sum_wo,   exp_wo)
             if not separate_vat:
                 match_vat = _approx(sum_vat, exp_vat)
-            append_log(doc, "lines discount-aware check: scenario A (doc-level WO discount) applied")
+
+            append_log(doc, f"lines discount-aware check: scenario {'A' if coreA else 'B'} applied "
+                            f"(exp_wo={exp_wo}, exp_vat={exp_vat}, exp_with={exp_with})")
+
+    # inv_wo = d(doc.get("invoice_discount_wo_vat"), 2)      # ← 2 знака
+    # inv_w  = d(doc.get("invoice_discount_with_vat"), 2)    # ← 2 знака
+
+    # # 1) Базовые сравнения "как есть" (без каких-либо поправок)
+    # match_wo   = _approx(sum_wo,   doc_wo)
+    # match_with = _approx(sum_with, doc_with)
+    # match_vat  = (None if separate_vat else _approx(sum_vat, doc_vat))
+
+    # # 2) Если есть документные скидки и базовые сравнения не прошли — пробуем скидочную сверку
+    # if (inv_wo != 0 or inv_w != 0) and (not match_wo or not match_with or (match_vat is False)):
+    #     # Проверяем тождества документа (как в _final_checks):
+    #     # A: wo - inv_wo + vat ≈ with  (скидка по нетто)
+    #     coreA = _approx(Q2(doc_wo - inv_wo + doc_vat), doc_with) if inv_wo != 0 else False  # ← Q2 вместо Q4
+    #     # B: wo + vat ≈ with - inv_w   (скидка по брутто)
+    #     coreB = _approx(Q2(doc_wo + doc_vat), Q2(doc_with - inv_w)) if inv_w != 0 else False  # ← Q2 вместо Q4
+
+    #     if coreA:
+    #         # Строки, скорее всего, "доскидочные" по нетто:
+    #         # тогда with для строк должен совпасть с (док.with + inv_wo)
+    #         exp_wo, exp_with, exp_vat = doc_wo, Q2(doc_with + inv_wo), doc_vat  # ← Q2 вместо Q4
+    #         match_wo   = _approx(sum_wo,   exp_wo)
+    #         match_with = _approx(sum_with, exp_with)
+    #         if not separate_vat:
+    #             match_vat = _approx(sum_vat, exp_vat)
+    #         append_log(doc, "lines discount-aware check: scenario A (doc-level WO discount) applied")
         elif coreB:
             # Строки "доскидочные" по брутто:
             # тогда with для строк должен совпасть с (док.with + inv_w)
@@ -2360,94 +2390,181 @@ def _final_math_validation(doc: Dict[str, Any]) -> Dict[str, Any]:
     
     # ✅ НОВОЕ: Получаем документные скидки
     inv_wo = d(doc.get("invoice_discount_wo_vat"), 2)
-    inv_w = d(doc.get("invoice_discount_with_vat"), 2)
+    inv_w  = d(doc.get("invoice_discount_with_vat"), 2)
     has_doc_discount = (inv_wo != 0 or inv_w != 0)
-    
-    # CHECK 4: Σsubtotal = doc.amount_wo_vat
-    delta_wo = Q2(sum_wo - doc_wo)
-    match_wo = _approx(sum_wo, doc_wo, tol=TOLERANCE)
-    
+
+    # --- Определяем сценарии A/B по самим полям документа ---
+    scenario_A_valid = (inv_wo != 0) and _approx(Q2(doc_wo - inv_wo + doc_vat), doc_with, tol=TOLERANCE)
+    scenario_B_valid = (inv_w  != 0) and _approx(Q2(doc_wo + doc_vat), Q2(doc_with - inv_w), tol=TOLERANCE)
+
+    # ===== CHECK 4: Σsubtotal vs doc.amount_wo_vat (discount-aware) =====
+    expected_wo = doc_wo
+    note_wo = "no doc-level discounts"
+    if has_doc_discount:
+        if scenario_A_valid:
+            expected_wo = Q2(doc_wo + inv_wo)  # строки до скидки по нетто
+            note_wo = f"doc-level WO discount ({inv_wo}): Σwo should be {expected_wo} (before discount)"
+        elif scenario_B_valid:
+            expected_wo = doc_wo  # при B нетто не меняется
+            note_wo = f"doc-level WITH discount ({inv_w})"
+        else:
+            # если обе заданы/неясно — выберем ближний вариант
+            cand_A = Q2(doc_wo + inv_wo)
+            dist_A = (sum_wo - cand_A).copy_abs()
+            dist_B = (sum_wo - doc_wo).copy_abs()
+            if dist_A < dist_B:
+                expected_wo = cand_A
+                note_wo = f"picked WO discount by proximity ({inv_wo})"
+    delta_wo = Q2(sum_wo - expected_wo)
+    match_wo = _approx(sum_wo, expected_wo, tol=TOLERANCE)
     validation_report["aggregate_checks"]["sum_wo_vat"] = {
         "sum_lines": float(sum_wo),
-        "doc_value": float(doc_wo),
+        "doc_value": float(expected_wo),
         "delta": float(delta_wo),
         "match": match_wo,
-        "status": "PASS" if match_wo else "FAIL"
+        "status": "PASS" if match_wo else "FAIL",
+        "note": note_wo,
     }
-    
-    if delta_wo.copy_abs() > max_rounding_error:
-        max_rounding_error = delta_wo.copy_abs()
-    
-    # CHECK 5: Σvat = doc.vat_amount
+
+    # ===== CHECK 5: Σvat vs doc.vat_amount (discount-aware) =====
     if not separate_vat:
-        delta_vat = Q2(sum_vat - doc_vat)
-        match_vat = _approx(sum_vat, doc_vat, tol=TOLERANCE)
-        
+        # строки «до скидок»: Σvat должен равняться doc.vat + (with - wo)
+        expected_vat = Q2(doc_vat + (inv_w - inv_wo)) if has_doc_discount else doc_vat
+        delta_vat = Q2(sum_vat - expected_vat)
+        match_vat = _approx(sum_vat, expected_vat, tol=TOLERANCE)
         validation_report["aggregate_checks"]["sum_vat"] = {
             "sum_lines": float(sum_vat),
-            "doc_value": float(doc_vat),
+            "doc_value": float(expected_vat),
             "delta": float(delta_vat),
             "match": match_vat,
-            "status": "PASS" if match_vat else "FAIL"
+            "status": "PASS" if match_vat else "FAIL",
+            "note": "adjusted by (with - wo)" if has_doc_discount else "no doc-level discounts",
         }
-        
-        if delta_vat.copy_abs() > max_rounding_error:
-            max_rounding_error = delta_vat.copy_abs()
     else:
-        validation_report["aggregate_checks"]["sum_vat"] = {
-            "status": "SKIP",
-            "reason": "separate_vat=True"
-        }
-    
-    # ✅ CHECK 6: Σtotal = doc.amount_with_vat (С УЧЁТОМ ДОКУМЕНТНЫХ СКИДОК!)
-    delta_with = Q2(sum_with - doc_with)
-    match_with = False
-    validation_note = None
-    
+        validation_report["aggregate_checks"]["sum_vat"] = {"status": "SKIP", "reason": "separate_vat=True"}
+
+    # ===== CHECK 6: Σtotal vs doc.amount_with_vat (discount-aware) =====
+    expected_with = doc_with
+    note_with = "no doc-level discounts"
     if has_doc_discount:
-        # Проверяем сценарии A и B (как в _check_against_doc)
-        # Сценарий A: wo - inv_wo + vat ≈ with (скидка по нетто)
-        expected_with_A = Q2(doc_wo - inv_wo + doc_vat)
-        scenario_A_valid = _approx(expected_with_A, doc_with, tol=TOLERANCE)
-        
-        # Сценарий B: wo + vat ≈ with - inv_w (скидка по брутто)
-        expected_left_B = Q2(doc_wo + doc_vat)
-        expected_right_B = Q2(doc_with + inv_w)
-        scenario_B_valid = _approx(expected_left_B, expected_right_B, tol=TOLERANCE)
-        
         if scenario_A_valid:
-            # Строки должны быть "до скидки по нетто"
-            # Ожидаемая сумма строк = doc.with + inv_wo
-            expected_sum_with = Q2(doc_with + inv_wo)
-            match_with = _approx(sum_with, expected_sum_with, tol=TOLERANCE)
-            validation_note = f"doc-level WO discount ({inv_wo}): Σwith should be {expected_sum_with} (before discount)"
-            
+            expected_with = Q2(doc_with + inv_wo)  # строки до скидки по нетто
+            note_with = f"doc-level WO discount ({inv_wo}): Σwith should be {expected_with} (before discount)"
         elif scenario_B_valid:
-            # Строки должны быть "до скидки по брутто"
-            # Ожидаемая сумма строк = doc.with + inv_w
-            expected_sum_with = Q2(doc_with + inv_w)
-            match_with = _approx(sum_with, expected_sum_with, tol=TOLERANCE)
-            validation_note = f"doc-level WITH discount ({inv_w}): Σwith should be {expected_sum_with} (before discount)"
-            
+            expected_with = Q2(doc_with + inv_w)   # строки до скидки по брутто
+            note_with = f"doc-level WITH discount ({inv_w}): Σwith should be {expected_with} (before discount)"
         else:
-            # Скидки есть, но не согласуются с документом — прямое сравнение
-            match_with = _approx(sum_with, doc_with, tol=TOLERANCE)
-            validation_note = f"doc-level discount exists but position unclear (wo={inv_wo}, with={inv_w})"
-    else:
-        # Нет документных скидок — прямое сравнение
-        match_with = _approx(sum_with, doc_with, tol=TOLERANCE)
-        validation_note = "no doc-level discounts"
-    
+            # неясно — выберем ближайший к линиям вариант
+            cand_A = Q2(doc_with + inv_wo)
+            cand_B = Q2(doc_with + inv_w)
+            dist_A = (sum_with - cand_A).copy_abs()
+            dist_B = (sum_with - cand_B).copy_abs()
+            if dist_A <= dist_B:
+                expected_with, note_with = cand_A, f"picked WO discount by proximity ({inv_wo})"
+            else:
+                expected_with, note_with = cand_B, f"picked WITH discount by proximity ({inv_w})"
+
+    delta_with = Q2(sum_with - expected_with)
+    match_with = _approx(sum_with, expected_with, tol=TOLERANCE)
     validation_report["aggregate_checks"]["sum_with_vat"] = {
         "sum_lines": float(sum_with),
-        "doc_value": float(doc_with),
+        "doc_value": float(expected_with),
         "delta": float(delta_with),
         "match": match_with,
         "status": "PASS" if match_with else "FAIL",
-        "note": validation_note,
+        "note": note_with,
         "doc_discount_wo": float(inv_wo) if has_doc_discount else None,
-        "doc_discount_with": float(inv_w) if has_doc_discount else None
+        "doc_discount_with": float(inv_w) if has_doc_discount else None,
     }
+    # inv_wo = d(doc.get("invoice_discount_wo_vat"), 2)
+    # inv_w = d(doc.get("invoice_discount_with_vat"), 2)
+    # has_doc_discount = (inv_wo != 0 or inv_w != 0)
+    
+    # # CHECK 4: Σsubtotal = doc.amount_wo_vat
+    # delta_wo = Q2(sum_wo - doc_wo)
+    # match_wo = _approx(sum_wo, doc_wo, tol=TOLERANCE)
+    
+    # validation_report["aggregate_checks"]["sum_wo_vat"] = {
+    #     "sum_lines": float(sum_wo),
+    #     "doc_value": float(doc_wo),
+    #     "delta": float(delta_wo),
+    #     "match": match_wo,
+    #     "status": "PASS" if match_wo else "FAIL"
+    # }
+    
+    # if delta_wo.copy_abs() > max_rounding_error:
+    #     max_rounding_error = delta_wo.copy_abs()
+    
+    # # CHECK 5: Σvat = doc.vat_amount
+    # if not separate_vat:
+    #     delta_vat = Q2(sum_vat - doc_vat)
+    #     match_vat = _approx(sum_vat, doc_vat, tol=TOLERANCE)
+        
+    #     validation_report["aggregate_checks"]["sum_vat"] = {
+    #         "sum_lines": float(sum_vat),
+    #         "doc_value": float(doc_vat),
+    #         "delta": float(delta_vat),
+    #         "match": match_vat,
+    #         "status": "PASS" if match_vat else "FAIL"
+    #     }
+        
+    #     if delta_vat.copy_abs() > max_rounding_error:
+    #         max_rounding_error = delta_vat.copy_abs()
+    # else:
+    #     validation_report["aggregate_checks"]["sum_vat"] = {
+    #         "status": "SKIP",
+    #         "reason": "separate_vat=True"
+    #     }
+    
+    # # ✅ CHECK 6: Σtotal = doc.amount_with_vat (С УЧЁТОМ ДОКУМЕНТНЫХ СКИДОК!)
+    # delta_with = Q2(sum_with - doc_with)
+    # match_with = False
+    # validation_note = None
+    
+    # if has_doc_discount:
+    #     # Проверяем сценарии A и B (как в _check_against_doc)
+    #     # Сценарий A: wo - inv_wo + vat ≈ with (скидка по нетто)
+    #     expected_with_A = Q2(doc_wo - inv_wo + doc_vat)
+    #     scenario_A_valid = _approx(expected_with_A, doc_with, tol=TOLERANCE)
+        
+    #     # Сценарий B: wo + vat ≈ with - inv_w (скидка по брутто)
+    #     expected_left_B = Q2(doc_wo + doc_vat)
+    #     expected_right_B = Q2(doc_with + inv_w)
+    #     scenario_B_valid = _approx(expected_left_B, expected_right_B, tol=TOLERANCE)
+        
+    #     if scenario_A_valid:
+    #         # Строки должны быть "до скидки по нетто"
+    #         # Ожидаемая сумма строк = doc.with + inv_wo
+    #         expected_sum_with = Q2(doc_with + inv_wo)
+    #         match_with = _approx(sum_with, expected_sum_with, tol=TOLERANCE)
+    #         validation_note = f"doc-level WO discount ({inv_wo}): Σwith should be {expected_sum_with} (before discount)"
+            
+    #     elif scenario_B_valid:
+    #         # Строки должны быть "до скидки по брутто"
+    #         # Ожидаемая сумма строк = doc.with + inv_w
+    #         expected_sum_with = Q2(doc_with + inv_w)
+    #         match_with = _approx(sum_with, expected_sum_with, tol=TOLERANCE)
+    #         validation_note = f"doc-level WITH discount ({inv_w}): Σwith should be {expected_sum_with} (before discount)"
+            
+    #     else:
+    #         # Скидки есть, но не согласуются с документом — прямое сравнение
+    #         match_with = _approx(sum_with, doc_with, tol=TOLERANCE)
+    #         validation_note = f"doc-level discount exists but position unclear (wo={inv_wo}, with={inv_w})"
+    # else:
+    #     # Нет документных скидок — прямое сравнение
+    #     match_with = _approx(sum_with, doc_with, tol=TOLERANCE)
+    #     validation_note = "no doc-level discounts"
+    
+    # validation_report["aggregate_checks"]["sum_with_vat"] = {
+    #     "sum_lines": float(sum_with),
+    #     "doc_value": float(doc_with),
+    #     "delta": float(delta_with),
+    #     "match": match_with,
+    #     "status": "PASS" if match_with else "FAIL",
+    #     "note": validation_note,
+    #     "doc_discount_wo": float(inv_wo) if has_doc_discount else None,
+    #     "doc_discount_with": float(inv_w) if has_doc_discount else None
+    # }
     
     if delta_with.copy_abs() > max_rounding_error:
         max_rounding_error = delta_with.copy_abs()

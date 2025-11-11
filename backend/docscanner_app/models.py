@@ -222,7 +222,7 @@ class LineItem(models.Model):
     prekes_pavadinimas = models.CharField("Prekės pavadinimas", max_length=255, blank=True, null=True)
     prekes_tipas = models.CharField("Prekės tipas", max_length=128, blank=True, null=True)
     unit = models.CharField(max_length=50, blank=True, null=True)               # <matovnt> / unit
-    quantity = models.DecimalField(max_digits=10, decimal_places=2, blank=True, null=True)  # <kiekis>
+    quantity = models.DecimalField(max_digits=15, decimal_places=5, blank=True, null=True)  # <kiekis>
     price = models.DecimalField(max_digits=10, decimal_places=4, blank=True, null=True)     # <kaina> / price
     subtotal = models.DecimalField(max_digits=10, decimal_places=4, blank=True, null=True)  # <suma_v> / subtotal
     vat = models.DecimalField(max_digits=10, decimal_places=4, blank=True, null=True)       # <suma_pvmv> / vat
