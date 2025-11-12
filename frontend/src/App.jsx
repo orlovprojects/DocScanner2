@@ -10,6 +10,7 @@ import Terms from './pages/Terms';
 import Privacy from './pages/Privacy';
 import AtlyginimoSkaiciuokle from './pages/AtlyginimoSkaiciuokle';
 import AtlyginimoSkaiciuokle2026 from './pages/AtlyginimoSkaiciuokle2026';
+import InvoiceGenerator from './pages/InvoiceGenerator';
 
 import AdminDashboard from "./pages/AdminDashboard";
 import AdminSuvestine from "./pages/AdminSuvestine";
@@ -125,6 +126,7 @@ function App() {
         />
         <Route path="/privatumo-politika" element={<Privacy />} />
         <Route path="/naudojimo-taisykles" element={<Terms />} />
+        <Route path="/saskaita-faktura" element={<InvoiceGenerator />} />
         <Route path="/admin-dashboard" element={<RequireSuperuser loginPath="/login" forbiddenPath="/403"><AdminDashboard /></RequireSuperuser>} />
         <Route path="/admin-visi-failai" element={<RequireSuperuser loginPath="/login" forbiddenPath="/403"><AdminVisiFailai /></RequireSuperuser>} />
         <Route path="/admin-suvestine" element={<RequireSuperuser loginPath="/login" forbiddenPath="/403"><AdminSuvestine /></RequireSuperuser>} />
