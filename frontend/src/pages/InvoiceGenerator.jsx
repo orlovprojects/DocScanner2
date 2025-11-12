@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Helmet } from "react-helmet";
 import {
   Box,
   Paper,
@@ -231,6 +232,13 @@ const InvoiceGenerator = () => {
 
   return (
     <Box sx={{ p: { xs: 2, md: 3 }, maxWidth: 1200, mx: 'auto' }}>
+      <Helmet>
+        <title>Nemokamas sąskaitos-faktūros generatorius – DokSkenas</title>
+        <meta
+          name="description"
+          content="Nemokamai sugeneruokite gražią PDF sąskaitą-faktūrą, suvedę reikiamus duomenis. Rinkitės iš kelių skirtingų šablonų."
+        />
+      </Helmet>
       <Paper
         sx={{
           p: { xs: 2, md: 3 },
