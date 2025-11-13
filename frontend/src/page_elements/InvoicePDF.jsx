@@ -273,7 +273,17 @@ const styles = StyleSheet.create({
   summaryRowBold: { flexDirection: 'row', justifyContent: 'space-between', padding: 5, fontSize: 11, fontWeight: 'bold', backgroundColor: '#f5f5f5', marginTop: 5 },
   sumInWords: { marginTop: 10, padding: 8, fontSize: 8, fontStyle: 'italic', color: '#555', borderTop: '1 solid #e0e0e0' },
 
-  footer: { position: 'absolute', bottom: 30, left: 40, right: 40, textAlign: 'center', fontSize: 8, color: '#666' },
+  footer: { 
+    position: 'absolute', 
+    bottom: 30, 
+    left: 40, 
+    right: 40, 
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    fontSize: 8, 
+    color: '#666' 
+  },
 });
 
 // numbers
@@ -309,10 +319,15 @@ const hasAnyValue = (obj) => {
 
 const InvoicePDF = ({ data, logo, sumos }) => {
   const currencySymbol = getCurrencySymbol(data?.valiuta || 'EUR');
+  const pvmTaikoma = data?.pvmTipas === 'taikoma';
   
   const hasBarcodes = Array.isArray(data?.eilutes)
     ? data.eilutes.some((e) => e?.barkodas && String(e.barkodas).trim() !== '')
     : false;
+
+  // Динамические заголовки в зависимости от PVM
+  const priceHeader = pvmTaikoma ? 'Kaina be PVM' : 'Kaina';
+  const sumHeader = pvmTaikoma ? 'Suma be PVM' : 'Suma';
 
   const columnWidths = hasBarcodes
     ? { col1: { width: '30%' }, col2: { width: '10%' }, col3: { width: '10%' }, col4: { width: '10%' }, col5: { width: '10%' }, col6: { width: '15%', textAlign: 'right' }, col7: { width: '15%', textAlign: 'right' } }
@@ -334,7 +349,6 @@ const InvoicePDF = ({ data, logo, sumos }) => {
   const pristatymas = toNumber(data?.pristatymoMokestis);
   const hasDiscount = nuolaida > 0;
   const hasDelivery = pristatymas > 0;
-  const pvmTaikoma = data?.pvmTipas === 'taikoma';
 
   return (
     <Document>
@@ -400,8 +414,8 @@ const InvoicePDF = ({ data, logo, sumos }) => {
             {hasBarcodes ? <Text style={columnWidths.col3}>Barkodas</Text> : null}
             <Text style={columnWidths.col4}>Kiekis</Text>
             <Text style={columnWidths.col5}>Mato vnt.</Text>
-            <Text style={columnWidths.col6}>Kaina be PVM</Text>
-            <Text style={columnWidths.col7}>Suma be PVM</Text>
+            <Text style={columnWidths.col6}>{priceHeader}</Text>
+            <Text style={columnWidths.col7}>{sumHeader}</Text>
           </View>
 
           {(data?.eilutes || []).map((eilute, index) => {
@@ -504,9 +518,10 @@ const InvoicePDF = ({ data, logo, sumos }) => {
           )}
         </View>
 
-        {/* Footer */}
-        <View style={styles.footer}>
+        {/* Footer with page numbers */}
+        <View style={styles.footer} fixed>
           <Text>Dokumentas sugeneruotas DokSkenu</Text>
+          <Text render={({ pageNumber, totalPages }) => `${pageNumber} / ${totalPages}`} />
         </View>
       </Page>
     </Document>
