@@ -27,3 +27,7 @@ media/
 backend/backend/keys/*.json
 
 backend/companies.xlsx
+
+backend/celery-beat.pid
+backend/celerybeat-schedule.db
+backend/celerybeat-schedule.db.db
