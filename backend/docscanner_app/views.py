@@ -2166,77 +2166,140 @@ def _ensure_dict(x):
             return {}
     return {}
 
+# def summarize_doc_issues(doc_struct):
+#     """
+#     Возвращает только 'error' на основании жестких критериев:
+#       - _check_minimum_anchors_ok == False
+#       - _doc_amounts_consistent == False
+#       - ar_sutapo == False И (любой из _lines_sum_matches_wo/with/vat == False)
+#       - 'красные' hints (DOC-LINES-NOT-MATCHING-*, LI-PRICE-MISMATCH, LI-ZERO-VAT-DISCOUNTS-MISMATCH)
+#       - в логах есть строки, начинающиеся на '❗'
+#     """
+#     doc = _ensure_dict(doc_struct)
+
+#     # --- логи / хинты ---
+#     logs = doc.get("_global_validation_log") or []
+#     if isinstance(logs, str):
+#         logs = [logs]
+#     hints = doc.get("_lines_structured_hints") or []
+#     if isinstance(hints, str):
+#         hints = [hints]
+
+#     bang = [s for s in logs if isinstance(s, str) and s.strip().startswith("❗")]
+#     red_hints = [h for h in hints if (
+#         isinstance(h, str) and (
+#             h.startswith("DOC-LINES-NOT-MATCHING-")
+#             or "LI-PRICE-MISMATCH" in h
+#             or "LI-ZERO-VAT-DISCOUNTS-MISMATCH" in h
+#         )
+#     )]
+
+#     # --- флаги согласованности ---
+#     min_ok        = bool(doc.get("_check_minimum_anchors_ok", True))
+#     doc_consistent= bool(doc.get("_doc_amounts_consistent", True))
+#     ar_sutapo     = bool(doc.get("ar_sutapo", True))
+
+#     match_wo   = doc.get("_lines_sum_matches_wo")
+#     match_with = doc.get("_lines_sum_matches_with")
+#     match_vat  = doc.get("_lines_sum_matches_vat")
+
+#     separate_vat = bool(doc.get("separate_vat"))
+#     vat_failed = (match_vat is False) if not separate_vat else False
+
+#     lines_failed = (match_wo is False) or (match_with is False) or vat_failed
+#     lines_block  = (not ar_sutapo) and lines_failed
+
+#     # --- error-условия ---
+#     errors = []
+#     if not min_ok:
+#         errors.append("min-anchors")
+#     if not doc_consistent:
+#         errors.append("doc-core")
+#     if lines_block:
+#         errors.append("lines-vs-doc")
+#     if red_hints:
+#         errors.append("hints")
+#     if bang:
+#         errors.append("bang")
+
+#     has_error = bool(errors)
+
+#     # --- оформление результата ---
+#     badges = []
+#     if not min_ok:        badges.append("min⊄")
+#     if not doc_consistent:badges.append("core✗")
+#     if lines_block:       badges.append("Σ(lines)≠doc")
+#     if red_hints:         badges.append("hint!")
+#     if bang:              badges.append(f"❗×{len(bang)}")
+
+#     # краткая сводка: приоритет — красный хинт → '❗' → бейджи
+#     summary = (red_hints[0] if red_hints else (bang[0] if bang else " ".join(badges)))[:300]
+
+#     issue_count = int(len(red_hints) + len(bang)
+#                       + (not min_ok) + (not doc_consistent) + (1 if lines_block else 0))
+
+#     return {
+#         "has_issues": has_error,
+#         "severity": "error" if has_error else "ok",
+#         "issue_badges": " ".join(badges),
+#         "issue_summary": summary,
+#         "issue_count": issue_count,
+#     }
+
+def _ensure_dict(x):
+    if x is None:
+        return {}
+    if isinstance(x, dict):
+        return x
+    if isinstance(x, str):
+        try:
+            return json.loads(x)
+        except Exception:
+            return {}
+    return {}
+
 def summarize_doc_issues(doc_struct):
     """
-    Возвращает только 'error' на основании жестких критериев:
-      - _check_minimum_anchors_ok == False
-      - _doc_amounts_consistent == False
-      - ar_sutapo == False И (любой из _lines_sum_matches_wo/with/vat == False)
-      - 'красные' hints (DOC-LINES-NOT-MATCHING-*, LI-PRICE-MISMATCH, LI-ZERO-VAT-DISCOUNTS-MISMATCH)
-      - в логах есть строки, начинающиеся на '❗'
+    Возвращает 'error' ТОЛЬКО если overall_status == "FAIL" из финальной математической валидации.
+    Это единственный критерий для определения проблемных документов.
     """
     doc = _ensure_dict(doc_struct)
 
-    # --- логи / хинты ---
-    logs = doc.get("_global_validation_log") or []
-    if isinstance(logs, str):
-        logs = [logs]
-    hints = doc.get("_lines_structured_hints") or []
-    if isinstance(hints, str):
-        hints = [hints]
+    # ✅ ЕДИНСТВЕННАЯ ПРОВЕРКА: overall_status из финальной валидации
+    math_failed = False
+    math_badge = None
+    validation_type = None
+    
+    # Проверяем для detaliai (с line_items)
+    final_validation = doc.get("_final_math_validation")
+    if final_validation:
+        overall = final_validation.get("summary", {}).get("overall_status")
+        if overall == "FAIL":
+            math_failed = True
+            math_badge = "MATH✗"
+            validation_type = "detaliai"
+    
+    # Проверяем для sumiskai (без line_items)
+    sumiskai_validation = doc.get("_final_math_validation_sumiskai")
+    if sumiskai_validation:
+        overall = sumiskai_validation.get("overall_status")
+        if overall == "FAIL":
+            math_failed = True
+            math_badge = "MATH✗"
+            validation_type = "sumiskai"
 
-    bang = [s for s in logs if isinstance(s, str) and s.strip().startswith("❗")]
-    red_hints = [h for h in hints if (
-        isinstance(h, str) and (
-            h.startswith("DOC-LINES-NOT-MATCHING-")
-            or "LI-PRICE-MISMATCH" in h
-            or "LI-ZERO-VAT-DISCOUNTS-MISMATCH" in h
-        )
-    )]
-
-    # --- флаги согласованности ---
-    min_ok        = bool(doc.get("_check_minimum_anchors_ok", True))
-    doc_consistent= bool(doc.get("_doc_amounts_consistent", True))
-    ar_sutapo     = bool(doc.get("ar_sutapo", True))
-
-    match_wo   = doc.get("_lines_sum_matches_wo")
-    match_with = doc.get("_lines_sum_matches_with")
-    match_vat  = doc.get("_lines_sum_matches_vat")
-
-    separate_vat = bool(doc.get("separate_vat"))
-    vat_failed = (match_vat is False) if not separate_vat else False
-
-    lines_failed = (match_wo is False) or (match_with is False) or vat_failed
-    lines_block  = (not ar_sutapo) and lines_failed
-
-    # --- error-условия ---
-    errors = []
-    if not min_ok:
-        errors.append("min-anchors")
-    if not doc_consistent:
-        errors.append("doc-core")
-    if lines_block:
-        errors.append("lines-vs-doc")
-    if red_hints:
-        errors.append("hints")
-    if bang:
-        errors.append("bang")
-
-    has_error = bool(errors)
+    has_error = math_failed
 
     # --- оформление результата ---
     badges = []
-    if not min_ok:        badges.append("min⊄")
-    if not doc_consistent:badges.append("core✗")
-    if lines_block:       badges.append("Σ(lines)≠doc")
-    if red_hints:         badges.append("hint!")
-    if bang:              badges.append(f"❗×{len(bang)}")
+    if math_badge:
+        badges.append(math_badge)
 
-    # краткая сводка: приоритет — красный хинт → '❗' → бейджи
-    summary = (red_hints[0] if red_hints else (bang[0] if bang else " ".join(badges)))[:300]
+    summary = " ".join(badges) if badges else ""
+    if validation_type:
+        summary = f"{summary} ({validation_type})".strip()
 
-    issue_count = int(len(red_hints) + len(bang)
-                      + (not min_ok) + (not doc_consistent) + (1 if lines_block else 0))
+    issue_count = 1 if has_error else 0
 
     return {
         "has_issues": has_error,

@@ -590,31 +590,53 @@ def update_scanned_document(
     except Exception:
         pass
 
-
-
     # 1.8) Линии: канонизация строк + агрегаты + сверка с документом
-    if isinstance(doc_struct.get("line_items"), list) and doc_struct["line_items"]:
-        doc_struct = resolve_line_items(doc_struct)
+    doc_struct = resolve_line_items(doc_struct)
 
-        # опционально подхватить итоговые флаги в поля модели (если есть такие поля)
-        try:
-            db_doc.val_subtotal_match = bool(doc_struct.get("_lines_sum_matches_wo"))
-        except Exception:
-            pass
-        try:
-            db_doc.val_vat_match = bool(doc_struct.get("_lines_sum_matches_vat")) if not bool(doc_struct.get("separate_vat")) else None
-        except Exception:
-            pass
-        try:
-            db_doc.val_total_match = bool(doc_struct.get("_lines_sum_matches_with"))
-        except Exception:
-            pass
-        try:
-            db_doc.val_ar_sutapo = bool(doc_struct.get("ar_sutapo"))
-        except Exception:
-            pass
-        if doc_struct.get("_lines_structured_hints"):
-            logger.info("Validation hints: %s", " | ".join(doc_struct["_lines_structured_hints"]))
+    # опционально подхватить итоговые флаги в поля модели (если есть такие поля)
+    try:
+        db_doc.val_subtotal_match = bool(doc_struct.get("_lines_sum_matches_wo"))
+    except Exception:
+        pass
+    try:
+        db_doc.val_vat_match = bool(doc_struct.get("_lines_sum_matches_vat")) if not bool(doc_struct.get("separate_vat")) else None
+    except Exception:
+        pass
+    try:
+        db_doc.val_total_match = bool(doc_struct.get("_lines_sum_matches_with"))
+    except Exception:
+        pass
+    try:
+        db_doc.val_ar_sutapo = bool(doc_struct.get("ar_sutapo"))
+    except Exception:
+        pass
+    if doc_struct.get("_lines_structured_hints"):
+        logger.info("Validation hints: %s", " | ".join(doc_struct["_lines_structured_hints"]))
+
+
+    # # 1.8) Линии: канонизация строк + агрегаты + сверка с документом
+    # # if isinstance(doc_struct.get("line_items"), list) and doc_struct["line_items"]:
+    #     doc_struct = resolve_line_items(doc_struct)
+
+    #     # опционально подхватить итоговые флаги в поля модели (если есть такие поля)
+    #     try:
+    #         db_doc.val_subtotal_match = bool(doc_struct.get("_lines_sum_matches_wo"))
+    #     except Exception:
+    #         pass
+    #     try:
+    #         db_doc.val_vat_match = bool(doc_struct.get("_lines_sum_matches_vat")) if not bool(doc_struct.get("separate_vat")) else None
+    #     except Exception:
+    #         pass
+    #     try:
+    #         db_doc.val_total_match = bool(doc_struct.get("_lines_sum_matches_with"))
+    #     except Exception:
+    #         pass
+    #     try:
+    #         db_doc.val_ar_sutapo = bool(doc_struct.get("ar_sutapo"))
+    #     except Exception:
+    #         pass
+    #     if doc_struct.get("_lines_structured_hints"):
+    #         logger.info("Validation hints: %s", " | ".join(doc_struct["_lines_structured_hints"]))
 
 
 

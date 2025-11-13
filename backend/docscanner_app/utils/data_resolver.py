@@ -2476,95 +2476,7 @@ def _final_math_validation(doc: Dict[str, Any]) -> Dict[str, Any]:
         "doc_discount_wo": float(inv_wo) if has_doc_discount else None,
         "doc_discount_with": float(inv_w) if has_doc_discount else None,
     }
-    # inv_wo = d(doc.get("invoice_discount_wo_vat"), 2)
-    # inv_w = d(doc.get("invoice_discount_with_vat"), 2)
-    # has_doc_discount = (inv_wo != 0 or inv_w != 0)
-    
-    # # CHECK 4: Σsubtotal = doc.amount_wo_vat
-    # delta_wo = Q2(sum_wo - doc_wo)
-    # match_wo = _approx(sum_wo, doc_wo, tol=TOLERANCE)
-    
-    # validation_report["aggregate_checks"]["sum_wo_vat"] = {
-    #     "sum_lines": float(sum_wo),
-    #     "doc_value": float(doc_wo),
-    #     "delta": float(delta_wo),
-    #     "match": match_wo,
-    #     "status": "PASS" if match_wo else "FAIL"
-    # }
-    
-    # if delta_wo.copy_abs() > max_rounding_error:
-    #     max_rounding_error = delta_wo.copy_abs()
-    
-    # # CHECK 5: Σvat = doc.vat_amount
-    # if not separate_vat:
-    #     delta_vat = Q2(sum_vat - doc_vat)
-    #     match_vat = _approx(sum_vat, doc_vat, tol=TOLERANCE)
-        
-    #     validation_report["aggregate_checks"]["sum_vat"] = {
-    #         "sum_lines": float(sum_vat),
-    #         "doc_value": float(doc_vat),
-    #         "delta": float(delta_vat),
-    #         "match": match_vat,
-    #         "status": "PASS" if match_vat else "FAIL"
-    #     }
-        
-    #     if delta_vat.copy_abs() > max_rounding_error:
-    #         max_rounding_error = delta_vat.copy_abs()
-    # else:
-    #     validation_report["aggregate_checks"]["sum_vat"] = {
-    #         "status": "SKIP",
-    #         "reason": "separate_vat=True"
-    #     }
-    
-    # # ✅ CHECK 6: Σtotal = doc.amount_with_vat (С УЧЁТОМ ДОКУМЕНТНЫХ СКИДОК!)
-    # delta_with = Q2(sum_with - doc_with)
-    # match_with = False
-    # validation_note = None
-    
-    # if has_doc_discount:
-    #     # Проверяем сценарии A и B (как в _check_against_doc)
-    #     # Сценарий A: wo - inv_wo + vat ≈ with (скидка по нетто)
-    #     expected_with_A = Q2(doc_wo - inv_wo + doc_vat)
-    #     scenario_A_valid = _approx(expected_with_A, doc_with, tol=TOLERANCE)
-        
-    #     # Сценарий B: wo + vat ≈ with - inv_w (скидка по брутто)
-    #     expected_left_B = Q2(doc_wo + doc_vat)
-    #     expected_right_B = Q2(doc_with + inv_w)
-    #     scenario_B_valid = _approx(expected_left_B, expected_right_B, tol=TOLERANCE)
-        
-    #     if scenario_A_valid:
-    #         # Строки должны быть "до скидки по нетто"
-    #         # Ожидаемая сумма строк = doc.with + inv_wo
-    #         expected_sum_with = Q2(doc_with + inv_wo)
-    #         match_with = _approx(sum_with, expected_sum_with, tol=TOLERANCE)
-    #         validation_note = f"doc-level WO discount ({inv_wo}): Σwith should be {expected_sum_with} (before discount)"
-            
-    #     elif scenario_B_valid:
-    #         # Строки должны быть "до скидки по брутто"
-    #         # Ожидаемая сумма строк = doc.with + inv_w
-    #         expected_sum_with = Q2(doc_with + inv_w)
-    #         match_with = _approx(sum_with, expected_sum_with, tol=TOLERANCE)
-    #         validation_note = f"doc-level WITH discount ({inv_w}): Σwith should be {expected_sum_with} (before discount)"
-            
-    #     else:
-    #         # Скидки есть, но не согласуются с документом — прямое сравнение
-    #         match_with = _approx(sum_with, doc_with, tol=TOLERANCE)
-    #         validation_note = f"doc-level discount exists but position unclear (wo={inv_wo}, with={inv_w})"
-    # else:
-    #     # Нет документных скидок — прямое сравнение
-    #     match_with = _approx(sum_with, doc_with, tol=TOLERANCE)
-    #     validation_note = "no doc-level discounts"
-    
-    # validation_report["aggregate_checks"]["sum_with_vat"] = {
-    #     "sum_lines": float(sum_with),
-    #     "doc_value": float(doc_with),
-    #     "delta": float(delta_with),
-    #     "match": match_with,
-    #     "status": "PASS" if match_with else "FAIL",
-    #     "note": validation_note,
-    #     "doc_discount_wo": float(inv_wo) if has_doc_discount else None,
-    #     "doc_discount_with": float(inv_w) if has_doc_discount else None
-    # }
+
     
     if delta_with.copy_abs() > max_rounding_error:
         max_rounding_error = delta_with.copy_abs()
@@ -2648,6 +2560,111 @@ def _final_math_validation(doc: Dict[str, Any]) -> Dict[str, Any]:
 
 
 
+def _final_math_validation_sumiskai(doc: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Упрощённая финальная проверка для суммишкай-документов (без line_items).
+
+    Проверяем:
+      1) amount_wo_vat + vat_amount ≈ amount_with_vat  (TOLERANCE = 0.02)
+      2) если separate_vat=False и vat_percent задан → 
+         vat_amount ≈ amount_wo_vat * vat_percent / 100
+
+    Пишем компактный FINAL MATH VALIDATION лог.
+    """
+    items = doc.get("line_items") or []
+    # Если строки вдруг есть – не трогаем, эта функция только для sumiskai
+    if items:
+        return doc
+
+    TOLERANCE = Decimal("0.02")
+    separate_vat = bool(doc.get("separate_vat"))
+
+    wo   = d(doc.get("amount_wo_vat"), 2)
+    vat  = d(doc.get("vat_amount"), 2)
+    w    = d(doc.get("amount_with_vat"), 2)
+    vp   = d(doc.get("vat_percent"), 2)
+
+    # --- CHECK 1: wo + vat ≈ with ---
+    core_sum = Q2(wo + vat)
+    diff_core = Q2(core_sum - w)
+    doc_ok = _approx(core_sum, w, tol=TOLERANCE)
+
+    # --- CHECK 2: vat_percent корректен? ---
+    vat_ok = None
+    diff_vp = Decimal("0.00")
+    if not separate_vat and wo != 0 and vp != 0:
+        vat_calc = Q2(wo * vp / Decimal("100"))
+        diff_vp = Q2(vat_calc - vat)
+        vat_ok = _approx(vat_calc, vat, tol=TOLERANCE)
+    # если separate_vat=True или vp==0 — считаем "не проверяем"
+
+    # --- ROUNDING / max_error ---
+    candidates = [diff_core.copy_abs()]
+    if vat_ok is not None:
+        candidates.append(diff_vp.copy_abs())
+    max_error = max(candidates) if candidates else Decimal("0.00")
+
+    within_tolerance = (max_error <= TOLERANCE)
+    overall_pass = bool(doc_ok and (separate_vat or vat_ok is None or vat_ok) and within_tolerance)
+
+    # можно сохранить мини-отчёт, если хочешь где-то использовать
+    doc["_final_math_validation_sumiskai"] = {
+        "doc_core_ok": bool(doc_ok),
+        "vat_percent_ok": (None if separate_vat else vat_ok),
+        "separate_vat": separate_vat,
+        "max_error": float(max_error),
+        "tolerance": float(TOLERANCE),
+        "overall_status": "PASS" if overall_pass else "FAIL",
+    }
+
+    # --- ЛОГИРОВАНИЕ в формате, который ты хочешь ---
+    append_log(doc, "=" * 60)
+    append_log(doc, "FINAL MATH VALIDATION")
+    append_log(doc, "=" * 60)
+
+    # doc-level check
+    doc_status_icon = "✓" if doc_ok else "✗"
+    append_log(
+        doc,
+        f"SUMISKAI DOC CHECK: {'PASS' if doc_ok else 'FAIL'} {doc_status_icon} "
+        f"(wo+vat={core_sum:.2f}, with={w:.2f}, Δ={diff_core:.4f})"
+    )
+
+    append_log(doc, "")
+
+    # VAT percent check
+    if separate_vat:
+        append_log(doc, "VAT PERCENT CHECK: SEPARATE VAT (skipped)")
+    elif vat_ok is None:
+        append_log(doc, "VAT PERCENT CHECK: NOT APPLICABLE (wo=0 or vp=0)")
+    else:
+        vp_status_icon = "✓" if vat_ok else "✗"
+        append_log(
+            doc,
+            f"VAT PERCENT CHECK: {'PASS' if vat_ok else 'FAIL'} {vp_status_icon} "
+            f"(wo={wo:.2f}, vp={vp:.2f}%, vat_calc={Q2(wo * vp / Decimal('100')):.2f}, "
+            f"vat_doc={vat:.2f}, Δ={diff_vp:.4f})"
+        )
+
+    append_log(doc, "")
+    append_log(doc, "ROUNDING:")
+    append_log(
+        doc,
+        f"  Max error: {max_error:.4f} (tolerance: {TOLERANCE:.4f})"
+    )
+
+    append_log(doc, "")
+    append_log(doc, "=" * 60)
+    status = "PASS" if overall_pass else "FAIL"
+    icon = "✅✅✅" if overall_pass else "❗❗❗"
+    append_log(doc, f"OVERALL STATUS: {status} {icon}")
+    append_log(doc, "=" * 60)
+
+    return doc
+
+
+
+
 def resolve_line_items(doc: Dict[str, Any]) -> Dict[str, Any]:
     """
     Основной этап для line items.
@@ -2659,6 +2676,8 @@ def resolve_line_items(doc: Dict[str, Any]) -> Dict[str, Any]:
         append_log(doc, "lines: no items")
         sum_wo, sum_vat, sum_with = Decimal("0.0000"), Decimal("0.0000"), Decimal("0.0000")
         _check_against_doc(doc, sum_wo, sum_vat, sum_with)
+        # ========== ФИНАЛЬНАЯ МАТЕМАТИЧЕСКАЯ ВАЛИДАЦИЯ (для sumiskai) ==========
+        _final_math_validation_sumiskai(doc)
         return doc
     
     # 0) Пред-пасс: восстановить net/price из total при vp>0 и price≈total
