@@ -37,6 +37,10 @@ from .exports.finvalda import (
     export_pirkimai_group_to_finvalda,
     export_pardavimai_group_to_finvalda,
 )
+from .exports.agnum import (
+    export_pirkimai_group_to_agnum,
+    export_pardavimai_group_to_agnum,
+)
 from .exports.rivile import (
     export_clients_group_to_rivile,
     export_pirkimai_group_to_rivile,
@@ -543,6 +547,48 @@ def export_documents(request):
         response['Content-Disposition'] = f'attachment; filename="{filename}"'
         response['X-Content-Type-Options'] = 'nosniff'
         export_success = True
+
+    # ========================= AGNUM =========================
+    elif export_type == 'agnum':
+        logger.info("[EXP] AGNUM export started")
+        assign_random_prekes_kodai(documents)
+
+        files_to_export = []
+
+        # 1) Pirkimai (Type="2")
+        if pirkimai_docs:
+            logger.info("[EXP] AGNUM exporting pirkimai: %d docs", len(pirkimai_docs))
+            pirkimai_xml = export_pirkimai_group_to_agnum(pirkimai_docs, request.user)
+            files_to_export.append((f'{today_str}_pirkimai_agnum.xml', pirkimai_xml))
+
+        # 2) Pardavimai (Type="4")
+        if pardavimai_docs:
+            logger.info("[EXP] AGNUM exporting pardavimai: %d docs", len(pardavimai_docs))
+            pardavimai_xml = export_pardavimai_group_to_agnum(pardavimai_docs, request.user)
+            files_to_export.append((f'{today_str}_pardavimai_agnum.xml', pardavimai_xml))
+
+        logger.info("[EXP] AGNUM files_to_export=%s", [n for n, _ in files_to_export])
+
+        if len(files_to_export) > 1:
+            zip_buffer = io.BytesIO()
+            with zipfile.ZipFile(zip_buffer, "w") as zf:
+                for filename, xml_content in files_to_export:
+                    zf.writestr(filename, xml_content)
+            zip_buffer.seek(0)
+            response = HttpResponse(zip_buffer.read(), content_type='application/zip')
+            response['Content-Disposition'] = f'attachment; filename={today_str}_agnum.zip'
+            export_success = True
+        elif len(files_to_export) == 1:
+            filename, xml_content = files_to_export[0]
+            response = HttpResponse(
+                xml_content,
+                content_type='application/xml; charset=utf-8'
+            )
+            response['Content-Disposition'] = f'attachment; filename={filename}'
+            export_success = True
+        else:
+            logger.warning("[EXP] AGNUM nothing to export")
+            response = Response({"error": "No documents to export"}, status=400)
 
     # ========================= RIVILĖ ERP (XLSX) =========================
     elif export_type == 'rivile_erp':

@@ -4,5 +4,6 @@ export const ACCOUNTING_PROGRAMS = [
   // { value: "bss", label: "BSS Buhalterija" },
   { value: "finvalda", label: "Finvalda" },
   { value: "centas", label: "Centas" },
+  { value: "agnum", label: "Agnum" },
   { value: "apskaita5", label: "Apskaita5" },
 ].sort((a, b) => a.label.localeCompare(b.label));

@@ -328,6 +328,7 @@ ACCOUNTING_PROGRAM_CHOICES = [
     ('finvalda', 'Finvalda'),
     ('apskaita5', 'Apskaita5'),
     ('centas', 'Centas'),
+    ('agnum', 'Agnum'),
     # добавь нужные программы
 ]
 

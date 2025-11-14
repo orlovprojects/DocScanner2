@@ -42,6 +42,7 @@ const faqList = [
       "Rivilė ERP",
       "Centas",
       "Finvalda",
+      "Agnum",
       "Apskaita5"
     ],
     answerOutro: "Po skaitmenizavimo galėsite eksportuoti duomenis į pasirinktą programą. Atsisiųstus failus iš DokSkeno tereikės importuoti į buhalterinę programą."
@@ -819,6 +820,7 @@ const Dokskenas = () => {
             { label: 'Finvalda (.xml)', url: 'https://finvalda.lt/', hasLink: true },
             { label: 'Rivilė GAMA (.eip)', hasLink: false },
             { label: 'Rivilė ERP (.xlsx)', hasLink: false },
+            { label: 'Agnum (.xml)', url: 'https://www.agnum.lt/', hasLink: true },
             { label: 'Centas (.xml)', hasLink: false },
             { label: 'Apskaita5 (.xml)', hasLink: false },
             { label: 'Excel (.csv/.xlsx)', hasLink: false },

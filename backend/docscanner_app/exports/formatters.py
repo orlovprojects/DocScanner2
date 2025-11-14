@@ -1,6 +1,25 @@
 import re
 
-
+def format_date_agnum(d):
+    """
+    Форматирует дату для AGNUM XML в формате YYYY-MM-DD.
+    Принимает: date, datetime, str или None.
+    Возвращает: строку 'YYYY-MM-DD' или None.
+    """
+    if d is None:
+        return None
+    if isinstance(d, str):
+        # Если уже строка, пытаемся нормализовать
+        d_clean = d.strip()
+        if not d_clean or d_clean == '1900-01-01':
+            return d_clean
+        # Конвертируем точки в дефисы, если есть
+        return d_clean.replace('.', '-')
+    # Для date/datetime объектов
+    try:
+        return d.strftime('%Y-%m-%d')
+    except AttributeError:
+        return None
 
 
 def format_date(date_obj):
