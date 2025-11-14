@@ -309,20 +309,15 @@ export default function UploadPage() {
 
   const exportableRows = tableData.filter(canExport);
 
-  const handleSelectRow = (id) => (e) => {
-    const row = tableData.find((d) => d.id === id);
-    if (!row || !canExport(row)) return;
+  const handleSelectRow = (id) => () => {
     setSelectedRows((prev) =>
-      e.target.checked ? [...prev, id] : prev.filter((rowId) => rowId !== id)
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
     );
   };
 
-  const handleSelectAll = (e) => {
-    if (e.target.checked) {
-      setSelectedRows(exportableRows.map((d) => d.id));
-    } else {
-      setSelectedRows([]);
-    }
+  // "выбрать всё": сюда теперь приходит МАССИВ id
+  const handleSelectAll = (ids) => {
+    setSelectedRows(ids);
   };
 
   const handleFilter = (f) => (e) => setFilters((p) => ({ ...p, [f]: e.target.value }));
