@@ -43,7 +43,9 @@ const faqList = [
       "Centas",
       "Finvalda",
       "Agnum",
-      "Apskaita5"
+      "Apskaita5",
+      "Pragma 3.2",
+      "Pragma 4",
     ],
     answerOutro: "Po skaitmenizavimo galėsite eksportuoti duomenis į pasirinktą programą. Atsisiųstus failus iš DokSkeno tereikės importuoti į buhalterinę programą."
   },
@@ -823,6 +825,8 @@ const Dokskenas = () => {
             { label: 'Agnum (.xml)', url: 'https://www.agnum.lt/', hasLink: true },
             { label: 'Centas (.xml)', hasLink: false },
             { label: 'Apskaita5 (.xml)', hasLink: false },
+            { label: 'Pragma 3.2 (.txt)', hasLink: false },
+            { label: 'Pragma 4 (.xml)', hasLink: false },
             { label: 'Excel (.csv/.xlsx)', hasLink: false },
           ].map((item, idx) => (
             <Box key={idx} sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>

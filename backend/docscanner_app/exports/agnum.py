@@ -433,7 +433,7 @@ def export_pirkimai_group_to_agnum(documents, user):
 
     agnum = ET.Element("AgnumData", {
         "Version": "25",
-        "CreatedByApp": "Docskanas",
+        "CreatedByApp": "DokSkenas",
         "CreatedByLogin": str(getattr(user, "id", "1")),
         "CreatedOn": format_date_agnum(getattr(user, "agnum_created_on", None)) or format_date_agnum(date.today()),
     })

@@ -11,6 +11,7 @@ import Privacy from './pages/Privacy';
 import AtlyginimoSkaiciuokle from './pages/AtlyginimoSkaiciuokle';
 import AtlyginimoSkaiciuokle2026 from './pages/AtlyginimoSkaiciuokle2026';
 import InvoiceGenerator from './pages/InvoiceGenerator';
+import BuhalterinenApskaita from './pages/BuhalterineApskaita';
 
 import AdminDashboard from "./pages/AdminDashboard";
 import AdminSuvestine from "./pages/AdminSuvestine";
@@ -124,6 +125,7 @@ function App() {
             </PrivateRoute>
           }
         />
+        <Route path="/buhalterine-apskaita" element={<BuhalterinenApskaita />} />
         <Route path="/privatumo-politika" element={<Privacy />} />
         <Route path="/naudojimo-taisykles" element={<Terms />} />
         <Route path="/saskaita-faktura" element={<InvoiceGenerator />} />
