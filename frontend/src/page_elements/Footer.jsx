@@ -79,6 +79,9 @@ const Footer = () => {
                   spacing={1.25} 
                   alignItems={{ xs: 'center', md: 'center' }}
                 >
+                  <Link href="/buhalterine-apskaita" underline="none" color="inherit" sx={linkSx}>
+                    Buhalterinė apskaita
+                  </Link>
                   <Link
                     component={RouterLink}
                     to="/saskaitu-skaitmenizavimas-dokskenas#kaip-veikia"
