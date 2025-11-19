@@ -20,7 +20,7 @@ const faqList = [
   },
   {
     question: "Ar sistema tinka mano apskaitos programai?",
-    answer: "DokSkenas integruotas su dauguma populiariausių Lietuvos apskaitos programų: Rivilė GAMA, Rivilė ERP, Centas, Finvalda, Agnum, Apskaita5, Pragma 3.2 ir 4. Jei jūsų programa nepalaiko tiesioginės integracijos, galite eksportuoti duomenis Excel formatu arba susisiekite su mumis, kad integruotume ir jūsų apskaitos programą.",
+    answer: "DokSkenas integruotas su dauguma populiariausių Lietuvos apskaitos programų: Rivilė GAMA, Rivilė ERP, Centas, Finvalda, Agnum, Apskaita5, Būtent, Pragma 3.2 ir 4. Jei jūsų programa nepalaiko tiesioginės integracijos, galite eksportuoti duomenis Excel formatu arba susisiekite su mumis, kad integruotume ir jūsų apskaitos programą.",
   },
   {
     question: "Ar sistema aptinka klaidas dokumentuose?",
@@ -984,6 +984,7 @@ const BuhalterinenApskaita = () => {
             { label: 'Apskaita5 (.xml)', hasLink: false },
             { label: 'Pragma 3.2 (.txt)', hasLink: false },
             { label: 'Pragma 4 (.xml)', hasLink: false },
+            { label: 'Būtent (.xlsx)', hasLink: false },
             { label: 'Excel (.xlsx)', hasLink: false },
           ].map((item, idx) => (
             <Box key={idx} sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>

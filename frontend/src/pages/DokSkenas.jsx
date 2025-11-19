@@ -46,6 +46,7 @@ const faqList = [
       "Apskaita5",
       "Pragma 3.2",
       "Pragma 4",
+      "Būtent",
     ],
     answerOutro: "Po skaitmenizavimo galėsite eksportuoti duomenis į pasirinktą programą. Atsisiųstus failus iš DokSkeno tereikės importuoti į buhalterinę programą."
   },
@@ -827,6 +828,7 @@ const Dokskenas = () => {
             { label: 'Apskaita5 (.xml)', hasLink: false },
             { label: 'Pragma 3.2 (.txt)', hasLink: false },
             { label: 'Pragma 4 (.xml)', hasLink: false },
+            { label: 'Būtent (.xlsx)', hasLink: false },
             { label: 'Excel (.csv/.xlsx)', hasLink: false },
           ].map((item, idx) => (
             <Box key={idx} sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>

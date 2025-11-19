@@ -329,6 +329,9 @@ ACCOUNTING_PROGRAM_CHOICES = [
     ('apskaita5', 'Apskaita5'),
     ('centas', 'Centas'),
     ('agnum', 'Agnum'),
+    ('pragma3', 'Pragma 3.2'),
+    ('pragma4', 'Pragma 4'),
+    ('butent', 'Būtent'),
     # добавь нужные программы
 ]
 

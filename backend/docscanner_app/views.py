@@ -52,6 +52,9 @@ from .exports.rivile_erp import (
     export_prekes_and_paslaugos_to_rivile_erp_xlsx,
     export_documents_to_rivile_erp_xlsx,
 )
+from .exports.pragma4 import export_to_pragma40_xml
+from .exports.pragma3 import export_to_pragma_full, save_pragma_export_to_files
+from .exports.butent import export_to_butent
 from .validators.required_fields_checker import check_required_fields_for_export
 from .validators.math_validator_for_export import validate_document_math_for_export
 
@@ -529,6 +532,174 @@ def export_documents(request):
         else:
             logger.warning("[EXP] FINVALDA nothing to export")
             response = Response({"error": "No documents to export"}, status=400)
+
+
+
+    # ====================================================================
+    # PRAGMA 3.2 - добавить этот блок в views.py после других export_type
+    # ====================================================================
+
+    # ========================= PRAGMA 3.2 =========================
+    elif export_type == 'pragma3':
+        logger.info("[EXP] PRAGMA32 export started")
+        assign_random_prekes_kodai(documents)
+
+        files_to_export = []
+
+        try:
+            # Полный экспорт с автодобавлением справочников (4 файла)
+            export_data = export_to_pragma_full(
+                documents=(pirkimai_docs or []) + (pardavimai_docs or []),
+                include_reference_data=True
+            )
+            
+            logger.info("[EXP] PRAGMA32 export_data keys: %s", list(export_data.keys()))
+
+            # Добавляем файлы в список для архивации
+            if export_data.get('documents'):
+                files_to_export.append((
+                    f'{today_str}_pardavimai.txt',
+                    export_data['documents']
+                ))
+            
+            if export_data.get('items'):
+                files_to_export.append((
+                    f'{today_str}_pardavimai_det.txt',
+                    export_data['items']
+                ))
+            
+            if export_data.get('companies'):
+                files_to_export.append((
+                    f'{today_str}_Imones.txt',
+                    export_data['companies']
+                ))
+            
+            if export_data.get('products'):
+                files_to_export.append((
+                    f'{today_str}_Prekes.txt',
+                    export_data['products']
+                ))
+
+            logger.info("[EXP] PRAGMA32 files_to_export=%s", [n for n, _ in files_to_export])
+
+        except Exception as e:
+            logger.exception("[EXP] PRAGMA32 export failed: %s", e)
+            return Response({"error": "Pragma 3.2 export failed", "detail": str(e)}, status=500)
+
+        # Формирование ответа
+        if len(files_to_export) > 1:
+            # Несколько файлов -> ZIP
+            zip_buffer = io.BytesIO()
+            with zipfile.ZipFile(zip_buffer, "w") as zf:
+                for filename, txt_content in files_to_export:
+                    zf.writestr(filename, txt_content)
+            zip_buffer.seek(0)
+            response = HttpResponse(zip_buffer.read(), content_type='application/zip')
+            response['Content-Disposition'] = f'attachment; filename={today_str}_pragma32.zip'
+            export_success = True
+            
+        elif len(files_to_export) == 1:
+            # Один файл -> прямая отдача
+            filename, txt_content = files_to_export[0]
+            response = HttpResponse(
+                txt_content,
+                content_type='text/plain; charset=windows-1257'
+            )
+            response['Content-Disposition'] = f'attachment; filename={filename}'
+            export_success = True
+            
+        else:
+            logger.warning("[EXP] PRAGMA32 nothing to export")
+            response = Response({"error": "No documents to export"}, status=400)
+
+
+    # ========================= PRAGMA 4.0 =========================
+    elif export_type == 'pragma4':
+        logger.info("[EXP] PRAGMA40 export started")
+        assign_random_prekes_kodai(documents)
+
+        # Твой универсальный экспортёр: сам решает, XML или ZIP
+        try:
+            content = export_to_pragma40_xml(
+                pirkimai_documents=pirkimai_docs,
+                pardavimai_documents=pardavimai_docs
+            )
+        except Exception as e:
+            logger.exception("[EXP] PRAGMA40 export failed: %s", e)
+            return Response({"error": "Pragma 4.0 export failed", "detail": str(e)}, status=500)
+
+        if not content:
+            logger.warning("[EXP] PRAGMA40 nothing to export")
+            response = Response({"error": "No documents to export"}, status=400)
+        else:
+            # Определяем, ZIP это или XML по сигнатуре ZIP ("PK")
+            if content[:2] == b'PK':
+                filename = f"{today_str}_pragma40.zip"
+                content_type = "application/zip"
+            else:
+                # Если экспортировались только покупки/продажи – более говорящие имена
+                if pirkimai_docs and not pardavimai_docs:
+                    filename = f"{today_str}_pragma40_pirkimai.xml"
+                elif pardavimai_docs and not pirkimai_docs:
+                    filename = f"{today_str}_pragma40_pardavimai.xml"
+                else:
+                    filename = f"{today_str}_pragma40.xml"
+
+                content_type = "application/xml; charset=utf-8"
+
+            response = HttpResponse(content, content_type=content_type)
+            response['Content-Disposition'] = f'attachment; filename="{filename}"'
+            export_success = True
+
+
+    # ========================= BŪTENT =========================
+    # Добавить этот блок в views.py после блока 'rivile_erp'
+    # Место вставки: после строки ~450, перед финальным else
+
+    elif export_type == 'butent':
+        logger.info("[EXP] BUTENT export started")
+        assign_random_prekes_kodai(documents)
+
+        # Объединяем все документы для экспорта (Būtent поддерживает смешивание)
+        all_docs = (pirkimai_docs or []) + (pardavimai_docs or [])
+        
+        if not all_docs:
+            logger.warning("[EXP] BUTENT no documents to export")
+            return Response({"error": "No documents to export"}, status=400)
+
+        try:
+            # Экспортируем в Excel (mode='auto' - автоопределение suminis/kiekinis)
+            excel_bytes = export_to_butent(
+                documents=all_docs,
+                mode='auto',
+                user=request.user
+            )
+            
+            logger.info("[EXP] BUTENT export completed, size=%d bytes", len(excel_bytes))
+            
+            # Формируем ответ
+            filename = f'{today_str}_butent_import.xlsx'
+            response = HttpResponse(
+                excel_bytes,
+                content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+            )
+            response['Content-Disposition'] = f'attachment; filename="{filename}"'
+            export_success = True
+
+        except FileNotFoundError as e:
+            logger.error("[EXP] BUTENT template not found: %s", e)
+            return Response({
+                "error": "Būtent template not found",
+                "detail": "Please create template using create_butent_template()"
+            }, status=500)
+        
+        except Exception as e:
+            logger.exception("[EXP] BUTENT export failed: %s", e)
+            return Response({
+                "error": "Būtent export failed",
+                "detail": str(e)
+            }, status=500)
+
 
     # ========================= APSKAITA5 =========================
     elif export_type == 'apskaita5':
