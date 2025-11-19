@@ -12,6 +12,7 @@ import AtlyginimoSkaiciuokle from './pages/AtlyginimoSkaiciuokle';
 import AtlyginimoSkaiciuokle2026 from './pages/AtlyginimoSkaiciuokle2026';
 import InvoiceGenerator from './pages/InvoiceGenerator';
 import BuhalterinenApskaita from './pages/BuhalterineApskaita';
+import SumaZodziais from './pages/SumaZodziais';
 
 import AdminDashboard from "./pages/AdminDashboard";
 import AdminSuvestine from "./pages/AdminSuvestine";
@@ -126,6 +127,7 @@ function App() {
           }
         />
         <Route path="/buhalterine-apskaita" element={<BuhalterinenApskaita />} />
+        <Route path="/suma-zodziais" element={<SumaZodziais />} />
         <Route path="/privatumo-politika" element={<Privacy />} />
         <Route path="/naudojimo-taisykles" element={<Terms />} />
         <Route path="/saskaita-faktura" element={<InvoiceGenerator />} />

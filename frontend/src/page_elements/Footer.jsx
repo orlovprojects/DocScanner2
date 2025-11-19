@@ -149,6 +149,9 @@ const Footer = () => {
                   <Link href="/saskaita-faktura" underline="none" color="inherit" sx={linkSx}>
                     Nemokamas sąskaitos-faktūros generatorius
                   </Link>
+                  <Link href="/suma-zodziais" underline="none" color="inherit" sx={linkSx}>
+                    Nemokamas sumos žodžiais generatorius
+                  </Link>
                   <Link href="/2026" underline="none" color="inherit" sx={linkSx}>
                     Atlyginimo skaičiuoklė 2026
                   </Link>
