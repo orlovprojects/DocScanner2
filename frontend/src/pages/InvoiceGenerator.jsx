@@ -1167,7 +1167,7 @@ function InvoiceGeneratorInfo() {
         <Button
           variant="contained"
           size="large"
-          href={`${import.meta.env.VITE_BASE_URL}/registruotis`}
+          href={`${import.meta.env.VITE_BASE_URL}registruotis`}
           sx={{
             backgroundColor: '#F4B400',
             color: '#000',

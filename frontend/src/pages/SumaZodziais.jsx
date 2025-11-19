@@ -969,7 +969,7 @@ function SumaZodziasiInfo() {
         >
         <li>
             <Link
-            href={`${import.meta.env.VITE_BASE_URL}/saskaita-faktura`}
+            href={`${import.meta.env.VITE_BASE_URL}saskaita-faktura`}
             underline="hover"
             sx={{ color: 'inherit' }}
             >
@@ -982,7 +982,7 @@ function SumaZodziasiInfo() {
         <li>Oficialiai korespondencijai</li>
         <li>
             <Link
-            href={`${import.meta.env.VITE_BASE_URL}/buhalterine-apskaita`}
+            href={`${import.meta.env.VITE_BASE_URL}buhalterine-apskaita`}
             underline="hover"
             sx={{ color: 'inherit' }}
             >
@@ -1090,7 +1090,7 @@ function SumaZodziasiInfo() {
         <Button
           variant="contained"
           size="large"
-          href={`${import.meta.env.VITE_BASE_URL}/registruotis`}
+          href={`${import.meta.env.VITE_BASE_URL}registruotis`}
           sx={{
             backgroundColor: '#F4B400',
             color: '#000',
