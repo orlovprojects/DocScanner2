@@ -221,17 +221,17 @@ def _get_sandelis(doc) -> str:
     return sandelis if sandelis else "S1"
 
 
-def _format_decimal(value, decimals=2) -> str:
+def _format_decimal(value, decimals=2) -> float:
     """
-    Форматирует число в строку с заданным количеством десятичных знаков.
-    Использует точку как разделитель.
+    Преобразует значение в float с округлением.
+    ✅ Возвращает ЧИСЛО (float), не строку!
     """
     try:
         d = Decimal(str(value))
-        format_str = f"{{:.{decimals}f}}"
-        return format_str.format(d)
+        rounded = d.quantize(Decimal(10) ** -decimals, rounding=ROUND_HALF_UP)
+        return float(rounded)
     except Exception:
-        return "0.00"
+        return 0.0
 
 
 def _distribute_discount_to_butent_lines(doc, items_list: list) -> None:
@@ -526,11 +526,42 @@ def export_to_butent(
     for idx, row_data in enumerate(rows, start=start_row):
         for col_idx, value in enumerate(row_data, start=1):
             cell = ws.cell(row=idx, column=col_idx)
-            cell.value = value
-
-            # Форматирование для числовых столбцов
-            if col_idx in [19, 20, 22]:  # S, T, V (Kiekis, Kaina, PVM suma)
-                cell.number_format = "0.00"
+            
+            # Числовые столбцы: D, L, S, T, V, W
+            # D=4 (iSAF), L=12 (fizinis), S=19 (Kiekis), T=20 (Kaina), V=22 (PVM suma), W=23 (Atv. PVM)
+            if col_idx in [4, 12, 19, 20, 22, 23]:
+                # ✅ КРИТИЧНО: СНАЧАЛА устанавливаем data_type, ПОТОМ value
+                if isinstance(value, (int, float)):
+                    cell.data_type = 'n'  # Явно "число"
+                    cell.value = value
+                    
+                    # Логируем первую строку
+                    if idx == start_row and col_idx in [19, 20, 22]:
+                        logger.debug(
+                            "[BUTENT:CELL] row=%d col=%d value=%r type=%s data_type=%s",
+                            idx, col_idx, value, type(value).__name__, cell.data_type
+                        )
+                elif isinstance(value, str):
+                    # Пробуем преобразовать строку в число
+                    try:
+                        num_value = float(value)
+                        cell.data_type = 'n'
+                        cell.value = num_value
+                        logger.warning(
+                            "[BUTENT:CELL] Converted string to float: row=%d col=%d '%s'->%f",
+                            idx, col_idx, value, num_value
+                        )
+                    except (ValueError, TypeError):
+                        # Не число - записываем как есть
+                        cell.value = value
+                else:
+                    cell.value = value
+                
+                # Форматирование для S, T, V (два десятичных знака)
+                if col_idx in [19, 20, 22]:
+                    cell.number_format = "0.00"
+            else:
+                cell.value = value
 
     logger.info("[BUTENT:EXPORT] Written %d rows to Excel", len(rows))
 
