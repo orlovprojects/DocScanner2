@@ -761,6 +761,8 @@ def export_documents(request):
             logger.warning("[EXP] AGNUM nothing to export")
             response = Response({"error": "No documents to export"}, status=400)
 
+
+
     # ========================= RIVILĖ ERP (XLSX) =========================
     elif export_type == 'rivile_erp':
         logger.info("[EXP] RIVILE_ERP export started")
@@ -776,8 +778,10 @@ def export_documents(request):
             if dir_ == 'pirkimas':
                 is_person = doc.seller_is_person
                 klient_type = 'pirkimas'
+                # Код клиента: id → vat_code → id_programoje (как в get_party_code)
+                client_code = doc.seller_id or doc.seller_vat_code or doc.seller_id_programoje or ""
                 client = {
-                    'id': doc.seller_id or "",
+                    'id': client_code,
                     'vat': doc.seller_vat_code or "",
                     'name': doc.seller_name or "",
                     'address': doc.seller_address or "",
@@ -791,8 +795,10 @@ def export_documents(request):
             elif dir_ == 'pardavimas':
                 is_person = doc.buyer_is_person
                 klient_type = 'pardavimas'
+                # Код клиента: id → vat_code → id_programoje (как в get_party_code)
+                client_code = doc.buyer_id or doc.buyer_vat_code or doc.buyer_id_programoje or ""
                 client = {
-                    'id': doc.buyer_id or "",
+                    'id': client_code,
                     'vat': doc.buyer_vat_code or "",
                     'name': doc.buyer_name or "",
                     'address': doc.buyer_address or "",
@@ -866,6 +872,9 @@ def export_documents(request):
             logger.warning("[EXP] RIVILE_ERP nothing to export")
             response = Response({"error": "No clients or products to export"}, status=400)
 
+
+
+
     else:
         logger.error("[EXP] unknown export type: %s", export_type)
         return Response({"error": "Unknown export type"}, status=400)
@@ -883,391 +892,6 @@ def export_documents(request):
     logger.warning("[EXP] fell through unexpectedly")
     return Response({"error": "No documents to export"}, status=400)
 
-
-
-
-# @api_view(['POST'])
-# @permission_classes([IsAuthenticated])
-# def export_documents(request):
-#     from datetime import date
-#     import io
-#     import zipfile
-#     import tempfile
-#     import logging
-
-#     logger = logging.getLogger(__name__)
-#     log_ctx = {"user": getattr(request.user, "id", None)}
-
-#     # ---- входные параметры
-#     ids = request.data.get('ids', [])
-#     export_type = request.data.get('export_type') or getattr(request.user, 'default_accounting_program', 'centas')
-#     raw_overrides = request.data.get('overrides', {}) or {}
-#     mode_raw = (request.data.get('mode') or "").strip().lower()  # <<< NEW
-
-#     logger.info("[EXP] start user=%s export_type_raw=%r ids=%s raw_overrides=%r mode_raw=%r",
-#                 log_ctx["user"], export_type, ids, raw_overrides, mode_raw)
-
-#     if not ids:
-#         logger.warning("[EXP] no ids provided")
-#         return Response({"error": "No document ids provided"}, status=400)
-
-#     user = request.user
-#     export_type = str(export_type).lower()
-
-#     # --- нормализация overrides (id -> 'pirkimas'|'pardavimas')
-#     overrides = {}
-#     for k, v in raw_overrides.items():
-#         key = str(k)
-#         val = str(v).lower()
-#         if val in ('pirkimas', 'pardavimas'):
-#             overrides[key] = val
-#         else:
-#             logger.warning("[EXP] skip override key=%r val=%r (invalid)", key, v)
-
-#     # --- определить mode: берём из клиента, иначе как раньше (по overrides)
-#     if mode_raw in ("multi", "single"):                       # <<< NEW
-#         mode = mode_raw
-#         logger.info("[EXP] view mode taken from request: %s", mode)
-#     else:
-#         mode = 'multi' if overrides else 'single'
-#         logger.info("[EXP] view mode inferred for backward-compat: %s", mode)
-
-#     # Доп. диагностика: если пришёл multi, но overrides пустой
-#     if mode == "multi" and not overrides:
-#         logger.info("[EXP] mode is 'multi' but overrides are EMPTY (will rely on resolver/doc DB fields)")
-
-#     logger.info("[EXP] export_type=%s overrides_norm=%r", export_type, overrides)
-
-#     today_str = date.today().strftime('%Y-%m-%d')
-
-#     documents = ScannedDocument.objects.filter(pk__in=ids, user=user)
-#     if not documents:
-#         logger.warning("[EXP] no documents found by ids=%s user=%s", ids, log_ctx["user"])
-#         return Response({"error": "No documents found"}, status=404)
-
-#     # === резолвер ===
-#     from .utils.data_resolver import prepare_export_groups
-#     logger.info("[EXP] resolver_mode=%s", mode)
-
-#     try:
-#         prepared = prepare_export_groups(
-#             documents,
-#             user=user,
-#             overrides=overrides if mode == 'multi' else {},  # <<< уважать переданный режим
-#             view_mode=mode,                                   # <<< уважать переданный режим
-#         )
-#     except Exception as e:
-#         logger.exception("[EXP] prepare_export_groups failed: %s", e)
-#         return Response({"error": "Resolver failed", "detail": str(e)}, status=500)
-
-#     # быстрый дамп того, что пришло из резолвера
-#     def _debug_dump(prepared_obj, where):
-#         for bucket in ("pirkimai", "pardavimai", "unknown"):
-#             packs = prepared_obj.get(bucket) or []
-#             logger.info("[EXPDBG:%s] bucket=%s count=%d", where, bucket, len(packs))
-#             for p in packs:
-#                 d = p.get("doc")
-#                 dpk = getattr(d, "pk", None)
-#                 li = p.get("line_items") or []
-#                 logger.info(
-#                     "[EXPDBG:%s] bucket=%s doc=%s dir=%r pack_keys=%s pvm=%r lines=%d",
-#                     where, bucket, dpk, p.get("direction"), list(p.keys()),
-#                     p.get("pvm_kodas", None), len(li)
-#                 )
-#                 if li:
-#                     preview = [(x.get("id"), x.get("pvm_kodas")) for x in li[:3]]
-#                     logger.info("[EXPDBG:%s] doc=%s sample_line_items=%s", where, dpk, preview)
-
-#     _debug_dump(prepared, "after_resolver")
-
-#     # применяем «в память» (без сохранения в БД)
-#     def _apply_resolved(pack_list, tag):
-#         out_docs = []
-#         for pack in pack_list:
-#             d = pack["doc"]
-#             setattr(d, "pirkimas_pardavimas", pack.get("direction"))
-#             setattr(d, "pvm_kodas", pack.get("pvm_kodas", None))  # явное перетирание
-
-#             line_map = {}
-#             for li in (pack.get("line_items") or []):
-#                 li_id = li.get("id")
-#                 if li_id is not None:
-#                     line_map[li_id] = li.get("pvm_kodas")
-#             setattr(d, "_pvm_line_map", line_map)
-
-#             logger.info("[EXPDBG:apply] tag=%s doc=%s dir=%r pvm_kodas=%r line_map_size=%d",
-#                         tag, getattr(d, "pk", None), getattr(d, "pirkimas_pardavimas", None),
-#                         getattr(d, "pvm_kodas", None), len(line_map))
-#             out_docs.append(d)
-#         return out_docs
-
-#     pirkimai_docs   = _apply_resolved(prepared.get("pirkimai", []), "pirkimai")
-#     pardavimai_docs = _apply_resolved(prepared.get("pardavimai", []), "pardavimai")
-#     unknown_docs    = _apply_resolved(prepared.get("unknown", []), "unknown")
-
-#     logger.info("[EXP] ready_for_export counts: pirkimai=%d pardavimai=%d unknown=%d",
-#                 len(pirkimai_docs), len(pardavimai_docs), len(unknown_docs))
-
-#     files_to_export = []
-
-#     # ========================= CENTAS =========================
-#     if export_type == 'centas':
-#         logger.info("[EXP] CENTAS export started")
-#         assign_random_prekes_kodai(documents)
-
-#         if pirkimai_docs:
-#             logger.info("[EXP] CENTAS exporting pirkimai: %d docs", len(pirkimai_docs))
-#             xml_bytes = export_documents_group_to_centras_xml(pirkimai_docs, direction="pirkimas")
-#             files_to_export.append((f"{today_str}_pirkimai.xml", xml_bytes))
-#         if pardavimai_docs:
-#             logger.info("[EXP] CENTAS exporting pardavimai: %d docs", len(pardavimai_docs))
-#             xml_bytes = export_documents_group_to_centras_xml(pardavimai_docs, direction="pardavimas")
-#             files_to_export.append((f"{today_str}_pardavimai.xml", xml_bytes))
-
-#         logger.info("[EXP] CENTAS files_to_export=%s", [n for n, _ in files_to_export])
-
-#         if len(files_to_export) > 1:
-#             zip_buffer = io.BytesIO()
-#             with zipfile.ZipFile(zip_buffer, "w") as zf:
-#                 for filename, xml_content in files_to_export:
-#                     zf.writestr(filename, xml_content)
-#             zip_buffer.seek(0)
-#             response = HttpResponse(zip_buffer.read(), content_type='application/zip')
-#             response['Content-Disposition'] = f'attachment; filename={today_str}_importui.zip'
-#             return response
-#         elif len(files_to_export) == 1:
-#             filename, xml_content = files_to_export[0]
-#             response = HttpResponse(
-#                 xml_content,
-#                 content_type='application/xml; charset=utf-8'
-#             )
-#             response['Content-Disposition'] = f'attachment; filename={filename}'
-#             return response
-
-#         else:
-#             logger.warning("[EXP] CENTAS nothing to export")
-#             return Response({"error": "No documents to export"}, status=400)
-
-#     # ========================= RIVILĖ (EIP) =========================
-#     elif export_type == 'rivile':
-#         logger.info("[EXP] RIVILE export started")
-#         assign_random_prekes_kodai(documents)
-
-#         files_to_export = []
-
-#         # 1) Клиенты (N08+N33): собираем ИЗ ДОКУМЕНТОВ; кэш больше не нужен
-#         docs_for_clients = (pirkimai_docs or []) + (pardavimai_docs or [])
-#         if docs_for_clients:
-#             klientai_xml = export_clients_group_to_rivile(
-#                 clients=None,
-#                 documents=docs_for_clients,
-#             )
-#             if klientai_xml and klientai_xml.strip():
-#                 files_to_export.append(('klientai.eip', klientai_xml))
-#                 logger.info("[EXP] RIVILE clients exported")
-
-#         # 2) ПИРКИМАИ (I06/I07)
-#         if pirkimai_docs:
-#             logger.info("[EXP] RIVILE exporting pirkimai: %d docs", len(pirkimai_docs))
-#             pirkimai_xml = export_pirkimai_group_to_rivile(pirkimai_docs)
-#             files_to_export.append(('pirkimai.eip', pirkimai_xml))
-
-#         # 3) ПАРДАВИМАИ (I06/I07)
-#         if pardavimai_docs:
-#             logger.info("[EXP] RIVILE exporting pardavimai: %d docs", len(pardavimai_docs))
-#             pardavimai_xml = export_pardavimai_group_to_rivile(pardavimai_docs)
-#             files_to_export.append(('pardavimai.eip', pardavimai_xml))
-
-#         # 4) N17/N25
-#         prekes_xml, paslaugos_xml, kodai_xml = export_prekes_paslaugos_kodai_group_to_rivile(documents)
-#         if prekes_xml and prekes_xml.strip():
-#             files_to_export.append(('prekes.eip', prekes_xml))
-#         if paslaugos_xml and paslaugos_xml.strip():
-#             files_to_export.append(('paslaugos.eip', paslaugos_xml))
-#         if kodai_xml and kodai_xml.strip():
-#             files_to_export.append(('kodai.eip', kodai_xml))
-
-#         logger.info("[EXP] RIVILE files_to_export=%s", [n for n, _ in files_to_export])
-
-#         if files_to_export:
-#             zip_buffer = io.BytesIO()
-#             with zipfile.ZipFile(zip_buffer, "w") as zf:
-#                 for filename, xml_content in files_to_export:
-#                     zf.writestr(filename, xml_content)
-#             zip_buffer.seek(0)
-#             response = HttpResponse(zip_buffer.read(), content_type='application/zip')
-#             response['Content-Disposition'] = f'attachment; filename={today_str}_rivile_eip.zip'
-#             documents.update(status="exported")
-#             return response
-#         else:
-#             logger.warning("[EXP] RIVILE nothing to export")
-#             return Response({"error": "No documents to export"}, status=400)
-
-
-
-#     # ========================= FINVALDA =========================
-#     elif export_type == 'finvalda':
-#         logger.info("[EXP] FINVALDA export started")
-#         assign_random_prekes_kodai(documents)
-
-#         if pirkimai_docs:
-#             logger.info("[EXP] FINVALDA exporting pirkimai: %d docs", len(pirkimai_docs))
-#             xml_bytes = export_pirkimai_group_to_finvalda(pirkimai_docs)
-#             files_to_export.append((f"{today_str}_pirkimai_finvalda.xml", xml_bytes))
-#         if pardavimai_docs:
-#             logger.info("[EXP] FINVALDA exporting pardavimai: %d docs", len(pardavimai_docs))
-#             xml_bytes = export_pardavimai_group_to_finvalda(pardavimai_docs)
-#             files_to_export.append((f"{today_str}_pardavimai_finvalda.xml", xml_bytes))
-
-#         logger.info("[EXP] FINVALDA files_to_export=%s", [n for n, _ in files_to_export])
-
-#         if len(files_to_export) > 1:
-#             zip_buffer = io.BytesIO()
-#             with zipfile.ZipFile(zip_buffer, "w") as zf:
-#                 for filename, xml_content in files_to_export:
-#                     zf.writestr(filename, xml_content)
-#             zip_buffer.seek(0)
-#             response = HttpResponse(zip_buffer.read(), content_type='application/zip')
-#             response['Content-Disposition'] = f'attachment; filename={today_str}_finvalda.zip'
-#             return response
-#         elif len(files_to_export) == 1:
-#             filename, xml_content = files_to_export[0]
-#             response = HttpResponse(xml_content, content_type='application/xml')
-#             response['Content-Disposition'] = f'attachment; filename={filename}'
-#             return response
-#         else:
-#             logger.warning("[EXP] FINVALDA nothing to export")
-#             return Response({"error": "No documents to export"}, status=400)
-
-#     # ========================= APSKAITA5 =========================
-#     elif export_type == 'apskaita5':
-#         logger.info("[EXP] APSKAITA5 export started")
-#         assign_random_prekes_kodai(documents)
-
-#         content, filename, content_type = export_documents_group_to_apskaita5_files(
-#             documents=documents,
-#             site_url=site_url,
-#             company_code=None,
-#             direction=None,
-#         )
-#         logger.info("[EXP] APSKAITA5 produced file=%s content_type=%s size=%d",
-#                     filename, content_type, len(content))
-#         response = HttpResponse(content, content_type=content_type)
-#         response['Content-Disposition'] = f'attachment; filename="{filename}"'
-#         response['X-Content-Type-Options'] = 'nosniff'
-#         return response
-
-#     # ========================= RIVILĖ ERP (XLSX) =========================
-#     elif export_type == 'rivile_erp':
-#         logger.info("[EXP] RIVILE_ERP export started")
-#         assign_random_prekes_kodai(documents)
-
-#         klientai = []
-#         seen = set()
-
-#         for pack in (prepared.get("pirkimai", []) + prepared.get("pardavimai", [])):
-#             doc = pack["doc"]
-#             dir_ = pack.get("direction")
-
-#             if dir_ == 'pirkimas':
-#                 is_person = doc.seller_is_person
-#                 klient_type = 'pirkimas'
-#                 client = {
-#                     'id': doc.seller_id or "",
-#                     'vat': doc.seller_vat_code or "",
-#                     'name': doc.seller_name or "",
-#                     'address': doc.seller_address or "",
-#                     'country_iso': doc.seller_country_iso or "",
-#                     'currency': doc.currency or "EUR",
-#                     'kodas_ds': 'PT001',
-#                     'type': klient_type,
-#                     'is_person': is_person,
-#                     'iban': doc.seller_iban or "",
-#                 }
-#             elif dir_ == 'pardavimas':
-#                 is_person = doc.buyer_is_person
-#                 klient_type = 'pardavimas'
-#                 client = {
-#                     'id': doc.buyer_id or "",
-#                     'vat': doc.buyer_vat_code or "",
-#                     'name': doc.buyer_name or "",
-#                     'address': doc.buyer_address or "",
-#                     'country_iso': doc.buyer_country_iso or "",
-#                     'currency': doc.currency or "EUR",
-#                     'kodas_ds': 'PT001',
-#                     'type': klient_type,
-#                     'is_person': is_person,
-#                     'iban': doc.buyer_iban or "",
-#                 }
-#             else:
-#                 continue
-
-#             client_key = (client['id'], client['vat'], client['name'], client['type'])
-#             if client['id'] and client_key not in seen:
-#                 klientai.append(client)
-#                 seen.add(client_key)
-
-#         logger.info("[EXP] RIVILE_ERP klientai=%d docs_pirk=%d docs_pard=%d",
-#                     len(klientai), len(pirkimai_docs), len(pardavimai_docs))
-
-#         files_to_export = []
-
-#         if klientai:
-#             with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp:
-#                 export_clients_to_rivile_erp_xlsx(klientai, tmp.name)
-#                 tmp.seek(0)
-#                 klientai_xlsx_bytes = tmp.read()
-#             files_to_export.append((f'klientai_{today_str}.xlsx', klientai_xlsx_bytes))
-
-#         with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp:
-#             export_prekes_and_paslaugos_to_rivile_erp_xlsx(documents, tmp.name)
-#             tmp.seek(0)
-#             prekes_xlsx_bytes = tmp.read()
-#         files_to_export.append((f'prekes_paslaugos_{today_str}.xlsx', prekes_xlsx_bytes))
-
-#         if pirkimai_docs:
-#             with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp:
-#                 export_documents_to_rivile_erp_xlsx(pirkimai_docs, tmp.name, doc_type="pirkimai")
-#                 tmp.seek(0)
-#                 pirkimai_xlsx_bytes = tmp.read()
-#             files_to_export.append((f'pirkimai_{today_str}.xlsx', pirkimai_xlsx_bytes))
-
-#         if pardavimai_docs:
-#             with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp:
-#                 export_documents_to_rivile_erp_xlsx(pardavimai_docs, tmp.name, doc_type="pardavimai")
-#                 tmp.seek(0)
-#                 pardavimai_xlsx_bytes = tmp.read()
-#             files_to_export.append((f'pardavimai_{today_str}.xlsx', pardavimai_xlsx_bytes))
-
-#         logger.info("[EXP] RIVILE_ERP files_to_export=%s", [n for n, _ in files_to_export])
-
-#         if len(files_to_export) > 1:
-#             zip_buffer = io.BytesIO()
-#             with zipfile.ZipFile(zip_buffer, "w") as zf:
-#                 for filename, file_bytes in files_to_export:
-#                     zf.writestr(filename, file_bytes)
-#             zip_buffer.seek(0)
-#             response = HttpResponse(zip_buffer.read(), content_type='application/zip')
-#             response['Content-Disposition'] = f'attachment; filename={today_str}_rivile_erp.zip'
-#             return response
-#         elif len(files_to_export) == 1:
-#             filename, file_bytes = files_to_export[0]
-#             response = HttpResponse(
-#                 file_bytes,
-#                 content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-#             )
-#             response['Content-Disposition'] = f'attachment; filename={filename}'
-#             return response
-#         else:
-#             logger.warning("[EXP] RIVILE_ERP nothing to export")
-#             return Response({"error": "No clients or products to export"}, status=400)
-
-#     else:
-#         logger.error("[EXP] unknown export type: %s", export_type)
-#         return Response({"error": "Unknown export type"}, status=400)
-
-#     logger.warning("[EXP] fell through unexpectedly")
-#     return Response({"error": "No documents to export"}, status=400)
 
 
 
