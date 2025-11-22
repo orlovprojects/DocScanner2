@@ -63,7 +63,7 @@ const PrivateRoute = ({ children }) => {
       <Box sx={{ display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center", height: "100vh" }}>
         <CircularProgress sx={{ color: "#F5BE09" }} />
         <Typography color="error" sx={{ mt: 2 }}>
-          Не удаётся определить статус подписки. Пробуем снова...
+          Nepavyksta nustatyti prenumeratos būsenos. Bandom dar kartą…
         </Typography>
       </Box>
     );
