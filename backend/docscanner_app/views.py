@@ -9,6 +9,7 @@ import zipfile
 import json
 from datetime import date, timedelta, time, datetime
 from decimal import Decimal
+import unicodedata
 
 # --- Django ---
 from django.conf import settings
@@ -272,7 +273,15 @@ def superuser_dashboard_stats(request):
 
 
 
-
+def strip_diacritics(text):
+    """
+    Pakeičia visas lietuviškas ir kitas lotyniškas raides su diakritika
+    į paprastas: š->s, ą->a, Ž->Z ir t.t.
+    """
+    if not isinstance(text, str):
+        return text
+    normalized = unicodedata.normalize("NFD", text)
+    return "".join(ch for ch in normalized if unicodedata.category(ch) != "Mn")
 
 
 
@@ -303,6 +312,11 @@ def export_documents(request):
 
     user = request.user
     export_type = str(export_type).lower()
+
+    # Rivilė: ar reikia nuimti lietuviškas raides (š->s ir t.t.)
+    extra_settings = getattr(user, "extra_settings", {}) or {}
+    rivile_strip_lt = bool(extra_settings.get("rivile_strip_lt_letters"))
+    logger.info("[EXP] user extra_settings: rivile_strip_lt_letters=%s", rivile_strip_lt)
 
     # --- нормализация overrides (id -> 'pirkimas'|'pardavimas')
     overrides = {}
@@ -484,6 +498,24 @@ def export_documents(request):
 
         logger.info("[EXP] RIVILE files_to_export=%s", [n for n, _ in files_to_export])
 
+        # Jei profilyje nustatyta „rivile_strip_lt_letters" – nuimame diakritiką
+        if rivile_strip_lt and files_to_export:
+            new_files = []
+            for filename, xml_content in files_to_export:
+                if isinstance(xml_content, bytes):
+                    try:
+                        xml_text = xml_content.decode("utf-8", errors="ignore")
+                    except Exception:
+                        xml_text = xml_content.decode("latin-1", errors="ignore")
+                else:
+                    xml_text = xml_content
+
+                stripped = strip_diacritics(xml_text)
+                logger.info("[EXP] RIVILE strip_lt applied to %s (len %d -> %d)",
+                            filename, len(xml_text), len(stripped))
+                new_files.append((filename, stripped))
+            files_to_export = new_files
+
         if files_to_export:
             zip_buffer = io.BytesIO()
             with zipfile.ZipFile(zip_buffer, "w") as zf:
@@ -496,6 +528,19 @@ def export_documents(request):
         else:
             logger.warning("[EXP] RIVILE nothing to export")
             response = Response({"error": "No documents to export"}, status=400)
+
+        # if files_to_export:
+        #     zip_buffer = io.BytesIO()
+        #     with zipfile.ZipFile(zip_buffer, "w") as zf:
+        #         for filename, xml_content in files_to_export:
+        #             zf.writestr(filename, xml_content)
+        #     zip_buffer.seek(0)
+        #     response = HttpResponse(zip_buffer.read(), content_type='application/zip')
+        #     response['Content-Disposition'] = f'attachment; filename={today_str}_rivile_eip.zip'
+        #     export_success = True
+        # else:
+        #     logger.warning("[EXP] RIVILE nothing to export")
+        #     response = Response({"error": "No documents to export"}, status=400)
 
     # ========================= FINVALDA =========================
     elif export_type == 'finvalda':

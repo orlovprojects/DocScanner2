@@ -584,6 +584,12 @@ export default function NustatymaiPage() {
   const rivileFracKey = "rivile_fraction";
   const rivileFraction = Number(extraSettings?.[rivileFracKey] ?? 1);
 
+  // Papildomi nustatymai: Rivilė: pakeisti lietuviškas raides
+  const rivileStripLtKey = "rivile_strip_lt_letters";
+  const isRivileStripLt = Boolean(
+    extraSettings && Object.prototype.hasOwnProperty.call(extraSettings, rivileStripLtKey)
+  );
+
   const setRivileFraction = async (value) => {
     const prev = extraSettings || {};
     const next = { ...prev };
@@ -602,6 +608,30 @@ export default function NustatymaiPage() {
     } catch {
       setExtraSettings(prev);
       alert("Nepavyko išsaugoti frakcijos.");
+    }
+  };
+
+
+  // NEW: Rivilė – pakeisti lietuviškas raides
+  const toggleRivileStripLt = async (e) => {
+    const checked = e.target.checked;
+    const prev = extraSettings || {};
+    const next = { ...prev };
+
+    if (checked) {
+      next[rivileStripLtKey] = 1;
+    } else if (rivileStripLtKey in next) {
+      delete next[rivileStripLtKey];
+    }
+
+    setExtraSettings(next);
+    try {
+      await api.patch("/profile/", { extra_settings: next }, { withCredentials: true });
+      setRivileSaved(true);
+      setTimeout(() => setRivileSaved(false), 1800);
+    } catch {
+      setExtraSettings(prev);
+      alert("Nepavyko išsaugoti nustatymo dėl lietuviškų raidžių.");
     }
   };
 
@@ -807,9 +837,34 @@ export default function NustatymaiPage() {
           control={<Switch checked={isOpDateFromDoc} onChange={toggleOpDateFromDoc} />}
           label="Operacijos datą imti iš sąskaitos datos"
         />
+
         {program === "rivile" && (
           <Box sx={{ mt: 2 }}>
-            {/* Заголовок с иконкой-подсказкой справа */}
+            {/* NEW: Pakeisti lietuviškas raides */}
+            <FormControlLabel
+              sx={{ mb: 1 }}
+              control={
+                <Switch
+                  checked={isRivileStripLt}
+                  onChange={toggleRivileStripLt}
+                />
+              }
+              label={
+                <Box sx={{ display: "inline-flex", alignItems: "center", gap: 0.5 }}>
+                  <span>Pakeisti lietuviškas raides</span>
+                  <Tooltip
+                    arrow
+                    enterTouchDelay={0}
+                    leaveTouchDelay={4000}
+                    title="Pakeisime visas lietuviškas raides į angliškas, pvz. š -> s. Naudokite, kai importuodami duomenis matote hieroglifus."
+                  >
+                    <HelpOutlineIcon fontSize="small" />
+                  </Tooltip>
+                </Box>
+              }
+            />
+
+            {/* Matavimo vienetų frakcija */}
             <Typography
               variant="body1"
               sx={{ display: "flex", alignItems: "center", gap: 0.5 }}
@@ -825,7 +880,6 @@ export default function NustatymaiPage() {
               </Tooltip>
             </Typography>
 
-            {/* Выпадающий список под текстом */}
             <FormControl sx={{ mt: 1.5, minWidth: 240 }} size="small">
               <Select
                 value={rivileFraction}
@@ -838,14 +892,13 @@ export default function NustatymaiPage() {
               </Select>
             </FormControl>
 
-            {/* Тост «Išsaugota!» после успешного PATCH */}
             {rivileSaved && (
               <Alert severity="success" sx={{ mt: 1, py: 0.5 }}>
                 Išsaugota!
               </Alert>
             )}
           </Box>
-        )}
+        )}        
       </Paper>
     </Box>
   );
