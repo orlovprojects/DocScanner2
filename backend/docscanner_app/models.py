@@ -113,6 +113,7 @@ class ScannedDocument(models.Model):
     seller_country_iso = models.CharField(max_length=10, blank=True, null=True)
     seller_iban = models.CharField(max_length=255, blank=True, null=True)
     seller_is_person = models.BooleanField(blank=True, null=True)
+    seller_name_normalized = models.CharField(max_length=255, blank=True, default="")
 
     buyer_id_programoje = models.CharField(max_length=64, blank=True, null=True)
     buyer_id = models.CharField(max_length=100, blank=True, null=True)
@@ -123,6 +124,7 @@ class ScannedDocument(models.Model):
     buyer_country_iso = models.CharField(max_length=10, blank=True, null=True)
     buyer_iban = models.CharField(max_length=255, blank=True, null=True)
     buyer_is_person = models.BooleanField(blank=True, null=True)
+    buyer_name_normalized = models.CharField(max_length=255, blank=True, default="")
 
     invoice_date = models.DateField(blank=True, null=True)
     due_date = models.DateField(blank=True, null=True)
@@ -203,6 +205,8 @@ class ScannedDocument(models.Model):
             models.Index(fields=["user"]),
             models.Index(fields=["uploaded_at"]),
             models.Index(fields=["seller_name"]),
+            models.Index(fields=["user", "seller_name_normalized"], name="idx_user_seller_norm"),
+            models.Index(fields=["user", "buyer_name_normalized"], name="idx_user_buyer_norm"),
         ]
 
     def __str__(self):

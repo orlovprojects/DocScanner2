@@ -14,6 +14,7 @@ from ..utils.data_resolver import (
 from ..validators.default_currency import set_default_currency
 from ..validators.vat_klas import auto_select_pvm_code  # новая сигнатура (см. вызовы ниже)
 from ..validators.currency_converter import to_iso_currency
+from ..validators.company_name_normalizer import normalize_company_name_v2
 
 # Санитайзеры
 from ..utils.parsers import (
@@ -34,6 +35,63 @@ logger = logging.getLogger("docscanner_app")
 def _gen_program_id7() -> str:
     """7-значный код без ведущего нуля (для *_id_programoje)."""
     return str(random.randint(1_000_000, 9_999_999))
+
+
+def _find_existing_counterparty_data(model_class, party_type: str, name: str, user, exclude_doc_id=None) -> dict | None:
+    """
+    Ищет в БД документы пользователя с таким же нормализованным именем контрагента.
+    Возвращает dict с id, vat_code, id_programoje (если найдены) или None.
+    Приоритет: самый старый документ (первый загруженный).
+    """
+    if not name:
+        return None
+    
+    normalized = normalize_company_name_v2(name)
+    if not normalized:
+        return None
+    
+    name_norm_field = f"{party_type}_name_normalized"
+    id_field = f"{party_type}_id"
+    vat_field = f"{party_type}_vat_code"
+    id_prog_field = f"{party_type}_id_programoje"
+    
+    qs = model_class.objects.filter(user=user, **{name_norm_field: normalized})
+    
+    if exclude_doc_id:
+        qs = qs.exclude(pk=exclude_doc_id)
+    
+    # Сортируем по дате загрузки — самый старый первый
+    qs = qs.order_by("uploaded_at")
+    
+    # Сначала ищем документ где есть id или vat_code
+    for doc in qs.only(id_field, vat_field, id_prog_field, "uploaded_at").iterator():
+        doc_id = getattr(doc, id_field, None)
+        doc_vat = getattr(doc, vat_field, None)
+        doc_prog = getattr(doc, id_prog_field, None)
+        
+        has_id = bool((str(doc_id) if doc_id else "").strip())
+        has_vat = bool((str(doc_vat) if doc_vat else "").strip())
+        has_prog = bool((str(doc_prog) if doc_prog else "").strip())
+        
+        # Приоритет: документ с id или vat_code
+        if has_id or has_vat:
+            return {
+                "id": doc_id if has_id else None,
+                "vat_code": doc_vat if has_vat else None,
+                "id_programoje": doc_prog if has_prog else None,
+            }
+    
+    # Если не нашли с id/vat — ищем хотя бы с id_programoje (тоже самый старый)
+    for doc in qs.only(id_prog_field).iterator():
+        doc_prog = getattr(doc, id_prog_field, None)
+        if doc_prog and str(doc_prog).strip():
+            return {
+                "id": None,
+                "vat_code": None,
+                "id_programoje": doc_prog,
+            }
+    
+    return None
 
 
 def _apply_top_level_fields(
@@ -69,22 +127,88 @@ def _apply_top_level_fields(
     db_doc.buyer_iban = doc_struct.get("buyer_iban")
     db_doc.buyer_is_person = doc_struct.get("buyer_is_person")
 
+
+    # --- Нормализованные имена для поиска дубликатов ---
+    db_doc.seller_name_normalized = normalize_company_name_v2(db_doc.seller_name)
+    db_doc.buyer_name_normalized = normalize_company_name_v2(db_doc.buyer_name)
+
     # --- Автогенерация *_id_programoje, если пусты *_id и *_vat_code ---
+    # Сначала ищем существующий id по нормализованному имени, если не найден — генерируем новый
+    
+    # SELLER
     try:
         if not (str(db_doc.seller_id or "").strip()) and not (str(db_doc.seller_vat_code or "").strip()):
+            existing = _find_existing_counterparty_data(
+                model_class=db_doc.__class__,
+                party_type="seller",
+                name=db_doc.seller_name,
+                user=user,
+                exclude_doc_id=db_doc.pk,
+            )
+            if existing:
+                if existing.get("id"):
+                    db_doc.seller_id = existing["id"]
+                    logger.info("seller_id reused: %s (name: %s)", existing["id"], db_doc.seller_name)
+                if existing.get("vat_code"):
+                    db_doc.seller_vat_code = existing["vat_code"]
+                    logger.info("seller_vat_code reused: %s (name: %s)", existing["vat_code"], db_doc.seller_name)
+                if existing.get("id_programoje"):
+                    db_doc.seller_id_programoje = existing["id_programoje"]
+                    logger.info("seller_id_programoje reused: %s (name: %s)", existing["id_programoje"], db_doc.seller_name)
+            
+            # Если всё ещё нет id_programoje — генерируем
             if not str(getattr(db_doc, "seller_id_programoje", "") or "").strip():
                 db_doc.seller_id_programoje = _gen_program_id7()
-                logger.info("seller_id_programoje auto-set to %s", db_doc.seller_id_programoje)
+                logger.info("seller_id_programoje generated: %s (name: %s)", db_doc.seller_id_programoje, db_doc.seller_name)
     except Exception as e:
-        logger.warning("failed to set seller_id_programoje: %s", e)
+        logger.warning("failed to set seller data: %s", e)
 
+    # BUYER
     try:
         if not (str(db_doc.buyer_id or "").strip()) and not (str(db_doc.buyer_vat_code or "").strip()):
+            existing = _find_existing_counterparty_data(
+                model_class=db_doc.__class__,
+                party_type="buyer",
+                name=db_doc.buyer_name,
+                user=user,
+                exclude_doc_id=db_doc.pk,
+            )
+            if existing:
+                if existing.get("id"):
+                    db_doc.buyer_id = existing["id"]
+                    logger.info("buyer_id reused: %s (name: %s)", existing["id"], db_doc.buyer_name)
+                if existing.get("vat_code"):
+                    db_doc.buyer_vat_code = existing["vat_code"]
+                    logger.info("buyer_vat_code reused: %s (name: %s)", existing["vat_code"], db_doc.buyer_name)
+                if existing.get("id_programoje"):
+                    db_doc.buyer_id_programoje = existing["id_programoje"]
+                    logger.info("buyer_id_programoje reused: %s (name: %s)", existing["id_programoje"], db_doc.buyer_name)
+            
+            # Если всё ещё нет id_programoje — генерируем
             if not str(getattr(db_doc, "buyer_id_programoje", "") or "").strip():
                 db_doc.buyer_id_programoje = _gen_program_id7()
-                logger.info("buyer_id_programoje auto-set to %s", db_doc.buyer_id_programoje)
+                logger.info("buyer_id_programoje generated: %s (name: %s)", db_doc.buyer_id_programoje, db_doc.buyer_name)
     except Exception as e:
-        logger.warning("failed to set buyer_id_programoje: %s", e)
+        logger.warning("failed to set buyer data: %s", e)
+
+
+
+    # # --- Автогенерация *_id_programoje, если пусты *_id и *_vat_code ---
+    # try:
+    #     if not (str(db_doc.seller_id or "").strip()) and not (str(db_doc.seller_vat_code or "").strip()):
+    #         if not str(getattr(db_doc, "seller_id_programoje", "") or "").strip():
+    #             db_doc.seller_id_programoje = _gen_program_id7()
+    #             logger.info("seller_id_programoje auto-set to %s", db_doc.seller_id_programoje)
+    # except Exception as e:
+    #     logger.warning("failed to set seller_id_programoje: %s", e)
+
+    # try:
+    #     if not (str(db_doc.buyer_id or "").strip()) and not (str(db_doc.buyer_vat_code or "").strip()):
+    #         if not str(getattr(db_doc, "buyer_id_programoje", "") or "").strip():
+    #             db_doc.buyer_id_programoje = _gen_program_id7()
+    #             logger.info("buyer_id_programoje auto-set to %s", db_doc.buyer_id_programoje)
+    # except Exception as e:
+    #     logger.warning("failed to set buyer_id_programoje: %s", e)
 
     db_doc.invoice_date = doc_struct.get("invoice_date")
     db_doc.due_date = doc_struct.get("due_date")
@@ -612,32 +736,6 @@ def update_scanned_document(
         pass
     if doc_struct.get("_lines_structured_hints"):
         logger.info("Validation hints: %s", " | ".join(doc_struct["_lines_structured_hints"]))
-
-
-    # # 1.8) Линии: канонизация строк + агрегаты + сверка с документом
-    # # if isinstance(doc_struct.get("line_items"), list) and doc_struct["line_items"]:
-    #     doc_struct = resolve_line_items(doc_struct)
-
-    #     # опционально подхватить итоговые флаги в поля модели (если есть такие поля)
-    #     try:
-    #         db_doc.val_subtotal_match = bool(doc_struct.get("_lines_sum_matches_wo"))
-    #     except Exception:
-    #         pass
-    #     try:
-    #         db_doc.val_vat_match = bool(doc_struct.get("_lines_sum_matches_vat")) if not bool(doc_struct.get("separate_vat")) else None
-    #     except Exception:
-    #         pass
-    #     try:
-    #         db_doc.val_total_match = bool(doc_struct.get("_lines_sum_matches_with"))
-    #     except Exception:
-    #         pass
-    #     try:
-    #         db_doc.val_ar_sutapo = bool(doc_struct.get("ar_sutapo"))
-    #     except Exception:
-    #         pass
-    #     if doc_struct.get("_lines_structured_hints"):
-    #         logger.info("Validation hints: %s", " | ".join(doc_struct["_lines_structured_hints"]))
-
 
 
     # 3) Сохранение документа и строк (строки сохраняем как есть; без перерасчётов)
