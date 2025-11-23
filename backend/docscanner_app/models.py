@@ -114,6 +114,7 @@ class ScannedDocument(models.Model):
     seller_iban = models.CharField(max_length=255, blank=True, null=True)
     seller_is_person = models.BooleanField(blank=True, null=True)
     seller_name_normalized = models.CharField(max_length=255, blank=True, default="")
+    seller_vat_val = models.CharField(max_length=32, null=True, blank=True)
 
     buyer_id_programoje = models.CharField(max_length=64, blank=True, null=True)
     buyer_id = models.CharField(max_length=100, blank=True, null=True)
@@ -125,6 +126,7 @@ class ScannedDocument(models.Model):
     buyer_iban = models.CharField(max_length=255, blank=True, null=True)
     buyer_is_person = models.BooleanField(blank=True, null=True)
     buyer_name_normalized = models.CharField(max_length=255, blank=True, default="")
+    buyer_vat_val = models.CharField(max_length=32, null=True, blank=True)
 
     invoice_date = models.DateField(blank=True, null=True)
     due_date = models.DateField(blank=True, null=True)

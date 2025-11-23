@@ -11,6 +11,7 @@ from datetime import date, timedelta, time, datetime
 from decimal import Decimal
 import unicodedata
 
+
 # --- Django ---
 from django.conf import settings
 from django.db import transaction
@@ -2574,3 +2575,4 @@ def contact_form(request):
         return Response({"detail": "Žinutė sėkmingai išsiųsta. Ačiū!"})
     return Response({"detail": "Nepavyko išsiųsti žinutės. Pabandykite vėliau."},
                     status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+

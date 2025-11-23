@@ -34,6 +34,35 @@ import IconButton from '@mui/material/IconButton';
 import EditableCell from "../components/EditableCell";
 import EditableAutoCell from "../components/EditableAutoCell";
 
+
+
+
+
+const mapVatStatus = (status) => {
+  switch (status) {
+    case "valid":
+      return {
+        label: "PVM galioja",
+        color: "success",
+        icon: <CheckCircleIcon />,
+      };
+    case "invalid":
+      return {
+        label: "PVM negalioja",
+        color: "error",
+        icon: <ErrorIcon />,
+      };
+    // "not_provided" или null → вообще не показываем чип
+    default:
+      return null;
+  }
+};
+
+
+
+
+
+
 export default function PreviewDialog({
   open,
   onClose,
@@ -750,7 +779,7 @@ export default function PreviewDialog({
                 </Typography>
                 <Divider sx={{ my: 1 }} />
 
-                <Grid2 container spacing={2} sx={{ mb: 2 }}>
+                {/* <Grid2 container spacing={2} sx={{ mb: 2 }}>
                   <Grid2 size={6}>
                     <Typography sx={{ mb: 1.5, fontWeight: 500, fontSize: "0.95rem" }}>Pirkėjas</Typography>
                     {["buyer_name", "buyer_id", "buyer_vat_code"].map((field) => {
@@ -842,7 +871,160 @@ export default function PreviewDialog({
                       );
                     })}
                   </Grid2>
+                </Grid2> */}
+
+                <Grid2 container spacing={2} sx={{ mb: 2 }}>
+                  <Grid2 size={6}>
+                    <Typography sx={{ mb: 1.5, fontWeight: 500, fontSize: "0.95rem" }}>
+                      Pirkėjas
+                    </Typography>
+                    {["buyer_name", "buyer_id", "buyer_vat_code"].map((field) => {
+                      const isVatField = field === "buyer_vat_code";
+                      const vatMeta = isVatField ? mapVatStatus(selected?.buyer_vat_val) : null;
+
+                      return (
+                        <Box key={field} sx={{ mb: 1 }}>
+                          <Box sx={{ display: "flex", alignItems: "center", gap: 0.5, mb: 0.25 }}>
+                            <Typography variant="caption" color="text.secondary">
+                              {EXTRA_FIELDS_CONFIG.client.find((f) => f.name === field)?.label ||
+                                field}
+                            </Typography>
+                            {isVatField && vatMeta && (
+                              <Chip
+                                icon={vatMeta.icon}
+                                label={vatMeta.label}
+                                color={vatMeta.color}
+                                size="small"
+                                sx={{
+                                  height: 18,
+                                  fontSize: "0.7rem",
+                                  "& .MuiChip-label": { px: 0.5 },
+                                  "& .MuiChip-icon": { fontSize: "0.9rem", ml: 0.5, mr: 0.025 },
+                                }}
+                              />
+                            )}
+                          </Box>
+                          <EditableAutoCell
+                            fieldName={field}
+                            label={
+                              EXTRA_FIELDS_CONFIG.client.find((f) => f.name === field)?.label ||
+                              "Pasirinkite…"
+                            }
+                            value={selected[field] || ""}
+                            searchUrl={EXTRA_FIELDS_CONFIG.client.find((f) => f.name === field)?.search}
+                            onSelect={handleClientSelect("buyer")}
+                            onManualSave={async (text) => {
+                              if (!selected?.id) return;
+                              const res = await api.patch(
+                                `/scanned-documents/${selected.id}/extra-fields/`,
+                                { [field]: text || null },
+                                { withCredentials: true }
+                              );
+                              setSelected(res.data);
+                              setDocs((prev) =>
+                                prev.map((d) =>
+                                  String(d.id) === String(selected.id) ? res.data : d
+                                )
+                              );
+                              if (isMulti) await refreshDocument(selected.id);
+                            }}
+                            onClear={async () => {
+                              await handleClientClear("buyer")();
+                            }}
+                            sx={{
+                              width: "100%",
+                              "& .MuiInputBase-root": {
+                                fontSize: "0.875rem",
+                              },
+                              "& input": {
+                                fontSize: "0.875rem",
+                              },
+                            }}
+                          />
+                        </Box>
+                      );
+                    })}
+                  </Grid2>
+
+                  <Grid2 size={6}>
+                    <Typography sx={{ mb: 1.5, fontWeight: 500, fontSize: "0.95rem" }}>
+                      Pardavėjas
+                    </Typography>
+                    {["seller_name", "seller_id", "seller_vat_code"].map((field) => {
+                      const isVatField = field === "seller_vat_code";
+                      const vatMeta = isVatField ? mapVatStatus(selected?.seller_vat_val) : null;
+
+                      const fieldNameForAuto = field.includes("_name")
+                        ? "prekes_pavadinimas"
+                        : field.includes("_id")
+                        ? "prekes_kodas"
+                        : "prekes_barkodas";
+
+                      return (
+                        <Box key={field} sx={{ mb: 1 }}>
+                          <Box sx={{ display: "flex", alignItems: "center", gap: 0.5, mb: 0.25 }}>
+                            <Typography variant="caption" color="text.secondary">
+                              {EXTRA_FIELDS_CONFIG.client.find((f) => f.name === field)?.label ||
+                                field}
+                            </Typography>
+                            {isVatField && vatMeta && (
+                              <Chip
+                                icon={vatMeta.icon}
+                                label={vatMeta.label}
+                                color={vatMeta.color}
+                                size="small"
+                                sx={{
+                                  height: 18,
+                                  fontSize: "0.7rem",
+                                  "& .MuiChip-label": { px: 0.5 },
+                                  "& .MuiChip-icon": { fontSize: "0.9rem", ml: 0.5, mr: 0.025 },
+                                }}
+                              />
+                            )}
+                          </Box>
+                          <EditableAutoCell
+                            fieldName={fieldNameForAuto}
+                            label={
+                              EXTRA_FIELDS_CONFIG.client.find((f) => f.name === field)?.label ||
+                              "Pasirinkite…"
+                            }
+                            value={selected[field] || ""}
+                            searchUrl={EXTRA_FIELDS_CONFIG.client.find((f) => f.name === field)?.search}
+                            onSelect={handleClientSelect("seller")}
+                            onManualSave={async (text) => {
+                              if (!selected?.id) return;
+                              const res = await api.patch(
+                                `/scanned-documents/${selected.id}/extra-fields/`,
+                                { [field]: text || null },
+                                { withCredentials: true }
+                              );
+                              setSelected(res.data);
+                              setDocs((prev) =>
+                                prev.map((d) =>
+                                  String(d.id) === String(selected.id) ? res.data : d
+                                )
+                              );
+                              if (isMulti) await refreshDocument(selected.id);
+                            }}
+                            onClear={async () => {
+                              await handleClientClear("seller")();
+                            }}
+                            sx={{
+                              width: "100%",
+                              "& .MuiInputBase-root": {
+                                fontSize: "0.875rem",
+                              },
+                              "& input": {
+                                fontSize: "0.875rem",
+                              },
+                            }}
+                          />
+                        </Box>
+                      );
+                    })}
+                  </Grid2>
                 </Grid2>
+
 
                 <Divider sx={{ my: 1 }} />
 

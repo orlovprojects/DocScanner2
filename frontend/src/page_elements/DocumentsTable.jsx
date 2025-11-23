@@ -20,6 +20,7 @@ import {
 } from "@mui/material";
 import { alpha, styled } from "@mui/material/styles";
 import WarningIcon from "@mui/icons-material/Warning";
+import PersonOffIcon from '@mui/icons-material/PersonOff';
 import FeedIcon from "@mui/icons-material/Feed";
 import HelpOutlineIcon from "@mui/icons-material/HelpOutline";
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
@@ -366,6 +367,43 @@ export default function DocumentsTable({
                     <TableCell>{renderScanType(d)}</TableCell>
                     <TableCell>{renderDirectionCell(d)}</TableCell>
 
+                    {/* <TableCell sx={{ verticalAlign: "middle", minHeight: 44 }}>
+                      <Box display="flex" alignItems="center">
+                        {iconForStatus(d)}&nbsp;{statusLabel(d)}
+
+                        {(d.status === "completed" || d.status === "exported") && (
+                          <>
+                            {d.ready_for_export === false && (
+                              <Tooltip title="Dokumente trūksta duomenų">
+                                <FeedIcon
+                                  fontSize="small"
+                                  sx={{
+                                    ml: 0.25,
+                                    verticalAlign: "middle",
+                                    cursor: "pointer",
+                                    color: "#8136c1",
+                                  }}
+                                />
+                              </Tooltip>
+                            )}
+                            {d.math_validation_passed === false && (
+                              <Tooltip title="Sumos nesutampa">
+                                <WarningIcon
+                                  fontSize="small"
+                                  sx={{
+                                    ml: 0.25,
+                                    verticalAlign: "middle",
+                                    cursor: "pointer",
+                                    color: "#f17e67",
+                                  }}
+                                />
+                              </Tooltip>
+                            )}
+                          </>
+                        )}
+                      </Box>
+                    </TableCell> */}
+
                     <TableCell sx={{ verticalAlign: "middle", minHeight: 44 }}>
                       <Box display="flex" alignItems="center">
                         {iconForStatus(d)}&nbsp;{statusLabel(d)}
@@ -394,6 +432,32 @@ export default function DocumentsTable({
                                     verticalAlign: "middle",
                                     cursor: "pointer",
                                     color: "#f17e67",
+                                  }}
+                                />
+                              </Tooltip>
+                            )}
+                            {d.buyer_vat_val === 'invalid' && (
+                              <Tooltip title="Negalioja pirkėjo PVM kodas">
+                                <PersonOffIcon
+                                  fontSize="small"
+                                  sx={{
+                                    ml: 0.25,
+                                    verticalAlign: "middle",
+                                    cursor: "pointer",
+                                    color: "#f44336",
+                                  }}
+                                />
+                              </Tooltip>
+                            )}
+                            {d.seller_vat_val === 'invalid' && (
+                              <Tooltip title="Negalioja pardavėjo PVM kodas">
+                                <PersonOffIcon
+                                  fontSize="small"
+                                  sx={{
+                                    ml: 0.25,
+                                    verticalAlign: "middle",
+                                    cursor: "pointer",
+                                    color: "#f44336",
                                   }}
                                 />
                               </Tooltip>

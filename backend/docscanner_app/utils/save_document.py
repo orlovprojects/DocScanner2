@@ -15,6 +15,8 @@ from ..validators.default_currency import set_default_currency
 from ..validators.vat_klas import auto_select_pvm_code  # новая сигнатура (см. вызовы ниже)
 from ..validators.currency_converter import to_iso_currency
 from ..validators.company_name_normalizer import normalize_company_name_v2
+from ..validators.vat_validator import validate_vat
+
 
 # Санитайзеры
 from ..utils.parsers import (
@@ -40,6 +42,7 @@ def _gen_program_id7() -> str:
 def _find_existing_counterparty_data(model_class, party_type: str, name: str, user, exclude_doc_id=None) -> dict | None:
     """
     Ищет в БД документы пользователя с таким же нормализованным именем контрагента.
+    Ищет как среди buyers, так и среди sellers.
     Возвращает dict с id, vat_code, id_programoje (если найдены) или None.
     Приоритет: самый старый документ (первый загруженный).
     """
@@ -50,12 +53,12 @@ def _find_existing_counterparty_data(model_class, party_type: str, name: str, us
     if not normalized:
         return None
     
-    name_norm_field = f"{party_type}_name_normalized"
-    id_field = f"{party_type}_id"
-    vat_field = f"{party_type}_vat_code"
-    id_prog_field = f"{party_type}_id_programoje"
+    from django.db.models import Q
     
-    qs = model_class.objects.filter(user=user, **{name_norm_field: normalized})
+    # Ищем по обеим сторонам: buyer и seller
+    qs = model_class.objects.filter(user=user).filter(
+        Q(seller_name_normalized=normalized) | Q(buyer_name_normalized=normalized)
+    )
     
     if exclude_doc_id:
         qs = qs.exclude(pk=exclude_doc_id)
@@ -64,32 +67,62 @@ def _find_existing_counterparty_data(model_class, party_type: str, name: str, us
     qs = qs.order_by("uploaded_at")
     
     # Сначала ищем документ где есть id или vat_code
-    for doc in qs.only(id_field, vat_field, id_prog_field, "uploaded_at").iterator():
-        doc_id = getattr(doc, id_field, None)
-        doc_vat = getattr(doc, vat_field, None)
-        doc_prog = getattr(doc, id_prog_field, None)
+    for doc in qs.iterator():
+        # Проверяем seller
+        if normalize_company_name_v2(doc.seller_name) == normalized:
+            doc_id = doc.seller_id
+            doc_vat = doc.seller_vat_code
+            doc_prog = doc.seller_id_programoje
+            
+            has_id = bool((str(doc_id) if doc_id else "").strip())
+            has_vat = bool((str(doc_vat) if doc_vat else "").strip())
+            has_prog = bool((str(doc_prog) if doc_prog else "").strip())
+            
+            if has_id or has_vat:
+                return {
+                    "id": doc_id if has_id else None,
+                    "vat_code": doc_vat if has_vat else None,
+                    "id_programoje": doc_prog if has_prog else None,
+                }
         
-        has_id = bool((str(doc_id) if doc_id else "").strip())
-        has_vat = bool((str(doc_vat) if doc_vat else "").strip())
-        has_prog = bool((str(doc_prog) if doc_prog else "").strip())
-        
-        # Приоритет: документ с id или vat_code
-        if has_id or has_vat:
-            return {
-                "id": doc_id if has_id else None,
-                "vat_code": doc_vat if has_vat else None,
-                "id_programoje": doc_prog if has_prog else None,
-            }
+        # Проверяем buyer
+        if normalize_company_name_v2(doc.buyer_name) == normalized:
+            doc_id = doc.buyer_id
+            doc_vat = doc.buyer_vat_code
+            doc_prog = doc.buyer_id_programoje
+            
+            has_id = bool((str(doc_id) if doc_id else "").strip())
+            has_vat = bool((str(doc_vat) if doc_vat else "").strip())
+            has_prog = bool((str(doc_prog) if doc_prog else "").strip())
+            
+            if has_id or has_vat:
+                return {
+                    "id": doc_id if has_id else None,
+                    "vat_code": doc_vat if has_vat else None,
+                    "id_programoje": doc_prog if has_prog else None,
+                }
     
-    # Если не нашли с id/vat — ищем хотя бы с id_programoje (тоже самый старый)
-    for doc in qs.only(id_prog_field).iterator():
-        doc_prog = getattr(doc, id_prog_field, None)
-        if doc_prog and str(doc_prog).strip():
-            return {
-                "id": None,
-                "vat_code": None,
-                "id_programoje": doc_prog,
-            }
+    # Если не нашли с id/vat — ищем хотя бы с id_programoje
+    for doc in qs.iterator():
+        # Проверяем seller
+        if normalize_company_name_v2(doc.seller_name) == normalized:
+            doc_prog = doc.seller_id_programoje
+            if doc_prog and str(doc_prog).strip():
+                return {
+                    "id": None,
+                    "vat_code": None,
+                    "id_programoje": doc_prog,
+                }
+        
+        # Проверяем buyer
+        if normalize_company_name_v2(doc.buyer_name) == normalized:
+            doc_prog = doc.buyer_id_programoje
+            if doc_prog and str(doc_prog).strip():
+                return {
+                    "id": None,
+                    "vat_code": None,
+                    "id_programoje": doc_prog,
+                }
     
     return None
 
@@ -126,6 +159,27 @@ def _apply_top_level_fields(
     db_doc.buyer_country_iso = doc_struct.get("buyer_country_iso")
     db_doc.buyer_iban = doc_struct.get("buyer_iban")
     db_doc.buyer_is_person = doc_struct.get("buyer_is_person")
+
+
+    try:
+        seller_vat_res = validate_vat(
+            raw_code=db_doc.seller_vat_code,
+            country_iso=db_doc.seller_country_iso,
+        )
+        db_doc.seller_vat_val = seller_vat_res.get("status")
+    except Exception as e:
+        logger.warning("Seller VAT validation failed: %s", e)
+        db_doc.seller_vat_val = None
+
+    try:
+        buyer_vat_res = validate_vat(
+            raw_code=db_doc.buyer_vat_code,
+            country_iso=db_doc.buyer_country_iso,
+        )
+        db_doc.buyer_vat_val = buyer_vat_res.get("status")
+    except Exception as e:
+        logger.warning("Buyer VAT validation failed: %s", e)
+        db_doc.buyer_vat_val = None
 
 
     # --- Нормализованные имена для поиска дубликатов ---
