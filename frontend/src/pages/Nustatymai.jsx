@@ -799,8 +799,7 @@ export default function NustatymaiPage() {
   return (
     <Box p={4} maxWidth={900}>
       <Helmet><title>Nustatymai - DokSkenas</title></Helmet>
-
-      <Typography variant="h5" gutterBottom>Nustatymai</Typography>
+      <Typography variant="h4" sx={{ fontWeight: 600 }}>Nustatymai</Typography>
 
       {/* 1. Company details */}
       <Paper sx={{ p: 3, mb: 3 }}>
@@ -926,9 +925,7 @@ export default function NustatymaiPage() {
 
       {/* 3. Papildomi nustatymai */}
       <Paper sx={{ p: 3, mb: 3, mt: 5 }}>
-        <Typography variant="subtitle1" sx={{ mb: 1 }}>
-          Papildomi nustatymai
-        </Typography>
+        <Typography variant="h6" sx={{ mb: 3, fontWeight: 600 }}>Papildomi nustatymai</Typography>
         <FormControlLabel
           control={<Switch checked={isOpDateFromDoc} onChange={toggleOpDateFromDoc} />}
           label="Operacijos datą imti iš sąskaitos datos"
@@ -997,7 +994,7 @@ export default function NustatymaiPage() {
 
       {/* 4. Duomenų importas */}
       <Box mb={3}>
-        <Typography variant="h6" gutterBottom>Duomenų importas</Typography>
+        <Typography variant="h4" sx={{ mt: 10, fontWeight: 600 }}>Duomenų importas</Typography>
         <Tabs value={importTab} onChange={(_, v) => setImportTab(v)} sx={{ mb: 2 }}>
           <Tab label="Prekės" /><Tab label="Įmonės" />
         </Tabs>
@@ -1009,10 +1006,15 @@ export default function NustatymaiPage() {
         )}
       </Box>
 
+
+      <Box mb={3}>
+        <Typography variant="h4" sx={{ mt: 10, fontWeight: 600 }}>Automatizacijos</Typography>
+      </Box>
+
       {/* 5. Defaults for sumiskai */}
       <Paper sx={{ p: 3, mb: 3 }}>
         <Box sx={{ display: "flex", alignItems: "center", gap: 0, mb: 2 }}>
-          <Typography variant="h6" sx={{ fontWeight: 600 }}>
+          <Typography variant="h6" sx={{ fontWeight: 500 }}>
             Numatytosios reikšmės (skaitmenizuojant sumiškai)
           </Typography>
           {/* <Typography variant="subtitle1" sx={{ mr: 0 }}>
@@ -1071,11 +1073,11 @@ export default function NustatymaiPage() {
       <Paper sx={{ p: 3, mt: 6 }}>
         {/* Заголовок секции */}
         <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 3 }}>
-          <Typography variant="h6" sx={{ fontWeight: 600 }}>
+          <Typography variant="h6" sx={{ fontWeight: 500 }}>
             Numatytosios prekių reikšmės (skaitmenizuojant detaliai)
           </Typography>
           <Tooltip
-            title="Kai taisyklių sąlygos įvykdytos, sistema automatiškai priskiria prekės kodą ir tipą kiekvienai eilutei skaitmenizuojant detaliai"
+            title="Kai taisyklių sąlygos įvykdytos, sistema automatiškai priskiria prekės pavadinimą, kodą, barkodą ir tipą kiekvienai eilutei skaitmenizuojant detaliai"
             arrow
             enterTouchDelay={0}
             leaveTouchDelay={4000}
