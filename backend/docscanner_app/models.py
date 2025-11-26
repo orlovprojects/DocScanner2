@@ -384,6 +384,7 @@ class CustomUser(AbstractUser):
 
     purchase_defaults = models.JSONField(default=_purchase_default_list, blank=True)
     sales_defaults = models.JSONField(default=_sales_default_list, blank=True)
+    lineitem_rules = models.JSONField(default=list, blank=True)
 
     extra_settings = models.JSONField(blank=True, null=True)
 
@@ -391,7 +392,7 @@ class CustomUser(AbstractUser):
     view_mode = models.CharField(
         max_length=16,
         choices=VIEW_MODE_CHOICES,
-        default=VIEW_MODE_SINGLE,
+        default=VIEW_MODE_MULTI,
         help_text="UI mode for documents: single or multi company."
     )
 

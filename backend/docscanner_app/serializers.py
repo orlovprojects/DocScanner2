@@ -7,6 +7,8 @@ from django.db.models import IntegerField, Value
 from django.db.models.functions import Cast
 from django.db.models import Case, When
 
+from .utils.lineitem_rules import normalize_lineitem_rules
+
 
 class LineItemSerializer(serializers.ModelSerializer):
     class Meta:
@@ -420,6 +422,8 @@ class CustomUserSerializer(serializers.ModelSerializer):
     purchase_defaults = serializers.JSONField(required=False)
     sales_defaults    = serializers.JSONField(required=False)
 
+    lineitem_rules    = serializers.JSONField(required=False)
+
     extra_settings    = serializers.JSONField(required=False, allow_null=True)
 
     class Meta:
@@ -432,7 +436,7 @@ class CustomUserSerializer(serializers.ModelSerializer):
             'company_name','company_code','vat_code',
             'company_iban','company_address','company_country_iso',
             'purchase_defaults','sales_defaults','view_mode',
-            'extra_settings', 'is_superuser','is_staff',
+            'extra_settings', 'is_superuser','is_staff', 'lineitem_rules',
         ]
         read_only_fields = ('credits',)
         extra_kwargs = {
@@ -543,12 +547,51 @@ class CustomUserSerializer(serializers.ModelSerializer):
                 instance_list.append(item)
 
     # --------- create / update ----------
+    # def create(self, validated_data):
+    #     password = validated_data.pop('password')
+
+    #     # забираем «сырые» payload (могут содержать команды удаления)
+    #     raw_pd = self.initial_data.get('purchase_defaults', None)
+    #     raw_sd = self.initial_data.get('sales_defaults', None)
+
+    #     # extra_settings уже провалидирован
+    #     extra   = validated_data.pop('extra_settings', None)
+
+    #     user = CustomUser.objects.create_user(password=password, **validated_data)
+    #     user.credits = 50
+
+    #     # стартуем со списков
+    #     user.purchase_defaults = []
+    #     user.sales_defaults = []
+
+    #     # обработка purchase_defaults
+    #     lst, di, dm = self._coerce_defaults_input(raw_pd, 'purchase_defaults')
+    #     if lst is not None:
+    #         lst = self._validate_profile_list(lst, 'purchase_defaults')
+    #         user.purchase_defaults = lst
+
+    #     # обработка sales_defaults
+    #     lst, di, dm = self._coerce_defaults_input(raw_sd, 'sales_defaults')
+    #     if lst is not None:
+    #         lst = self._validate_profile_list(lst, 'sales_defaults')
+    #         user.sales_defaults = lst
+
+    #     if extra is not None:
+    #         user.extra_settings = extra   # ПОЛНАЯ ЗАМЕНА
+
+    #     user.save(update_fields=['credits','purchase_defaults','sales_defaults','extra_settings'])
+    #     return user
+
+
     def create(self, validated_data):
         password = validated_data.pop('password')
 
         # забираем «сырые» payload (могут содержать команды удаления)
         raw_pd = self.initial_data.get('purchase_defaults', None)
         raw_sd = self.initial_data.get('sales_defaults', None)
+
+        # 🔹 НОВОЕ: сырые правила по строкам
+        raw_lr = self.initial_data.get('lineitem_rules', None)
 
         # extra_settings уже провалидирован
         extra   = validated_data.pop('extra_settings', None)
@@ -572,11 +615,75 @@ class CustomUserSerializer(serializers.ModelSerializer):
             lst = self._validate_profile_list(lst, 'sales_defaults')
             user.sales_defaults = lst
 
+        # 🔹 НОВОЕ: lineitem_rules — полная замена/установка списка
+        if raw_lr is not None:
+            user.lineitem_rules = normalize_lineitem_rules(raw_lr)
+        else:
+            user.lineitem_rules = []
+
         if extra is not None:
             user.extra_settings = extra   # ПОЛНАЯ ЗАМЕНА
 
-        user.save(update_fields=['credits','purchase_defaults','sales_defaults','extra_settings'])
+        user.save(update_fields=[
+            'credits','purchase_defaults','sales_defaults',
+            'extra_settings','lineitem_rules',  # 🔹 тут тоже
+        ])
         return user
+    
+
+
+    # def update(self, instance, validated_data):
+    #     password = validated_data.pop('password', None)
+
+    #     # текущие списки
+    #     cur_pd = list(instance.purchase_defaults or [])
+    #     cur_sd = list(instance.sales_defaults or [])
+
+    #     # сырые входные (могут быть delete-команды)
+    #     raw_pd = self.initial_data.get('purchase_defaults', None)
+    #     raw_sd = self.initial_data.get('sales_defaults', None)
+
+    #     # какой метод
+    #     method = (self.context.get('request').method.upper() if self.context.get('request') else 'PATCH')
+
+    #     # --- purchase_defaults ---
+    #     lst, di, dm = self._coerce_defaults_input(raw_pd, 'purchase_defaults')
+    #     if di is not None or dm is not None:
+    #         self._apply_delete_to_list(cur_pd, di, dm)
+    #     elif lst is not None:
+    #         lst = self._validate_profile_list(lst, 'purchase_defaults')
+    #         if method == 'PATCH':
+    #             self._merge_defaults_list(cur_pd, lst)
+    #         else:
+    #             cur_pd = lst
+
+    #     # --- sales_defaults ---
+    #     lst, di, dm = self._coerce_defaults_input(raw_sd, 'sales_defaults')
+    #     if di is not None or dm is not None:
+    #         self._apply_delete_to_list(cur_sd, di, dm)
+    #     elif lst is not None:
+    #         lst = self._validate_profile_list(lst, 'sales_defaults')
+    #         if method == 'PATCH':
+    #             self._merge_defaults_list(cur_sd, lst)
+    #         else:
+    #             cur_sd = lst
+
+    #     # extra_settings — ПОЛНАЯ ЗАМЕНА (чтобы удаление ключей работало)
+    #     if 'extra_settings' in validated_data:
+    #         instance.extra_settings = validated_data.pop('extra_settings')
+
+    #     # остальные поля
+    #     for attr, value in validated_data.items():
+    #         setattr(instance, attr, value)
+
+    #     if password:
+    #         instance.set_password(password)
+
+    #     instance.purchase_defaults = cur_pd
+    #     instance.sales_defaults = cur_sd
+    #     instance.save()
+    #     return instance
+
 
     def update(self, instance, validated_data):
         password = validated_data.pop('password', None)
@@ -585,12 +692,16 @@ class CustomUserSerializer(serializers.ModelSerializer):
         cur_pd = list(instance.purchase_defaults or [])
         cur_sd = list(instance.sales_defaults or [])
 
-        # сырые входные (могут быть delete-команды)
+        # сырые входные (могут быть delete-команды) для sumiskai defaults
         raw_pd = self.initial_data.get('purchase_defaults', None)
         raw_sd = self.initial_data.get('sales_defaults', None)
 
+        # 🔹 для lineitem_rules НИКАКИХ спец-команд — только список целиком
+        raw_lr = self.initial_data.get('lineitem_rules', None)
+
         # какой метод
-        method = (self.context.get('request').method.upper() if self.context.get('request') else 'PATCH')
+        method = (self.context.get('request').method.upper()
+                if self.context.get('request') else 'PATCH')
 
         # --- purchase_defaults ---
         lst, di, dm = self._coerce_defaults_input(raw_pd, 'purchase_defaults')
@@ -614,9 +725,14 @@ class CustomUserSerializer(serializers.ModelSerializer):
             else:
                 cur_sd = lst
 
-        # extra_settings — ПОЛНАЯ ЗАМЕНА (чтобы удаление ключей работало)
+        # extra_settings — ПОЛНАЯ ЗАМЕНА
         if 'extra_settings' in validated_data:
             instance.extra_settings = validated_data.pop('extra_settings')
+
+        # 🔹 lineitem_rules — ПОЛНАЯ ЗАМЕНА СПИСКА
+        # фронт всегда шлёт текущий список (с нужным правилом удалённым/изменённым)
+        if raw_lr is not None:
+            instance.lineitem_rules = normalize_lineitem_rules(raw_lr)
 
         # остальные поля
         for attr, value in validated_data.items():
@@ -627,6 +743,7 @@ class CustomUserSerializer(serializers.ModelSerializer):
 
         instance.purchase_defaults = cur_pd
         instance.sales_defaults = cur_sd
+
         instance.save()
         return instance
 
@@ -647,7 +764,7 @@ class CustomUserAdminListSerializer(CustomUserSerializer):
             'company_name','company_code','vat_code',
             'company_iban','company_address','company_country_iso',
             'purchase_defaults','sales_defaults','view_mode',
-            'extra_settings',
+            'extra_settings','lineitem_rules',
         ]
         read_only_fields = getattr(CustomUserSerializer.Meta, 'read_only_fields', ('credits',))
 

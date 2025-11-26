@@ -689,6 +689,57 @@ def export_products_to_pragma(products=None, documents=None):
     return result
 
 
+def normalize_preke_paslauga_for_pragma(value) -> int:
+    """
+    Нормализует значение preke_paslauga для Pragma 3.2.
+    
+    Возвращает:
+    - 0 = товар (prekė)
+    - 1 = услуга (paslauga)
+    
+    Маппинг:
+    - 1 → 0 (prekė = товар)
+    - 2 → 1 (paslauga = услуга)
+    - 3 → 0 (kodas = товар)
+    - 4 → 1 (услуга)
+    
+    Также поддерживает текстовые значения:
+    - 'preke', 'prekė', 'prekes', 'prekės' → 0
+    - 'paslauga', 'paslaugos' → 1
+    """
+    if value is None:
+        return 0
+    
+    s = str(value).strip()
+    if not s:
+        return 0
+    
+    # Числовые значения
+    try:
+        n = int(float(s.replace(",", ".")))
+        if n == 1:
+            return 0  # товар
+        elif n == 2:
+            return 1  # услуга
+        elif n == 3:
+            return 0  # код → товар
+        elif n == 4:
+            return 1  # → услуга
+        return 0  # fallback - товар
+    except Exception:
+        pass
+    
+    # Текстовые значения
+    low = s.lower()
+    if low in ("preke", "prekė", "prekes", "prekės"):
+        return 0
+    if low in ("paslauga", "paslaugos"):
+        return 1
+    
+    return 0  # fallback - товар
+
+
+# Использование в _extract_product_from_item():
 def _extract_product_from_item(item, doc):
     """Извлекает данные товара из позиции документа."""
     code = (
@@ -703,12 +754,9 @@ def _extract_product_from_item(item, doc):
     name = _s(getattr(item, 'prekes_pavadinimas', '')) or _s(getattr(doc, 'prekes_pavadinimas', '')) or 'Prekė'
     unit = _s(getattr(item, 'unit', '')) or _s(getattr(doc, 'unit', '')) or 'vnt.'
     
-    # Определяем тип: 0=товар, 1=услуга
+    # Определяем тип: 0=товар, 1=услуга (ИСПРАВЛЕНО)
     preke_paslauga = getattr(item, 'preke_paslauga', None) or getattr(doc, 'preke_paslauga', None)
-    if preke_paslauga in ('2', 2, 'paslauga'):
-        is_service = 1
-    else:
-        is_service = 0
+    is_service = normalize_preke_paslauga_for_pragma(preke_paslauga)
     
     return {
         'id': code,
@@ -723,6 +771,7 @@ def _extract_product_from_item(item, doc):
     }
 
 
+# Использование в _extract_product_from_doc():
 def _extract_product_from_doc(doc):
     """Извлекает данные товара из документа без позиций."""
     code = _s(getattr(doc, 'prekes_kodas', ''))
@@ -733,11 +782,9 @@ def _extract_product_from_doc(doc):
     name = _s(getattr(doc, 'prekes_pavadinimas', '')) or 'Prekė'
     unit = _s(getattr(doc, 'unit', '')) or 'vnt.'
     
+    # Определяем тип: 0=товар, 1=услуга (ИСПРАВЛЕНО)
     preke_paslauga = getattr(doc, 'preke_paslauga', None)
-    if preke_paslauga in ('2', 2, 'paslauga'):
-        is_service = 1
-    else:
-        is_service = 0
+    is_service = normalize_preke_paslauga_for_pragma(preke_paslauga)
     
     return {
         'id': code,
@@ -750,6 +797,7 @@ def _extract_product_from_doc(doc):
         'pack_qty': '',
         'pack_type': ''
     }
+
 
 
 def _build_product_line(product):

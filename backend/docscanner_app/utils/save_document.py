@@ -29,6 +29,8 @@ from ..utils.parsers import (
 from ..validators.extra_validators import apply_user_extra_settings
 from ..validators.required_fields_checker import check_required_fields_for_export
 from ..validators.math_validator_for_export import validate_document_math_for_export
+from ..utils.lineitem_rules_applier import apply_lineitem_rules_for_detaliai
+
 
 
 logger = logging.getLogger("docscanner_app")
@@ -806,6 +808,14 @@ def update_scanned_document(
         db_doc.save()
 
         _save_line_items(db_doc, doc_struct, scan_type)
+
+        try:
+            if scan_type == "detaliai":
+                changed = apply_lineitem_rules_for_detaliai(db_doc, user)
+                logger.info("apply_lineitem_rules_for_detaliai changed %d line(s)", changed)
+        except Exception as e:
+            logger.warning("Failed to apply lineitem_rules: %s", e)
+            
 
         if scan_type == "detaliai" and (structured or {}).get("ar_sutapo") is not None:
             # Не затираем внешний флаг, если он пришёл снаружи

@@ -898,7 +898,7 @@ export default function PreviewDialog({
                                 sx={{
                                   height: 18,
                                   fontSize: "0.7rem",
-                                  "& .MuiChip-label": { px: 0.5 },
+                                  "& .MuiChip-label": { px: 0.5, pr: 1 },
                                   "& .MuiChip-icon": { fontSize: "0.9rem", ml: 0.5, mr: 0.025 },
                                 }}
                               />
@@ -976,7 +976,7 @@ export default function PreviewDialog({
                                 sx={{
                                   height: 18,
                                   fontSize: "0.7rem",
-                                  "& .MuiChip-label": { px: 0.5 },
+                                  "& .MuiChip-label": { px: 0.5, pr: 1 },
                                   "& .MuiChip-icon": { fontSize: "0.9rem", ml: 0.5, mr: 0.025 },
                                 }}
                               />

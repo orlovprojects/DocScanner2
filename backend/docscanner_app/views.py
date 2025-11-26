@@ -698,10 +698,7 @@ def export_documents(request):
             export_success = True
 
 
-    # ========================= BŪTENT =========================
-    # Добавить этот блок в views.py после блока 'rivile_erp'
-    # Место вставки: после строки ~450, перед финальным else
-
+    # ========================= Butent =========================
     elif export_type == 'butent':
         logger.info("[EXP] BUTENT export started")
         assign_random_prekes_kodai(documents)
@@ -714,23 +711,50 @@ def export_documents(request):
             return Response({"error": "No documents to export"}, status=400)
 
         try:
-            # Экспортируем в Excel (mode='auto' - автоопределение suminis/kiekinis)
-            excel_bytes = export_to_butent(
+            # Экспортируем в Excel (mode='auto' возвращает Dict[str, bytes])
+            result = export_to_butent(
                 documents=all_docs,
                 mode='auto',
                 user=request.user
             )
             
-            logger.info("[EXP] BUTENT export completed, size=%d bytes", len(excel_bytes))
+            logger.info("[EXP] BUTENT export completed, files=%s", list(result.keys()))
             
-            # Формируем ответ
-            filename = f'{today_str}_butent_import.xlsx'
-            response = HttpResponse(
-                excel_bytes,
-                content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-            )
-            response['Content-Disposition'] = f'attachment; filename="{filename}"'
-            export_success = True
+            # Если один файл - отдаем его напрямую
+            if len(result) == 1:
+                mode, excel_bytes = list(result.items())[0]
+                filename = f'{today_str}_butent_{mode}_import.xlsx'
+                
+                logger.info("[EXP] BUTENT single file: %s, size=%d bytes", filename, len(excel_bytes))
+                
+                response = HttpResponse(
+                    excel_bytes,
+                    content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+                )
+                response['Content-Disposition'] = f'attachment; filename="{filename}"'
+                export_success = True
+            
+            # Если два файла - создаем ZIP архив
+            else:
+                import zipfile
+                from io import BytesIO
+                
+                zip_buffer = BytesIO()
+                
+                with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+                    for mode, excel_bytes in result.items():
+                        filename = f'{today_str}_butent_{mode}_import.xlsx'
+                        zip_file.writestr(filename, excel_bytes)
+                        logger.info("[EXP] BUTENT added to ZIP: %s, size=%d bytes", filename, len(excel_bytes))
+                
+                zip_buffer.seek(0)
+                zip_bytes = zip_buffer.read()
+                
+                logger.info("[EXP] BUTENT ZIP created, size=%d bytes", len(zip_bytes))
+                
+                response = HttpResponse(zip_bytes, content_type='application/zip')
+                response['Content-Disposition'] = f'attachment; filename="{today_str}_butent_import.zip"'
+                export_success = True
 
         except FileNotFoundError as e:
             logger.error("[EXP] BUTENT template not found: %s", e)

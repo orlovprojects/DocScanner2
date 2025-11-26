@@ -41,14 +41,42 @@ def _d(v, default: Decimal = Decimal("0")) -> Decimal:
 
 def normalize_tip_lineitem(value) -> str:
     """
-    Для line item: 'preke' → '1', 'paslauga' → '2', иначе '1'.
+    Для line item в Finvalda: возвращает '1' (preke) или '2' (paslauga).
+    Поддерживает: 1/2/3/4, 'preke/prekė', 'paslauga/paslaugos'.
+    
+    Маппинг:
+    - 1 → '1' (prekė = товар)
+    - 2 → '2' (paslauga = услуга)
+    - 3 → '1' (kodas обрабатывается как товар)
+    - 4 → '2' (обрабатывается как услуга)
     """
-    s = _s(value).lower()
-    if s in ("preke", "prekė", "prekes", "prekės"):
+    s = str(value).strip() if value is not None else ""
+    if not s:
         return "1"
-    if s in ("paslauga", "paslaugos"):
+    
+    # Пробуем числовое значение
+    try:
+        n = int(float(s.replace(",", ".")))
+        if n == 1:
+            return "1"
+        elif n == 2:
+            return "2"
+        elif n == 3:
+            return "1"  # kodas -> товар
+        elif n == 4:
+            return "2"  # -> услуга
+        return "1"  # fallback
+    except Exception:
+        pass
+    
+    # Текстовые синонимы
+    low = s.lower()
+    if low in ("preke", "prekė", "prekes", "prekės"):
+        return "1"
+    if low in ("paslauga", "paslaugos"):
         return "2"
-    return "1"
+    
+    return "1"  # fallback
 
 
 def normalize_tip_doc(value) -> str:

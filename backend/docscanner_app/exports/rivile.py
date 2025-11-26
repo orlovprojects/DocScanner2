@@ -246,11 +246,51 @@ def get_party_code(
     return ""
 
 
+# def normalize_preke_paslauga_tipas(value: object) -> str:
+#     """
+#     Вернёт '1' | '2' | '3' из любого ввода.
+#     Поддерживает: 1/2/3, 'preke/prekė/prekes/prekės', 'paslauga/paslaugos',
+#     'kodas/kodai', пробелы, запятые/точки. Пусто/непонятно -> '1'.
+#     """
+#     if value is None:
+#         logger.info("[RIVILE:TIPAS] value=None -> '1'")
+#         return "1"
+#     s = str(value).strip().lower()
+#     if not s:
+#         logger.info("[RIVILE:TIPAS] value='' -> '1'")
+#         return "1"
+
+#     try:
+#         n = int(float(s.replace(",", ".")))
+#         if n in (1, 2, 3):
+#             logger.info("[RIVILE:TIPAS] numeric %r -> %r", s, n)
+#             return str(n)
+#     except ValueError:
+#         pass
+
+#     preke_syn    = {"preke", "prekė", "prekes", "prekės"}
+#     paslauga_syn = {"paslauga", "paslaugos"}
+#     kodas_syn    = {"kodas", "kodai"}
+
+#     if s in preke_syn:
+#         logger.info("[RIVILE:TIPAS] word %r -> '1'", s)
+#         return "1"
+#     if s in paslauga_syn:
+#         logger.info("[RIVILE:TIPAS] word %r -> '2'", s)
+#         return "2"
+#     if s in kodas_syn:
+#         logger.info("[RIVILE:TIPAS] word %r -> '3'", s)
+#         return "3"
+#     logger.info("[RIVILE:TIPAS] fallback for %r -> '1'", s)
+#     return "1"
+
 def normalize_preke_paslauga_tipas(value: object) -> str:
     """
-    Вернёт '1' | '2' | '3' из любого ввода.
-    Поддерживает: 1/2/3, 'preke/prekė/prekes/prekės', 'paslauga/paslaugos',
+    Vернёт '1' | '2' | '3' из любого ввода.
+    Поддерживает: 1/2/3/4, 'preke/prekė/prekes/prekės', 'paslauga/paslaugos',
     'kodas/kodai', пробелы, запятые/точки. Пусто/непонятно -> '1'.
+    
+    Новое правило: 3 или 4 -> '3' (kodas)
     """
     if value is None:
         logger.info("[RIVILE:TIPAS] value=None -> '1'")
@@ -262,9 +302,15 @@ def normalize_preke_paslauga_tipas(value: object) -> str:
 
     try:
         n = int(float(s.replace(",", ".")))
-        if n in (1, 2, 3):
-            logger.info("[RIVILE:TIPAS] numeric %r -> %r", s, n)
-            return str(n)
+        if n == 1:
+            logger.info("[RIVILE:TIPAS] numeric %r -> '1'", s)
+            return "1"
+        elif n == 2:
+            logger.info("[RIVILE:TIPAS] numeric %r -> '2'", s)
+            return "2"
+        elif n in (3, 4):  # ← ДОБАВЛЕНО: 3 или 4 -> kodas
+            logger.info("[RIVILE:TIPAS] numeric %r -> '3' (kodas)", s)
+            return "3"
     except ValueError:
         pass
 
@@ -281,6 +327,7 @@ def normalize_preke_paslauga_tipas(value: object) -> str:
     if s in kodas_syn:
         logger.info("[RIVILE:TIPAS] word %r -> '3'", s)
         return "3"
+    
     logger.info("[RIVILE:TIPAS] fallback for %r -> '1'", s)
     return "1"
 
@@ -360,14 +407,84 @@ def export_prekes_paslaugos_kodai_group_to_rivile(documents):
         target_dict[kodas] = n17
         logger.info("[RIVILE:N17] added kodas=%r tipas=%r unit=%r", kodas, tipas, unit)
 
-    def add_n25_record(kodai_dict, doc):
-        kodas = getattr(doc, "prekes_kodas", None)
-        if not kodas or kodas in kodai_dict:
+    # def add_n25_record(kodai_dict, doc):
+    #     kodas = getattr(doc, "prekes_kodas", None)
+    #     if not kodas or kodas in kodai_dict:
+    #         return
+
+    #     pavadinimas = getattr(doc, "prekes_pavadinimas", None) or "Prekė"
+
+    #     # TIPAS для N25 зависит от pirkimas/pardavimas
+    #     pirk_pard = (getattr(doc, "pirkimas_pardavimas", "") or "").strip().lower()
+    #     if pirk_pard == "pirkimas":
+    #         tipas = "1"
+    #     elif pirk_pard == "pardavimas":
+    #         tipas = "2"
+    #     else:
+    #         tipas = "1"  # дефолт
+
+    #     saskaita    = getattr(doc, "N25_KODAS_SS", None) or getattr(doc, "saskaita", None) or "5001"
+    #     kodas_ds    = getattr(doc, "N25_KODAS_DS", None) or getattr(doc, "kodas_ds", None) or "PR001"
+    #     unit        = getattr(doc, "unit", None) or getattr(doc, "N25_KODAS_US", None) or "VNT"
+    #     frakcija    = getattr(doc, "N25_FRAKCIJA", None) or "100"
+    #     suma        = getattr(doc, "N25_SUMA", None) or "0.00"
+    #     tax         = getattr(doc, "N25_TAX", None) or "1"
+    #     mokestis    = getattr(doc, "N25_MOKESTIS", None) or "1"
+    #     poz_date    = getattr(doc, "N25_POZ_DATE", None) or "0"
+
+    #     n25 = ET.Element("N25")
+    #     ET.SubElement(n25, "N25_KODAS_BS").text = smart_str(kodas)
+    #     ET.SubElement(n25, "N25_PAV").text      = smart_str(pavadinimas)
+    #     ET.SubElement(n25, "N25_TIPAS").text    = tipas
+    #     ET.SubElement(n25, "N25_KODAS_SS").text = smart_str(saskaita)
+    #     ET.SubElement(n25, "N25_KODAS_DS").text = smart_str(kodas_ds)
+    #     ET.SubElement(n25, "N25_KODAS_US").text = smart_str(unit)
+    #     ET.SubElement(n25, "N25_FRAKCIJA").text = smart_str(str(frakcija))
+    #     ET.SubElement(n25, "N25_SUMA").text     = smart_str(str(suma))
+    #     ET.SubElement(n25, "N25_TAX").text      = smart_str(str(tax))
+    #     ET.SubElement(n25, "N25_MOKESTIS").text = smart_str(str(mokestis))
+    #     ET.SubElement(n25, "N25_POZ_DATE").text = smart_str(str(poz_date))
+    #     kodai_dict[kodas] = n25
+    #     logger.info("[RIVILE:N25] added kodas=%r tipas=%r saskaita=%r", kodas, tipas, saskaita)
+
+    def add_n25_record(kodai_dict, doc, item=None):
+        """
+        Создаёт N25 по данным line item, а если item=None — по doc.
+        Один N25 на один kodas (ключ в kodai_dict).
+        """
+
+        # --- 1) KODAS (ключ и N25_KODAS_BS) ---
+        if item is not None:
+            kodas = (
+                getattr(item, "prekes_kodas", None)
+                or getattr(item, "prekes_barkodas", None)
+                or getattr(doc, "prekes_kodas", None)
+                or getattr(doc, "prekes_barkodas", None)
+            )
+        else:
+            kodas = (
+                getattr(doc, "prekes_kodas", None)
+                or getattr(doc, "prekes_barkodas", None)
+            )
+
+        if not kodas:
+            # нет кода – нет N25
+            return
+        if kodas in kodai_dict:
+            # уже есть такой код – второй раз не создаем
             return
 
-        pavadinimas = getattr(doc, "prekes_pavadinimas", None) or "Prekė"
+        # --- 2) Название ---
+        if item is not None:
+            pavadinimas = (
+                getattr(item, "prekes_pavadinimas", None)
+                or getattr(doc, "prekes_pavadinimas", None)
+                or "Prekė"
+            )
+        else:
+            pavadinimas = getattr(doc, "prekes_pavadinimas", None) or "Prekė"
 
-        # TIPAS для N25 зависит от pirkimas/pardavimas
+        # --- 3) TIPAS (1 – pirkimas, 2 – pardavimas) ---
         pirk_pard = (getattr(doc, "pirkimas_pardavimas", "") or "").strip().lower()
         if pirk_pard == "pirkimas":
             tipas = "1"
@@ -376,14 +493,72 @@ def export_prekes_paslaugos_kodai_group_to_rivile(documents):
         else:
             tipas = "1"  # дефолт
 
-        saskaita    = getattr(doc, "N25_KODAS_SS", None) or getattr(doc, "saskaita", None) or "5001"
-        kodas_ds    = getattr(doc, "N25_KODAS_DS", None) or getattr(doc, "kodas_ds", None) or "PR001"
-        unit        = getattr(doc, "unit", None) or getattr(doc, "N25_KODAS_US", None) or "VNT"
-        frakcija    = getattr(doc, "N25_FRAKCIJA", None) or "100"
-        suma        = getattr(doc, "N25_SUMA", None) or "0.00"
-        tax         = getattr(doc, "N25_TAX", None) or "1"
-        mokestis    = getattr(doc, "N25_MOKESTIS", None) or "1"
-        poz_date    = getattr(doc, "N25_POZ_DATE", None) or "0"
+        # --- 4) Остальные поля с приоритетом item → doc → дефолт ---
+        if item is not None:
+            saskaita = (
+                getattr(item, "N25_KODAS_SS", None)
+                or getattr(doc, "N25_KODAS_SS", None)
+                or getattr(doc, "saskaita", None)
+                or "5001"
+            )
+            kodas_ds = (
+                getattr(item, "N25_KODAS_DS", None)
+                or getattr(doc, "N25_KODAS_DS", None)
+                or getattr(doc, "kodas_ds", None)
+                or "PR001"
+            )
+            unit = (
+                getattr(item, "unit", None)
+                or getattr(item, "N25_KODAS_US", None)
+                or getattr(doc, "unit", None)
+                or "VNT"
+            )
+            frakcija = (
+                getattr(item, "N25_FRAKCIJA", None)
+                or getattr(doc, "N25_FRAKCIJA", None)
+                or "100"
+            )
+            suma = (
+                getattr(item, "N25_SUMA", None)
+                or getattr(doc, "N25_SUMA", None)
+                or "0.00"
+            )
+            tax = (
+                getattr(item, "N25_TAX", None)
+                or getattr(doc, "N25_TAX", None)
+                or "1"
+            )
+            mokestis = (
+                getattr(item, "N25_MOKESTIS", None)
+                or getattr(doc, "N25_MOKESTIS", None)
+                or "1"
+            )
+            poz_date = (
+                getattr(item, "N25_POZ_DATE", None)
+                or getattr(doc, "N25_POZ_DATE", None)
+                or "0"
+            )
+        else:
+            saskaita = (
+                getattr(doc, "N25_KODAS_SS", None)
+                or getattr(doc, "saskaita", None)
+                or "5001"
+            )
+            kodas_ds = (
+                getattr(doc, "N25_KODAS_DS", None)
+                or getattr(doc, "kodas_ds", None)
+                or "PR001"
+            )
+            unit = (
+                getattr(doc, "unit", None)
+                or getattr(doc, "N25_KODAS_US", None)
+                or "VNT"
+            )
+            frakcija = getattr(doc, "N25_FRAKCIJA", None) or "100"
+            suma = getattr(doc, "N25_SUMA", None) or "0.00"
+            tax = getattr(doc, "N25_TAX", None) or "1"
+            mokestis = getattr(doc, "N25_MOKESTIS", None) or "1"
+            poz_date = getattr(doc, "N25_POZ_DATE", None) or "0"
 
         n25 = ET.Element("N25")
         ET.SubElement(n25, "N25_KODAS_BS").text = smart_str(kodas)
@@ -397,8 +572,10 @@ def export_prekes_paslaugos_kodai_group_to_rivile(documents):
         ET.SubElement(n25, "N25_TAX").text      = smart_str(str(tax))
         ET.SubElement(n25, "N25_MOKESTIS").text = smart_str(str(mokestis))
         ET.SubElement(n25, "N25_POZ_DATE").text = smart_str(str(poz_date))
+
         kodai_dict[kodas] = n25
-        logger.info("[RIVILE:N25] added kodas=%r tipas=%r saskaita=%r", kodas, tipas, saskaita)
+        logger.info("[RIVILE:N25] added kodas=%r tipas=%r saskaita=%r (from %s)",
+                    kodas, tipas, saskaita, "item" if item is not None else "doc")
 
     for doc in documents or []:
         line_items = getattr(doc, "line_items", None)
@@ -426,8 +603,11 @@ def export_prekes_paslaugos_kodai_group_to_rivile(documents):
                     getattr(item, "preke_paslauga", None) or getattr(doc, "preke_paslauga", None)
                 )
                 kodas = (getattr(item, "prekes_kodas", None) or getattr(item, "prekes_barkodas", None) or "").strip()
-                if not kodas:
-                    continue
+                if not kodas and tipas != '3':
+                    # Для N17 (prekes/paslaugos) мы уже делаем continue выше,
+                    # можно оставить как есть, этот if по желанию.
+                    pass
+
                 unit  = (getattr(item, "unit", None) or "VNT").strip()
                 pavadinimas = (getattr(item, "prekes_pavadinimas", None) or "Prekė").strip()
                 kodas_ds = (getattr(item, "kodas_ds", None) or "PR001").strip()
@@ -437,7 +617,27 @@ def export_prekes_paslaugos_kodai_group_to_rivile(documents):
                 elif tipas == '2':
                     add_n17_record(paslaugos_dict, kodas, '2', unit, pavadinimas, kodas_ds)
                 elif tipas == '3':
-                    add_n25_record(kodai_dict, doc)
+                    # ВАЖНО: теперь используем item
+                    add_n25_record(kodai_dict, doc, item=item)
+
+                    
+            # for item in line_items.all():
+            #     tipas = normalize_preke_paslauga_tipas(
+            #         getattr(item, "preke_paslauga", None) or getattr(doc, "preke_paslauga", None)
+            #     )
+            #     kodas = (getattr(item, "prekes_kodas", None) or getattr(item, "prekes_barkodas", None) or "").strip()
+            #     if not kodas:
+            #         continue
+            #     unit  = (getattr(item, "unit", None) or "VNT").strip()
+            #     pavadinimas = (getattr(item, "prekes_pavadinimas", None) or "Prekė").strip()
+            #     kodas_ds = (getattr(item, "kodas_ds", None) or "PR001").strip()
+
+            #     if tipas == '1':
+            #         add_n17_record(prekes_dict, kodas, '1', unit, pavadinimas, kodas_ds)
+            #     elif tipas == '2':
+            #         add_n17_record(paslaugos_dict, kodas, '2', unit, pavadinimas, kodas_ds)
+            #     elif tipas == '3':
+            #         add_n25_record(kodai_dict, doc)
 
     # prekes_xml = b"".join(prettify_no_header(el) + b"\n" for el in prekes_dict.values())
     # paslaugos_xml = b"".join(prettify_no_header(el) + b"\n" for el in paslaugos_dict.values())

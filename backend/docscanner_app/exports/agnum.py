@@ -123,17 +123,39 @@ def get_party_code(
 
 
 def normalize_preke_paslauga_tipas(value: object) -> str:
-    """Вернёт '1' | '2' | '3' из любого ввода."""
+    """
+    Вернёт '1' | '2' для AGNUM (в AGNUM нет типа 3 - kodas).
+    Поддерживает: 1/2/3/4, 'preke/prekė/prekes/prekės', 'paslauga/paslaugos',
+    'kodas/kodai', пробелы, запятые/точки. Пусто/непонятно -> '1'.
+    
+    Маппинг для AGNUM:
+    - 1 -> '1' (prekė = товар, CLASS=0)
+    - 2 -> '2' (paslauga = услуга, CLASS=1)
+    - 3 -> '1' (kodas обрабатывается как товар, CLASS=0)
+    - 4 -> '2' (обрабатывается как услуга, CLASS=1)
+    """
     if value is None:
+        logger.info("[AGNUM:TIPAS] value=None -> '1'")
         return "1"
     s = str(value).strip().lower()
     if not s:
+        logger.info("[AGNUM:TIPAS] value='' -> '1'")
         return "1"
 
     try:
         n = int(float(s.replace(",", ".")))
-        if n in (1, 2, 3):
-            return str(n)
+        if n == 1:
+            logger.info("[AGNUM:TIPAS] numeric %r -> '1' (prekė)", s)
+            return "1"
+        elif n == 2:
+            logger.info("[AGNUM:TIPAS] numeric %r -> '2' (paslauga)", s)
+            return "2"
+        elif n == 3:
+            logger.info("[AGNUM:TIPAS] numeric %r -> '1' (kodas as prekė)", s)
+            return "1"
+        elif n == 4:
+            logger.info("[AGNUM:TIPAS] numeric %r -> '2' (paslauga)", s)
+            return "2"
     except ValueError:
         pass
 
@@ -142,11 +164,16 @@ def normalize_preke_paslauga_tipas(value: object) -> str:
     kodas_syn = {"kodas", "kodai"}
 
     if s in preke_syn:
+        logger.info("[AGNUM:TIPAS] word %r -> '1'", s)
         return "1"
     if s in paslauga_syn:
+        logger.info("[AGNUM:TIPAS] word %r -> '2'", s)
         return "2"
     if s in kodas_syn:
-        return "3"
+        logger.info("[AGNUM:TIPAS] word %r -> '1' (as prekė)", s)
+        return "1"
+    
+    logger.info("[AGNUM:TIPAS] fallback for %r -> '1'", s)
     return "1"
 
 
