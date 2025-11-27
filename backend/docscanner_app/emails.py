@@ -4,12 +4,14 @@ from django.template.loader import render_to_string
 from django.conf import settings
 from email.utils import formataddr
 from django.utils.timezone import now
+from django.contrib.auth import get_user_model
 
 import logging
 import logging.config
 
 logging.config.dictConfig(settings.LOGGING)
 logger = logging.getLogger('docscanner_app')
+
 
 
 
@@ -134,3 +136,113 @@ def siusti_sveikinimo_laiska(vartotojas):
     except Exception as e:
         logger.exception(f"[EMAIL ERROR] Nepavyko išsiųsti laiško vartotojui {vartotojas.email if vartotojas else 'nežinomas'}: {e}")
         raise
+
+
+
+
+
+# Masinis laiskas visiems uzsiregistravusiems (galima exclude pagal user id)
+
+def siusti_masini_laiska_visiems(
+    *,
+    subject: str,
+    text_template: str | None = None,
+    html_template_name: str | None = None,
+    extra_context: dict | None = None,
+    exclude_user_ids: list[int] | None = None,
+    tik_aktyviems: bool = True,
+) -> int:
+    """
+    Masinė laiškų siunta visiems CustomUser.
+
+    :param subject: laiško tema
+    :param text_template: tekstinė versija (gali būti su .format() vietomis: {vardas}, {email}, {user})
+    :param html_template_name: Django šablono pavadinimas, pvz. 'emails/bulk_info.html'
+    :param extra_context: papildomas kontekstas, kurį gaus šablonai
+    :param exclude_user_ids: vartotojų ID sąrašas, kuriems nesiųsti
+    :param tik_aktyviems: jei True – siųsti tik aktyviems vartotojams (is_active=True)
+    :return: sėkmingai išsiųstų laiškų skaičius
+    """
+    User = get_user_model()
+
+    qs = User.objects.all()
+
+    if tik_aktyviems and hasattr(User, "is_active"):
+        qs = qs.filter(is_active=True)
+
+    if exclude_user_ids:
+        qs = qs.exclude(id__in=exclude_user_ids)
+
+    users = list(qs)
+
+    if not users:
+        logger.warning("[BULK EMAIL] Nėra kam siųsti (vartotojų sąrašas tuščias).")
+        return 0
+
+    logger.info(
+        f"[BULK EMAIL START] Vartotojų kiekis={len(users)}, "
+        f"exclude_user_ids={exclude_user_ids or []}"
+    )
+
+    extra_context = extra_context or {}
+    sent_count = 0
+
+    for user in users:
+        try:
+            ctx = {
+                "user": user,
+                "email": getattr(user, "email", ""),
+                "vardas": getattr(user, "first_name", "") or getattr(user, "username", ""),
+                "now": now(),
+                **extra_context,
+            }
+
+            # Tekstinė versija
+            if text_template:
+                try:
+                    text_body = text_template.format(**ctx)
+                except Exception:
+                    # jei format nepavyko – nenaudojam .format, kad bent kažką išsiųstų
+                    text_body = text_template
+            else:
+                vardas = ctx["vardas"] or "vartotojau"
+                text_body = (
+                    f"Sveiki, {vardas},\n\n"
+                    "Norėjome jus informuoti apie naujienas DokSkeno sistemoje.\n\n"
+                    "Pagarbiai,\nDokSkeno komanda"
+                )
+
+            # HTML versija
+            html_body = None
+            if html_template_name:
+                html_body = render_to_string(html_template_name, ctx)
+
+            msg = EmailMultiAlternatives(
+                subject=subject.strip(),
+                body=text_body,
+                from_email=formataddr(("Denis iš DokSkeno", settings.DEFAULT_FROM_EMAIL)),
+                to=[user.email],
+            )
+
+            if html_body:
+                msg.attach_alternative(html_body, "text/html")
+
+            # Mailjet / Anymail žymos ir metaduomenys
+            try:
+                msg.tags = ["bulk"]
+                msg.metadata = {"event": "bulk_send", "user_id": user.id}
+            except Exception:
+                pass
+
+            msg.send()
+            sent_count += 1
+            logger.info(f"[BULK EMAIL SENT] user_id={user.id}, email={user.email}")
+
+        except Exception as e:
+            logger.exception(
+                f"[BULK EMAIL ERROR] Nepavyko išsiųsti vartotojui id={getattr(user, 'id', None)}, "
+                f"email={getattr(user, 'email', None)}: {e}"
+            )
+
+    logger.info(f"[BULK EMAIL DONE] Sėkmingai išsiųsta: {sent_count} laiškų.")
+    return sent_count

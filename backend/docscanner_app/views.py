@@ -107,6 +107,7 @@ from .serializers import (
 
 #emails
 from .emails import siusti_sveikinimo_laiska, siusti_kontakto_laiska
+from .emails import siusti_masini_laiska_visiems
 
 from time import perf_counter
 
@@ -2600,3 +2601,32 @@ def contact_form(request):
     return Response({"detail": "Nepavyko išsiųsti žinutės. Pabandykite vėliau."},
                     status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+
+
+
+
+def send_newsletter():
+    text_tpl = (
+        "Sveiki,\n\n"
+        "dabar su DokSkenu apskaitą vesite dar lengviau.\n\n"
+        "Pridėjome automatizacijas ir skaitmenizuojant detaliai su eilutėmis.\n"
+        "Nustatymuose rasite skiltį \"Numatytosios prekių reikšmės (skaitmenizuojant detaliai)\",\n"
+        "kur galėsite nusistatyti sąlygas dokumentų eilutėms.\n\n"
+        "Jei jūsų sąlygos bus įvykdytos, eilutei priskirs jūsų išlaidų/pajamų kodą, tipą, "
+        "pavadinimą ar barkodą.\n"
+        "Sąlygas galit nusistatyti pagal pvm procentą, eilutės pavadinimą, "
+        "pirkėjo/pardavėjo rekvezitus.\n\n"
+        "Plačiau parodžiau šiame video: https://www.facebook.com/reel/1547084576311150\n\n"
+        "Jei turėsite pastebėjimų, rašykite.\n\n"
+        "Gero savaitgalio,\n"
+        "Denis"
+    )
+
+    siusti_masini_laiska_visiems(
+        subject="Naujos DokSkeno automatizacijos",
+        text_template=text_tpl,
+        html_template_name=None,      # ← НЕ используем HTML вообще
+        extra_context=None,           # можно опустить
+        exclude_user_ids=[2, 16, 24, 31, 69, 105],   # кого исключить (опционально)
+        tik_aktyviems=True,
+    )
