@@ -7,6 +7,8 @@ import tempfile
 import subprocess
 import logging
 from typing import List, Dict, Optional, Tuple
+import base64
+import re
 
 from pdf2image import convert_from_bytes
 from PIL import Image, ImageOps, UnidentifiedImageError
@@ -88,6 +90,7 @@ IMG_EXTS = {
 }
 OFFICE_EXTS = {'.doc', '.docx', '.xls', '.xlsx'}
 ARCHIVE_EXTS = {'.zip', '.rar', '.7z', '.tar', '.tgz', '.tar.gz', '.tar.bz2', '.tar.xz', '.tbz2'}
+HTML_EXTS = {'.html', '.htm'}
 
 SUPPORTED_ARCHIVES = {'.zip'}
 if RARFILE_AVAILABLE:
@@ -96,7 +99,7 @@ if PY7ZR_AVAILABLE:
     SUPPORTED_ARCHIVES.add('.7z')
 SUPPORTED_ARCHIVES.update({'.tar', '.tgz', '.tar.gz', '.tar.bz2', '.tar.xz', '.tbz2'})
 
-SUPPORTED_EXTS = IMG_EXTS | OFFICE_EXTS | {'.pdf'} | SUPPORTED_ARCHIVES
+SUPPORTED_EXTS = IMG_EXTS | OFFICE_EXTS| HTML_EXTS | {'.pdf'} | SUPPORTED_ARCHIVES
 
 logger.info(f"Archive support: ZIP=yes, RAR={RARFILE_AVAILABLE}, 7Z={PY7ZR_AVAILABLE}, TAR=yes")
 
@@ -709,7 +712,8 @@ def normalize_any(uploaded_file) -> List[Dict] | Dict:
         supported_list = ', '.join(sorted(SUPPORTED_EXTS - ARCHIVE_EXTS | SUPPORTED_ARCHIVES))
         raise ValueError(
             f"Unsupported file format: {name} (extension: {ext}). "
-            f"Supported: images (PNG, JPG, WEBP, TIFF, HEIC, AVIF), PDF, Office (DOC/DOCX/XLS/XLSX), "
+            f"Supported: images (PNG, JPG, WEBP, TIFF, HEIC, AVIF), PDF, "
+            f"Office (DOC/DOCX/XLS/XLSX), HTML (HTML/HTM), "
             f"archives ({supported_list})"
         )
 
@@ -746,8 +750,43 @@ def normalize_any(uploaded_file) -> List[Dict] | Dict:
         return _from_pdf_bytes(raw, name)
 
     # Office
-    if ext in OFFICE_EXTS:
+    if ext in HTML_EXTS or content_type in {'text/html', 'application/xhtml+xml'}:
+        try:
+            html_content = raw.decode('utf-8', errors='ignore')
+            
+            # Ищем base64 изображения в HTML
+            img_match = re.search(r'src="data:image/(jpeg|jpg|png|webp|gif);base64,([^"]+)"', html_content)
+            
+            if img_match:
+                # Нашли embedded изображение - извлекаем его
+                img_format = img_match.group(1)
+                img_base64 = img_match.group(2)
+                
+                try:
+                    # Декодируем base64
+                    img_bytes = base64.b64decode(img_base64)
+                    logger.info(f"Extracted embedded {img_format} image from HTML ({len(img_bytes)} bytes)")
+                    
+                    # Обрабатываем как обычное изображение
+                    return _from_image_bytes(img_bytes, f"embedded.{img_format}")
+                    
+                except Exception as e:
+                    logger.warning(f"Failed to decode base64 image from HTML: {e}")
+                    # Fallback к LibreOffice ниже
+            else:
+                logger.info("No embedded image found in HTML, will use LibreOffice")
+                
+        except Exception as e:
+            logger.warning(f"Failed to process HTML for embedded images: {e}")
+
+    # Office и HTML через LibreOffice
+    if ext in OFFICE_EXTS | HTML_EXTS or content_type in {'text/html', 'application/xhtml+xml'}:
         soffice = LIBREOFFICE_PATH
+        if not soffice:
+            raise ValueError(
+                "HTML/Office conversion requires LibreOffice. "
+                "Set LIBREOFFICE_PATH in settings."
+            )
         return _from_office_bytes(raw, name, soffice)
 
     # Изображения
