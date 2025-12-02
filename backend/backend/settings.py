@@ -38,6 +38,8 @@ POPPLER_PATH = os.getenv("POPPLER_PATH", "")
 
 LIBREOFFICE_PATH = os.getenv('LIBREOFFICE_PATH', "")
 
+WKHTMLTOIMAGE_PATH = os.getenv("WKHTMLTOIMAGE_PATH", "")
+
 RARFILE_UNRAR_TOOL = os.getenv('RARFILE_UNRAR_TOOL', None)
 if RARFILE_UNRAR_TOOL:
     import rarfile

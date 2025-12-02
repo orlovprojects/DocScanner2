@@ -80,6 +80,7 @@ MAX_SINGLE_FILE_BYTES   = 50 * 1024 * 1024   # 50 MB на 1 файл
 # Пути внешних инструментов (подхватываются из Django settings при наличии)
 LIBREOFFICE_PATH        = None
 POPPLER_PATH            = None
+WKHTMLTOIMAGE_PATH      = None
 # =====================================================
 
 # Расширения
@@ -251,6 +252,80 @@ def _office_to_pdf_bytes(src_bytes: bytes, src_name: str, soffice_path: str) -> 
             raise RuntimeError("LibreOffice did not produce PDF")
         with open(pdf_path, 'rb') as f:
             return f.read()
+        
+
+def _html_to_image_bytes_wkhtml(raw_html: bytes, name: str, wkhtml_path: str) -> bytes:
+    """
+    Конвертируем HTML -> PNG через wkhtmltoimage.
+    Используем временные файлы + timeout, чтобы не вешать воркер.
+    Совместимо с wkhtmltoimage 0.12.6 и выше.
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        html_path = os.path.join(tmpdir, "input.html")
+        img_path  = os.path.join(tmpdir, "output.png")
+
+        # пишем HTML во временный файл
+        with open(html_path, "wb") as f:
+            f.write(raw_html)
+
+        # Базовая команда без проблемных опций
+        cmd = [
+            wkhtml_path,
+            "--quality", "90",
+            "--encoding", "utf-8",
+            "--width", "1200",  # фиксированная ширина вместо smart-shrinking
+            html_path,
+            img_path,
+        ]
+        
+        logger.info(f"wkhtmltoimage cmd: {' '.join(cmd)}")
+
+        try:
+            res = subprocess.run(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+                timeout=30,
+            )
+        except subprocess.TimeoutExpired:
+            logger.error(f"wkhtmltoimage timeout while converting {name}")
+            raise RuntimeError(f"wkhtmltoimage timeout while converting {name}")
+
+        if res.returncode != 0:
+            stderr = res.stderr.decode("utf-8", "ignore")
+            logger.error(f"wkhtmltoimage failed ({res.returncode}) for {name}: {stderr}")
+            raise RuntimeError(f"wkhtmltoimage failed ({res.returncode}) for {name}")
+
+        if not os.path.exists(img_path):
+            logger.error(f"wkhtmltoimage did not produce image for {name}")
+            raise RuntimeError("wkhtmltoimage did not produce image")
+
+        with open(img_path, "rb") as f:
+            img_bytes = f.read()
+            logger.debug(f"wkhtmltoimage produced {len(img_bytes)} bytes for {name}")
+            return img_bytes
+
+
+def _from_html_bytes_wkhtml(raw: bytes, name: str, wkhtml_path: str) -> Dict:
+    """
+    HTML -> картинка через wkhtmltoimage, затем даунскейл по твоим правилам.
+    """
+    img_bytes = _html_to_image_bytes_wkhtml(raw, name, wkhtml_path)
+
+    try:
+        img = Image.open(io.BytesIO(img_bytes))
+    except UnidentifiedImageError as e:
+        logger.warning(f"wkhtmltoimage output is not a valid image for {name}: {e}")
+        raise ValueError(f"wkhtmltoimage produced unreadable image for {name}")
+
+    data, out_ext = _downscale_until_fit(img, '.png')
+    return {
+        'data': data,
+        'filename': f"{uuid.uuid4().hex}{out_ext}",
+        'original_filename': name,
+    }
+
 
 # ============ Конверторы конкретных типов ============
 
@@ -689,11 +764,13 @@ def normalize_any(uploaded_file) -> List[Dict] | Dict:
     """
     try:
         from django.conf import settings
-        global LIBREOFFICE_PATH, POPPLER_PATH
+        global LIBREOFFICE_PATH, POPPLER_PATH, WKHTMLTOIMAGE_PATH
         if not LIBREOFFICE_PATH:
             LIBREOFFICE_PATH = getattr(settings, 'LIBREOFFICE_PATH', LIBREOFFICE_PATH)
         if not POPPLER_PATH:
             POPPLER_PATH = getattr(settings, 'POPPLER_PATH', POPPLER_PATH)
+        if not WKHTMLTOIMAGE_PATH:
+            WKHTMLTOIMAGE_PATH = getattr(settings, 'WKHTMLTOIMAGE_PATH', WKHTMLTOIMAGE_PATH)
     except Exception:
         pass
 
@@ -749,45 +826,63 @@ def normalize_any(uploaded_file) -> List[Dict] | Dict:
     if ext == '.pdf' or content_type == 'application/pdf':
         return _from_pdf_bytes(raw, name)
 
-    # Office
+    # HTML
     if ext in HTML_EXTS or content_type in {'text/html', 'application/xhtml+xml'}:
         try:
             html_content = raw.decode('utf-8', errors='ignore')
-            
-            # Ищем base64 изображения в HTML
-            img_match = re.search(r'src="data:image/(jpeg|jpg|png|webp|gif);base64,([^"]+)"', html_content)
-            
-            if img_match:
-                # Нашли embedded изображение - извлекаем его
-                img_format = img_match.group(1)
-                img_base64 = img_match.group(2)
-                
-                try:
-                    # Декодируем base64
-                    img_bytes = base64.b64decode(img_base64)
-                    logger.info(f"Extracted embedded {img_format} image from HTML ({len(img_bytes)} bytes)")
-                    
-                    # Обрабатываем как обычное изображение
-                    return _from_image_bytes(img_bytes, f"embedded.{img_format}")
-                    
-                except Exception as e:
-                    logger.warning(f"Failed to decode base64 image from HTML: {e}")
-                    # Fallback к LibreOffice ниже
-            else:
-                logger.info("No embedded image found in HTML, will use LibreOffice")
-                
         except Exception as e:
-            logger.warning(f"Failed to process HTML for embedded images: {e}")
+            logger.warning(f"Failed to decode HTML {name} as UTF-8: {e}")
+            html_content = ''
 
-    # Office и HTML через LibreOffice
-    if ext in OFFICE_EXTS | HTML_EXTS or content_type in {'text/html', 'application/xhtml+xml'}:
+        # 1) Пытаемся вытащить embedded base64 image: data:image/...
+        try:
+            img_match = re.search(
+                r'src=[\'"]data:image/(jpeg|jpg|png|webp|gif);base64,([^\'"]+)[\'"]',
+                html_content,
+                re.IGNORECASE
+            )
+            if img_match:
+                img_format = img_match.group(1).lower()
+                img_base64 = img_match.group(2)
+
+                # Декодируем base64
+                img_bytes = base64.b64decode(img_base64)
+                logger.info(
+                    f"Extracted embedded {img_format} image from HTML {name} "
+                    f"({len(img_bytes)} bytes)"
+                )
+
+                # Обрабатываем как обычное изображение
+                ext_img = '.jpg' if img_format in {'jpeg', 'jpg'} else f".{img_format}"
+                return _from_image_bytes(img_bytes, f"embedded{ext_img}")
+        except Exception as e:
+            logger.warning(f"Failed to extract base64 image from HTML {name}: {e}")
+
+        # 2) Если встроенного изображения нет — пробуем wkhtmltoimage
+        wkhtml = WKHTMLTOIMAGE_PATH
+        if wkhtml:
+            try:
+                logger.info(f"HTML {name}: no embedded image, using wkhtmltoimage")
+                return _from_html_bytes_wkhtml(raw, name, wkhtml)
+            except Exception as e:
+                logger.error(f"wkhtmltoimage failed for {name}: {e}")
+
+        # 3) Fallback, если wkhtmltoimage не настроен / упал
+        raise ValueError(
+            "HTML conversion failed or wkhtmltoimage not available. "
+            "Configure WKHTMLTOIMAGE_PATH or add a fallback renderer."
+        )
+
+    # Office через LibreOffice (ТОЛЬКО DOC/DOCX/XLS/XLSX, без HTML)
+    if ext in OFFICE_EXTS:
         soffice = LIBREOFFICE_PATH
         if not soffice:
             raise ValueError(
-                "HTML/Office conversion requires LibreOffice. "
+                "Office conversion requires LibreOffice. "
                 "Set LIBREOFFICE_PATH in settings."
             )
         return _from_office_bytes(raw, name, soffice)
+
 
     # Изображения
     if ext in IMG_EXTS or content_type.startswith('image/'):
