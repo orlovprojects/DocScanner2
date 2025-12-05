@@ -462,6 +462,23 @@ export default function DocumentsTable({
                                 />
                               </Tooltip>
                             )}
+                            {(
+                              (d.buyer_id && d.seller_id && d.buyer_id === d.seller_id) ||
+                              (d.buyer_name && d.seller_name && d.buyer_name.trim() === d.seller_name.trim()) ||
+                              (d.buyer_vat_code && d.seller_vat_code && d.buyer_vat_code === d.seller_vat_code)
+                            ) && (
+                              <Tooltip title="Pirkėjo rekvizitai sutampa su pardavėjo rekvizitais">
+                                <FeedIcon
+                                  fontSize="small"
+                                  sx={{
+                                    ml: 0.25,
+                                    verticalAlign: "middle",
+                                    cursor: "pointer",
+                                    color: "#ff9800",
+                                  }}
+                                />
+                              </Tooltip>
+                            )}
                           </>
                         )}
                       </Box>

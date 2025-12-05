@@ -28,6 +28,7 @@ from .views import (
     ScannedDocumentViewSet,
     admin_users_simple,
     contact_form,
+    DinetaSettingsView,
 )
 
 from .views import TrackAdClickView
@@ -107,6 +108,8 @@ urlpatterns = [
     path("scanned-documents/<int:pk>/lineitem/<int:lineitem_id>/clear-product/", clear_lineitem_product),
 
     path("view-mode/", update_view_mode, name="user-view-mode"),
+
+    path("settings/dineta/", DinetaSettingsView.as_view(), name="dineta-settings"),
 
     path("scanned-documents/<int:doc_id>/inline/", InlineDocUpdateView.as_view()),
     path("scanned-documents/<int:doc_id>/lineitem/<int:line_id>/inline/", InlineLineUpdateView.as_view()),

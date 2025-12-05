@@ -6,6 +6,7 @@ from typing import Optional
 from django.db.models import IntegerField, Value
 from django.db.models.functions import Cast
 from django.db.models import Case, When
+from .utils.password_encryption import encrypt_password
 
 from .utils.lineitem_rules import normalize_lineitem_rules
 
@@ -426,6 +427,13 @@ class CustomUserSerializer(serializers.ModelSerializer):
 
     extra_settings    = serializers.JSONField(required=False, allow_null=True)
 
+    rivile_erp_extra_fields = serializers.JSONField(required=False, allow_null=True)
+    rivile_gama_extra_fields = serializers.JSONField(required=False, allow_null=True)
+    butent_extra_fields      = serializers.JSONField(required=False, allow_null=True)
+    finvalda_extra_fields    = serializers.JSONField(required=False, allow_null=True)
+    centas_extra_fields      = serializers.JSONField(required=False, allow_null=True)
+    agnum_extra_fields       = serializers.JSONField(required=False, allow_null=True)
+
     class Meta:
         model = CustomUser
         fields = [
@@ -437,6 +445,8 @@ class CustomUserSerializer(serializers.ModelSerializer):
             'company_iban','company_address','company_country_iso',
             'purchase_defaults','sales_defaults','view_mode',
             'extra_settings', 'is_superuser','is_staff', 'lineitem_rules',
+            'rivile_erp_extra_fields', 'rivile_gama_extra_fields', 'butent_extra_fields','finvalda_extra_fields',
+            'centas_extra_fields','agnum_extra_fields',
         ]
         read_only_fields = ('credits',)
         extra_kwargs = {
@@ -465,6 +475,39 @@ class CustomUserSerializer(serializers.ModelSerializer):
         if not isinstance(value, dict):
             raise serializers.ValidationError("extra_settings must be a JSON object")
         return value
+
+    def _validate_extra_dict(self, value, field_name):
+        if value in (None, ""):
+            return {}
+        if isinstance(value, str):
+            try:
+                value = json.loads(value)
+            except Exception:
+                raise serializers.ValidationError(f"{field_name} must be valid JSON")
+        if not isinstance(value, dict):
+            raise serializers.ValidationError(f"{field_name} must be a JSON object")
+        return value
+
+
+    def validate_rivile_erp_extra_fields(self, value):
+        return self._validate_extra_dict(value, "rivile_erp_extra_fields")
+
+    def validate_rivile_gama_extra_fields(self, value):
+        return self._validate_extra_dict(value, "rivile_gama_extra_fields")
+
+    def validate_butent_extra_fields(self, value):
+        return self._validate_extra_dict(value, "butent_extra_fields")
+
+    def validate_finvalda_extra_fields(self, value):
+        return self._validate_extra_dict(value, "finvalda_extra_fields")
+
+    def validate_centas_extra_fields(self, value):
+        return self._validate_extra_dict(value, "centas_extra_fields")
+
+    def validate_agnum_extra_fields(self, value):
+        return self._validate_extra_dict(value, "agnum_extra_fields")
+
+
 
     # --------- helpers ----------
     def _coerce_defaults_input(self, incoming, field_name):
@@ -546,41 +589,7 @@ class CustomUserSerializer(serializers.ModelSerializer):
             else:
                 instance_list.append(item)
 
-    # --------- create / update ----------
-    # def create(self, validated_data):
-    #     password = validated_data.pop('password')
 
-    #     # забираем «сырые» payload (могут содержать команды удаления)
-    #     raw_pd = self.initial_data.get('purchase_defaults', None)
-    #     raw_sd = self.initial_data.get('sales_defaults', None)
-
-    #     # extra_settings уже провалидирован
-    #     extra   = validated_data.pop('extra_settings', None)
-
-    #     user = CustomUser.objects.create_user(password=password, **validated_data)
-    #     user.credits = 50
-
-    #     # стартуем со списков
-    #     user.purchase_defaults = []
-    #     user.sales_defaults = []
-
-    #     # обработка purchase_defaults
-    #     lst, di, dm = self._coerce_defaults_input(raw_pd, 'purchase_defaults')
-    #     if lst is not None:
-    #         lst = self._validate_profile_list(lst, 'purchase_defaults')
-    #         user.purchase_defaults = lst
-
-    #     # обработка sales_defaults
-    #     lst, di, dm = self._coerce_defaults_input(raw_sd, 'sales_defaults')
-    #     if lst is not None:
-    #         lst = self._validate_profile_list(lst, 'sales_defaults')
-    #         user.sales_defaults = lst
-
-    #     if extra is not None:
-    #         user.extra_settings = extra   # ПОЛНАЯ ЗАМЕНА
-
-    #     user.save(update_fields=['credits','purchase_defaults','sales_defaults','extra_settings'])
-    #     return user
 
 
     def create(self, validated_data):
@@ -595,6 +604,13 @@ class CustomUserSerializer(serializers.ModelSerializer):
 
         # extra_settings уже провалидирован
         extra   = validated_data.pop('extra_settings', None)
+
+        rivile_extra = validated_data.pop('rivile_erp_extra_fields', None)
+        rivile_gama_extra = validated_data.pop('rivile_gama_extra_fields', None)
+        butent_extra   = validated_data.pop('butent_extra_fields', None)
+        finvalda_extra = validated_data.pop('finvalda_extra_fields', None)
+        centas_extra   = validated_data.pop('centas_extra_fields', None)
+        agnum_extra    = validated_data.pop('agnum_extra_fields', None)
 
         user = CustomUser.objects.create_user(password=password, **validated_data)
         user.credits = 50
@@ -624,65 +640,35 @@ class CustomUserSerializer(serializers.ModelSerializer):
         if extra is not None:
             user.extra_settings = extra   # ПОЛНАЯ ЗАМЕНА
 
+        if rivile_extra is not None:
+            user.rivile_erp_extra_fields = rivile_extra
+
+        if rivile_gama_extra is not None:
+            user.rivile_gama_extra_fields = rivile_gama_extra
+
+        if butent_extra is not None:
+            user.butent_extra_fields = butent_extra
+
+        if finvalda_extra is not None:
+            user.finvalda_extra_fields = finvalda_extra
+
+        if centas_extra is not None:
+            user.centas_extra_fields = centas_extra
+
+        if agnum_extra is not None:
+            user.agnum_extra_fields = agnum_extra
+
         user.save(update_fields=[
             'credits','purchase_defaults','sales_defaults',
-            'extra_settings','lineitem_rules',  # 🔹 тут тоже
+            'extra_settings','lineitem_rules',
+            'rivile_erp_extra_fields', 'rivile_gama_extra_fields',
+            'butent_extra_fields','finvalda_extra_fields',
+            'centas_extra_fields','agnum_extra_fields',
         ])
         return user
     
 
 
-    # def update(self, instance, validated_data):
-    #     password = validated_data.pop('password', None)
-
-    #     # текущие списки
-    #     cur_pd = list(instance.purchase_defaults or [])
-    #     cur_sd = list(instance.sales_defaults or [])
-
-    #     # сырые входные (могут быть delete-команды)
-    #     raw_pd = self.initial_data.get('purchase_defaults', None)
-    #     raw_sd = self.initial_data.get('sales_defaults', None)
-
-    #     # какой метод
-    #     method = (self.context.get('request').method.upper() if self.context.get('request') else 'PATCH')
-
-    #     # --- purchase_defaults ---
-    #     lst, di, dm = self._coerce_defaults_input(raw_pd, 'purchase_defaults')
-    #     if di is not None or dm is not None:
-    #         self._apply_delete_to_list(cur_pd, di, dm)
-    #     elif lst is not None:
-    #         lst = self._validate_profile_list(lst, 'purchase_defaults')
-    #         if method == 'PATCH':
-    #             self._merge_defaults_list(cur_pd, lst)
-    #         else:
-    #             cur_pd = lst
-
-    #     # --- sales_defaults ---
-    #     lst, di, dm = self._coerce_defaults_input(raw_sd, 'sales_defaults')
-    #     if di is not None or dm is not None:
-    #         self._apply_delete_to_list(cur_sd, di, dm)
-    #     elif lst is not None:
-    #         lst = self._validate_profile_list(lst, 'sales_defaults')
-    #         if method == 'PATCH':
-    #             self._merge_defaults_list(cur_sd, lst)
-    #         else:
-    #             cur_sd = lst
-
-    #     # extra_settings — ПОЛНАЯ ЗАМЕНА (чтобы удаление ключей работало)
-    #     if 'extra_settings' in validated_data:
-    #         instance.extra_settings = validated_data.pop('extra_settings')
-
-    #     # остальные поля
-    #     for attr, value in validated_data.items():
-    #         setattr(instance, attr, value)
-
-    #     if password:
-    #         instance.set_password(password)
-
-    #     instance.purchase_defaults = cur_pd
-    #     instance.sales_defaults = cur_sd
-    #     instance.save()
-    #     return instance
 
 
     def update(self, instance, validated_data):
@@ -728,6 +714,24 @@ class CustomUserSerializer(serializers.ModelSerializer):
         # extra_settings — ПОЛНАЯ ЗАМЕНА
         if 'extra_settings' in validated_data:
             instance.extra_settings = validated_data.pop('extra_settings')
+
+        if 'rivile_erp_extra_fields' in validated_data:
+            instance.rivile_erp_extra_fields = validated_data.pop('rivile_erp_extra_fields')
+
+        if 'rivile_gama_extra_fields' in validated_data:
+            instance.rivile_gama_extra_fields = validated_data.pop('rivile_gama_extra_fields')
+
+        if 'butent_extra_fields' in validated_data:
+            instance.butent_extra_fields = validated_data.pop('butent_extra_fields')
+
+        if 'finvalda_extra_fields' in validated_data:
+            instance.finvalda_extra_fields = validated_data.pop('finvalda_extra_fields')
+
+        if 'centas_extra_fields' in validated_data:
+            instance.centas_extra_fields = validated_data.pop('centas_extra_fields')
+
+        if 'agnum_extra_fields' in validated_data:
+            instance.agnum_extra_fields = validated_data.pop('agnum_extra_fields')
 
         # 🔹 lineitem_rules — ПОЛНАЯ ЗАМЕНА СПИСКА
         # фронт всегда шлёт текущий список (с нужным правилом удалённым/изменённым)
@@ -988,7 +992,47 @@ class GuideArticleDetailSerializer(serializers.ModelSerializer):
 
 
 
+class DinetaSettingsSerializer(serializers.Serializer):
+    server = serializers.CharField(max_length=50)
+    client = serializers.CharField(max_length=50)
+    username = serializers.CharField(max_length=100)
+    password = serializers.CharField(write_only=True, style={"input_type": "password"})
 
+    brandid = serializers.CharField(
+        max_length=20, required=False, allow_blank=True, allow_null=True
+    )
+    storeid = serializers.CharField(
+        max_length=20, required=False, allow_blank=True, allow_null=True
+    )
+    posid = serializers.CharField(
+        max_length=20, required=False, allow_blank=True, allow_null=True
+    )
+
+    def to_representation(self, instance):
+        """
+        instance — это dict из user.dineta_settings.
+        Пароль наружу не отдаем.
+        """
+        if instance is None:
+            return None
+        data = dict(instance)
+        data.pop("password", None)
+        return data
+
+    def build_settings_dict(self):
+        """
+        Вызываем после is_valid().
+        Возвращает dict, который можно положить в CustomUser.dineta_settings.
+        """
+        data = dict(self.validated_data)
+        raw_password = data.pop("password", None)
+
+        if raw_password:
+            data["password"] = encrypt_password(raw_password)
+        else:
+            raise serializers.ValidationError({"password": "Password is required"})
+
+        return data
 
 
 

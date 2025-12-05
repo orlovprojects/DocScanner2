@@ -12,6 +12,7 @@ import Autocomplete from "@mui/material/Autocomplete";
 import { api } from "../api/endpoints";
 import { COUNTRY_OPTIONS } from "../page_elements/Countries";
 import { ACCOUNTING_PROGRAMS } from "../page_elements/AccountingPrograms";
+import { AccountingProgramExtraSettings } from "../page_elements/AccountingProgramExtraSettings";
 import { Helmet } from "react-helmet";
 
 /** ===== PVM copy text (tab-separated), for Apskaita5 button ===== */
@@ -301,6 +302,16 @@ export default function NustatymaiPage() {
   const [savingCompany, setSavingCompany] = useState(false);
   const [successCompany, setSuccessCompany] = useState(false);
   const [companyError, setCompanyError] = useState("");
+  const [dinetaSettings, setDinetaSettings] = useState({
+    server: "",
+    client: "",
+    username: "",
+    password: "",
+  });
+  const [dinetaLoading, setDinetaLoading] = useState(false);
+  const [dinetaSaving, setDinetaSaving] = useState(false);
+  const [dinetaSuccess, setDinetaSuccess] = useState(false);
+  const [dinetaError, setDinetaError] = useState("");
 
   const [importTab, setImportTab] = useState(0);
 
@@ -360,6 +371,86 @@ export default function NustatymaiPage() {
 
   const [extraSettings, setExtraSettings] = useState({});
 
+  const [rivileErpFields, setRivileErpFields] = useState({
+    pirkimas_zurnalo_kodas: "",
+    pirkimas_padalinio_kodas: "",
+    pirkimas_objekto_kodas: "",
+    pardavimas_zurnalo_kodas: "",
+    pardavimas_padalinio_kodas: "",
+    pardavimas_objekto_kodas: "",
+  });
+
+  const [savingRivileErp, setSavingRivileErp] = useState(false);
+  const [successRivileErp, setSuccessRivileErp] = useState(false);
+  const [errorRivileErp, setErrorRivileErp] = useState("");
+
+  const [rivileGamaFields, setRivileGamaFields] = useState({
+    pirkimas_padalinys: "",
+    pirkimas_objektas: "",
+    pirkimas_serija: "",
+    pirkimas_centras: "",
+    pirkimas_atskaitingas_asmuo: "",
+    pirkimas_prekes_grupe: "",
+    pardavimas_padalinys: "",
+    pardavimas_objektas: "",
+    pardavimas_serija: "",
+    pardavimas_centras: "",
+    pardavimas_atskaitingas_asmuo: "",
+    pardavimas_prekes_grupe: "",
+  });
+
+  const [savingRivileGama, setSavingRivileGama] = useState(false);
+  const [successRivileGama, setSuccessRivileGama] = useState(false);
+  const [errorRivileGama, setErrorRivileGama] = useState("");
+
+  // --- Butent ---
+  const [butentFields, setButentFields] = useState({
+    pirkimas_sandelis: "",
+    pirkimas_operacija: "",
+    pardavimas_sandelis: "",
+    pardavimas_operacija: "",
+  });
+  const [savingButent, setSavingButent] = useState(false);
+  const [successButent, setSuccessButent] = useState(false);
+  const [errorButent, setErrorButent] = useState("");
+
+  // --- Finvalda ---
+  const [finvaldaFields, setFinvaldaFields] = useState({
+    pirkimas_sandelis: "",
+    pirkimas_tipas: "",
+    pirkimas_zurnalas: "",
+    pardavimas_sandelis: "",
+    pardavimas_tipas: "",
+    pardavimas_zurnalas: "",
+  });
+  const [savingFinvalda, setSavingFinvalda] = useState(false);
+  const [successFinvalda, setSuccessFinvalda] = useState(false);
+  const [errorFinvalda, setErrorFinvalda] = useState("");
+
+  // --- Centas ---
+  const [centasFields, setCentasFields] = useState({
+    pirkimas_sandelis: "",
+    pirkimas_objektas: "",
+    pardavimas_sandelis: "",
+    pardavimas_objektas: "",
+  });
+  const [savingCentas, setSavingCentas] = useState(false);
+  const [successCentas, setSuccessCentas] = useState(false);
+  const [errorCentas, setErrorCentas] = useState("");
+
+  // --- Agnum ---
+  const [agnumFields, setAgnumFields] = useState({
+    pirkimas_sandelis: "",
+    pirkimas_grupe: "",
+    pirkimas_objektas: "",
+    pardavimas_sandelis: "",
+    pardavimas_grupe: "",
+    pardavimas_objektas: "",
+  });
+  const [savingAgnum, setSavingAgnum] = useState(false);
+  const [successAgnum, setSuccessAgnum] = useState(false);
+  const [errorAgnum, setErrorAgnum] = useState("");
+
   const [touchedDefaults, setTouchedDefaults] = useState(false);
 
   const [copiedPvm, setCopiedPvm] = useState(false);
@@ -396,6 +487,68 @@ export default function NustatymaiPage() {
       setCompanyAddress(data.company_address || "");
       setCompanyCountryIso(data.company_country_iso || "LT");
 
+      const ref = data.rivile_erp_extra_fields || {};
+      setRivileErpFields({
+        pirkimas_zurnalo_kodas: ref.pirkimas_zurnalo_kodas || "",
+        pirkimas_padalinio_kodas: ref.pirkimas_padalinio_kodas || "",
+        pirkimas_objekto_kodas: ref.pirkimas_objekto_kodas || "",
+        pardavimas_zurnalo_kodas: ref.pardavimas_zurnalo_kodas || "",
+        pardavimas_padalinio_kodas: ref.pardavimas_padalinio_kodas || "",
+        pardavimas_objekto_kodas: ref.pardavimas_objekto_kodas || "",
+      });
+
+      const gama = data.rivile_gama_extra_fields || {};
+      setRivileGamaFields({
+        pirkimas_padalinys: gama.pirkimas_padalinys || "",
+        pirkimas_objektas: gama.pirkimas_objektas || "",
+        pirkimas_serija: gama.pirkimas_serija || "",
+        pirkimas_centras: gama.pirkimas_centras || "",
+        pirkimas_atskaitingas_asmuo: gama.pirkimas_atskaitingas_asmuo || "",
+        pirkimas_prekes_grupe: gama.pirkimas_prekes_grupe || "",
+        pardavimas_padalinys: gama.pardavimas_padalinys || "",
+        pardavimas_objektas: gama.pardavimas_objektas || "",
+        pardavimas_serija: gama.pardavimas_serija || "",
+        pardavimas_centras: gama.pardavimas_centras || "",
+        pardavimas_atskaitingas_asmuo: gama.pardavimas_atskaitingas_asmuo || "",
+        pardavimas_prekes_grupe: gama.pardavimas_prekes_grupe || "",
+      });
+
+      const butent = data.butent_extra_fields || {};
+      setButentFields({
+        pirkimas_sandelis: butent.pirkimas_sandelis || "",
+        pirkimas_operacija: butent.pirkimas_operacija || "",
+        pardavimas_sandelis: butent.pardavimas_sandelis || "",
+        pardavimas_operacija: butent.pardavimas_operacija || "",
+      });
+
+      const fin = data.finvalda_extra_fields || {};
+      setFinvaldaFields({
+        pirkimas_sandelis: fin.pirkimas_sandelis || "",
+        pirkimas_tipas: fin.pirkimas_tipas || "",
+        pirkimas_zurnalas: fin.pirkimas_zurnalas || "",
+        pardavimas_sandelis: fin.pardavimas_sandelis || "",
+        pardavimas_tipas: fin.pardavimas_tipas || "",
+        pardavimas_zurnalas: fin.pardavimas_zurnalas || "",
+      });
+
+      const cent = data.centas_extra_fields || {};
+      setCentasFields({
+        pirkimas_sandelis: cent.pirkimas_sandelis || "",
+        pirkimas_objektas: cent.pirkimas_objektas || "",
+        pardavimas_sandelis: cent.pardavimas_sandelis || "",
+        pardavimas_objektas: cent.pardavimas_objektas || "",
+      });
+
+      const agn = data.agnum_extra_fields || {};
+      setAgnumFields({
+        pirkimas_sandelis: agn.pirkimas_sandelis || "",
+        pirkimas_grupe: agn.pirkimas_grupe || "",
+        pirkimas_objektas: agn.pirkimas_objektas || "",
+        pardavimas_sandelis: agn.pardavimas_sandelis || "",
+        pardavimas_grupe: agn.pardavimas_grupe || "",
+        pardavimas_objektas: agn.pardavimas_objektas || "",
+      });
+
       const pdList = Array.isArray(data.purchase_defaults)
         ? data.purchase_defaults
         : data.purchase_defaults
@@ -420,6 +573,33 @@ export default function NustatymaiPage() {
       setLineitemRules(lrList);
     });
   }, []);
+
+
+
+  useEffect(() => {
+    if (program !== "dineta") return;
+
+    setDinetaLoading(true);
+    setDinetaError("");
+    api
+      .get("/settings/dineta/", { withCredentials: true })
+      .then(({ data }) => {
+        // сервер пароль не возвращает — поле оставляем пустым
+        setDinetaSettings((prev) => ({
+          ...prev,
+          server:  data?.server  || "",
+          client:  data?.client  || "",
+          username:data?.username|| "",
+          password: "", // всегда пустое для безопасности
+        }));
+      })
+      .catch((err) => {
+        console.error("Failed to load Dineta settings:", err);
+        // при желании можно показать ошибку
+      })
+      .finally(() => setDinetaLoading(false));
+  }, [program]);
+
 
   useEffect(() => {
     setTouchedDefaults(false);
@@ -557,6 +737,246 @@ export default function NustatymaiPage() {
       setSavingDefaults(false);
     }
   };
+
+  const saveDinetaSettings = async () => {
+    setDinetaSaving(true);
+    setDinetaError("");
+    setDinetaSuccess(false);
+
+    const { server, client, username, password } = dinetaSettings;
+
+    if (!server.trim() || !client.trim() || !username.trim() || !password.trim()) {
+      setDinetaError("Visi API laukai yra privalomi.");
+      setDinetaSaving(false);
+      return;
+    }
+
+    try {
+      await api.put(
+        "/settings/dineta/",
+        { server, client, username, password },
+        { withCredentials: true }
+      );
+
+      // пароль в стейте чистим, чтобы его не хранить в явном виде
+      setDinetaSettings((prev) => ({ ...prev, password: "" }));
+
+      setDinetaSuccess(true);
+      setTimeout(() => setDinetaSuccess(false), 2000);
+    } catch (e) {
+      const data = e?.response?.data;
+      let msg =
+        data?.detail ||
+        data?.non_field_errors ||
+        data?.error ||
+        "Nepavyko išsaugoti Dineta nustatymų.";
+      if (typeof msg === "object") {
+        try {
+          msg = JSON.stringify(msg);
+        } catch {
+          msg = "Nepavyko išsaugoti Dineta nustatymų.";
+        }
+      }
+      setDinetaError(msg);
+    } finally {
+      setDinetaSaving(false);
+    }
+  };
+
+
+  const saveRivileErpFields = async () => {
+    setSavingRivileErp(true);
+    setErrorRivileErp("");
+    setSuccessRivileErp(false);
+
+    try {
+      await api.patch(
+        "/profile/",
+        { rivile_erp_extra_fields: rivileErpFields },
+        { withCredentials: true }
+      );
+      setSuccessRivileErp(true);
+      setTimeout(() => setSuccessRivileErp(false), 2000);
+    } catch (e) {
+      const data = e?.response?.data;
+      let msg =
+        data?.rivile_erp_extra_fields ||
+        data?.detail ||
+        "Nepavyko išsaugoti Rivilė ERP nustatymų.";
+      if (typeof msg === "object") {
+        try {
+          msg = JSON.stringify(msg);
+        } catch {
+          msg = "Nepavyko išsaugoti Rivilė ERP nustatymų.";
+        }
+      }
+      setErrorRivileErp(msg);
+    } finally {
+      setSavingRivileErp(false);
+    }
+  };
+
+  const saveRivileGamaFields = async () => {
+    setSavingRivileGama(true);
+    setErrorRivileGama("");
+    setSuccessRivileGama(false);
+
+    try {
+      await api.patch(
+        "/profile/",
+        { rivile_gama_extra_fields: rivileGamaFields },
+        { withCredentials: true }
+      );
+      setSuccessRivileGama(true);
+      setTimeout(() => setSuccessRivileGama(false), 2000);
+    } catch (e) {
+      const data = e?.response?.data;
+      let msg =
+        data?.rivile_gama_extra_fields ||
+        data?.detail ||
+        "Nepavyko išsaugoti Rivilė Gama nustatymų.";
+      if (typeof msg === "object") {
+        try {
+          msg = JSON.stringify(msg);
+        } catch {
+          msg = "Nepavyko išsaugoti Rivilė Gama nustatymų.";
+        }
+      }
+      setErrorRivileGama(msg);
+    } finally {
+      setSavingRivileGama(false);
+    }
+  };
+
+  const saveButentFields = async () => {
+    setSavingButent(true);
+    setErrorButent("");
+    setSuccessButent(false);
+
+    try {
+      await api.patch(
+        "/profile/",
+        { butent_extra_fields: butentFields },
+        { withCredentials: true }
+      );
+      setSuccessButent(true);
+      setTimeout(() => setSuccessButent(false), 2000);
+    } catch (e) {
+      const data = e?.response?.data;
+      let msg =
+        data?.butent_extra_fields ||
+        data?.detail ||
+        "Nepavyko išsaugoti Butent nustatymų.";
+      if (typeof msg === "object") {
+        try {
+          msg = JSON.stringify(msg);
+        } catch {
+          msg = "Nepavyko išsaugoti Butent nustatymų.";
+        }
+      }
+      setErrorButent(msg);
+    } finally {
+      setSavingButent(false);
+    }
+  };
+
+  const saveFinvaldaFields = async () => {
+    setSavingFinvalda(true);
+    setErrorFinvalda("");
+    setSuccessFinvalda(false);
+
+    try {
+      await api.patch(
+        "/profile/",
+        { finvalda_extra_fields: finvaldaFields },
+        { withCredentials: true }
+      );
+      setSuccessFinvalda(true);
+      setTimeout(() => setSuccessFinvalda(false), 2000);
+    } catch (e) {
+      const data = e?.response?.data;
+      let msg =
+        data?.finvalda_extra_fields ||
+        data?.detail ||
+        "Nepavyko išsaugoti Finvalda nustatymų.";
+      if (typeof msg === "object") {
+        try {
+          msg = JSON.stringify(msg);
+        } catch {
+          msg = "Nepavyko išsaugoti Finvalda nustatymų.";
+        }
+      }
+      setErrorFinvalda(msg);
+    } finally {
+      setSavingFinvalda(false);
+    }
+  };
+
+  const saveCentasFields = async () => {
+    setSavingCentas(true);
+    setErrorCentas("");
+    setSuccessCentas(false);
+
+    try {
+      await api.patch(
+        "/profile/",
+        { centas_extra_fields: centasFields },
+        { withCredentials: true }
+      );
+      setSuccessCentas(true);
+      setTimeout(() => setSuccessCentas(false), 2000);
+    } catch (e) {
+      const data = e?.response?.data;
+      let msg =
+        data?.centas_extra_fields ||
+        data?.detail ||
+        "Nepavyko išsaugoti Centas nustatymų.";
+      if (typeof msg === "object") {
+        try {
+          msg = JSON.stringify(msg);
+        } catch {
+          msg = "Nepavyko išsaugoti Centas nustatymų.";
+        }
+      }
+      setErrorCentas(msg);
+    } finally {
+      setSavingCentas(false);
+    }
+  };
+
+  const saveAgnumFields = async () => {
+    setSavingAgnum(true);
+    setErrorAgnum("");
+    setSuccessAgnum(false);
+
+    try {
+      await api.patch(
+        "/profile/",
+        { agnum_extra_fields: agnumFields },
+        { withCredentials: true }
+      );
+      setSuccessAgnum(true);
+      setTimeout(() => setSuccessAgnum(false), 2000);
+    } catch (e) {
+      const data = e?.response?.data;
+      let msg =
+        data?.agnum_extra_fields ||
+        data?.detail ||
+        "Nepavyko išsaugoti Agnum nustatymų.";
+      if (typeof msg === "object") {
+        try {
+          msg = JSON.stringify(msg);
+        } catch {
+          msg = "Nepavyko išsaugoti Agnum nustatymų.";
+        }
+      }
+      setErrorAgnum(msg);
+    } finally {
+      setSavingAgnum(false);
+    }
+  };
+
+
 
   const deleteProfile = async (mode, index) => {
     try {
@@ -922,6 +1342,151 @@ export default function NustatymaiPage() {
           )}
         </Box>
       )}
+
+      {program === "dineta" && (
+        <Paper sx={{ p: 3, mb: 3 }}>
+          <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 2 }}>
+            <Typography variant="h6" sx={{ fontWeight: 600 }}>
+              Dineta API sąsajos nustatymai
+            </Typography>
+            <Tooltip
+              arrow
+              enterTouchDelay={0}
+              leaveTouchDelay={4000}
+              title="Čia suvedami duomenys, naudojami jungiantis prie Dineta API (serveris, klientas ir naudotojas)."
+            >
+              <HelpOutlineIcon fontSize="small" sx={{ color: "text.secondary" }} />
+            </Tooltip>
+          </Box>
+
+          <Grid2 container spacing={2}>
+            <Grid2 size={{ xs: 12, md: 6 }}>
+              <TextField
+                label="Serveris (pvz. lt4)"
+                value={dinetaSettings.server}
+                onChange={(e) =>
+                  setDinetaSettings((prev) => ({ ...prev, server: e.target.value }))
+                }
+                fullWidth
+                required
+                disabled={dinetaLoading || dinetaSaving}
+              />
+            </Grid2>
+            <Grid2 size={{ xs: 12, md: 6 }}>
+              <TextField
+                label="Klientas (pvz. demo)"
+                value={dinetaSettings.client}
+                onChange={(e) =>
+                  setDinetaSettings((prev) => ({ ...prev, client: e.target.value }))
+                }
+                fullWidth
+                required
+                disabled={dinetaLoading || dinetaSaving}
+              />
+            </Grid2>
+
+            <Grid2 size={{ xs: 12, md: 6 }}>
+              <TextField
+                label="API naudotojo vardas"
+                value={dinetaSettings.username}
+                onChange={(e) =>
+                  setDinetaSettings((prev) => ({ ...prev, username: e.target.value }))
+                }
+                fullWidth
+                required
+                disabled={dinetaLoading || dinetaSaving}
+              />
+            </Grid2>
+            <Grid2 size={{ xs: 12, md: 6 }}>
+              <TextField
+                label="API slaptažodis"
+                type="password"
+                value={dinetaSettings.password}
+                onChange={(e) =>
+                  setDinetaSettings((prev) => ({ ...prev, password: e.target.value }))
+                }
+                fullWidth
+                required
+                disabled={dinetaLoading || dinetaSaving}
+                helperText="Saugumo sumetimais slaptažodis nerodomas — įveskite jį iš naujo, kai norite pakeisti."
+              />
+            </Grid2>
+          </Grid2>
+
+          <Box sx={{ mt: 2, display: "flex", alignItems: "center", gap: 2 }}>
+            <Button
+              variant="contained"
+              onClick={saveDinetaSettings}
+              disabled={dinetaSaving || dinetaLoading}
+            >
+              Išsaugoti API nustatymus
+            </Button>
+            {dinetaLoading && (
+              <Typography variant="body2" sx={{ color: "text.secondary" }}>
+                Kraunama...
+              </Typography>
+            )}
+          </Box>
+
+          {dinetaError && (
+            <Alert severity="error" sx={{ mt: 2 }}>
+              {dinetaError}
+            </Alert>
+          )}
+          {dinetaSuccess && (
+            <Alert severity="success" sx={{ mt: 2 }}>
+              Dineta nustatymai išsaugoti!
+            </Alert>
+          )}
+        </Paper>
+      )}
+
+      <AccountingProgramExtraSettings
+        program={program}
+        // Rivilė ERP
+        rivileErpFields={rivileErpFields}
+        setRivileErpFields={setRivileErpFields}
+        savingRivileErp={savingRivileErp}
+        successRivileErp={successRivileErp}
+        errorRivileErp={errorRivileErp}
+        onSaveRivileErp={saveRivileErpFields}
+        // Rivilė Gama
+        rivileGamaFields={rivileGamaFields}
+        setRivileGamaFields={setRivileGamaFields}
+        savingRivileGama={savingRivileGama}
+        successRivileGama={successRivileGama}
+        errorRivileGama={errorRivileGama}
+        onSaveRivileGama={saveRivileGamaFields}
+        // Butent
+        butentFields={butentFields}
+        setButentFields={setButentFields}
+        savingButent={savingButent}
+        successButent={successButent}
+        errorButent={errorButent}
+        onSaveButent={saveButentFields}
+        // Finvalda
+        finvaldaFields={finvaldaFields}
+        setFinvaldaFields={setFinvaldaFields}
+        savingFinvalda={savingFinvalda}
+        successFinvalda={successFinvalda}
+        errorFinvalda={errorFinvalda}
+        onSaveFinvalda={saveFinvaldaFields}
+        // Centas
+        centasFields={centasFields}
+        setCentasFields={setCentasFields}
+        savingCentas={savingCentas}
+        successCentas={successCentas}
+        errorCentas={errorCentas}
+        onSaveCentas={saveCentasFields}
+        // Agnum
+        agnumFields={agnumFields}
+        setAgnumFields={setAgnumFields}
+        savingAgnum={savingAgnum}
+        successAgnum={successAgnum}
+        errorAgnum={errorAgnum}
+        onSaveAgnum={saveAgnumFields}
+      />
+
 
       {/* 3. Papildomi nustatymai */}
       <Paper sx={{ p: 3, mb: 3, mt: 5 }}>

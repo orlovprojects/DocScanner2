@@ -73,6 +73,8 @@ class HeaderCols:
     DOC_TYPE = 6      # F - IsTaxIncluded
     JOURNAL = 7       # G - JournalCode
     CURRENCY = 9      # I - CurrencyCode
+    DEPARTMENT = 20   # T - DepartmentCode (Padalinio kodas)
+    OBJECT = 21       # U - ObjectCode (Objekto kodas)
 
 
 class LineCols:
@@ -505,6 +507,7 @@ def export_documents_to_rivile_erp_xlsx(
     documents: Iterable[Any],
     output_path: str | Path,
     doc_type: str = "pirkimai",
+    rivile_erp_extra_fields: Optional[dict] = None,
 ) -> Path:
     """
     Экспорт документов в XLSX-шаблоны Rivile ERP.
@@ -516,17 +519,29 @@ def export_documents_to_rivile_erp_xlsx(
         client_vat_field = "seller_vat_code"
         client_id_programoje_field = "seller_id_programoje"
         default_journal = "0201"
+        prefix = "pirkimas"
     elif doc_type == "pardavimai":
         wb = _load_template(PARD_TEMPLATE_FILE)
         client_id_field = "buyer_id"
         client_vat_field = "buyer_vat_code"
         client_id_programoje_field = "buyer_id_programoje"
         default_journal = "0101"
+        prefix = "pardavimas"
     else:
         raise ValueError("doc_type должен быть 'pirkimai' или 'pardavimai'")
 
     if "Headers" not in wb.sheetnames or "Lines" not in wb.sheetnames:
         raise ValueError("Шаблон должен содержать листы 'Headers' и 'Lines'")
+
+    # 🔹 Дефолты из rivile_erp_extra_fields
+    extra = rivile_erp_extra_fields or {}
+    journal_key = f"{prefix}_zurnalo_kodas"
+    dept_key    = f"{prefix}_padalinio_kodas"
+    obj_key     = f"{prefix}_objekto_kodas"
+
+    user_journal = _s(extra.get(journal_key) or "")
+    user_dept    = _s(extra.get(dept_key) or "")
+    user_obj     = _s(extra.get(obj_key) or "")
 
     ws_headers = wb["Headers"]
     ws_lines = wb["Lines"]
@@ -549,19 +564,32 @@ def export_documents_to_rivile_erp_xlsx(
         discount_pct = compute_global_invoice_discount_pct(doc)
 
         # === Headers ===
-        ws_headers.cell(row=header_idx, column=HeaderCols.REF_ID, value=safe_excel_text(ref_id))
-        ws_headers.cell(row=header_idx, column=HeaderCols.CLIENT_CODE, value=safe_excel_text(client_code))
-        set_cell_date(ws_headers, header_idx, HeaderCols.OP_DATE, getattr(doc, "operation_date", None) or getattr(doc, "invoice_date", None))
-        set_cell_date(ws_headers, header_idx, HeaderCols.INV_DATE, getattr(doc, "invoice_date", None))
-        ws_headers.cell(row=header_idx, column=HeaderCols.DOC_NO, value=safe_excel_text(ref_id))
-        ws_headers.cell(row=header_idx, column=HeaderCols.DOC_TYPE, value=0)
+        header_row = header_idx  # одна строка хедера на документ
 
-        zurnalo_kodas = _s(getattr(doc, "zurnalo_kodas", "")) or default_journal
-        ws_headers.cell(row=header_idx, column=HeaderCols.JOURNAL, value=safe_excel_text(zurnalo_kodas))
+        ws_headers.cell(row=header_row, column=HeaderCols.REF_ID, value=safe_excel_text(ref_id))
+        ws_headers.cell(row=header_row, column=HeaderCols.CLIENT_CODE, value=safe_excel_text(client_code))
+        set_cell_date(
+            ws_headers,
+            header_row,
+            HeaderCols.OP_DATE,
+            getattr(doc, "operation_date", None) or getattr(doc, "invoice_date", None),
+        )
+        set_cell_date(ws_headers, header_row, HeaderCols.INV_DATE, getattr(doc, "invoice_date", None))
+        ws_headers.cell(row=header_row, column=HeaderCols.DOC_NO, value=safe_excel_text(ref_id))
+        ws_headers.cell(row=header_row, column=HeaderCols.DOC_TYPE, value=0)
+
+        # 🔹 Journal: сначала дефолт из rivile_erp_extra_fields, потом doc, потом global default
+        if user_journal:
+            zurnalo_kodas = user_journal
+        else:
+            zurnalo_kodas = _s(getattr(doc, "zurnalo_kodas", "")) or default_journal
+
+        ws_headers.cell(row=header_row, column=HeaderCols.JOURNAL, value=safe_excel_text(zurnalo_kodas))
 
         currency = _s(getattr(doc, "currency", "") or DEFAULT_CURRENCY) or DEFAULT_CURRENCY
-        ws_headers.cell(row=header_idx, column=HeaderCols.CURRENCY, value=currency)
+        ws_headers.cell(row=header_row, column=HeaderCols.CURRENCY, value=currency)
 
+        # DEPARTMENT / OBJECT в header заполняем только если нет line items (ниже)
         header_idx += 1
 
         # === Lines ===
@@ -572,12 +600,30 @@ def export_documents_to_rivile_erp_xlsx(
         if has_items:
             for item in line_items.all():
                 ws_lines.cell(row=line_idx, column=LineCols.REF_ID, value=safe_excel_text(ref_id))
-                ws_lines.cell(row=line_idx, column=LineCols.ITEM_CODE, value=normalize_code(getattr(item, "prekes_kodas", None) or ""))
-                ws_lines.cell(row=line_idx, column=LineCols.UOM, value=normalize_code(getattr(item, "unit", None) or DEFAULT_UNIT))
-                ws_lines.cell(row=line_idx, column=LineCols.BARCODE, value=normalize_code(getattr(item, "prekes_barkodas", None) or ""))
+                ws_lines.cell(
+                    row=line_idx,
+                    column=LineCols.ITEM_CODE,
+                    value=normalize_code(getattr(item, "prekes_kodas", None) or ""),
+                )
+                ws_lines.cell(
+                    row=line_idx,
+                    column=LineCols.UOM,
+                    value=normalize_code(getattr(item, "unit", None) or DEFAULT_UNIT),
+                )
+                ws_lines.cell(
+                    row=line_idx,
+                    column=LineCols.BARCODE,
+                    value=normalize_code(getattr(item, "prekes_barkodas", None) or ""),
+                )
 
-                padalinio_kodas = _s(getattr(item, "padalinio_kodas", None) or "") or DEFAULT_DEPT
-                ws_lines.cell(row=line_idx, column=LineCols.DEPT, value=safe_excel_text(padalinio_kodas))
+                # 🔹 Padalinio kodas: item → user_default → DEFAULT_DEPT
+                item_dept = _s(getattr(item, "padalinio_kodas", None) or "")
+                padalinio_kodas = item_dept or user_dept or DEFAULT_DEPT
+                ws_lines.cell(
+                    row=line_idx,
+                    column=LineCols.DEPT,
+                    value=safe_excel_text(padalinio_kodas),
+                )
 
                 set_cell_qty(ws_lines, line_idx, LineCols.QTY, getattr(item, "quantity", None) or 1)
                 set_cell_price(ws_lines, line_idx, LineCols.PRICE, getattr(item, "price", None) or 0)
@@ -591,24 +637,52 @@ def export_documents_to_rivile_erp_xlsx(
                     pvm_code = (line_map or {}).get(getattr(item, "id", None))
                 else:
                     pvm_code = getattr(item, "pvm_kodas", None)
-                ws_lines.cell(row=line_idx, column=LineCols.VAT_CODE, value=safe_excel_text(_s(pvm_code)))
+                ws_lines.cell(
+                    row=line_idx,
+                    column=LineCols.VAT_CODE,
+                    value=safe_excel_text(_s(pvm_code)),
+                )
 
                 name = safe_excel_text(getattr(item, "prekes_pavadinimas", None) or "")
                 ws_lines.cell(row=line_idx, column=LineCols.NAME, value=name)
 
-                objekto_kodas = _s(getattr(item, "objekto_kodas", None) or "")
+                # 🔹 Objekto kodas: item → user_default
+                item_obj = _s(getattr(item, "objekto_kodas", None) or "")
+                objekto_kodas = item_obj or user_obj
                 if objekto_kodas:
-                    ws_lines.cell(row=line_idx, column=LineCols.OBJECT_CODE, value=safe_excel_text(objekto_kodas))
+                    ws_lines.cell(
+                        row=line_idx,
+                        column=LineCols.OBJECT_CODE,
+                        value=safe_excel_text(objekto_kodas),
+                    )
 
                 line_idx += 1
         else:
             ws_lines.cell(row=line_idx, column=LineCols.REF_ID, value=safe_excel_text(ref_id))
-            ws_lines.cell(row=line_idx, column=LineCols.ITEM_CODE, value=normalize_code(getattr(doc, "prekes_kodas", None) or ""))
-            ws_lines.cell(row=line_idx, column=LineCols.UOM, value=normalize_code(getattr(doc, "unit", None) or DEFAULT_UNIT))
-            ws_lines.cell(row=line_idx, column=LineCols.BARCODE, value=normalize_code(getattr(doc, "prekes_barkodas", None) or ""))
+            ws_lines.cell(
+                row=line_idx,
+                column=LineCols.ITEM_CODE,
+                value=normalize_code(getattr(doc, "prekes_kodas", None) or ""),
+            )
+            ws_lines.cell(
+                row=line_idx,
+                column=LineCols.UOM,
+                value=normalize_code(getattr(doc, "unit", None) or DEFAULT_UNIT),
+            )
+            ws_lines.cell(
+                row=line_idx,
+                column=LineCols.BARCODE,
+                value=normalize_code(getattr(doc, "prekes_barkodas", None) or ""),
+            )
 
-            padalinio_kodas = _s(getattr(doc, "padalinio_kodas", None) or "") or DEFAULT_DEPT
-            ws_lines.cell(row=line_idx, column=LineCols.DEPT, value=safe_excel_text(padalinio_kodas))
+            # 🔹 Padalinio kodas: doc → user_default → DEFAULT_DEPT
+            doc_dept = _s(getattr(doc, "padalinio_kodas", None) or "")
+            padalinio_kodas = doc_dept or user_dept or DEFAULT_DEPT
+            ws_lines.cell(
+                row=line_idx,
+                column=LineCols.DEPT,
+                value=safe_excel_text(padalinio_kodas),
+            )
 
             set_cell_qty(ws_lines, line_idx, LineCols.QTY, getattr(doc, "quantity", None) or 1)
 
@@ -622,14 +696,37 @@ def export_documents_to_rivile_erp_xlsx(
                 set_cell_money(ws_lines, line_idx, LineCols.VAT_AMOUNT, vat_amount if vat_amount is not None else 0)
 
             pvm = getattr(doc, "pvm_kodas", None)
-            ws_lines.cell(row=line_idx, column=LineCols.VAT_CODE, value=safe_excel_text(_s(pvm)))
+            ws_lines.cell(
+                row=line_idx,
+                column=LineCols.VAT_CODE,
+                value=safe_excel_text(_s(pvm)),
+            )
 
             name = safe_excel_text(getattr(doc, "prekes_pavadinimas", None) or "")
             ws_lines.cell(row=line_idx, column=LineCols.NAME, value=name)
 
-            objekto_kodas = _s(getattr(doc, "objekto_kodas", None) or "")
+            # 🔹 Objekto kodas: doc → user_default
+            doc_obj = _s(getattr(doc, "objekto_kodas", None) or "")
+            objekto_kodas = doc_obj or user_obj
             if objekto_kodas:
-                ws_lines.cell(row=line_idx, column=LineCols.OBJECT_CODE, value=safe_excel_text(objekto_kodas))
+                ws_lines.cell(
+                    row=line_idx,
+                    column=LineCols.OBJECT_CODE,
+                    value=safe_excel_text(objekto_kodas),
+                )
+
+            # 🔹 ТЕ ЖЕ ЗНАЧЕНИЯ — В HEADER T/U (doc-level)
+            ws_headers.cell(
+                row=header_row,
+                column=HeaderCols.DEPARTMENT,
+                value=safe_excel_text(padalinio_kodas),
+            )
+            if objekto_kodas:
+                ws_headers.cell(
+                    row=header_row,
+                    column=HeaderCols.OBJECT,
+                    value=safe_excel_text(objekto_kodas),
+                )
 
             line_idx += 1
 

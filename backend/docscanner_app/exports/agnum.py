@@ -4,11 +4,55 @@ from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from datetime import date
 
 from django.utils.encoding import smart_str
-from .formatters import format_date_agnum, vat_to_int_str, get_price_or_zero, expand_empty_tags
+from .formatters import format_date_agnum, expand_empty_tags
 from ..models import CurrencyRate
 
 
 logger = logging.getLogger(__name__)
+
+
+# =========================
+# AGNUM-SPECIFIC FORMATTERS
+# =========================
+
+def _format_decimal_agnum(value, precision=2):
+    """
+    Форматирует число для AGNUM с запятой как десятичным разделителем.
+    AGNUM требует запятую вместо точки: 12.50 -> 12,50
+    """
+    try:
+        d = _safe_D(value)
+        if precision > 0:
+            quantizer = Decimal('0.1') ** precision
+            d = d.quantize(quantizer, rounding=ROUND_HALF_UP)
+        # Конвертируем точку в запятую
+        return str(d).replace('.', ',')
+    except Exception:
+        return "0"
+
+
+def _format_quantity_agnum(value):
+    """Форматирует количество для AGNUM (4 знака после запятой)."""
+    return _format_decimal_agnum(value, precision=4)
+
+
+def _format_price_agnum(value):
+    """Форматирует цену для AGNUM (2 знака после запятой)."""
+    return _format_decimal_agnum(value, precision=2)
+
+
+def _format_vat_rate_agnum(value):
+    """
+    Форматирует ставку НДС для AGNUM.
+    Целое число без дробной части: 21 (не 21.00)
+    """
+    try:
+        if value is None:
+            return "0"
+        v = _safe_D(value)
+        return str(int(v))
+    except Exception:
+        return "0"
 
 
 # =========================
@@ -331,13 +375,45 @@ def _build_agnum_customer_from_doc(doc) -> tuple[str, dict]:
     return kod, attrs
 
 
-def _build_agnum_good_from_item(doc, item) -> tuple[str, dict]:
-    """Строим один Goods/Item по строке."""
+def _build_agnum_good_from_item(doc, item, user_defaults: dict = None) -> tuple[str, dict, str]:
+    """
+    Строим один Goods/Item по строке.
+    
+    Args:
+        doc: документ
+        item: строка документа  
+        user_defaults: словарь с дефолтами из agnum_extra_fields
+            - "sandelis": код склада
+            - "grupe": группа товара
+            - "objektas": код объекта (опционально)
+            
+    Returns:
+        tuple: (kod, attrs, okod) - код товара, атрибуты, код объекта
+    """
+    user_defaults = user_defaults or {}
+    
     kod = (_s(getattr(item, "prekes_kodas", "")) or
            _s(getattr(item, "prekes_barkodas", "")) or
            "PREKE001")
 
-    snd_kod = _s(getattr(doc, "agnum_snd_kod", "")) or "**OBJ"
+    # SND_KOD: user default → doc → FALLBACK "S1" (обязательное поле!)
+    doc_snd = _s(getattr(doc, "agnum_snd_kod", ""))
+    snd_kod = user_defaults.get("sandelis") or doc_snd or "S1"
+    
+    # GRUPE: user default → item → doc → empty (БЕЗ fallback)
+    item_grupe = _s(getattr(item, "grupe", "") or getattr(item, "preke_grupe", ""))
+    doc_grupe = _s(getattr(doc, "grupe", ""))
+    grupe = user_defaults.get("grupe") or item_grupe or doc_grupe
+    if not grupe:
+        grupe = _agnum_empty_varchar()
+    
+    # OKOD: user default → item → doc → empty (БЕЗ fallback)
+    item_okod = _s(getattr(item, "okod", "") or getattr(item, "objekto_kodas", ""))
+    doc_okod = _s(getattr(doc, "okod", ""))
+    okod = user_defaults.get("objektas") or item_okod or doc_okod
+    if not okod:
+        okod = _agnum_empty_varchar()
+    
     name = _s(getattr(item, "prekes_pavadinimas", "")) or "Prekė"
 
     tipas_str = normalize_preke_paslauga_tipas(
@@ -357,7 +433,7 @@ def _build_agnum_good_from_item(doc, item) -> tuple[str, dict]:
         "SND_KOD": snd_kod,
         "PAVAD": name,
         "CLASS": cls,
-        "GRUPE": _agnum_empty_varchar(),
+        "GRUPE": grupe,
         "POGRUPIS": _agnum_empty_varchar(),
         "KATEG": _agnum_empty_varchar(),
         "PAVAD1": _agnum_empty_varchar(),
@@ -376,7 +452,7 @@ def _build_agnum_good_from_item(doc, item) -> tuple[str, dict]:
         "VIETA": _agnum_empty_varchar(),
         "METOD": "0",
         "IPAK": "0",
-        "KN0": get_price_or_zero(getattr(item, "price", None)),
+        "KN0": _format_price_agnum(getattr(item, "price", None)),
         "KN1": "0",
         "KN2": "0",
         "KN3": "0",
@@ -387,12 +463,12 @@ def _build_agnum_good_from_item(doc, item) -> tuple[str, dict]:
         "REZ": "0",
         "UZS": "0",
         "APMOKPVM": "Y",
-        "PVM0": vat_to_int_str(vat_pct),
-        "PVM": vat_to_int_str(vat_pct),
-        "PVM2": vat_to_int_str(vat_pct),
-        "PVM3": vat_to_int_str(vat_pct),
-        "PVM4": vat_to_int_str(vat_pct),
-        "PVM5": vat_to_int_str(vat_pct),
+        "PVM0": _format_vat_rate_agnum(vat_pct),
+        "PVM": _format_vat_rate_agnum(vat_pct),
+        "PVM2": _format_vat_rate_agnum(vat_pct),
+        "PVM3": _format_vat_rate_agnum(vat_pct),
+        "PVM4": _format_vat_rate_agnum(vat_pct),
+        "PVM5": _format_vat_rate_agnum(vat_pct),
         "MOK0": "0",
         "MEMO": _agnum_empty_varchar(),
         "F1": _agnum_empty_varchar(),
@@ -411,28 +487,45 @@ def _build_agnum_good_from_item(doc, item) -> tuple[str, dict]:
         "PVM_KOD": _s(getattr(item, "pvm_kodas", "")) or "PVM1",
         "POZYMIAI": _agnum_pozymiai_100(),
     }
-    return kod, attrs
+    
+    return kod, attrs, okod
 
 
-def _build_agnum_rows_for_pirkimas(doc, line_items):
-    """Собирает список row_attrs для одного документа pirkimai."""
+def _build_agnum_rows_for_pirkimas(doc, line_items, user_defaults: dict = None):
+    """
+    Собирает список row_attrs для одного документа pirkimai.
+    
+    Args:
+        doc: документ
+        line_items: строки документа
+        user_defaults: словарь с дефолтами из agnum_extra_fields
+    """
+    user_defaults = user_defaults or {}
     rows = []
+    
     for item in line_items:
         qty = getattr(item, "quantity", None) or 1
         price = getattr(item, "price", None) or 0
         vat = getattr(item, "vat", None) or 0
         vat_pct = getattr(item, "vat_percent", None)
 
+        # OBJ_KOD: user default → item → doc → empty (БЕЗ fallback)
+        item_okod = _s(getattr(item, "okod", "") or getattr(item, "objekto_kodas", ""))
+        doc_okod = _s(getattr(doc, "okod", ""))
+        obj_kod = user_defaults.get("objektas") or item_okod or doc_okod
+        if not obj_kod:
+            obj_kod = _agnum_empty_varchar()
+
         row = {
             "KOD": (_s(getattr(item, "prekes_kodas", "")) or
                     _s(getattr(item, "prekes_barkodas", "")) or
                     "PREKE001"),
-            "KIEKIS": get_price_or_zero(qty),
-            "PRKKN": get_price_or_zero(price),
+            "KIEKIS": _format_quantity_agnum(qty),
+            "PRKKN": _format_price_agnum(price),
             "MT": "0",
             "AKC": "0",
-            "PVM": get_price_or_zero(vat),
-            "PVM_PROC": vat_to_int_str(vat_pct),
+            "PVM": _format_price_agnum(vat),
+            "PVM_PROC": _format_vat_rate_agnum(vat_pct),
             "F1": _agnum_empty_varchar(),
             "F2": _agnum_empty_varchar(),
             "F3": _agnum_empty_varchar(),
@@ -444,7 +537,7 @@ def _build_agnum_rows_for_pirkimas(doc, line_items):
             "KILMESSALIS": _s(getattr(doc, "seller_country_iso", "")).upper(),
             "APSKRITIS": _agnum_empty_varchar(),
             "PART_PARKN": "0",
-            "OBJ_KOD": _agnum_empty_varchar(),
+            "OBJ_KOD": obj_kod,
             "PVM_KOD": _s(getattr(item, "pvm_kodas", "")) or "PVM1",
         }
         rows.append(row)
@@ -458,6 +551,14 @@ def export_pirkimai_group_to_agnum(documents, user):
     """
     logger.info("[AGNUM:PIRKIMAI] start, docs=%d", len(documents) if documents else 0)
 
+    # ✅ ДОБАВЛЕНО: Получаем дефолты из agnum_extra_fields
+    extra = getattr(user, "agnum_extra_fields", None) or {}
+    user_defaults_pirkimas = {
+        "sandelis": _s(extra.get("pirkimas_sandelis") or ""),
+        "grupe": _s(extra.get("pirkimas_grupe") or ""),
+        "objektas": _s(extra.get("pirkimas_objektas") or ""),
+    }
+    
     agnum = ET.Element("AgnumData", {
         "Version": "25",
         "CreatedByApp": "DokSkenas",
@@ -507,11 +608,13 @@ def export_pirkimai_group_to_agnum(documents, user):
 
             items = [fake_item]
 
-        rows = _build_agnum_rows_for_pirkimas(doc, items)
+        # ✅ ИЗМЕНЕНО: передаём user_defaults
+        rows = _build_agnum_rows_for_pirkimas(doc, items, user_defaults_pirkimas)
 
         # 3) товары / штрихкоды
         for item in items:
-            g_kod, g_attrs = _build_agnum_good_from_item(doc, item)
+            # ✅ ИЗМЕНЕНО: передаём user_defaults и получаем 3 значения
+            g_kod, g_attrs, okod = _build_agnum_good_from_item(doc, item, user_defaults_pirkimas)
             if g_kod not in goods_by_kod:
                 goods_by_kod[g_kod] = g_attrs
 
@@ -539,6 +642,10 @@ def export_pirkimai_group_to_agnum(documents, user):
         code_isaf = _pick_isaf_for_purchase(doc)
         ch1_value = "N" if code_isaf == "12" else "Y"
 
+        # ✅ ИЗМЕНЕНО: SND_KOD с приоритетом user → doc → fallback "S1"
+        doc_snd = _s(getattr(doc, "agnum_snd_kod", ""))
+        snd_kod = user_defaults_pirkimas["sandelis"] or doc_snd or "S1"
+
         doc_attrs = {
             "DATA": format_date_agnum(getattr(doc, "invoice_date", None)) or _agnum_empty_date(),
             "DATA_G": format_date_agnum(op_date) or _agnum_empty_date(),
@@ -546,24 +653,24 @@ def export_pirkimai_group_to_agnum(documents, user):
             "DOKNR2": number,
             "KL_KOD": cust_kod,
             "KL_RKOD": cust_attrs.get("RKOD", _agnum_empty_varchar()),
-            "SND_KOD": _s(getattr(doc, "agnum_snd_kod", "")) or "**OBJ",
+            "SND_KOD": snd_kod,  # ← ИЗМЕНЕНО
             "VAL": currency,
-            "KURS": str(rate if rate else "1"),
+            "KURS": _format_decimal_agnum(rate if rate else 1, precision=6),
             "TR_TIP": "0",
             "NUOL1": "0",
             "NUOL2": "0",
-            "SUMA": get_price_or_zero(amount_wo),
+            "SUMA": _format_price_agnum(amount_wo),
             "MT": "0",
             "AKC": "0",
-            "PVM": get_price_or_zero(vat_amount),
+            "PVM": _format_price_agnum(vat_amount),
             "PVM_KL": "0",
             "KT": "0",
             "PR": "0",
             "SUMAP": "0",
             "TRANSP": "0",
-            "SUMVISO": get_price_or_zero(total_wo),
+            "SUMVISO": _format_price_agnum(total_wo),
             "DRB": _agnum_empty_varchar(),
-            "SKOLA": get_price_or_zero(skola),
+            "SKOLA": _format_price_agnum(skola),
             "TERM": "0",
             "APMSUM": "0",
             "SANDORIS": _agnum_empty_varchar(),
@@ -723,22 +830,29 @@ def _build_agnum_customer_from_buyer(doc) -> tuple[str, dict]:
     return kod, attrs
 
 
-def _build_agnum_rows_for_pardavimas(doc, line_items, discount_pct=None):
+def _build_agnum_rows_for_pardavimas(doc, line_items, discount_pct=None, user_defaults: dict = None):
     """
     Собирает список row_attrs для одного документа pardavimai (Documents Type=4).
     Если discount_pct не None, распределяет документную скидку в NUOL2.
+    
+    Args:
+        doc: документ
+        line_items: строки документа
+        discount_pct: процент документной скидки (опционально)
+        user_defaults: словарь с дефолтами из agnum_extra_fields
     """
+    user_defaults = user_defaults or {}
     rows = []
     
     # Для распределения документной скидки считаем base_total
     base_total = Decimal("0")
-    if discount_pct is not None:
+    doc_discount_amount = _safe_D(getattr(doc, "invoice_discount_wo_vat", 0) or 0)
+    
+    if discount_pct is not None and doc_discount_amount > 0:
         for item in line_items:
             qty = _safe_D(getattr(item, "quantity", None) or 1)
             price = _safe_D(getattr(item, "price", None) or 0)
             base_total += (price * qty)
-
-    doc_discount_amount = _safe_D(getattr(doc, "invoice_discount_wo_vat", 0) or 0)
 
     for item in line_items:
         qty = getattr(item, "quantity", None) or 1
@@ -757,25 +871,32 @@ def _build_agnum_rows_for_pardavimas(doc, line_items, discount_pct=None):
 
         # Распределение документной скидки
         nuol2_value = "0"
-        if discount_pct is not None and base_total > 0:
+        if discount_pct is not None and base_total > 0 and doc_discount_amount > 0:
             line_base = qD * pD
             nuol2 = (line_base / base_total * doc_discount_amount)
-            nuol2_value = get_price_or_zero(nuol2)
+            nuol2_value = _format_price_agnum(nuol2)
+
+        # OKOD: user default → item → doc → empty (БЕЗ fallback)
+        item_okod = _s(getattr(item, "okod", "") or getattr(item, "objekto_kodas", ""))
+        doc_okod = _s(getattr(doc, "okod", ""))
+        okod = user_defaults.get("objektas") or item_okod or doc_okod
+        if not okod:
+            okod = _agnum_empty_varchar()
 
         row = {
             "KOD": (_s(getattr(item, "prekes_kodas", "")) or
                     _s(getattr(item, "prekes_barkodas", "")) or
                     "PREKE002"),
             "BKOD": _s(getattr(item, "prekes_barkodas", "")),
-            "KIEKIS": get_price_or_zero(qty),
-            "PVM": get_price_or_zero(vat),
-            "PVM_PROC": vat_to_int_str(vat_pct),
+            "KIEKIS": _format_quantity_agnum(qty),
+            "PVM": _format_price_agnum(vat),
+            "PVM_PROC": _format_vat_rate_agnum(vat_pct),
             "MOK0_PROC": "0",
             "MOK0_LT": "0",
             "VNT": _s(getattr(item, "unit", "")) or "vnt",
-            "PARKN": get_price_or_zero(price),
-            "ORIGPARKN": get_price_or_zero(orig),
-            "NUOL": get_price_or_zero(line_disc),
+            "PARKN": _format_price_agnum(price),
+            "ORIGPARKN": _format_price_agnum(orig),
+            "NUOL": _format_price_agnum(line_disc),
             "NUOL2": nuol2_value,
             "UZS_SHOPNR": _agnum_empty_varchar(),
             "UZS_UZSNR": _agnum_empty_varchar(),
@@ -790,7 +911,7 @@ def _build_agnum_rows_for_pardavimas(doc, line_items, discount_pct=None):
             "VSK_F5": _agnum_empty_varchar(),
             "ID_PRK1": "0",
             "PVM_KOD": _s(getattr(item, "pvm_kodas", "")) or "PVM1",
-            "OKOD": _agnum_empty_varchar(),
+            "OKOD": okod,
         }
         rows.append(row)
     return rows
@@ -823,9 +944,17 @@ def export_pardavimai_group_to_agnum(documents, user):
     """
     logger.info("[AGNUM:PARDAVIMAI] start, docs=%d", len(documents) if documents else 0)
 
+    # ✅ ДОБАВЛЕНО: Получаем дефолты из agnum_extra_fields
+    extra = getattr(user, "agnum_extra_fields", None) or {}
+    user_defaults_pardavimas = {
+        "sandelis": _s(extra.get("pardavimas_sandelis") or ""),
+        "grupe": _s(extra.get("pardavimas_grupe") or ""),
+        "objektas": _s(extra.get("pardavimas_objektas") or ""),
+    }
+    
     agnum = ET.Element("AgnumData", {
         "Version": "25",
-        "CreatedByApp": "Docskanas",
+        "CreatedByApp": "DokSkenas",
         "CreatedByLogin": str(getattr(user, "id", "1")),
         "CreatedOn": format_date_agnum(getattr(user, "agnum_created_on", None)) or format_date_agnum(date.today()),
     })
@@ -853,6 +982,14 @@ def export_pardavimai_group_to_agnum(documents, user):
         else:
             items = []
 
+        # Определяем, суммарный ли документ
+        is_sumisr = len(items) == 0
+        
+        # Можно также проверить scan_type если есть:
+        scan_type = getattr(doc, "scan_type", None)
+        if scan_type and str(scan_type).lower() in ["summary", "suminis", "суммарный"]:
+            is_sumisr = True
+
         if not items:
             qty = 1
             price_wo = getattr(doc, "amount_wo_vat", None) or 0
@@ -879,11 +1016,13 @@ def export_pardavimai_group_to_agnum(documents, user):
         # Вычисляем документную скидку
         discount_pct = compute_global_invoice_discount_pct(doc)
         
-        rows = _build_agnum_rows_for_pardavimas(doc, items, discount_pct)
+        # ✅ ИЗМЕНЕНО: передаём user_defaults
+        rows = _build_agnum_rows_for_pardavimas(doc, items, discount_pct, user_defaults_pardavimas)
 
         # 3) товары / штрихкоды
         for item in items:
-            g_kod, g_attrs = _build_agnum_good_from_item(doc, item)
+            # ✅ ИЗМЕНЕНО: передаём user_defaults и получаем 3 значения
+            g_kod, g_attrs, okod = _build_agnum_good_from_item(doc, item, user_defaults_pardavimas)
             if g_kod not in goods_by_kod:
                 goods_by_kod[g_kod] = g_attrs
 
@@ -912,8 +1051,12 @@ def export_pardavimai_group_to_agnum(documents, user):
 
         # Документная скидка
         doc_discount_wo_vat = _safe_D(getattr(doc, "invoice_discount_wo_vat", 0) or 0)
-        nuolproc_value = f"{discount_pct:.2f}" if discount_pct is not None else "0"
-        nuol_value = get_price_or_zero(doc_discount_wo_vat)
+        nuolproc_value = _format_price_agnum(discount_pct) if discount_pct is not None else "0"
+        nuol_value = _format_price_agnum(doc_discount_wo_vat)
+
+        # ✅ ИЗМЕНЕНО: SND_KOD с приоритетом user → doc → fallback "S1"
+        doc_snd = _s(getattr(doc, "agnum_snd_kod", ""))
+        snd_kod = user_defaults_pardavimas["sandelis"] or doc_snd or "S1"
 
         doc_attrs = {
             "DATA": format_date_agnum(getattr(doc, "invoice_date", None)) or _agnum_empty_date(),
@@ -923,18 +1066,18 @@ def export_pardavimai_group_to_agnum(documents, user):
             "KL_KOD": cust_kod,
             "KL_RKOD": cust_attrs.get("RKOD", _agnum_empty_varchar()),
             "PAD_KOD": _agnum_empty_varchar(),
-            "SND_KOD": _s(getattr(doc, "agnum_snd_kod", "")) or "**SAN01",
+            "SND_KOD": snd_kod,  # ← ИЗМЕНЕНО
             "VAL": currency,
-            "KURS": str(rate if rate else "1"),
+            "KURS": _format_decimal_agnum(rate if rate else 1, precision=6),
             "NUOLPROC": nuolproc_value,
             "NUOL": nuol_value,
-            "SUMA": get_price_or_zero(amount_wo),
+            "SUMA": _format_price_agnum(amount_wo),
             "SUMAP": "0",
             "PVMPROC": "0",
-            "PVM": get_price_or_zero(vat_amount),
+            "PVM": _format_price_agnum(vat_amount),
             "MOK0": "0",
-            "SUMVISO": get_price_or_zero(total_wo),
-            "SKOLA": get_price_or_zero(skola),
+            "SUMVISO": _format_price_agnum(total_wo),
+            "SKOLA": _format_price_agnum(skola),
             "APMSUM": "0",
             "APM_SAL": apm_sal,
             "TERM": term,
@@ -942,7 +1085,7 @@ def export_pardavimai_group_to_agnum(documents, user):
             "PR_VIETA": _s(getattr(doc, "delivery_place", "")),
             "PR_DATA": format_date_agnum(getattr(doc, "delivery_date", None)) or _agnum_empty_date(),
             "KIENO_TR": "0",
-            "SUMISR": "N",
+            "SUMISR": "Y" if is_sumisr else "N",
             "CHECKNR": _s(getattr(doc, "receipt_number", "")),
             "KSNR": _s(getattr(doc, "cash_register_number", "")),
             "CHECKD": format_date_agnum(getattr(doc, "receipt_date", None)) or _agnum_empty_date(),

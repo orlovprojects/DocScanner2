@@ -54,6 +54,7 @@ from .exports.rivile_erp import (
     export_prekes_and_paslaugos_to_rivile_erp_xlsx,
     export_documents_to_rivile_erp_xlsx,
 )
+from .exports.dineta import send_dineta_bundle, DinetaError
 from .exports.pragma4 import export_to_pragma40_xml
 from .exports.pragma3 import export_to_pragma_full, save_pragma_export_to_files
 from .exports.butent import export_to_butent
@@ -78,6 +79,7 @@ from .serializers import (
     AdClickSerializer,
     LineItemSerializer,
     CustomUserAdminListSerializer,
+    DinetaSettingsSerializer,
 )
 from django.db.models import Prefetch
 
@@ -699,6 +701,51 @@ def export_documents(request):
             export_success = True
 
 
+    # ========================= DINETA =========================
+    elif export_type == 'dineta':
+        logger.info("[EXP] DINETA export started")
+
+        # Для Dineta нам логичнее отправлять только уже классифицированные покупки/продажи
+        all_docs = (pirkimai_docs or []) + (pardavimai_docs or [])
+
+        if not all_docs:
+            logger.warning("[EXP] DINETA no documents to export (no pirkimai/pardavimai)")
+            return Response({"error": "No documents to send to Dineta"}, status=400)
+
+        try:
+            dineta_result = send_dineta_bundle(request.user, all_docs)
+        except DinetaError as e:
+            logger.exception("[EXP] DINETA export failed (DinetaError): %s", e)
+            return Response(
+                {
+                    "error": "Dineta export failed",
+                    "detail": str(e),
+                },
+                status=502,  # bad gateway / внешняя система
+            )
+        except Exception as e:
+            logger.exception("[EXP] DINETA export failed (unexpected): %s", e)
+            return Response(
+                {
+                    "error": "Dineta export failed (unexpected)",
+                    "detail": str(e),
+                },
+                status=500,
+            )
+
+        # Если сюда дошли – считаем экспорт успешным
+        export_success = True
+        # response — обычный JSON с тем, что вернула Dineta
+        response = Response(
+            {
+                "status": "ok",
+                "dineta": dineta_result,
+            },
+            status=200,
+        )
+
+
+
     # ========================= Butent =========================
     elif export_type == 'butent':
         logger.info("[EXP] BUTENT export started")
@@ -838,6 +885,7 @@ def export_documents(request):
     elif export_type == 'rivile_erp':
         logger.info("[EXP] RIVILE_ERP export started")
         assign_random_prekes_kodai(documents)
+        rivile_defaults = getattr(request.user, "rivile_erp_extra_fields", None) or {}
 
         klientai = []
         seen = set()
@@ -908,14 +956,24 @@ def export_documents(request):
 
         if pirkimai_docs:
             with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp:
-                export_documents_to_rivile_erp_xlsx(pirkimai_docs, tmp.name, doc_type="pirkimai")
+                export_documents_to_rivile_erp_xlsx(
+                    pirkimai_docs,
+                    tmp.name,
+                    doc_type="pirkimai",
+                    rivile_erp_extra_fields=rivile_defaults,  # 🔹 вот здесь
+                )
                 tmp.seek(0)
                 pirkimai_xlsx_bytes = tmp.read()
             files_to_export.append((f'pirkimai_{today_str}.xlsx', pirkimai_xlsx_bytes))
 
         if pardavimai_docs:
             with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp:
-                export_documents_to_rivile_erp_xlsx(pardavimai_docs, tmp.name, doc_type="pardavimai")
+                export_documents_to_rivile_erp_xlsx(
+                    pardavimai_docs,
+                    tmp.name,
+                    doc_type="pardavimai",
+                    rivile_erp_extra_fields=rivile_defaults,  # 🔹 и здесь
+                )
                 tmp.seek(0)
                 pardavimai_xlsx_bytes = tmp.read()
             files_to_export.append((f'pardavimai_{today_str}.xlsx', pardavimai_xlsx_bytes))
@@ -962,6 +1020,42 @@ def export_documents(request):
 
     logger.warning("[EXP] fell through unexpectedly")
     return Response({"error": "No documents to export"}, status=400)
+
+
+
+# Soxranenije user infy s Dineta
+class DinetaSettingsView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        """
+        Вернуть текущие настройки Dineta этого пользователя.
+        Пароль НЕ возвращается.
+        """
+        user = request.user
+        settings_dict = user.dineta_settings or {}
+
+        serializer = DinetaSettingsSerializer(instance=settings_dict)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    def put(self, request):
+        """
+        Обновить настройки Dineta.
+        Фронт шлёт server/client/username/password (+ опции).
+        """
+        user = request.user
+
+        serializer = DinetaSettingsSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        settings_to_store = serializer.build_settings_dict()
+
+        user.dineta_settings = settings_to_store
+        user.save(update_fields=["dineta_settings"])
+
+        # в ответ отдаём без пароля (serializer.instance → dict)
+        response_serializer = DinetaSettingsSerializer(instance=settings_to_store)
+        return Response(response_serializer.data, status=status.HTTP_200_OK)
 
 
 
@@ -2581,6 +2675,7 @@ class ScannedDocumentViewSet(viewsets.ModelViewSet):
             return Response(status=status.HTTP_204_NO_CONTENT)
         except LineItem.DoesNotExist:
             return Response({"detail": "Line item not found"}, status=status.HTTP_404_NOT_FOUND)
+        
 
 
 # contact email sender

@@ -338,6 +338,8 @@ ACCOUNTING_PROGRAM_CHOICES = [
     ('pragma3', 'Pragma 3.2'),
     ('pragma4', 'Pragma 4'),
     ('butent', 'Būtent'),
+    ('dineta', 'Dineta'),
+    ('optimum', 'Optimum'),
     # добавь нужные программы
 ]
 
@@ -387,6 +389,15 @@ class CustomUser(AbstractUser):
     lineitem_rules = models.JSONField(default=list, blank=True)
 
     extra_settings = models.JSONField(blank=True, null=True)
+
+    dineta_settings = models.JSONField(blank=True, null=True)
+
+    rivile_erp_extra_fields = models.JSONField(default=dict, blank=True)
+    rivile_gama_extra_fields = models.JSONField(default=dict, blank=True)
+    butent_extra_fields      = models.JSONField(default=dict, blank=True)
+    finvalda_extra_fields    = models.JSONField(default=dict, blank=True)
+    centas_extra_fields      = models.JSONField(default=dict, blank=True)
+    agnum_extra_fields       = models.JSONField(default=dict, blank=True)
 
     # --- NEW: UI režimas dokumentų sąrašui ---
     view_mode = models.CharField(
