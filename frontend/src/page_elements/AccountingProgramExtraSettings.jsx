@@ -1,5 +1,4 @@
 // src/page_elements/AccountingProgramExtraSettings.jsx
-import React from "react";
 import {
   Paper,
   Typography,
@@ -7,12 +6,40 @@ import {
   TextField,
   Button,
   Alert,
+  FormControl,
+  InputLabel,
+  Select,
+  MenuItem,
+  Box,
 } from "@mui/material";
 import { Grid2 } from "@mui/material";
+
+const PREKES_ASSEMBLY_OPTIONS = [
+  { value: 1, label: "Paprasta" },
+  { value: 2, label: "Komplektuojama" },
+  { value: 3, label: "Išskaidoma" },
+  { value: 4, label: "Generavimai" },
+  { value: 5, label: "Sudėtinė" },
+  { value: 6, label: "Komplektuojama/Išskaidoma" },
+  { value: 7, label: "Mišri" },
+  { value: 8, label: "Tara" },
+];
 
 export function AccountingProgramExtraSettings(props) {
   const {
     program,
+
+    // nauji props
+    prekesAssemblyPirkimas,
+    prekesAssemblyPardavimas,
+    paslaugosAssemblyPirkimas,
+    paslaugosAssemblyPardavimas,
+    savingPrekesAssembly,
+    successPrekesAssembly,
+    onChangePrekesAssemblyPirkimas,
+    onChangePrekesAssemblyPardavimas,
+    onChangePaslaugosAssemblyPirkimas,
+    onChangePaslaugosAssemblyPardavimas,
 
     // Rivilė ERP
     rivileErpFields,
@@ -272,6 +299,42 @@ export function AccountingProgramExtraSettings(props) {
                 fullWidth
               />
               <TextField
+                label="Logistika"
+                size="small"
+                value={rivileGamaFields.pirkimas_logistika}
+                onChange={(e) =>
+                  setRivileGamaFields((prev) => ({
+                    ...prev,
+                    pirkimas_logistika: e.target.value,
+                  }))
+                }
+                fullWidth
+              />
+              <TextField
+                label="Apmokėjimo sąskaitos kodas"
+                size="small"
+                value={rivileGamaFields.pirkimas_pinigu_saskaitos_kodas}
+                onChange={(e) =>
+                  setRivileGamaFields((prev) => ({
+                    ...prev,
+                    pirkimas_pinigu_saskaitos_kodas: e.target.value,
+                  }))
+                }
+                fullWidth
+              />
+              <TextField
+                label="Sąskaitos ryšio kodas"
+                size="small"
+                value={rivileGamaFields.pirkimas_saskaitos_rysio_kodas}
+                onChange={(e) =>
+                  setRivileGamaFields((prev) => ({
+                    ...prev,
+                    pirkimas_saskaitos_rysio_kodas: e.target.value,
+                  }))
+                }
+                fullWidth
+              />
+              <TextField
                 label="Prekės grupė"
                 size="small"
                 value={rivileGamaFields.pirkimas_prekes_grupe}
@@ -283,6 +346,62 @@ export function AccountingProgramExtraSettings(props) {
                 }
                 fullWidth
               />
+              <TextField
+                label="Paslaugos grupė"
+                size="small"
+                value={rivileGamaFields.pirkimas_paslaugos_grupe}
+                onChange={(e) =>
+                  setRivileGamaFields((prev) => ({
+                    ...prev,
+                    pirkimas_paslaugos_grupe: e.target.value,
+                  }))
+                }
+                fullWidth
+              />
+              <TextField
+                label="Kodo grupė"
+                size="small"
+                value={rivileGamaFields.pirkimas_kodo_grupe}
+                onChange={(e) =>
+                  setRivileGamaFields((prev) => ({
+                    ...prev,
+                    pirkimas_kodo_grupe: e.target.value,
+                  }))
+                }
+                fullWidth
+              />
+              {/* PREKĖS TIPAS – Pirkimas */}
+              <FormControl size="small" fullWidth>
+                <InputLabel>Prekės tipas</InputLabel>
+                <Select
+                  label="Prekės tipas"
+                  value={prekesAssemblyPirkimas}
+                  onChange={onChangePrekesAssemblyPirkimas}
+                  disabled={savingPrekesAssembly}
+                >
+                  {PREKES_ASSEMBLY_OPTIONS.map((opt) => (
+                    <MenuItem key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+              {/* PASLAUGOS TIPAS – Pirkimas */}
+              <FormControl size="small" fullWidth>
+                <InputLabel>Paslaugos tipas</InputLabel>
+                <Select
+                  label="Paslaugos tipas"
+                  value={paslaugosAssemblyPirkimas}
+                  onChange={onChangePaslaugosAssemblyPirkimas}
+                  disabled={savingPrekesAssembly}
+                >
+                  {PREKES_ASSEMBLY_OPTIONS.map((opt) => (
+                    <MenuItem key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
             </Stack>
           </Grid2>
 
@@ -353,6 +472,42 @@ export function AccountingProgramExtraSettings(props) {
                 fullWidth
               />
               <TextField
+                label="Logistika"
+                size="small"
+                value={rivileGamaFields.pardavimas_logistika}
+                onChange={(e) =>
+                  setRivileGamaFields((prev) => ({
+                    ...prev,
+                    pardavimas_logistika: e.target.value,
+                  }))
+                }
+                fullWidth
+              />
+              <TextField
+                label="Apmokėjimo sąskaitos kodas"
+                size="small"
+                value={rivileGamaFields.pardavimas_pinigu_saskaitos_kodas}
+                onChange={(e) =>
+                  setRivileGamaFields((prev) => ({
+                    ...prev,
+                    pardavimas_pinigu_saskaitos_kodas: e.target.value,
+                  }))
+                }
+                fullWidth
+              />
+              <TextField
+                label="Sąskaitos ryšio kodas"
+                size="small"
+                value={rivileGamaFields.pardavimas_saskaitos_rysio_kodas}
+                onChange={(e) =>
+                  setRivileGamaFields((prev) => ({
+                    ...prev,
+                    pardavimas_saskaitos_rysio_kodas: e.target.value,
+                  }))
+                }
+                fullWidth
+              />
+              <TextField
                 label="Prekės grupė"
                 size="small"
                 value={rivileGamaFields.pardavimas_prekes_grupe}
@@ -364,6 +519,62 @@ export function AccountingProgramExtraSettings(props) {
                 }
                 fullWidth
               />
+              <TextField
+                label="Paslaugos grupė"
+                size="small"
+                value={rivileGamaFields.pardavimas_paslaugos_grupe}
+                onChange={(e) =>
+                  setRivileGamaFields((prev) => ({
+                    ...prev,
+                    pardavimas_paslaugos_grupe: e.target.value,
+                  }))
+                }
+                fullWidth
+              />
+              <TextField
+                label="Kodo grupė"
+                size="small"
+                value={rivileGamaFields.pardavimas_kodo_grupe}
+                onChange={(e) =>
+                  setRivileGamaFields((prev) => ({
+                    ...prev,
+                    pardavimas_kodo_grupe: e.target.value,
+                  }))
+                }
+                fullWidth
+              />
+              {/* PREKĖS TIPAS – Pardavimas */}
+              <FormControl size="small" fullWidth>
+                <InputLabel>Prekės tipas</InputLabel>
+                <Select
+                  label="Prekės tipas"
+                  value={prekesAssemblyPardavimas}
+                  onChange={onChangePrekesAssemblyPardavimas}
+                  disabled={savingPrekesAssembly}
+                >
+                  {PREKES_ASSEMBLY_OPTIONS.map((opt) => (
+                    <MenuItem key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+              {/* PASLAUGOS TIPAS – Pardavimas */}
+              <FormControl size="small" fullWidth>
+                <InputLabel>Paslaugos tipas</InputLabel>
+                <Select
+                  label="Paslaugos tipas"
+                  value={paslaugosAssemblyPardavimas}
+                  onChange={onChangePaslaugosAssemblyPardavimas}
+                  disabled={savingPrekesAssembly}
+                >
+                  {PREKES_ASSEMBLY_OPTIONS.map((opt) => (
+                    <MenuItem key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
             </Stack>
           </Grid2>
         </Grid2>
@@ -526,6 +737,18 @@ export function AccountingProgramExtraSettings(props) {
                 fullWidth
               />
               <TextField
+                label="Žurnalas"
+                size="small"
+                value={finvaldaFields.pirkimas_zurnalas}
+                onChange={(e) =>
+                  setFinvaldaFields((prev) => ({
+                    ...prev,
+                    pirkimas_zurnalas: e.target.value,
+                  }))
+                }
+                fullWidth
+              />
+              <TextField
                 label="Tipas"
                 size="small"
                 value={finvaldaFields.pirkimas_tipas}
@@ -538,13 +761,25 @@ export function AccountingProgramExtraSettings(props) {
                 fullWidth
               />
               <TextField
-                label="Žurnalas"
+                label="Padalinys"
                 size="small"
-                value={finvaldaFields.pirkimas_zurnalas}
+                value={finvaldaFields.pirkimas_padalinys}
                 onChange={(e) =>
                   setFinvaldaFields((prev) => ({
                     ...prev,
-                    pirkimas_zurnalas: e.target.value,
+                    pirkimas_padalinys: e.target.value,
+                  }))
+                }
+                fullWidth
+              />
+              <TextField
+                label="Darbuotojas"
+                size="small"
+                value={finvaldaFields.pirkimas_darbuotojas}
+                onChange={(e) =>
+                  setFinvaldaFields((prev) => ({
+                    ...prev,
+                    pirkimas_darbuotojas: e.target.value,
                   }))
                 }
                 fullWidth
@@ -571,6 +806,18 @@ export function AccountingProgramExtraSettings(props) {
                 fullWidth
               />
               <TextField
+                label="Žurnalas"
+                size="small"
+                value={finvaldaFields.pardavimas_zurnalas}
+                onChange={(e) =>
+                  setFinvaldaFields((prev) => ({
+                    ...prev,
+                    pardavimas_zurnalas: e.target.value,
+                  }))
+                }
+                fullWidth
+              />
+              <TextField
                 label="Tipas"
                 size="small"
                 value={finvaldaFields.pardavimas_tipas}
@@ -583,13 +830,25 @@ export function AccountingProgramExtraSettings(props) {
                 fullWidth
               />
               <TextField
-                label="Žurnalas"
+                label="Padalinys"
                 size="small"
-                value={finvaldaFields.pardavimas_zurnalas}
+                value={finvaldaFields.pardavimas_padalinys}
                 onChange={(e) =>
                   setFinvaldaFields((prev) => ({
                     ...prev,
-                    pardavimas_zurnalas: e.target.value,
+                    pardavimas_padalinys: e.target.value,
+                  }))
+                }
+                fullWidth
+              />
+              <TextField
+                label="Darbuotojas"
+                size="small"
+                value={finvaldaFields.pardavimas_darbuotojas}
+                onChange={(e) =>
+                  setFinvaldaFields((prev) => ({
+                    ...prev,
+                    pardavimas_darbuotojas: e.target.value,
                   }))
                 }
                 fullWidth
@@ -653,13 +912,13 @@ export function AccountingProgramExtraSettings(props) {
                 fullWidth
               />
               <TextField
-                label="Objektas"
+                label="Kaštų centras"
                 size="small"
-                value={centasFields.pirkimas_objektas}
+                value={centasFields.pirkimas_kastu_centras}
                 onChange={(e) =>
                   setCentasFields((prev) => ({
                     ...prev,
-                    pirkimas_objektas: e.target.value,
+                    pirkimas_kastu_centras: e.target.value,
                   }))
                 }
                 fullWidth
@@ -686,13 +945,13 @@ export function AccountingProgramExtraSettings(props) {
                 fullWidth
               />
               <TextField
-                label="Objektas"
+                label="Kaštų centras"
                 size="small"
-                value={centasFields.pardavimas_objektas}
+                value={centasFields.pardavimas_kastu_centras}
                 onChange={(e) =>
                   setCentasFields((prev) => ({
                     ...prev,
-                    pardavimas_objektas: e.target.value,
+                    pardavimas_kastu_centras: e.target.value,
                   }))
                 }
                 fullWidth
@@ -854,3 +1113,4 @@ export function AccountingProgramExtraSettings(props) {
   // Kitos programos neturi papildomų laukų
   return null;
 }
+

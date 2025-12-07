@@ -195,13 +195,36 @@ def _format_date_for_butent(dt) -> str:
     return ""
 
 
-def _get_operacija(doc) -> str:
+def _get_operacija(doc, user=None) -> str:
     """
     Определяет операцию для колонки H:
-      - pirkimas -> "Pajamavimas"
-      - pardavimas -> "Pardavimas"
+      - pirkimas -> "Pajamavimas" (или из user.butent_extra_fields['pirkimas_operacija'])
+      - pardavimas -> "Pardavimas" (или из user.butent_extra_fields['pardavimas_operacija'])
     """
     doc_type = _s(getattr(doc, "pirkimas_pardavimas", "")).lower()
+    
+    # Пытаемся взять из user.butent_extra_fields
+    if user and hasattr(user, "butent_extra_fields") and user.butent_extra_fields:
+        extra_fields = user.butent_extra_fields
+        
+        if doc_type == "pirkimas":
+            custom_op = extra_fields.get("pirkimas_operacija", "").strip()
+            if custom_op:
+                logger.info(
+                    "[BUTENT:OPERACIJA] doc=%s using custom pirkimas_operacija=%r",
+                    getattr(doc, "pk", None), custom_op
+                )
+                return custom_op
+        elif doc_type == "pardavimas":
+            custom_op = extra_fields.get("pardavimas_operacija", "").strip()
+            if custom_op:
+                logger.info(
+                    "[BUTENT:OPERACIJA] doc=%s using custom pardavimas_operacija=%r",
+                    getattr(doc, "pk", None), custom_op
+                )
+                return custom_op
+    
+    # Дефолтные значения
     if doc_type == "pirkimas":
         return "Pajamavimas"
     elif doc_type == "pardavimas":
@@ -211,14 +234,42 @@ def _get_operacija(doc) -> str:
         return "Pajamavimas"
 
 
-def _get_sandelis(doc) -> str:
+def _get_sandelis(doc, user=None) -> str:
     """
     Определяет склад для колонки I:
       - doc.sandelio_kodas если есть
+      - иначе из user.butent_extra_fields (pirkimas_sandelis/pardavimas_sandelis)
       - иначе "S1"
     """
+    # Приоритет 1: значение из документа
     sandelis = _s(getattr(doc, "sandelio_kodas", ""))
-    return sandelis if sandelis else "S1"
+    if sandelis:
+        return sandelis
+    
+    # Приоритет 2: значение из user.butent_extra_fields
+    if user and hasattr(user, "butent_extra_fields") and user.butent_extra_fields:
+        extra_fields = user.butent_extra_fields
+        doc_type = _s(getattr(doc, "pirkimas_pardavimas", "")).lower()
+        
+        if doc_type == "pirkimas":
+            custom_sandelis = extra_fields.get("pirkimas_sandelis", "").strip()
+            if custom_sandelis:
+                logger.info(
+                    "[BUTENT:SANDELIS] doc=%s using custom pirkimas_sandelis=%r",
+                    getattr(doc, "pk", None), custom_sandelis
+                )
+                return custom_sandelis
+        elif doc_type == "pardavimas":
+            custom_sandelis = extra_fields.get("pardavimas_sandelis", "").strip()
+            if custom_sandelis:
+                logger.info(
+                    "[BUTENT:SANDELIS] doc=%s using custom pardavimas_sandelis=%r",
+                    getattr(doc, "pk", None), custom_sandelis
+                )
+                return custom_sandelis
+    
+    # Приоритет 3: дефолтное значение
+    return "S1"
 
 
 def _format_decimal(value, decimals=2) -> float:
@@ -362,7 +413,7 @@ def export_to_butent(
               'auto' - автоматически разделяет документы на два файла
               'suminis' - принудительно все в один файл (suminis режим)
               'kiekinis' - принудительно все в один файл (kiekinis режим)
-        user: пользователь (не используется, но оставлен для совместимости с Rivile)
+        user: пользователь (для получения butent_extra_fields)
 
     Returns:
         Dict[str, bytes]: словарь вида {"suminis": bytes, "kiekinis": bytes}
@@ -410,12 +461,12 @@ def export_to_butent(
     # Экспортируем suminis, если есть документы
     if docs_suminis:
         logger.info("[BUTENT:EXPORT] Generating suminis file...")
-        result["suminis"] = _generate_butent_file(docs_suminis, "suminis")
+        result["suminis"] = _generate_butent_file(docs_suminis, "suminis", user)
     
     # Экспортируем kiekinis, если есть документы
     if docs_kiekinis:
         logger.info("[BUTENT:EXPORT] Generating kiekinis file...")
-        result["kiekinis"] = _generate_butent_file(docs_kiekinis, "kiekinis")
+        result["kiekinis"] = _generate_butent_file(docs_kiekinis, "kiekinis", user)
 
     if not result:
         logger.warning("[BUTENT:EXPORT] No files generated")
@@ -425,13 +476,14 @@ def export_to_butent(
     return result
 
 
-def _generate_butent_file(documents: List, mode: str) -> bytes:
+def _generate_butent_file(documents: List, mode: str, user=None) -> bytes:
     """
     Генерирует один Excel-файл для Būtent.
 
     Args:
         documents: список документов для экспорта
         mode: 'suminis' | 'kiekinis'
+        user: пользователь (для получения butent_extra_fields)
 
     Returns:
         bytes: содержимое Excel-файла
@@ -452,8 +504,8 @@ def _generate_butent_file(documents: List, mode: str) -> bytes:
 
     for doc in documents:
         # Общие данные документа (колонки A-Q)
-        operacija = _get_operacija(doc)
-        sandelis = _get_sandelis(doc)
+        operacija = _get_operacija(doc, user)  # ✅ Передаём user
+        sandelis = _get_sandelis(doc, user)    # ✅ Передаём user
         isaf = _get_butent_isaf_flag(doc)
         client = _get_client_data_for_butent(doc)
 
@@ -715,6 +767,15 @@ def create_butent_template():
 
     logger.info("[BUTENT:TEMPLATE] Created template: %s", template_path)
     return template_path
+
+
+
+
+
+
+
+
+
 
 
 
@@ -1072,20 +1133,21 @@ def create_butent_template():
 #     documents: List,
 #     mode: str = "auto",
 #     user=None
-# ) -> bytes:
+# ) -> Dict[str, bytes]:
 #     """
 #     Экспортирует документы в формат Būtent Excel.
 
 #     Args:
 #         documents: список документов для экспорта
 #         mode: 'auto' | 'suminis' | 'kiekinis'
-#               'auto' - автоматически определяет режим по наличию line_items
-#               'suminis' - один документ = одна строка (без детализации товаров)
-#               'kiekinis' - один документ = несколько строк (по одной на товар)
+#               'auto' - автоматически разделяет документы на два файла
+#               'suminis' - принудительно все в один файл (suminis режим)
+#               'kiekinis' - принудительно все в один файл (kiekinis режим)
 #         user: пользователь (не используется, но оставлен для совместимости с Rivile)
 
 #     Returns:
-#         bytes: содержимое Excel-файла
+#         Dict[str, bytes]: словарь вида {"suminis": bytes, "kiekinis": bytes}
+#                          где ключи присутствуют только если есть соответствующие документы
 #     """
 #     logger.info("[BUTENT:EXPORT] Starting export, docs=%d mode=%s", len(documents), mode)
 
@@ -1093,39 +1155,83 @@ def create_butent_template():
 #         logger.warning("[BUTENT:EXPORT] No documents to export")
 #         raise ValueError("No documents provided for export")
 
+#     # Разделяем документы на две группы
+#     docs_suminis = []
+#     docs_kiekinis = []
+
+#     if mode == "auto":
+#         for doc in documents:
+#             line_items = getattr(doc, "line_items", None)
+#             has_items = False
+#             if line_items and hasattr(line_items, "all"):
+#                 has_items = line_items.exists()
+            
+#             if has_items:
+#                 docs_kiekinis.append(doc)
+#             else:
+#                 docs_suminis.append(doc)
+        
+#         logger.info(
+#             "[BUTENT:EXPORT] Auto mode: suminis=%d kiekinis=%d",
+#             len(docs_suminis),
+#             len(docs_kiekinis)
+#         )
+#     elif mode == "suminis":
+#         docs_suminis = documents
+#         logger.info("[BUTENT:EXPORT] Force suminis mode: %d docs", len(docs_suminis))
+#     elif mode == "kiekinis":
+#         docs_kiekinis = documents
+#         logger.info("[BUTENT:EXPORT] Force kiekinis mode: %d docs", len(docs_kiekinis))
+#     else:
+#         logger.error("[BUTENT:EXPORT] Unknown mode: %s", mode)
+#         raise ValueError(f"Unknown mode: {mode}")
+
+#     result = {}
+
+#     # Экспортируем suminis, если есть документы
+#     if docs_suminis:
+#         logger.info("[BUTENT:EXPORT] Generating suminis file...")
+#         result["suminis"] = _generate_butent_file(docs_suminis, "suminis")
+    
+#     # Экспортируем kiekinis, если есть документы
+#     if docs_kiekinis:
+#         logger.info("[BUTENT:EXPORT] Generating kiekinis file...")
+#         result["kiekinis"] = _generate_butent_file(docs_kiekinis, "kiekinis")
+
+#     if not result:
+#         logger.warning("[BUTENT:EXPORT] No files generated")
+#         raise ValueError("No documents to export")
+
+#     logger.info("[BUTENT:EXPORT] Export completed, files=%s", list(result.keys()))
+#     return result
+
+
+# def _generate_butent_file(documents: List, mode: str) -> bytes:
+#     """
+#     Генерирует один Excel-файл для Būtent.
+
+#     Args:
+#         documents: список документов для экспорта
+#         mode: 'suminis' | 'kiekinis'
+
+#     Returns:
+#         bytes: содержимое Excel-файла
+#     """
+#     logger.info("[BUTENT:FILE] Generating %s file for %d docs", mode, len(documents))
+
 #     # Загружаем шаблон
 #     template_path = TEMPLATES_DIR / BUTENT_TEMPLATE_FILE
 #     if not template_path.exists():
-#         logger.error("[BUTENT:EXPORT] Template not found: %s", template_path)
+#         logger.error("[BUTENT:FILE] Template not found: %s", template_path)
 #         raise FileNotFoundError(f"Būtent template not found: {template_path}")
 
 #     wb = load_workbook(template_path)
 #     ws = wb.active
 
-#     logger.info("[BUTENT:EXPORT] Template loaded: %s", template_path)
-
 #     # Собираем строки данных
 #     rows = []
 
 #     for doc in documents:
-#         # Определяем режим автоматически
-#         has_items = False
-#         line_items = getattr(doc, "line_items", None)
-#         if line_items and hasattr(line_items, "all"):
-#             has_items = line_items.exists()
-
-#         if mode == "auto":
-#             actual_mode = "kiekinis" if has_items else "suminis"
-#         else:
-#             actual_mode = mode
-
-#         logger.info(
-#             "[BUTENT:DOC] doc=%s mode=%s has_items=%s",
-#             getattr(doc, "pk", None),
-#             actual_mode,
-#             has_items,
-#         )
-
 #         # Общие данные документа (колонки A-Q)
 #         operacija = _get_operacija(doc)
 #         sandelis = _get_sandelis(doc)
@@ -1152,7 +1258,7 @@ def create_butent_template():
 #             client["iban"],                                                    # Q: Atsiskaitomoji sąskaita
 #         ]
 
-#         if actual_mode == "suminis":
+#         if mode == "suminis":
 #             # Одна строка на документ (колонки R-Z из документа)
 #             preke_kodas = (
 #                 _s(getattr(doc, "prekes_kodas", ""))
@@ -1174,8 +1280,16 @@ def create_butent_template():
 #             rows.append(row)
 #             logger.info("[BUTENT:SUMINIS] doc=%s row added", getattr(doc, "pk", None))
 
-#         else:
+#         else:  # kiekinis
 #             # Несколько строк на документ (по одной на товар)
+#             line_items = getattr(doc, "line_items", None)
+#             if not line_items or not hasattr(line_items, "all"):
+#                 logger.warning(
+#                     "[BUTENT:KIEKINIS] doc=%s has no line_items, skipping",
+#                     getattr(doc, "pk", None)
+#                 )
+#                 continue
+            
 #             items_list = list(line_items.all())
             
 #             # КЛЮЧЕВОЙ МОМЕНТ: Распределяем скидку документа на строки
@@ -1283,7 +1397,7 @@ def create_butent_template():
 #             else:
 #                 cell.value = value
 
-#     logger.info("[BUTENT:EXPORT] Written %d rows to Excel", len(rows))
+#     logger.info("[BUTENT:FILE] Written %d rows to Excel", len(rows))
 
 #     # Сохраняем в BytesIO
 #     from io import BytesIO
@@ -1292,7 +1406,7 @@ def create_butent_template():
 #     wb.save(output)
 #     output.seek(0)
 
-#     logger.info("[BUTENT:EXPORT] Export completed successfully")
+#     logger.info("[BUTENT:FILE] File generation completed")
 #     return output.read()
 
 

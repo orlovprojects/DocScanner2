@@ -144,6 +144,26 @@ def _fallback_doc_num(series: str, number: str) -> tuple[str, str]:
     return s, n
 
 
+def _get_extra_field_value(doc, user_extra_fields: dict, field_key: str) -> str:
+    """
+    Извлекает значение extra field из user.finvalda_extra_fields.
+    
+    Args:
+        doc: Document instance
+        user_extra_fields: dict из user.finvalda_extra_fields
+        field_key: ключ типа "pirkimas_tipas", "pardavimas_zurnalas" и т.д.
+    
+    Returns:
+        UPPERCASE значение или пустая строка
+    """
+    if not user_extra_fields or not isinstance(user_extra_fields, dict):
+        return ""
+    
+    # Получаем значение из extra_fields
+    value = user_extra_fields.get(field_key, "")
+    return _upper(value)
+
+
 # =========================
 # XML helpers
 # =========================
@@ -353,24 +373,25 @@ def _fill_line(
     fallback_tip_doc=None,  # тип с уровня документа при отсутствии строк
     sandelio_kodas_value: str = "",
     summary_kodas: str = "",
-    fallback_vat_percent=None,  # <— НОВОЕ: для суммарного режима
+    fallback_vat_percent=None,
 ):
     """
     Добавляет <eilute> в <operacijaDet>.
 
-    - <tipas> (1/2):
+    - <tipas> (1/2): УРОВЕНЬ СТРОКИ (товар/услуга)
         * если есть line_obj → normalize_tip_lineitem(line_obj.preke_paslauga)
         * если line_obj нет → normalize_tip_doc(fallback_tip_doc)
     - <kodas> = из БД (если нет своего), иначе NERAPREKESKODO####
     - <kiekis pirmas_mat="true"> = quantity (по умолчанию 1.00)
     - <sandelis> = item.sandelio_kodas (детально) или sandelio_kodas_value (суммарно)
+                   ТОЛЬКО для товаров (tipas=1), НЕ для услуг (tipas=2)
     - суммы: EUR → заполняем и *_v, и *_l одинаково; не-EUR → только *_v
     - <pvm_proc> = item.vat_percent (детально) или doc.vat_percent (суммарно)
     - <pvm_kodas> = pvm_kodas_value (multi) → line_obj.pvm_kodas (single) → ""
     """
     eilute = ET.SubElement(parent, "eilute")
 
-    # tipas (1/2 товар/услуга)
+    # tipas (1/2 товар/услуга) - УРОВЕНЬ СТРОКИ
     if line_obj is not None:
         tipas_val = normalize_tip_lineitem(getattr(line_obj, "preke_paslauga", None))
     else:
@@ -391,10 +412,11 @@ def _fill_line(
         qty = 1
     ET.SubElement(eilute, "kiekis", {"pirmas_mat": "true"}).text = f"{float(qty):.2f}"
 
-    # sandelis (from item if detailed; from doc if summary)
-    sandelio_kodas = _s(getattr(line_obj, "sandelio_kodas", None)) if line_obj is not None else _s(sandelio_kodas_value)
-    if sandelio_kodas:
-        ET.SubElement(eilute, "sandelis").text = _upper(sandelio_kodas)
+    # sandelis (ТОЛЬКО для товаров tipas=1, НЕ для услуг tipas=2)
+    if tipas_val == "1":
+        sandelio_kodas = _s(getattr(line_obj, "sandelio_kodas", None)) if line_obj is not None else _s(sandelio_kodas_value)
+        if sandelio_kodas:
+            ET.SubElement(eilute, "sandelis").text = _upper(sandelio_kodas)
 
     # pavadinimas
     name = getattr(line_obj, "prekes_pavadinimas", None) if line_obj is not None else None
@@ -487,33 +509,75 @@ def export_pirkimai_group_to_finvalda(documents):
             country_iso=seller_country,
         )
 
+        # Получаем extra fields из user
+        user = getattr(doc, "user", None)
+        user_extra_fields = {}
+        if user:
+            user_extra_fields = getattr(user, "finvalda_extra_fields", None) or {}
+
+        # ПРАВИЛЬНЫЙ ПОРЯДОК ПОЛЕЙ согласно XSD схеме
         pirkimas = ET.SubElement(operacijos, "pirkimas")
+
+        # 1. Поля из operacijaType (базовый тип)
+        # tipas (УРОВЕНЬ ДОКУМЕНТА - тип операции, не путать с tipas строки!)
+        tipas_value = (
+            _get_extra_field_value(doc, user_extra_fields, "pirkimas_tipas")
+            or _upper(getattr(doc, "tipo_kodas", None))
+        )
+        if tipas_value:
+            ET.SubElement(pirkimas, "tipas").text = tipas_value
+
+        # zurnalas
+        zurnalas_value = (
+            _get_extra_field_value(doc, user_extra_fields, "pirkimas_zurnalas")
+            or _upper(getattr(doc, "zurnalo_kodas", None))
+        )
+        if zurnalas_value:
+            ET.SubElement(pirkimas, "zurnalas").text = zurnalas_value
+
+        # padalinys
+        padalinys_value = (
+            _get_extra_field_value(doc, user_extra_fields, "pirkimas_padalinys")
+            or _upper(getattr(doc, "padalinio_kodas", None))
+            or "PP"  # fallback
+        )
+        ET.SubElement(pirkimas, "padalinys").text = padalinys_value
+
+        # serija, dokumentas
         ET.SubElement(pirkimas, "serija").text = serija
         ET.SubElement(pirkimas, "dokumentas").text = dokumentas
-        ET.SubElement(pirkimas, "data").text = format_date(invoice_date)
-        ET.SubElement(pirkimas, "valiuta").text = currency
-        ET.SubElement(pirkimas, "mokejimo_data").text = format_date(payment_date)
-        ET.SubElement(pirkimas, "reg_data").text = format_date(invoice_date)
-        ET.SubElement(pirkimas, "dokumento_data").text = format_date(invoice_date)
 
+        # klientas
         k = ET.SubElement(pirkimas, "klientas", {"kodo_tipas": "im_kodas"})
         k.text = _s(seller_code) or "neraimoneskodo"
 
+        # darbuotojas
+        darbuotojas_value = (
+            _get_extra_field_value(doc, user_extra_fields, "pirkimas_darbuotojas")
+            or _upper(getattr(doc, "atsakingo_asmens_kodas", None))
+        )
+        if darbuotojas_value:
+            ET.SubElement(pirkimas, "darbuotojas").text = darbuotojas_value
+
+        # data, pastaba, imp_param
+        ET.SubElement(pirkimas, "data").text = format_date(invoice_date)
         ET.SubElement(pirkimas, "pastaba").text = smart_str(_s(getattr(doc, "preview_url", "")))
         ET.SubElement(pirkimas, "imp_param").text = "VA"
-        ET.SubElement(pirkimas, "padalinys").text = "PP"
 
-        # Doc-level extra tags (always from doc)
-        if _s(getattr(doc, "zurnalo_kodas", None)):
-            ET.SubElement(pirkimas, "zurnalas").text = _upper(getattr(doc, "zurnalo_kodas", ""))
-        if _s(getattr(doc, "tipo_kodas", None)):
-            ET.SubElement(pirkimas, "tipas").text = _upper(getattr(doc, "tipo_kodas", ""))
-        if _s(getattr(doc, "padalinio_kodas", None)):
-            ET.SubElement(pirkimas, "padalinys").text = _upper(getattr(doc, "padalinio_kodas", ""))
-        if _s(getattr(doc, "atsakingo_asmens_kodas", None)):
-            ET.SubElement(pirkimas, "darbuotojas").text = _upper(getattr(doc, "atsakingo_asmens_kodas", ""))
+        # 2. Поля из pirkType расширения
+        ET.SubElement(pirkimas, "mokejimo_data").text = format_date(payment_date)
+        ET.SubElement(pirkimas, "reg_data").text = format_date(invoice_date)
+        ET.SubElement(pirkimas, "dokumento_data").text = format_date(invoice_date)
+        ET.SubElement(pirkimas, "valiuta").text = currency
 
+        # 3. operacijaDet
         det = ET.SubElement(pirkimas, "operacijaDet")
+
+        # Получаем sandelis из extra_fields или doc
+        default_sandelis = (
+            _get_extra_field_value(doc, user_extra_fields, "pirkimas_sandelis")
+            or _s(getattr(doc, "sandelio_kodas", ""))
+        )
 
         # multi/single источник pvm кодов по строкам
         line_map = getattr(doc, "_pvm_line_map", None)
@@ -532,7 +596,7 @@ def export_pirkimai_group_to_finvalda(documents):
                     line_obj=item,
                     currency=currency,
                     pvm_kodas_value=code,
-                    sandelio_kodas_value=_s(getattr(doc, "sandelio_kodas", "")),
+                    sandelio_kodas_value=default_sandelis,
                 )
         else:
             # синтетическая строка
@@ -546,9 +610,9 @@ def export_pirkimai_group_to_finvalda(documents):
                 fallback_name=_s(getattr(doc, "prekes_pavadinimas", "")),
                 pvm_kodas_value=getattr(doc, "pvm_kodas", None),
                 fallback_tip_doc=getattr(doc, "preke_paslauga", None),
-                sandelio_kodas_value=_s(getattr(doc, "sandelio_kodas", "")),
+                sandelio_kodas_value=default_sandelis,
                 summary_kodas=_get_or_persist_kodas_from_obj(doc),
-                fallback_vat_percent=getattr(doc, "vat_percent", None),  # <— добавлено
+                fallback_vat_percent=getattr(doc, "vat_percent", None),
             )
 
     xml_bytes = _pretty_bytes(root)
@@ -573,8 +637,8 @@ def export_pardavimai_group_to_finvalda(documents):
         serija, dokumentas = _fallback_doc_num(series_raw, number_raw)
 
         invoice_date = getattr(doc, "invoice_date", None)
-        op_date = getattr(doc, "operation_date", None)
-        payment_date = op_date or invoice_date
+        oper_date = getattr(doc, "operation_date", None)
+        payment_date = oper_date or invoice_date
 
         # buyer: id -> vat -> id_programoje
         buyer_code = get_party_code(
@@ -597,31 +661,73 @@ def export_pardavimai_group_to_finvalda(documents):
             country_iso=buyer_country,
         )
 
+        # Получаем extra fields из user
+        user = getattr(doc, "user", None)
+        user_extra_fields = {}
+        if user:
+            user_extra_fields = getattr(user, "finvalda_extra_fields", None) or {}
+
+        # ПРАВИЛЬНЫЙ ПОРЯДОК ПОЛЕЙ согласно XSD схеме
         pard = ET.SubElement(operacijos, "pardavimas")
+
+        # 1. Поля из operacijaType (базовый тип)
+        # tipas (УРОВЕНЬ ДОКУМЕНТА - тип операции)
+        tipas_value = (
+            _get_extra_field_value(doc, user_extra_fields, "pardavimas_tipas")
+            or _upper(getattr(doc, "tipo_kodas", None))
+        )
+        if tipas_value:
+            ET.SubElement(pard, "tipas").text = tipas_value
+
+        # zurnalas
+        zurnalas_value = (
+            _get_extra_field_value(doc, user_extra_fields, "pardavimas_zurnalas")
+            or _upper(getattr(doc, "zurnalo_kodas", None))
+        )
+        if zurnalas_value:
+            ET.SubElement(pard, "zurnalas").text = zurnalas_value
+
+        # padalinys
+        padalinys_value = (
+            _get_extra_field_value(doc, user_extra_fields, "pardavimas_padalinys")
+            or _upper(getattr(doc, "padalinio_kodas", None))
+            or "PP"  # fallback
+        )
+        ET.SubElement(pard, "padalinys").text = padalinys_value
+
+        # serija, dokumentas
         ET.SubElement(pard, "serija").text = serija
         ET.SubElement(pard, "dokumentas").text = dokumentas
 
+        # klientas
         k = ET.SubElement(pard, "klientas", {"kodo_tipas": "im_kodas"})
         k.text = _s(buyer_code) or "neraimoneskodo"
 
+        # darbuotojas
+        darbuotojas_value = (
+            _get_extra_field_value(doc, user_extra_fields, "pardavimas_darbuotojas")
+            or _upper(getattr(doc, "atsakingo_asmens_kodas", None))
+        )
+        if darbuotojas_value:
+            ET.SubElement(pard, "darbuotojas").text = darbuotojas_value
+
+        # data, pastaba, imp_param
         ET.SubElement(pard, "data").text = format_date(invoice_date)
-        ET.SubElement(pard, "valiuta").text = currency
-        ET.SubElement(pard, "mokejimo_data").text = format_date(payment_date)
         ET.SubElement(pard, "pastaba").text = smart_str(_s(getattr(doc, "preview_url", "")))
         ET.SubElement(pard, "imp_param").text = "VA"
-        ET.SubElement(pard, "padalinys").text = "PP"
 
-        # Doc-level extra tags (always from doc)
-        if _s(getattr(doc, "zurnalo_kodas", None)):
-            ET.SubElement(pard, "zurnalas").text = _upper(getattr(doc, "zurnalo_kodas", ""))
-        if _s(getattr(doc, "tipo_kodas", None)):
-            ET.SubElement(pard, "tipas").text = _upper(getattr(doc, "tipo_kodas", ""))
-        if _s(getattr(doc, "padalinio_kodas", None)):
-            ET.SubElement(pard, "padalinys").text = _upper(getattr(doc, "padalinio_kodas", ""))
-        if _s(getattr(doc, "atsakingo_asmens_kodas", None)):
-            ET.SubElement(pard, "darbuotojas").text = _upper(getattr(doc, "atsakingo_asmens_kodas", ""))
+        # 2. Поля из pardType расширения
+        ET.SubElement(pard, "mokejimo_data").text = format_date(payment_date)
+        ET.SubElement(pard, "valiuta").text = currency
 
+        # 3. operacijaDet
         det = ET.SubElement(pard, "operacijaDet")
+
+        # Получаем sandelis из extra_fields или doc
+        default_sandelis = (
+            _get_extra_field_value(doc, user_extra_fields, "pardavimas_sandelis")
+            or _s(getattr(doc, "sandelio_kodas", ""))
+        )
 
         # multi/single источник pvm кодов по строкам
         line_map = getattr(doc, "_pvm_line_map", None)
@@ -640,7 +746,7 @@ def export_pardavimai_group_to_finvalda(documents):
                     line_obj=item,
                     currency=currency,
                     pvm_kodas_value=code,
-                    sandelio_kodas_value=_s(getattr(doc, "sandelio_kodas", "")),
+                    sandelio_kodas_value=default_sandelis,
                 )
         else:
             _fill_line(
@@ -653,9 +759,9 @@ def export_pardavimai_group_to_finvalda(documents):
                 fallback_name=_s(getattr(doc, "prekes_pavadinimas", "")),
                 pvm_kodas_value=getattr(doc, "pvm_kodas", None),
                 fallback_tip_doc=getattr(doc, "preke_paslauga", None),
-                sandelio_kodas_value=_s(getattr(doc, "sandelio_kodas", "")),
-                # summary_kodas опционален; если хочешь — можно передать как в pirkimai
-                fallback_vat_percent=getattr(doc, "vat_percent", None),  # <— добавлено
+                sandelio_kodas_value=default_sandelis,
+                summary_kodas=_get_or_persist_kodas_from_obj(doc),
+                fallback_vat_percent=getattr(doc, "vat_percent", None),
             )
 
     xml_bytes = _pretty_bytes(root)
@@ -707,14 +813,42 @@ def export_pardavimai_group_to_finvalda(documents):
 
 # def normalize_tip_lineitem(value) -> str:
 #     """
-#     Для line item: 'preke' → '1', 'paslauga' → '2', иначе '1'.
+#     Для line item в Finvalda: возвращает '1' (preke) или '2' (paslauga).
+#     Поддерживает: 1/2/3/4, 'preke/prekė', 'paslauga/paslaugos'.
+    
+#     Маппинг:
+#     - 1 → '1' (prekė = товар)
+#     - 2 → '2' (paslauga = услуга)
+#     - 3 → '1' (kodas обрабатывается как товар)
+#     - 4 → '2' (обрабатывается как услуга)
 #     """
-#     s = _s(value).lower()
-#     if s in ("preke", "prekė", "prekes", "prekės"):
+#     s = str(value).strip() if value is not None else ""
+#     if not s:
 #         return "1"
-#     if s in ("paslauga", "paslaugos"):
+    
+#     # Пробуем числовое значение
+#     try:
+#         n = int(float(s.replace(",", ".")))
+#         if n == 1:
+#             return "1"
+#         elif n == 2:
+#             return "2"
+#         elif n == 3:
+#             return "1"  # kodas -> товар
+#         elif n == 4:
+#             return "2"  # -> услуга
+#         return "1"  # fallback
+#     except Exception:
+#         pass
+    
+#     # Текстовые синонимы
+#     low = s.lower()
+#     if low in ("preke", "prekė", "prekes", "prekės"):
+#         return "1"
+#     if low in ("paslauga", "paslaugos"):
 #         return "2"
-#     return "1"
+    
+#     return "1"  # fallback
 
 
 # def normalize_tip_doc(value) -> str:
@@ -991,6 +1125,7 @@ def export_pardavimai_group_to_finvalda(documents):
 #     fallback_tip_doc=None,  # тип с уровня документа при отсутствии строк
 #     sandelio_kodas_value: str = "",
 #     summary_kodas: str = "",
+#     fallback_vat_percent=None,  # <— НОВОЕ: для суммарного режима
 # ):
 #     """
 #     Добавляет <eilute> в <operacijaDet>.
@@ -1001,8 +1136,8 @@ def export_pardavimai_group_to_finvalda(documents):
 #     - <kodas> = из БД (если нет своего), иначе NERAPREKESKODO####
 #     - <kiekis pirmas_mat="true"> = quantity (по умолчанию 1.00)
 #     - <sandelis> = item.sandelio_kodas (детально) или sandelio_kodas_value (суммарно)
-#     - суммы: EUR → *_l, не-EUR → *_v
-#     - <pvm_proc> = line_obj.vat_percent (или 0.00)
+#     - суммы: EUR → заполняем и *_v, и *_l одинаково; не-EUR → только *_v
+#     - <pvm_proc> = item.vat_percent (детально) или doc.vat_percent (суммарно)
 #     - <pvm_kodas> = pvm_kodas_value (multi) → line_obj.pvm_kodas (single) → ""
 #     """
 #     eilute = ET.SubElement(parent, "eilute")
@@ -1047,23 +1182,31 @@ def export_pardavimai_group_to_finvalda(documents):
 
 #     cur = (_s(currency) or "EUR").upper()
 #     if cur == "EUR":
-#         ET.SubElement(eilute, "suma_v").text = "0"
-#         ET.SubElement(eilute, "suma_l").text = get_price_or_zero(subtotal)
-#         ET.SubElement(eilute, "suma_pvmv").text = "0"
-#         ET.SubElement(eilute, "suma_pvml").text = get_price_or_zero(vat_amount)
+#         # EUR: заполняем и *_v, и *_l одинаковыми значениями
+#         val_sub = get_price_or_zero(subtotal)
+#         val_vat = get_price_or_zero(vat_amount)
+#         ET.SubElement(eilute, "suma_v").text = val_sub
+#         ET.SubElement(eilute, "suma_l").text = val_sub
+#         ET.SubElement(eilute, "suma_pvmv").text = val_vat
+#         ET.SubElement(eilute, "suma_pvml").text = val_vat
 #     else:
+#         # не EUR: только *_v и *_pvmv; *_l и *_pvml = 0
 #         ET.SubElement(eilute, "suma_v").text = get_price_or_zero(subtotal)
 #         ET.SubElement(eilute, "suma_l").text = "0"
 #         ET.SubElement(eilute, "suma_pvmv").text = get_price_or_zero(vat_amount)
 #         ET.SubElement(eilute, "suma_pvml").text = "0"
 
 #     # pvm_proc
-#     vat_percent = getattr(line_obj, "vat_percent", None) if line_obj is not None else None
-#     if vat_percent is None or vat_percent == "":
+#     if line_obj is not None:
+#         raw_vat_percent = getattr(line_obj, "vat_percent", None)
+#     else:
+#         raw_vat_percent = fallback_vat_percent
+
+#     if raw_vat_percent in (None, ""):
 #         pvm_proc_text = "0.00"
 #     else:
 #         try:
-#             pvm_proc_text = f"{float(vat_percent):.2f}"
+#             pvm_proc_text = f"{float(raw_vat_percent):.2f}"
 #         except Exception:
 #             pvm_proc_text = "0.00"
 #     ET.SubElement(eilute, "pvm_proc").text = pvm_proc_text
@@ -1177,6 +1320,7 @@ def export_pardavimai_group_to_finvalda(documents):
 #                 fallback_tip_doc=getattr(doc, "preke_paslauga", None),
 #                 sandelio_kodas_value=_s(getattr(doc, "sandelio_kodas", "")),
 #                 summary_kodas=_get_or_persist_kodas_from_obj(doc),
+#                 fallback_vat_percent=getattr(doc, "vat_percent", None),  # <— добавлено
 #             )
 
 #     xml_bytes = _pretty_bytes(root)
@@ -1237,6 +1381,7 @@ def export_pardavimai_group_to_finvalda(documents):
 #         ET.SubElement(pard, "mokejimo_data").text = format_date(payment_date)
 #         ET.SubElement(pard, "pastaba").text = smart_str(_s(getattr(doc, "preview_url", "")))
 #         ET.SubElement(pard, "imp_param").text = "VA"
+#         ET.SubElement(pard, "padalinys").text = "PP"
 
 #         # Doc-level extra tags (always from doc)
 #         if _s(getattr(doc, "zurnalo_kodas", None)):
@@ -1281,6 +1426,8 @@ def export_pardavimai_group_to_finvalda(documents):
 #                 pvm_kodas_value=getattr(doc, "pvm_kodas", None),
 #                 fallback_tip_doc=getattr(doc, "preke_paslauga", None),
 #                 sandelio_kodas_value=_s(getattr(doc, "sandelio_kodas", "")),
+#                 # summary_kodas опционален; если хочешь — можно передать как в pirkimai
+#                 fallback_vat_percent=getattr(doc, "vat_percent", None),  # <— добавлено
 #             )
 
 #     xml_bytes = _pretty_bytes(root)

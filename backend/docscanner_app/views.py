@@ -431,11 +431,22 @@ def export_documents(request):
 
         if pirkimai_docs:
             logger.info("[EXP] CENTAS exporting pirkimai: %d docs", len(pirkimai_docs))
-            xml_bytes = export_documents_group_to_centras_xml(pirkimai_docs, direction="pirkimas")
+            # ИЗМЕНЕНО: добавлен параметр user=request.user
+            xml_bytes = export_documents_group_to_centras_xml(
+                pirkimai_docs, 
+                direction="pirkimas",
+                user=request.user  # <-- ДОБАВЬ ЭТО
+            )
             files_to_export.append((f"{today_str}_pirkimai.xml", xml_bytes))
+            
         if pardavimai_docs:
             logger.info("[EXP] CENTAS exporting pardavimai: %d docs", len(pardavimai_docs))
-            xml_bytes = export_documents_group_to_centras_xml(pardavimai_docs, direction="pardavimas")
+            # ИЗМЕНЕНО: добавлен параметр user=request.user
+            xml_bytes = export_documents_group_to_centras_xml(
+                pardavimai_docs, 
+                direction="pardavimas",
+                user=request.user  # <-- ДОБАВЬ ЭТО
+            )
             files_to_export.append((f"{today_str}_pardavimai.xml", xml_bytes))
 
         logger.info("[EXP] CENTAS files_to_export=%s", [n for n, _ in files_to_export])
@@ -462,6 +473,7 @@ def export_documents(request):
             response = Response({"error": "No documents to export"}, status=400)
 
     # ========================= RIVILĖ (EIP) =========================
+
     elif export_type == 'rivile':
         logger.info("[EXP] RIVILE export started")
         assign_random_prekes_kodai(documents)
@@ -491,8 +503,11 @@ def export_documents(request):
             pardavimai_xml = export_pardavimai_group_to_rivile(pardavimai_docs, request.user)
             files_to_export.append(('pardavimai.eip', pardavimai_xml))
 
-        # 4) N17/N25
-        prekes_xml, paslaugos_xml, kodai_xml = export_prekes_paslaugos_kodai_group_to_rivile(documents)
+        # 4) N17/N25 - ИЗМЕНЕНО: передаём request.user
+        prekes_xml, paslaugos_xml, kodai_xml = export_prekes_paslaugos_kodai_group_to_rivile(
+            documents, 
+            request.user  # ← ДОБАВЛЕНО
+        )
         if prekes_xml and prekes_xml.strip():
             files_to_export.append(('prekes.eip', prekes_xml))
         if paslaugos_xml and paslaugos_xml.strip():
@@ -532,19 +547,77 @@ def export_documents(request):
         else:
             logger.warning("[EXP] RIVILE nothing to export")
             response = Response({"error": "No documents to export"}, status=400)
+    # elif export_type == 'rivile':
+    #     logger.info("[EXP] RIVILE export started")
+    #     assign_random_prekes_kodai(documents)
 
-        # if files_to_export:
-        #     zip_buffer = io.BytesIO()
-        #     with zipfile.ZipFile(zip_buffer, "w") as zf:
-        #         for filename, xml_content in files_to_export:
-        #             zf.writestr(filename, xml_content)
-        #     zip_buffer.seek(0)
-        #     response = HttpResponse(zip_buffer.read(), content_type='application/zip')
-        #     response['Content-Disposition'] = f'attachment; filename={today_str}_rivile_eip.zip'
-        #     export_success = True
-        # else:
-        #     logger.warning("[EXP] RIVILE nothing to export")
-        #     response = Response({"error": "No documents to export"}, status=400)
+    #     files_to_export = []
+
+    #     # 1) Клиенты (N08+N33): собираем ИЗ ДОКУМЕНТОВ; кэш больше не нужен
+    #     docs_for_clients = (pirkimai_docs or []) + (pardavimai_docs or [])
+    #     if docs_for_clients:
+    #         klientai_xml = export_clients_group_to_rivile(
+    #             clients=None,
+    #             documents=docs_for_clients,
+    #         )
+    #         if klientai_xml and klientai_xml.strip():
+    #             files_to_export.append(('klientai.eip', klientai_xml))
+    #             logger.info("[EXP] RIVILE clients exported")
+
+    #     # 2) ПИРКИМАИ (I06/I07)
+    #     if pirkimai_docs:
+    #         logger.info("[EXP] RIVILE exporting pirkimai: %d docs", len(pirkimai_docs))
+    #         pirkimai_xml = export_pirkimai_group_to_rivile(pirkimai_docs, request.user)
+    #         files_to_export.append(('pirkimai.eip', pirkimai_xml))
+
+    #     # 3) ПАРДАВИМАИ (I06/I07)
+    #     if pardavimai_docs:
+    #         logger.info("[EXP] RIVILE exporting pardavimai: %d docs", len(pardavimai_docs))
+    #         pardavimai_xml = export_pardavimai_group_to_rivile(pardavimai_docs, request.user)
+    #         files_to_export.append(('pardavimai.eip', pardavimai_xml))
+
+    #     # 4) N17/N25
+    #     prekes_xml, paslaugos_xml, kodai_xml = export_prekes_paslaugos_kodai_group_to_rivile(documents)
+    #     if prekes_xml and prekes_xml.strip():
+    #         files_to_export.append(('prekes.eip', prekes_xml))
+    #     if paslaugos_xml and paslaugos_xml.strip():
+    #         files_to_export.append(('paslaugos.eip', paslaugos_xml))
+    #     if kodai_xml and kodai_xml.strip():
+    #         files_to_export.append(('kodai.eip', kodai_xml))
+
+    #     logger.info("[EXP] RIVILE files_to_export=%s", [n for n, _ in files_to_export])
+
+    #     # Jei profilyje nustatyta „rivile_strip_lt_letters" – nuimame diakritiką
+    #     if rivile_strip_lt and files_to_export:
+    #         new_files = []
+    #         for filename, xml_content in files_to_export:
+    #             if isinstance(xml_content, bytes):
+    #                 try:
+    #                     xml_text = xml_content.decode("utf-8", errors="ignore")
+    #                 except Exception:
+    #                     xml_text = xml_content.decode("latin-1", errors="ignore")
+    #             else:
+    #                 xml_text = xml_content
+
+    #             stripped = strip_diacritics(xml_text)
+    #             logger.info("[EXP] RIVILE strip_lt applied to %s (len %d -> %d)",
+    #                         filename, len(xml_text), len(stripped))
+    #             new_files.append((filename, stripped))
+    #         files_to_export = new_files
+
+    #     if files_to_export:
+    #         zip_buffer = io.BytesIO()
+    #         with zipfile.ZipFile(zip_buffer, "w") as zf:
+    #             for filename, xml_content in files_to_export:
+    #                 zf.writestr(filename, xml_content)
+    #         zip_buffer.seek(0)
+    #         response = HttpResponse(zip_buffer.read(), content_type='application/zip')
+    #         response['Content-Disposition'] = f'attachment; filename={today_str}_rivile_eip.zip'
+    #         export_success = True
+    #     else:
+    #         logger.warning("[EXP] RIVILE nothing to export")
+    #         response = Response({"error": "No documents to export"}, status=400)
+
 
     # ========================= FINVALDA =========================
     elif export_type == 'finvalda':
