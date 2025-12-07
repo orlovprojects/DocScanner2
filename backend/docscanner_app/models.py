@@ -141,6 +141,7 @@ class ScannedDocument(models.Model):
     invoice_discount_with_vat = models.DecimalField(max_digits=10, decimal_places=4, blank=True, null=True)
     invoice_discount_wo_vat = models.DecimalField(max_digits=10, decimal_places=4, blank=True, null=True)
     separate_vat = models.BooleanField(blank=True, null=True)
+    doc_96_str = models.BooleanField(blank=True, null=True)
     currency = models.CharField(max_length=20, blank=True, null=True)
     with_receipt = models.BooleanField(blank=True, null=True)
     paid_by_cash = models.BooleanField(blank=True, null=True)

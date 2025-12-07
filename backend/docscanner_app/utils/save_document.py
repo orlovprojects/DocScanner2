@@ -282,6 +282,7 @@ def _apply_top_level_fields(
 
     # NEW: дефолт для режима ставок
     db_doc.separate_vat = doc_struct.get("separate_vat", False)
+    db_doc.doc_96_str = doc_struct.get("doc_96_str", getattr(db_doc, "doc_96_str", None))
 
     # 1) конвертируем символ/префикс → ISO3
     raw_currency = doc_struct.get("currency")
@@ -377,7 +378,7 @@ def _apply_top_level_fields(
         db_doc.tipo_pavadinimas = ""
         db_doc.zurnalo_kodas = ""
         db_doc.zurnalo_pavadinimas = ""
-        db_doc.projekто_kodas = ""
+        db_doc.projekto_kodas = ""
         db_doc.projekto_pavadinimas = ""
         db_doc.projekto_vadovo_kodas = ""
         db_doc.projekto_vadovo_pavadinimas = ""
@@ -616,6 +617,7 @@ def _save_line_items(db_doc, doc_struct: Dict[str, Any], scan_type: str):
                 separate_vat=False,
                 buyer_has_vat_code=getattr(db_doc, "buyer_has_vat_code", None),
                 seller_has_vat_code=getattr(db_doc, "seller_has_vat_code", None),
+                doc_96_str=bool(getattr(db_doc, "doc_96_str", False)),
             )
 
             if pvm_kodas is not None:
@@ -706,6 +708,7 @@ def _save_line_items(db_doc, doc_struct: Dict[str, Any], scan_type: str):
             separate_vat=db_doc.separate_vat,
             buyer_has_vat_code=getattr(db_doc, "buyer_has_vat_code", None),
             seller_has_vat_code=getattr(db_doc, "seller_has_vat_code", None),
+            doc_96_str=bool(getattr(db_doc, "doc_96_str", False)),
         )
 
     db_doc.save()

@@ -1437,7 +1437,7 @@ def update_scanned_document_extra_fields(request, pk):
         'buyer_id', 'buyer_name', 'buyer_vat_code', 'buyer_iban', 'buyer_address', 'buyer_country_iso',
         'seller_id', 'seller_name', 'seller_vat_code', 'seller_iban', 'seller_address', 'seller_country_iso',
         'prekes_kodas', 'prekes_barkodas', 'prekes_pavadinimas', 'preke_paslauga',
-        'vat_percent', 'scan_type',
+        'vat_percent', 'scan_type', 'doc_96_str',
     ]
 
     # helpers
@@ -1616,6 +1616,7 @@ def update_scanned_document_extra_fields(request, pk):
                     separate_vat=bool(doc.separate_vat),
                     buyer_has_vat_code=buyer_has_vat_code,
                     seller_has_vat_code=seller_has_vat_code,
+                    doc_96_str=bool(getattr(doc, "doc_96_str", False)),
                 )
 
                 old = item.pvm_kodas
@@ -1653,6 +1654,7 @@ def update_scanned_document_extra_fields(request, pk):
                 separate_vat=bool(doc.separate_vat),
                 buyer_has_vat_code=buyer_has_vat_code,
                 seller_has_vat_code=seller_has_vat_code,
+                doc_96_str=bool(getattr(doc, "doc_96_str", False)),
             )
             old_doc_pvm = doc.pvm_kodas
             doc.pvm_kodas = doc_pvm

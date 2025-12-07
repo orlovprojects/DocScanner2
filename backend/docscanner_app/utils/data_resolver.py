@@ -914,6 +914,7 @@ def _compute_pvm_detaliai_multi(
                 separate_vat=bool(doc.separate_vat),
                 buyer_has_vat_code=buyer_has_v,
                 seller_has_vat_code=seller_has_v,
+                doc_96_str=bool(getattr(doc, "doc_96_str", False)),
             )
 
         if li_code is not None:
@@ -974,6 +975,7 @@ def _compute_pvm_sumiskai_multi(
             separate_vat=bool(doc.separate_vat),
             buyer_has_vat_code=buyer_has_v,
             seller_has_vat_code=seller_has_v,
+            doc_96_str=bool(getattr(doc, "doc_96_str", False)),
         )
 
     return PvmResult(

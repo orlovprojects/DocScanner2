@@ -86,8 +86,9 @@ Assign the detected type to the field "document_type".
 - currency
 - with_receipt
 - paid_by_cash
+- doc_96_str
 
-All boolean fields (seller_is_person, buyer_is_person, with_receipt, separate_vat, paid_by_cash) must be returned as true/false, not as strings.
+All boolean fields (seller_is_person, buyer_is_person, with_receipt, separate_vat, paid_by_cash, doc_96_str) must be returned as true/false, not as strings.
 
 *Return ONLY a valid JSON object in a SINGLE LINE (compact form): no newlines, no \n, no \r, no tabs, and no spaces outside string values. Do not use Markdown or code fences. No trailing commas. Do NOT wrap in quotes or escape characters. Do NOT include any explanations, comments, or extra text outside the JSON. The output must be directly parsable by JSON.parse().
 
@@ -95,7 +96,11 @@ Example (structure and field names; values may be empty strings, booleans must b
 {"docs":<number_of_documents>,"documents":[{"document_type":"","seller_id":"","seller_name":"","seller_vat_code":"","seller_address":"","seller_country":"","seller_country_iso":"","seller_iban":"","seller_is_person":false,"buyer_id":"","buyer_name":"","buyer_vat_code":"","buyer_address":"","buyer_country":"","buyer_country_iso":"","buyer_iban":"","buyer_is_person":false,"invoice_date":"","due_date":"","operation_date":"","document_series":"","document_number":"","order_number":"","amount_wo_vat":"","vat_amount":"","vat_percent":"","amount_with_vat":"","separate_vat":false,"currency":"","with_receipt":false,"paid_by_cash":false}]}
 
 Format dates as yyyy-mm-dd. Delete country from addresses. seller_country and buyer_country must be full country name in language of address provided. country_iso must be 2-letter code.
+If due_date is not stated in the document, but invoice date and payment terms like number of days for payment are mentioned, calculate the due date by adding the payment period to the invoice date.
 If 2 or more different VAT '%' in doc, separate_vat must be True, otherwise False, but ignore any VAT '%' whose associated VAT amount equals 0.
+
+
+Set "doc_96_str": true only if the document explicitly mentions Lietuvos PVM įstatymo 96 straipsnis, e.g. “PVM įstatymo 96 straipsnis”, “96 straipsnis”, “96 str.”, “taikomas 96 straipsnis”, “pagal PVMĮ 96 str.”. Otherwise set "doc_96_str": false.
 
 If there are any signs of cash payment, for example, 'gryni', 'grąža' or similar, return paid_by_cash as True.
 
@@ -168,8 +173,9 @@ Assign the detected type to the field "document_type".
 - currency
 - with_receipt
 - paid_by_cash
+- doc_96_str
 
-All boolean fields (seller_is_person, buyer_is_person, with_receipt, separate_vat, paid_by_cash) must be returned as true/false, not as strings.
+All boolean fields (seller_is_person, buyer_is_person, with_receipt, separate_vat, paid_by_cash, doc_96_str) must be returned as true/false, not as strings.
 If there are any signs of cash payment, for example, 'gryni', 'grąža' or similar, return paid_by_cash as True.
 
 5. For each document, also extract an array of line items (products or services) if present. For each line item, extract the following fields (leave empty if not found):
@@ -223,12 +229,14 @@ If there are any signs of cash payment, for example, 'gryni', 'grąža' or simil
 *Return ONLY a valid JSON object in a SINGLE LINE (compact form): no newlines, no \n, no \r, no tabs, and no spaces outside string values. Do not use Markdown or code fences. No trailing commas. Do NOT wrap in quotes or escape characters. Do NOT include any explanations, comments, or extra text outside the JSON. The output must be directly parsable by JSON.parse().
 
 Example (structure and field names; values may be empty strings, booleans must be true/false, numbers should be numbers when available):
-{"docs":<number_of_documents>,"total_lines":<total_number_of_lines>,"ar_sutapo":<true_or_false>,"documents":[{"document_type":"","seller_id":"","seller_name":"","seller_vat_code":"","seller_address":"","seller_country":"","seller_country_iso":"","seller_iban":"","seller_is_person":false,"buyer_id":"","buyer_name":"","buyer_vat_code":"","buyer_address":"","buyer_country":"","buyer_country_iso":"","buyer_iban":"","buyer_is_person":false,"invoice_date":"","due_date":"","operation_date":"","document_series":"","document_number":"","order_number":"","invoice_discount_wo_vat":"","invoice_discount_with_vat":"","amount_wo_vat":"","vat_amount":"","vat_percent":"","amount_with_vat":"","separate_vat":false,"currency":"","with_receipt":false,"paid_by_cash":false,"line_items":[{"line_id":"","product_code":"","product_barcode":"","product_name":"","unit":"","quantity":"","price":"","subtotal":"","discount_wo_vat":"","vat":"","vat_percent":"","discount_with_vat":"","total":"","preke_paslauga":""}]}]}
+{"docs":<number_of_documents>,"total_lines":<total_number_of_lines>,"ar_sutapo":<true_or_false>,"documents":[{"document_type":"","seller_id":"","seller_name":"","seller_vat_code":"","seller_address":"","seller_country":"","seller_country_iso":"","seller_iban":"","seller_is_person":false,"buyer_id":"","buyer_name":"","buyer_vat_code":"","buyer_address":"","buyer_country":"","buyer_country_iso":"","buyer_iban":"","buyer_is_person":false,"invoice_date":"","due_date":"","operation_date":"","document_series":"","document_number":"","order_number":"","invoice_discount_wo_vat":"","invoice_discount_with_vat":"","amount_wo_vat":"","vat_amount":"","vat_percent":"","amount_with_vat":"","separate_vat":false,"currency":"","with_receipt":false,"paid_by_cash":false,"doc_96_str":false,"line_items":[{"line_id":"","product_code":"","product_barcode":"","product_name":"","unit":"","quantity":"","price":"","subtotal":"","discount_wo_vat":"","vat":"","vat_percent":"","discount_with_vat":"","total":"","preke_paslauga":""}]}]}
 
 If any of values are empty, don't include them in JSON. For example, if "product_barcode" is empty, omit it from that lineitem in JSON.
 
-Format dates as yyyy-mm-dd. Delete country from addresses. seller_country and buyer_country must be full country name in language of address provided. country_iso must be 2-letter code. 
+Format dates as yyyy-mm-dd. Delete country from addresses. seller_country and buyer_country must be full country name in language of address provided. country_iso must be 2-letter code.
+If due_date is not stated in the document, but invoice date and payment terms like number of days for payment are mentioned, calculate the due date by adding the payment period to the invoice date.
 If 2 or more different VAT '%' in doc, separate_vat must be True, otherwise False, ignore any VAT '%' whose associated VAT amount equals 0.
+Set "doc_96_str": true only if the document explicitly mentions Lietuvos PVM įstatymo 96 straipsnis, e.g. “PVM įstatymo 96 straipsnis”, “96 straipsnis”, “96 str.”, “taikomas 96 straipsnis”, “pagal PVMĮ 96 str.”. Otherwise set "doc_96_str": false.
 For unit, try to identify any of these vnt kg g mg kompl t ct m cm mm km l ml m2 cm2 dm2 m3 cm3 dm3 val h min s d sav mėn metai pak kompl or similar. If units is not in Lithuanian, translate it (example: szt should be vnt). If can't identify unit, choose vnt.
 
 If the document is a kasos čekis (cash receipt), for example, a fuel (kuro) receipt, buyer info is often at the bottom as a line with company name, company code, and VAT code—extract these as buyer details. For line items, find the quantity and unit next to price (like “50,01 l” for litres). Product name is usually above this line. document_number is usually next to kvitas, ignore long numer below "kasininkas" at the bottom of document but don't ignore date at the bottom.
@@ -287,7 +295,7 @@ FIELDS PER DOCUMENT (if present; otherwise omit):
 - document_series, document_number, order_number
 - invoice_discount_wo_vat, invoice_discount_with_vat
 - amount_wo_vat, vat_amount, vat_percent, amount_with_vat, separate_vat
-- currency, with_receipt, paid_by_cash
+- currency, with_receipt, paid_by_cash, doc_96_str
 Booleans must be true/false. Dates yyyy-mm-dd. Use dot as decimal separator.
 
 LINE ITEMS (array per document; include ALL that are actually charged):
@@ -326,12 +334,14 @@ ADDITIONAL RULES
 - If any of values are empty, don't include them in JSON.
   For example, if "product_barcode" is empty, omit it from that lineitem in JSON.
 - Format dates as yyyy-mm-dd.
+- If due_date is not stated in the document, but invoice date and payment terms like number of days for payment are mentioned, calculate the due date by adding the payment period to the invoice date.
 - In line items, always always try to take price after discount (without VAT) if such price is provided in the document. Use up to 4 decimal places for prices if needed. Do not round numbers.
 - Delete country names from addresses.
 - seller_country and buyer_country must be full country names in the language of the address provided.
 - country_iso must be a 2-letter code.
 - If 2 or more different VAT '%' exist in the document, set separate_vat=true; otherwise false.
   Ignore any VAT % whose associated VAT amount equals 0.
+- Set "doc_96_str": true only if the document explicitly mentions Lietuvos PVM įstatymo 96 straipsnis, e.g. “PVM įstatymo 96 straipsnis”, “96 straipsnis”, “96 str.”, “taikomas 96 straipsnis”, “pagal PVMĮ 96 str.”. Otherwise set "doc_96_str": false.
 - If the document is a kasos čekis (cash receipt), e.g. a fuel (kuro) receipt, buyer info is often at the bottom as a line
   with company name, company code, and VAT code — extract these as buyer details.
   For line items, find the quantity and unit next to the price (like “50,01 l” for litres).
