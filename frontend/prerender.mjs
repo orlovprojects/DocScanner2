@@ -53,10 +53,13 @@ async function prerender() {
       const url = `http://localhost:${port}${route}`;
       console.log(`[prerender] Rendering ${url} ...`);
 
-      await page.goto(url, {
-        waitUntil: 'networkidle0',
-        timeout: 60000,
-      });
+        await page.goto(url, {
+        waitUntil: 'domcontentloaded', // DOM готов, скрипты начинают работать
+        timeout: 120000,               // дадим больше времени на медленный сервер
+        });
+
+        // даём React + Helmet чуть времени отработать
+        await page.waitForTimeout(5000);
 
       const html = await page.content();
 
