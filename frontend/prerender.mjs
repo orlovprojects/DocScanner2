@@ -23,7 +23,6 @@ async function startServer() {
   const app = express();
   app.use(express.static(distDir));
 
-  // SPA fallback — используем use вместо get('*')
   app.use((req, res) => {
     res.sendFile(path.join(distDir, 'index.html'));
   });
@@ -56,11 +55,12 @@ async function prerender() {
       console.log(`[prerender] Rendering ${url} ...`);
 
       await page.goto(url, {
-        waitUntil: 'networkidle0',
-        timeout: 120000,
+        waitUntil: 'domcontentloaded',
+        timeout: 30000,
       });
 
-      await new Promise((resolve) => setTimeout(resolve, 3000));
+      // даём React + Helmet время отработать
+      await new Promise((resolve) => setTimeout(resolve, 5000));
 
       const html = await page.content();
 
