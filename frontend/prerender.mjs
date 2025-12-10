@@ -23,8 +23,8 @@ async function startServer() {
   const app = express();
   app.use(express.static(distDir));
 
-  // ✅ SPA fallback — без этого роуты возвращают "Cannot GET"
-  app.get('*', (req, res) => {
+  // SPA fallback — используем use вместо get('*')
+  app.use((req, res) => {
     res.sendFile(path.join(distDir, 'index.html'));
   });
 
@@ -60,12 +60,10 @@ async function prerender() {
         timeout: 120000,
       });
 
-      // даём React + Helmet время отработать
       await new Promise((resolve) => setTimeout(resolve, 3000));
 
       const html = await page.content();
 
-      // Проверяем что рендер успешен
       if (html.includes('Cannot GET') || html.includes('<title>Error</title>')) {
         console.error(`[prerender] ERROR: Failed to render ${route}`);
         continue;
