@@ -54,12 +54,12 @@ async function prerender() {
       console.log(`[prerender] Rendering ${url} ...`);
 
         await page.goto(url, {
-        waitUntil: 'domcontentloaded', // DOM готов, скрипты начинают работать
-        timeout: 120000,               // дадим больше времени на медленный сервер
+        waitUntil: 'domcontentloaded',
+        timeout: 120000,
         });
 
         // даём React + Helmet чуть времени отработать
-        await page.waitForTimeout(5000);
+        await new Promise((resolve) => setTimeout(resolve, 5000));
 
       const html = await page.content();
 
