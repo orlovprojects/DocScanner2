@@ -35,6 +35,23 @@ async function startServer() {
   });
 }
 
+function cleanHtml(html) {
+  // Удаляем старый title (без data-react-helmet)
+  html = html.replace(/<title>DokSkenas[^<]*<\/title>/g, '');
+  html = html.replace(/<title>DokSkenas app<\/title>/g, '');
+  
+  // Удаляем старый meta description (без data-react-helmet)
+  html = html.replace(
+    /<meta name="description" content="Patogiai apskaičiuokite savo atlyginimą[^>]*>/g,
+    ''
+  );
+  
+  // Удаляем дубликаты пустых строк
+  html = html.replace(/\n\s*\n/g, '\n');
+  
+  return html;
+}
+
 async function prerender() {
   if (!fs.existsSync(distDir)) {
     console.error('[prerender] dist/ not found. Run `npm run build` first.');
@@ -59,15 +76,17 @@ async function prerender() {
         timeout: 30000,
       });
 
-      // даём React + Helmet время отработать
       await new Promise((resolve) => setTimeout(resolve, 5000));
 
-      const html = await page.content();
+      let html = await page.content();
 
       if (html.includes('Cannot GET') || html.includes('<title>Error</title>')) {
         console.error(`[prerender] ERROR: Failed to render ${route}`);
         continue;
       }
+
+      // Чистим HTML от дубликатов
+      html = cleanHtml(html);
 
       const outPath = path.join(distDir, route.replace(/^\//, ''), 'index.html');
 
