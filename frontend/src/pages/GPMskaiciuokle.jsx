@@ -73,7 +73,7 @@ const GpmSkaiciuokle = () => {
   return (
     <Container maxWidth="lg" sx={{ marginBottom: "100px" }}>
       <Helmet>
-        <title>Tiksliausia GPM skaičiuoklė 2025 – DokSkenas</title>
+        <title>Tiksliausia GPM skaičiuoklė 2026 – DokSkenas</title>
         <meta
           name="description"
           content="Pasiskaičiuokite GPM sumas naudojant mūsų skaičiuoklę. Sužinokite, kiek mokesčių mokate."

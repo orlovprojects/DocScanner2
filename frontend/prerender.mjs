@@ -9,11 +9,18 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const routesToPrerender = [
+  '/',                      
+  '/2025',                      
   '/saskaitu-skaitmenizavimas-dokskenas',
   '/pvm-skaiciuokle',
   '/gpm-skaiciuokle',
   '/buhalterine-apskaita',
   '/suma-zodziais',
+  '/saskaita-faktura',
+  '/naudojimo-gidas',
+  '/susisiekti',
+  '/privatumo-politika',
+  '/naudojimo-taisykles',
 ];
 
 const distDir = path.resolve(__dirname, 'dist');

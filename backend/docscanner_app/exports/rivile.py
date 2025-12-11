@@ -4,21 +4,160 @@ from django.utils.encoding import smart_str
 from .formatters import format_date, vat_to_int_str, get_price_or_zero, expand_empty_tags
 from ..models import CurrencyRate
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
-import xml.etree.ElementTree as ET
 
 
 logger = logging.getLogger(__name__)
 
 # =========================
+# Кодировка для Rivile (ANSI/Windows-1257 для литовского)
+# =========================
+RIVILE_ENCODING = "windows-1257"
+
+# Символы, которых нет в windows-1257 -> упрощённая замена
+NON_CP1257_MAP = {
+    # Чешские / Словацкие
+    'á': 'a', 'Á': 'A',
+    'ď': 'd', 'Ď': 'D',
+    'ě': 'e', 'Ě': 'E',
+    'í': 'i', 'Í': 'I',
+    'ĺ': 'l', 'Ĺ': 'L',
+    'ľ': 'l', 'Ľ': 'L',
+    'ň': 'n', 'Ň': 'N',
+    'ř': 'r', 'Ř': 'R',
+    'ť': 't', 'Ť': 'T',
+    'ú': 'u', 'Ú': 'U',
+    'ů': 'u', 'Ů': 'U',
+    'ý': 'y', 'Ý': 'Y',
+
+    # Венгерские
+    'ő': 'o', 'Ő': 'O',
+    'ű': 'u', 'Ű': 'U',
+
+    # Румынские
+    'ă': 'a', 'Ă': 'A',
+    'â': 'a', 'Â': 'A',
+    'î': 'i', 'Î': 'I',
+    'ș': 's', 'Ș': 'S',
+    'ț': 't', 'Ț': 'T',
+
+    # Хорватский
+    'đ': 'd', 'Đ': 'D',
+
+    # Французский
+    'à': 'a', 'À': 'A',
+    'â': 'a', 'Â': 'A',
+    'ç': 'c', 'Ç': 'C',
+    'è': 'e', 'È': 'E',
+    'ê': 'e', 'Ê': 'E',
+    'ë': 'e', 'Ë': 'E',
+    'î': 'i', 'Î': 'I',
+    'ï': 'i', 'Ï': 'I',
+    'ô': 'o', 'Ô': 'O',
+    'œ': 'oe', 'Œ': 'OE',
+    'ù': 'u', 'Ù': 'U',
+    'û': 'u', 'Û': 'U',
+    'ÿ': 'y', 'Ÿ': 'Y',
+
+    # Испанский
+    'ñ': 'n', 'Ñ': 'N',
+    '¿': '?', '¡': '!',   # как ты и писал
+
+    # Португальский
+    'ã': 'a', 'Ã': 'A',
+
+    # Итальянский
+    'ì': 'i', 'Ì': 'I',
+    'ò': 'o', 'Ò': 'O',
+
+    # Турецкий
+    'ç': 'c', 'Ç': 'C',
+    'ğ': 'g', 'Ğ': 'G',
+    'ı': 'i',            # без точки -> i
+    'ş': 's', 'Ş': 'S',
+    'İ': 'I',
+
+    # Редкие латинские с диакритиками (нет в cp1257)
+    'ȳ': 'y', 'Ȳ': 'Y',   
+    'ḩ': 'h', 'Ḩ': 'H',   
+    'ƶ': 'z', 'Ƶ': 'Z',   
+    'ɇ': 'e', 'Ɇ': 'E',   
+
+    # Исландские
+    'þ': 'th', 'Þ': 'Th',
+    'ð': 'd',  'Ð': 'D',
+
+    # Вьетнамские
+    'ơ': 'o', 'Ơ': 'O',
+    'ư': 'u', 'Ư': 'U',
+
+    # Немецкая заглавная ß
+    'ẞ': 'SS',
+}
+
+# =========================
 # Helpers
 # =========================
+
+def normalize_for_cp1257(value):
+    """
+    Возвращает (safe_text, has_cyrillic):
+      - safe_text: строка, которую можно кодировать в windows-1257 без падения
+      - has_cyrillic: True, если в ОРИГИНАЛЕ была хотя бы одна кириллическая буква
+    """
+    if value is None:
+        return "", False
+
+    s = str(value)
+    has_cyrillic = False
+
+    # 1) сначала прогоняем через маппинг "нестандартных" латинских букв
+    s = "".join(NON_CP1257_MAP.get(ch, ch) for ch in s)
+
+    result_chars = []
+    for ch in s:
+        code = ord(ch)
+
+        # Кириллица – отмечаем, но в cp1257-версии её не оставляем
+        if 0x0400 <= code <= 0x04FF or 0x0500 <= code <= 0x052F:
+            has_cyrillic = True
+            # В файле cp1257 можно:
+            # - или вообще дропнуть букву,
+            # - или заменить на '?'
+            # Тут выберу '?'
+            result_chars.append('?')
+            continue
+
+        # Всё остальное пробуем закодировать в cp1257
+        try:
+            ch.encode("cp1257")
+            result_chars.append(ch)
+        except UnicodeEncodeError:
+            # какой-то экзотический символ: эмодзи, азиатский, и т.п.
+            result_chars.append('?')
+
+    safe_text = "".join(result_chars)
+    return safe_text, has_cyrillic
+
+
+def rivile_str(value, cyr_flag: dict | None = None, key: str = "default"):
+    """
+    Обёртка над normalize_for_cp1257:
+    - возвращает уже нормализованный str
+    - если есть dict cyr_flag, то проставляет флажок cyr_flag[key] = True при наличии кириллицы
+    """
+    safe, has_cyr = normalize_for_cp1257(value)
+    if has_cyr and cyr_flag is not None:
+        cyr_flag[key] = True
+    return smart_str(safe)
+
 
 def _safe_D(x):
     try:
         return Decimal(str(x))
     except Exception:
         return Decimal("0")
-    
+
+
 def compute_global_invoice_discount_pct(doc):
     """
     Возвращает Decimal с 2 знаками — процент скидки по документу (0..99.99),
@@ -46,8 +185,10 @@ def compute_global_invoice_discount_pct(doc):
         return None
 
     pct = (disc / base_total) * Decimal("100")
-    if pct < 0: pct = Decimal("0")
-    if pct > Decimal("99.99"): pct = Decimal("99.99")
+    if pct < 0:
+        pct = Decimal("0")
+    if pct > Decimal("99.99"):
+        pct = Decimal("99.99")
     return pct.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
 
@@ -64,7 +205,8 @@ def _get_gama_extras(user):
         return extras
     except Exception:
         return {}
-    
+
+
 def _apply_header_extras(i06, user, direction: str):
     """
     direction: 'pirkimas' | 'pardavimas'
@@ -82,16 +224,17 @@ def _apply_header_extras(i06, user, direction: str):
     log  = extras.get(prefix + "logistika")
 
     if atsk:
-        ET.SubElement(i06, "I06_KODAS_SM").text = smart_str(atsk)
+        ET.SubElement(i06, "I06_KODAS_SM").text = rivile_str(atsk)
         logger.info("[RIVILE:I06] set I06_KODAS_SM=%r direction=%s", atsk, direction)
 
     if acc:
-        ET.SubElement(i06, "I06_KODAS_SS").text = smart_str(acc)
+        ET.SubElement(i06, "I06_KODAS_SS").text = rivile_str(acc)
         logger.info("[RIVILE:I06] set I06_KODAS_SS=%r direction=%s", acc, direction)
 
     if log:
-        ET.SubElement(i06, "I06_KODAS_LS_1").text = smart_str(log)
+        ET.SubElement(i06, "I06_KODAS_LS_1").text = rivile_str(log)
         logger.info("[RIVILE:I06] set I06_KODAS_LS_1=%r direction=%s", log, direction)
+
 
 def _apply_line_extras(i07, user, direction: str):
     """
@@ -112,20 +255,20 @@ def _apply_line_extras(i07, user, direction: str):
     obj  = (extras.get(prefix + "objektas") or "").strip()
 
     if ser:
-        ET.SubElement(i07, "I07_SERIJA").text = smart_str(ser)
+        ET.SubElement(i07, "I07_SERIJA").text = rivile_str(ser)
     if cen:
-        ET.SubElement(i07, "I07_KODAS_OS_C").text = smart_str(cen)
+        ET.SubElement(i07, "I07_KODAS_OS_C").text = rivile_str(cen)
     if pad:
-        ET.SubElement(i07, "I07_KODAS_IS").text = smart_str(pad)
+        ET.SubElement(i07, "I07_KODAS_IS").text = rivile_str(pad)
     if obj:
-        ET.SubElement(i07, "I07_KODAS_OS").text = smart_str(obj)
+        ET.SubElement(i07, "I07_KODAS_OS").text = rivile_str(obj)
 
     if ser or cen or pad or obj:
         logger.info(
             "[RIVILE:I07] line extras direction=%s ser=%r cen=%r pad=%r obj=%r",
             direction, ser, cen, pad, obj
         )
-    
+
 
 def get_rivile_fraction(user):
     """
@@ -138,6 +281,7 @@ def get_rivile_fraction(user):
         return val if val in (1, 10, 100, 1000) else 1
     except Exception:
         return 1
+
 
 def _scale_qty(qty, frac):
     """qty (None/str/Decimal/float) * frac -> str без экспоненты, без лишних нулей."""
@@ -207,16 +351,42 @@ def _indent(elem, level=0):
         if not (elem.tail and elem.tail.strip()):
             elem.tail = i
 
-def elem_to_bytes_utf8(elem) -> bytes:
-    """Один элемент → bytes UTF-8 (без BOM, без заголовка)."""
-    _indent(elem)
-    return ET.tostring(elem, encoding="utf-8", xml_declaration=False)
 
-def join_records_utf8(elements) -> bytes:
-    """Склеить элементы в один файл с ОДНИМ заголовком UTF-8 (без BOM)."""
-    header = b'<?xml version="1.0" encoding="UTF-8"?>\n'
-    body = b"\n".join(elem_to_bytes_utf8(el) for el in elements)
+def elem_to_bytes(elem, encoding=None) -> bytes:
+    """Один элемент → bytes в указанной кодировке (без BOM, без заголовка).
+
+    По умолчанию использует RIVILE_ENCODING (windows-1257).
+    """
+    if encoding is None:
+        encoding = RIVILE_ENCODING
+    _indent(elem)
+    return ET.tostring(elem, encoding=encoding, xml_declaration=False)
+
+
+# Алиас для обратной совместимости
+def elem_to_bytes_utf8(elem) -> bytes:
+    """Deprecated: используйте elem_to_bytes(). Оставлено для совместимости."""
+    return elem_to_bytes(elem, encoding=RIVILE_ENCODING)
+
+
+def join_records(elements, encoding=None) -> bytes:
+    """Склеить элементы в один файл с заголовком в указанной кодировке.
+
+    По умолчанию использует RIVILE_ENCODING (windows-1257).
+    """
+    if encoding is None:
+        encoding = RIVILE_ENCODING
+
+    # XML заголовок с правильной кодировкой
+    header = f'<?xml version="1.0" encoding="{encoding.upper()}"?>\n'.encode(encoding)
+    body = b"\n".join(elem_to_bytes(el, encoding) for el in elements)
     return header + body + b"\n"
+
+
+# Алиас для обратной совместимости
+def join_records_utf8(elements) -> bytes:
+    """Deprecated: используйте join_records(). Оставлено для совместимости."""
+    return join_records(elements, encoding=RIVILE_ENCODING)
 
 
 def build_dok_nr(series: str, number: str) -> str:
@@ -254,7 +424,6 @@ def build_dok_nr(series: str, number: str) -> str:
     res = f"{s}{n}"
     logger.info("[RIVILE:DOK_NR] s=%r n=%r -> %r", s, n, res)
     return res
-
 
 
 # ===== ЕДИНЫЙ РЕЗОЛВЕР КОДА КЛИЕНТА/ПОСТАВЩИКА БЕЗ КЭША И РАНДОМА =====
@@ -336,15 +505,16 @@ def normalize_preke_paslauga_tipas(value: object) -> str:
     if s in kodas_syn:
         logger.info("[RIVILE:TIPAS] word %r -> '3'", s)
         return "3"
-    
+
     logger.info("[RIVILE:TIPAS] fallback for %r -> '1'", s)
     return "1"
 
 
 EU_ISO2 = {
-    "AT","BE","BG","HR","CY","CZ","DK","EE","FI","FR","DE","GR","HU","IE",
-    "IT","LV","LT","LU","MT","NL","PL","PT","RO","SK","SI","ES","SE"
+    "AT", "BE", "BG", "HR", "CY", "CZ", "DK", "EE", "FI", "FR", "DE", "GR", "HU", "IE",
+    "IT", "LV", "LT", "LU", "MT", "NL", "PL", "PT", "RO", "SK", "SI", "ES", "SE"
 }
+
 
 def _is_eu_country(iso: object) -> bool:
     """True только для явных ISO2 из списка ЕС. Пустое значение -> False."""
@@ -352,13 +522,15 @@ def _is_eu_country(iso: object) -> bool:
         return False
     return str(iso).strip().upper() in EU_ISO2
 
+
 def _is_zero(v) -> bool:
     """Нулевая ставка НДС? None/'' считаем как 0 для этого правила."""
     try:
         return Decimal(str(v)) == 0
     except Exception:
         return True
-    
+
+
 def _pick_isaf_for_purchase(doc):
     """
     Возвращает:
@@ -401,7 +573,7 @@ def export_prekes_paslaugos_kodai_group_to_rivile(documents, user):
       - paslaugos_xml (N17) — только услуги
       - kodai_xml (N25)  — если doc.preke_paslauga == '3', формируем блоки <N25> по заданному шаблону
     """
-    logger.info("[RIVILE:N17/N25] start, docs=%d user=%s", 
+    logger.info("[RIVILE:N17/N25] start, docs=%d user=%s",
                 len(documents) if documents is not None else 0,
                 getattr(user, 'id', None))
     prekes_dict = {}      # key: kodas -> Element("N17")
@@ -416,49 +588,49 @@ def export_prekes_paslaugos_kodai_group_to_rivile(documents, user):
             return
         if kodas in target_dict:
             return
-        
+
         n17 = ET.Element("N17")
-        ET.SubElement(n17, "N17_KODAS_PS").text = smart_str(kodas)
-        ET.SubElement(n17, "N17_TIPAS").text    = smart_str(tipas or '1')
-        ET.SubElement(n17, "N17_KODAS_US").text = smart_str(unit or "VNT")
-        ET.SubElement(n17, "N17_PAV").text      = smart_str(pavadinimas or "Prekė")
-        
+        ET.SubElement(n17, "N17_KODAS_PS").text = rivile_str(kodas)
+        ET.SubElement(n17, "N17_TIPAS").text    = rivile_str(tipas or '1')
+        ET.SubElement(n17, "N17_KODAS_US").text = rivile_str(unit or "VNT")
+        ET.SubElement(n17, "N17_PAV").text      = rivile_str(pavadinimas or "Prekė")
+
         # === Подстановка из rivile_gama_extra_fields ===
         extras = _get_gama_extras(user)
         prefix = f"{direction}_"
-        
+
         # saskaitos_rysio_kodas -> N17_KODAS_DS (fallback: PR001)
         rysio_kodas = extras.get(prefix + "saskaitos_rysio_kodas") or kodas_ds or "PR001"
-        ET.SubElement(n17, "N17_KODAS_DS").text = smart_str(rysio_kodas)
-        
+        ET.SubElement(n17, "N17_KODAS_DS").text = rivile_str(rysio_kodas)
+
         # objektas -> N17_KODAS_OS
         obj = extras.get(prefix + "objektas")
         if obj:
-            ET.SubElement(n17, "N17_KODAS_OS").text = smart_str(obj)
-        
+            ET.SubElement(n17, "N17_KODAS_OS").text = rivile_str(obj)
+
         # logistika -> N17_KODAS_LS_1
         log = extras.get(prefix + "logistika")
         if log:
-            ET.SubElement(n17, "N17_KODAS_LS_1").text = smart_str(log)
-        
+            ET.SubElement(n17, "N17_KODAS_LS_1").text = rivile_str(log)
+
         # prekes_grupe / paslaugos_grupe -> N17_KODAS_GS
         if tipas == '1':  # prekes
             grupe = extras.get(prefix + "prekes_grupe")
             if grupe:
-                ET.SubElement(n17, "N17_KODAS_GS").text = smart_str(grupe)
+                ET.SubElement(n17, "N17_KODAS_GS").text = rivile_str(grupe)
             # assembly
             assembly = extras.get("prekes_assembly_" + direction)
             if assembly:
-                ET.SubElement(n17, "N17_ASSEMBLY").text = smart_str(assembly)
+                ET.SubElement(n17, "N17_ASSEMBLY").text = rivile_str(assembly)
         elif tipas == '2':  # paslaugos
             grupe = extras.get(prefix + "paslaugos_grupe")
             if grupe:
-                ET.SubElement(n17, "N17_KODAS_GS").text = smart_str(grupe)
+                ET.SubElement(n17, "N17_KODAS_GS").text = rivile_str(grupe)
             # assembly
             assembly = extras.get("paslaugos_assembly_" + direction)
             if assembly:
-                ET.SubElement(n17, "N17_ASSEMBLY").text = smart_str(assembly)
-        
+                ET.SubElement(n17, "N17_ASSEMBLY").text = rivile_str(assembly)
+
         target_dict[kodas] = n17
         logger.info("[RIVILE:N17] added kodas=%r tipas=%r direction=%s", kodas, tipas, direction)
 
@@ -582,28 +754,28 @@ def export_prekes_paslaugos_kodai_group_to_rivile(documents, user):
 
         # objektas -> N25_KODAS_OS
         objektas = extras.get(prefix + "objektas")
-        
+
         # kodo_grupe -> N25_KODAS_GS
         kodo_grupe = extras.get(prefix + "kodo_grupe")
 
         n25 = ET.Element("N25")
-        ET.SubElement(n25, "N25_KODAS_BS").text = smart_str(kodas)
-        ET.SubElement(n25, "N25_PAV").text      = smart_str(pavadinimas)
-        ET.SubElement(n25, "N25_TIPAS").text    = tipas
-        ET.SubElement(n25, "N25_KODAS_SS").text = smart_str(saskaita)
-        ET.SubElement(n25, "N25_KODAS_DS").text = smart_str(kodas_ds)
-        ET.SubElement(n25, "N25_KODAS_US").text = smart_str(unit)
-        ET.SubElement(n25, "N25_FRAKCIJA").text = smart_str(str(frakcija))
-        ET.SubElement(n25, "N25_SUMA").text     = smart_str(str(suma))
-        ET.SubElement(n25, "N25_TAX").text      = smart_str(str(tax))
-        ET.SubElement(n25, "N25_MOKESTIS").text = smart_str(str(mokestis))
-        ET.SubElement(n25, "N25_POZ_DATE").text = smart_str(str(poz_date))
-        
+        ET.SubElement(n25, "N25_KODAS_BS").text = rivile_str(kodas)
+        ET.SubElement(n25, "N25_PAV").text      = rivile_str(pavadinimas)
+        ET.SubElement(n25, "N25_TIPAS").text    = rivile_str(tipas)
+        ET.SubElement(n25, "N25_KODAS_SS").text = rivile_str(saskaita)
+        ET.SubElement(n25, "N25_KODAS_DS").text = rivile_str(kodas_ds)
+        ET.SubElement(n25, "N25_KODAS_US").text = rivile_str(unit)
+        ET.SubElement(n25, "N25_FRAKCIJA").text = rivile_str(str(frakcija))
+        ET.SubElement(n25, "N25_SUMA").text     = rivile_str(str(suma))
+        ET.SubElement(n25, "N25_TAX").text      = rivile_str(str(tax))
+        ET.SubElement(n25, "N25_MOKESTIS").text = rivile_str(str(mokestis))
+        ET.SubElement(n25, "N25_POZ_DATE").text = rivile_str(str(poz_date))
+
         # Добавляем поля из rivile_gama_extra_fields
         if objektas:
-            ET.SubElement(n25, "N25_KODAS_OS").text = smart_str(objektas)
+            ET.SubElement(n25, "N25_KODAS_OS").text = rivile_str(objektas)
         if kodo_grupe:
-            ET.SubElement(n25, "N25_KODAS_GS").text = smart_str(kodo_grupe)
+            ET.SubElement(n25, "N25_KODAS_GS").text = rivile_str(kodo_grupe)
 
         kodai_dict[kodas] = n25
         logger.info("[RIVILE:N25] added kodas=%r tipas=%r direction=%s saskaita=%r",
@@ -620,9 +792,9 @@ def export_prekes_paslaugos_kodai_group_to_rivile(documents, user):
                 direction = 'pardavimas'
             else:
                 direction = 'pirkimas'  # дефолт
-        
+
         logger.info("[RIVILE:N17/N25] doc=%s direction=%s", getattr(doc, "pk", None), direction)
-        
+
         line_items = getattr(doc, "line_items", None)
         has_items = bool(line_items and hasattr(line_items, 'all') and line_items.exists())
 
@@ -661,9 +833,9 @@ def export_prekes_paslaugos_kodai_group_to_rivile(documents, user):
                 elif tipas == '3':
                     add_n25_record(kodai_dict, doc, item=item, user=user, direction=direction)
 
-    prekes_xml    = join_records_utf8(list(prekes_dict.values()))    if prekes_dict    else b""
-    paslaugos_xml = join_records_utf8(list(paslaugos_dict.values())) if paslaugos_dict else b""
-    kodai_xml     = join_records_utf8(list(kodai_dict.values()))     if kodai_dict     else b""
+    prekes_xml    = join_records(list(prekes_dict.values()))    if prekes_dict    else b""
+    paslaugos_xml = join_records(list(paslaugos_dict.values())) if paslaugos_dict else b""
+    kodai_xml     = join_records(list(kodai_dict.values()))     if kodai_dict     else b""
 
     if prekes_xml.strip():
         prekes_xml = expand_empty_tags(prekes_xml)
@@ -691,23 +863,23 @@ def export_pirkimai_group_to_rivile(documents, user):
         op_date = getattr(doc, 'operation_date', None) or getattr(doc, 'invoice_date', None)
         ET.SubElement(i06, "I06_OP_TIP").text = "1"
 
-        series = smart_str(getattr(doc, "document_series", "") or "")
-        number = smart_str(getattr(doc, "document_number", "") or "")
+        series = _s(getattr(doc, "document_series", "") or "")
+        number = _s(getattr(doc, "document_number", "") or "")
         dok_num = build_dok_nr(series, number)
 
         discount_pct = compute_global_invoice_discount_pct(doc)  # Decimal('x.xx') или None
 
         if currency.upper() != "EUR":
             ET.SubElement(i06, "I06_VAL_POZ").text = "1"
-            ET.SubElement(i06, "I06_KODAS_VL").text = currency.upper()
+            ET.SubElement(i06, "I06_KODAS_VL").text = rivile_str(currency.upper())
             rate = get_currency_rate(currency, op_date)
-            ET.SubElement(i06, "I06_KURSAS").text = str(rate if rate else "1")
+            ET.SubElement(i06, "I06_KURSAS").text = rivile_str(str(rate if rate else "1"))
         else:
             ET.SubElement(i06, "I06_VAL_POZ").text = "0"
 
-        ET.SubElement(i06, "I06_DOK_NR").text   = dok_num
-        ET.SubElement(i06, "I06_OP_DATA").text  = format_date(op_date)
-        ET.SubElement(i06, "I06_DOK_DATA").text = format_date(getattr(doc, 'invoice_date', None))
+        ET.SubElement(i06, "I06_DOK_NR").text   = rivile_str(dok_num)
+        ET.SubElement(i06, "I06_OP_DATA").text  = rivile_str(format_date(op_date))
+        ET.SubElement(i06, "I06_DOK_DATA").text = rivile_str(format_date(getattr(doc, 'invoice_date', None)))
 
         # ЕДИНЫЙ КОД ПРОДАВЦА (seller): id -> vat -> id_programoje
         seller_code = get_party_code(
@@ -717,16 +889,16 @@ def export_pirkimai_group_to_rivile(documents, user):
             vat_field="seller_vat_code",
             id_programoje_field="seller_id_programoje",
         )
-        ET.SubElement(i06, "I06_KODAS_KS").text = smart_str(seller_code)
+        ET.SubElement(i06, "I06_KODAS_KS").text = rivile_str(seller_code)
         logger.info("[RIVILE:I06] doc=%s dir=pirkimas KODAS_KS=%r DOK_NR=%r CUR=%s",
                     getattr(doc, "pk", None), seller_code, dok_num, currency)
 
-        ET.SubElement(i06, "I06_DOK_REG").text    = dok_num
+        ET.SubElement(i06, "I06_DOK_REG").text = rivile_str(dok_num)
         code_isaf = _pick_isaf_for_purchase(doc)
         if code_isaf == "12":
             ET.SubElement(i06, "I06_ISAF").text = "12"
 
-        ET.SubElement(i06, "I06_APRASYMAS1").text = smart_str(getattr(doc, 'preview_url', '') or '')
+        ET.SubElement(i06, "I06_APRASYMAS1").text = rivile_str(getattr(doc, 'preview_url', '') or '')
 
         _apply_header_extras(i06, user, direction="pirkimas")
 
@@ -740,77 +912,77 @@ def export_pirkimai_group_to_rivile(documents, user):
                 _apply_line_extras(i07, user, direction="pirkimas")
 
                 kodas = getattr(item, "prekes_kodas", None) or getattr(doc, "prekes_kodas", None) or "PREKE001"
-                ET.SubElement(i07, "I07_KODAS").text = kodas
+                ET.SubElement(i07, "I07_KODAS").text = rivile_str(kodas)
 
                 preke_paslauga_src = getattr(item, "preke_paslauga", None) or getattr(doc, "preke_paslauga", None)
                 tipas = normalize_preke_paslauga_tipas(preke_paslauga_src)
-                ET.SubElement(i07, "I07_TIPAS").text = tipas
+                ET.SubElement(i07, "I07_TIPAS").text = rivile_str(tipas)
 
                 if currency.upper() == "EUR":
-                    ET.SubElement(i07, "I07_KAINA_BE").text = get_price_or_zero(getattr(item, "price", None))
+                    ET.SubElement(i07, "I07_KAINA_BE").text = rivile_str(get_price_or_zero(getattr(item, "price", None)))
                     if discount_pct is None:
-                        ET.SubElement(i07, "I07_PVM").text  = get_price_or_zero(getattr(item, "vat", None))
-                        ET.SubElement(i07, "I07_SUMA").text = get_price_or_zero(getattr(item, "subtotal", None))
+                        ET.SubElement(i07, "I07_PVM").text  = rivile_str(get_price_or_zero(getattr(item, "vat", None)))
+                        ET.SubElement(i07, "I07_SUMA").text = rivile_str(get_price_or_zero(getattr(item, "subtotal", None)))
                 else:
-                    ET.SubElement(i07, "I07_VAL_KAINA").text = get_price_or_zero(getattr(item, "price", None))
+                    ET.SubElement(i07, "I07_VAL_KAINA").text = rivile_str(get_price_or_zero(getattr(item, "price", None)))
                     if discount_pct is None:
-                        ET.SubElement(i07, "I07_PVM_VAL").text  = get_price_or_zero(getattr(item, "vat", None))
-                        ET.SubElement(i07, "I07_SUMA_VAL").text = get_price_or_zero(getattr(item, "subtotal", None))
+                        ET.SubElement(i07, "I07_PVM_VAL").text  = rivile_str(get_price_or_zero(getattr(item, "vat", None)))
+                        ET.SubElement(i07, "I07_SUMA_VAL").text = rivile_str(get_price_or_zero(getattr(item, "subtotal", None)))
 
                 if discount_pct is not None:
-                    ET.SubElement(i07, "I07_NUOLAIDA").text = f"{discount_pct:.2f}"
+                    ET.SubElement(i07, "I07_NUOLAIDA").text = rivile_str(f"{discount_pct:.2f}")
 
                 ET.SubElement(i07, "I07_MOKESTIS").text   = "1"
-                ET.SubElement(i07, "I07_MOKESTIS_P").text = vat_to_int_str(getattr(item, "vat_percent", None))
+                ET.SubElement(i07, "I07_MOKESTIS_P").text = rivile_str(vat_to_int_str(getattr(item, "vat_percent", None)))
 
                 qty_scaled = _scale_qty(getattr(item, "quantity", None), frac) if use_frac else str(getattr(item, "quantity", None) or "1")
-                ET.SubElement(i07, "T_KIEKIS").text = qty_scaled
+                ET.SubElement(i07, "T_KIEKIS").text = rivile_str(qty_scaled)
                 if use_frac:
-                    ET.SubElement(i07, "I07_FRAKCIJA").text = str(frac)
+                    ET.SubElement(i07, "I07_FRAKCIJA").text = rivile_str(str(frac))
 
                 # источники кода без fallback'ов
                 if line_map is not None:  # multi
                     code = (line_map or {}).get(getattr(item, "id", None))
                 else:                      # single
                     code = getattr(item, "pvm_kodas", None)
-                ET.SubElement(i07, "I07_KODAS_KL").text = smart_str(code or "")
+                ET.SubElement(i07, "I07_KODAS_KL").text = rivile_str(code or "")
 
                 added += 1
         else:
             i07 = ET.SubElement(i06, "I07")
             _apply_line_extras(i07, user, direction="pirkimas")
             kodas = getattr(doc, "prekes_kodas", None) or "PREKE001"
-            ET.SubElement(i07, "I07_KODAS").text = kodas
-            ET.SubElement(i07, "I07_TIPAS").text = normalize_preke_paslauga_tipas(getattr(doc, "preke_paslauga", None))
+            ET.SubElement(i07, "I07_KODAS").text = rivile_str(kodas)
+            ET.SubElement(i07, "I07_TIPAS").text = rivile_str(normalize_preke_paslauga_tipas(getattr(doc, "preke_paslauga", None)))
 
             if currency.upper() == "EUR":
-                ET.SubElement(i07, "I07_KAINA_BE").text = get_price_or_zero(getattr(doc, "amount_wo_vat", None))
+                ET.SubElement(i07, "I07_KAINA_BE").text = rivile_str(get_price_or_zero(getattr(doc, "amount_wo_vat", None)))
                 if discount_pct is None:
-                    ET.SubElement(i07, "I07_PVM").text  = get_price_or_zero(getattr(doc, "vat_amount", None))
-                    ET.SubElement(i07, "I07_SUMA").text = get_price_or_zero(getattr(doc, "amount_wo_vat", None))
+                    ET.SubElement(i07, "I07_PVM").text  = rivile_str(get_price_or_zero(getattr(doc, "vat_amount", None)))
+                    ET.SubElement(i07, "I07_SUMA").text = rivile_str(get_price_or_zero(getattr(doc, "amount_wo_vat", None)))
             else:
-                ET.SubElement(i07, "I07_VAL_KAINA").text = get_price_or_zero(getattr(doc, "amount_wo_vat", None))
+                ET.SubElement(i07, "I07_VAL_KAINA").text = rivile_str(get_price_or_zero(getattr(doc, "amount_wo_vat", None)))
                 if discount_pct is None:
-                    ET.SubElement(i07, "I07_PVM_VAL").text  = get_price_or_zero(getattr(doc, "vat_amount", None))
-                    ET.SubElement(i07, "I07_SUMA_VAL").text = get_price_or_zero(getattr(doc, "amount_wo_vat", None))
+                    ET.SubElement(i07, "I07_PVM_VAL").text  = rivile_str(get_price_or_zero(getattr(doc, "vat_amount", None)))
+                    ET.SubElement(i07, "I07_SUMA_VAL").text = rivile_str(get_price_or_zero(getattr(doc, "amount_wo_vat", None)))
 
             if discount_pct is not None:
-                ET.SubElement(i07, "I07_NUOLAIDA").text = f"{discount_pct:.2f}"
+                ET.SubElement(i07, "I07_NUOLAIDA").text = rivile_str(f"{discount_pct:.2f}")
 
             ET.SubElement(i07, "I07_MOKESTIS").text   = "1"
-            ET.SubElement(i07, "I07_MOKESTIS_P").text = vat_to_int_str(getattr(doc, "vat_percent", None))
+            ET.SubElement(i07, "I07_MOKESTIS_P").text = rivile_str(vat_to_int_str(getattr(doc, "vat_percent", None)))
 
             qty_scaled = _scale_qty(1, frac) if use_frac else "1"
-            ET.SubElement(i07, "T_KIEKIS").text = qty_scaled
+            ET.SubElement(i07, "T_KIEKIS").text = rivile_str(qty_scaled)
             if use_frac:
-                ET.SubElement(i07, "I07_FRAKCIJA").text = str(frac)
-            ET.SubElement(i07, "I07_KODAS_KL").text   = smart_str(getattr(doc, "pvm_kodas", None) or "")
+                ET.SubElement(i07, "I07_FRAKCIJA").text = rivile_str(str(frac))
+            ET.SubElement(i07, "I07_KODAS_KL").text   = rivile_str(getattr(doc, "pvm_kodas", None) or "")
             added = 1
 
         logger.info("[RIVILE:I07] doc=%s lines=%d", getattr(doc, "pk", None), added)
         elements.append(i06)
 
-    xml = join_records_utf8(elements) if elements else b""
+    xml = join_records(elements) if elements else b""
     return expand_empty_tags(xml)
 
 
@@ -827,8 +999,8 @@ def export_pardavimai_group_to_rivile(documents, user):
         currency = getattr(doc, 'currency', 'EUR') or 'EUR'
         op_date = getattr(doc, 'operation_date', None) or getattr(doc, 'invoice_date', None)
 
-        series = smart_str(getattr(doc, "document_series", "") or "")
-        number = smart_str(getattr(doc, "document_number", "") or "")
+        series = _s(getattr(doc, "document_series", "") or "")
+        number = _s(getattr(doc, "document_number", "") or "")
         dok_num = build_dok_nr(series, number)
 
         discount_pct = compute_global_invoice_discount_pct(doc)  # Decimal('x.xx') или None
@@ -836,15 +1008,15 @@ def export_pardavimai_group_to_rivile(documents, user):
         ET.SubElement(i06, "I06_OP_TIP").text = "51"
         if currency.upper() != "EUR":
             ET.SubElement(i06, "I06_VAL_POZ").text = "1"
-            ET.SubElement(i06, "I06_KODAS_VL").text = currency.upper()
+            ET.SubElement(i06, "I06_KODAS_VL").text = rivile_str(currency.upper())
             rate = get_currency_rate(currency, op_date)
-            ET.SubElement(i06, "I06_KURSAS").text = str(rate if rate else "")
+            ET.SubElement(i06, "I06_KURSAS").text = rivile_str(str(rate if rate else ""))
         else:
             ET.SubElement(i06, "I06_VAL_POZ").text = "0"
 
-        ET.SubElement(i06, "I06_DOK_NR").text   = dok_num
-        ET.SubElement(i06, "I06_OP_DATA").text  = format_date(op_date)
-        ET.SubElement(i06, "I06_DOK_DATA").text = format_date(getattr(doc, 'invoice_date', None))
+        ET.SubElement(i06, "I06_DOK_NR").text   = rivile_str(dok_num)
+        ET.SubElement(i06, "I06_OP_DATA").text  = rivile_str(format_date(op_date))
+        ET.SubElement(i06, "I06_DOK_DATA").text = rivile_str(format_date(getattr(doc, 'invoice_date', None)))
 
         # ЕДИНЫЙ КОД ПОКУПАТЕЛЯ (buyer): id -> vat -> id_programoje
         buyer_code = get_party_code(
@@ -854,12 +1026,12 @@ def export_pardavimai_group_to_rivile(documents, user):
             vat_field="buyer_vat_code",
             id_programoje_field="buyer_id_programoje",
         )
-        ET.SubElement(i06, "I06_KODAS_KS").text = smart_str(buyer_code)
+        ET.SubElement(i06, "I06_KODAS_KS").text = rivile_str(buyer_code)
         logger.info("[RIVILE:I06] doc=%s dir=pardavimas KODAS_KS=%r DOK_NR=%r CUR=%s",
                     getattr(doc, "pk", None), buyer_code, dok_num, currency)
 
-        ET.SubElement(i06, "I06_DOK_REG").text    = smart_str(getattr(doc, 'document_number', '') or '')
-        ET.SubElement(i06, "I06_APRASYMAS1").text = smart_str(getattr(doc, 'preview_url', '') or '')
+        ET.SubElement(i06, "I06_DOK_REG").text    = rivile_str(getattr(doc, 'document_number', '') or '')
+        ET.SubElement(i06, "I06_APRASYMAS1").text = rivile_str(getattr(doc, 'preview_url', '') or '')
 
         _apply_header_extras(i06, user, direction="pardavimas")
 
@@ -873,77 +1045,77 @@ def export_pardavimai_group_to_rivile(documents, user):
                 _apply_line_extras(i07, user, direction="pardavimas")
 
                 kodas = getattr(item, "prekes_kodas", None) or getattr(doc, "prekes_kodas", None) or "PREKE002"
-                ET.SubElement(i07, "I07_KODAS").text = kodas
+                ET.SubElement(i07, "I07_KODAS").text = rivile_str(kodas)
 
                 preke_paslauga_src = getattr(item, "preke_paslauga", None) or getattr(doc, "preke_paslauga", None)
                 tipas = normalize_preke_paslauga_tipas(preke_paslauga_src)
-                ET.SubElement(i07, "I07_TIPAS").text = tipas
+                ET.SubElement(i07, "I07_TIPAS").text = rivile_str(tipas)
 
                 if currency.upper() == "EUR":
-                    ET.SubElement(i07, "I07_KAINA_BE").text = get_price_or_zero(getattr(item, "price", None))
+                    ET.SubElement(i07, "I07_KAINA_BE").text = rivile_str(get_price_or_zero(getattr(item, "price", None)))
                     if discount_pct is None:
-                        ET.SubElement(i07, "I07_PVM").text  = get_price_or_zero(getattr(item, "vat", None))
-                        ET.SubElement(i07, "I07_SUMA").text = get_price_or_zero(getattr(item, "subtotal", None))
+                        ET.SubElement(i07, "I07_PVM").text  = rivile_str(get_price_or_zero(getattr(item, "vat", None)))
+                        ET.SubElement(i07, "I07_SUMA").text = rivile_str(get_price_or_zero(getattr(item, "subtotal", None)))
                 else:
-                    ET.SubElement(i07, "I07_VAL_KAINA").text  = get_price_or_zero(getattr(item, "price", None))
+                    ET.SubElement(i07, "I07_VAL_KAINA").text  = rivile_str(get_price_or_zero(getattr(item, "price", None)))
                     if discount_pct is None:
-                        ET.SubElement(i07, "I07_PVM_VAL").text    = get_price_or_zero(getattr(item, "vat", None))
-                        ET.SubElement(i07, "I07_SUMA_VAL").text   = get_price_or_zero(getattr(item, "subtotal", None))
+                        ET.SubElement(i07, "I07_PVM_VAL").text    = rivile_str(get_price_or_zero(getattr(item, "vat", None)))
+                        ET.SubElement(i07, "I07_SUMA_VAL").text   = rivile_str(get_price_or_zero(getattr(item, "subtotal", None)))
 
                 if discount_pct is not None:
-                    ET.SubElement(i07, "I07_NUOLAIDA").text = f"{discount_pct:.2f}"
+                    ET.SubElement(i07, "I07_NUOLAIDA").text = rivile_str(f"{discount_pct:.2f}")
 
                 ET.SubElement(i07, "I07_MOKESTIS").text   = "1"
-                ET.SubElement(i07, "I07_MOKESTIS_P").text = vat_to_int_str(getattr(item, "vat_percent", None))
+                ET.SubElement(i07, "I07_MOKESTIS_P").text = rivile_str(vat_to_int_str(getattr(item, "vat_percent", None)))
 
                 qty_scaled = _scale_qty(getattr(item, "quantity", None), frac) if use_frac else str(getattr(item, "quantity", None) or "1")
-                ET.SubElement(i07, "T_KIEKIS").text = qty_scaled
+                ET.SubElement(i07, "T_KIEKIS").text = rivile_str(qty_scaled)
                 if use_frac:
-                    ET.SubElement(i07, "I07_FRAKCIJA").text = str(frac)
+                    ET.SubElement(i07, "I07_FRAKCIJA").text = rivile_str(str(frac))
 
                 # источники кода без fallback'ов
                 if line_map is not None:  # multi
                     code = (line_map or {}).get(getattr(item, "id", None))
                 else:                      # single
                     code = getattr(item, "pvm_kodas", None)
-                ET.SubElement(i07, "I07_KODAS_KL").text = smart_str(code or "")
+                ET.SubElement(i07, "I07_KODAS_KL").text = rivile_str(code or "")
 
                 added += 1
         else:
             i07 = ET.SubElement(i06, "I07")
             _apply_line_extras(i07, user, direction="pardavimas")
             kodas = getattr(doc, "prekes_kodas", None) or "PREKE002"
-            ET.SubElement(i07, "I07_KODAS").text = kodas
-            ET.SubElement(i07, "I07_TIPAS").text = normalize_preke_paslauga_tipas(getattr(doc, "preke_paslauga", None))
+            ET.SubElement(i07, "I07_KODAS").text = rivile_str(kodas)
+            ET.SubElement(i07, "I07_TIPAS").text = rivile_str(normalize_preke_paslauga_tipas(getattr(doc, "preke_paslauga", None)))
 
             if currency.upper() == "EUR":
-                ET.SubElement(i07, "I07_KAINA_BE").text = get_price_or_zero(getattr(doc, "amount_wo_vat", None))
+                ET.SubElement(i07, "I07_KAINA_BE").text = rivile_str(get_price_or_zero(getattr(doc, "amount_wo_vat", None)))
                 if discount_pct is None:
-                    ET.SubElement(i07, "I07_PVM").text  = get_price_or_zero(getattr(doc, "vat_amount", None))
-                    ET.SubElement(i07, "I07_SUMA").text = get_price_or_zero(getattr(doc, "amount_wo_vat", None))
+                    ET.SubElement(i07, "I07_PVM").text  = rivile_str(get_price_or_zero(getattr(doc, "vat_amount", None)))
+                    ET.SubElement(i07, "I07_SUMA").text = rivile_str(get_price_or_zero(getattr(doc, "amount_wo_vat", None)))
             else:
-                ET.SubElement(i07, "I07_VAL_KAINA").text  = get_price_or_zero(getattr(doc, "amount_wo_vat", None))
+                ET.SubElement(i07, "I07_VAL_KAINA").text  = rivile_str(get_price_or_zero(getattr(doc, "amount_wo_vat", None)))
                 if discount_pct is None:
-                    ET.SubElement(i07, "I07_PVM_VAL").text    = get_price_or_zero(getattr(doc, "vat_amount", None))
-                    ET.SubElement(i07, "I07_SUMA_VAL").text   = get_price_or_zero(getattr(doc, "amount_wo_vat", None))
+                    ET.SubElement(i07, "I07_PVM_VAL").text    = rivile_str(get_price_or_zero(getattr(doc, "vat_amount", None)))
+                    ET.SubElement(i07, "I07_SUMA_VAL").text   = rivile_str(get_price_or_zero(getattr(doc, "amount_wo_vat", None)))
 
             if discount_pct is not None:
-                ET.SubElement(i07, "I07_NUOLAIDA").text = f"{discount_pct:.2f}"
+                ET.SubElement(i07, "I07_NUOLAIDA").text = rivile_str(f"{discount_pct:.2f}")
 
             ET.SubElement(i07, "I07_MOKESTIS").text   = "1"
-            ET.SubElement(i07, "I07_MOKESTIS_P").text = vat_to_int_str(getattr(doc, "vat_percent", None))
+            ET.SubElement(i07, "I07_MOKESTIS_P").text = rivile_str(vat_to_int_str(getattr(doc, "vat_percent", None)))
 
             qty_scaled = _scale_qty(1, frac) if use_frac else "1"
-            ET.SubElement(i07, "T_KIEKIS").text = qty_scaled
+            ET.SubElement(i07, "T_KIEKIS").text = rivile_str(qty_scaled)
             if use_frac:
-                ET.SubElement(i07, "I07_FRAKCIJA").text = str(frac)
-            ET.SubElement(i07, "I07_KODAS_KL").text   = smart_str(getattr(doc, "pvm_kodas", None) or "")
+                ET.SubElement(i07, "I07_FRAKCIJA").text = rivile_str(str(frac))
+            ET.SubElement(i07, "I07_KODAS_KL").text   = rivile_str(getattr(doc, "pvm_kodas", None) or "")
             added = 1
 
         logger.info("[RIVILE:I07] doc=%s lines=%d", getattr(doc, "pk", None), added)
         elements.append(i06)
 
-    xml = join_records_utf8(elements) if elements else b""
+    xml = join_records(elements) if elements else b""
     return expand_empty_tags(xml)
 
 
@@ -1071,7 +1243,7 @@ def export_clients_group_to_rivile(clients=None, documents=None):
 
     # --- 3) Склеиваем и возвращаем XML ---
     logger.info("[RIVILE:N08] total unique clients: %d", len(elements))
-    xml = join_records_utf8(elements) if elements else b""
+    xml = join_records(elements) if elements else b""
     return expand_empty_tags(xml)
 
 
@@ -1119,42 +1291,36 @@ def _add_client_n08(elements, client):
         tipas_pirk, tipas_tiek, rusis = "1", "1", "1"
 
     name = _s(client.get('name')) or 'Nezinoma'
-    currency = smart_str((_s(client.get('currency')) or 'EUR')).upper()
+    currency = (_s(client.get('currency')) or 'EUR').upper()
     val_poz = "0" if currency == "EUR" else "1"
 
     logger.info("[RIVILE:N08->] type=%s name=%r KODAS_KS=%r IM_KODAS=%r PVM_KODAS=%r VL=%s",
                 doc_type, name, client_code, im_code, vat_code, currency)
 
     n08 = ET.Element("N08")
-    ET.SubElement(n08, "N08_KODAS_KS").text    = smart_str(client_code)
-    ET.SubElement(n08, "N08_RUSIS").text       = rusis
-    ET.SubElement(n08, "N08_PVM_KODAS").text   = smart_str(vat_code)
-    ET.SubElement(n08, "N08_IM_KODAS").text    = smart_str(im_code)
-    ET.SubElement(n08, "N08_PAV").text         = smart_str(name or 'Nezinoma')
-    ET.SubElement(n08, "N08_ADR").text         = smart_str(_s(client.get('address')))
-    ET.SubElement(n08, "N08_TIPAS_PIRK").text  = tipas_pirk
-    ET.SubElement(n08, "N08_TIPAS_TIEK").text  = tipas_tiek
-    ET.SubElement(n08, "N08_KODAS_DS").text    = smart_str(client.get('kodas_ds', 'PT001'))
+    ET.SubElement(n08, "N08_KODAS_KS").text    = rivile_str(client_code)
+    ET.SubElement(n08, "N08_RUSIS").text       = rivile_str(rusis)
+    ET.SubElement(n08, "N08_PVM_KODAS").text   = rivile_str(vat_code)
+    ET.SubElement(n08, "N08_IM_KODAS").text    = rivile_str(im_code)
+    ET.SubElement(n08, "N08_PAV").text         = rivile_str(name or 'Nezinoma')
+    ET.SubElement(n08, "N08_ADR").text         = rivile_str(_s(client.get('address')))
+    ET.SubElement(n08, "N08_TIPAS_PIRK").text  = rivile_str(tipas_pirk)
+    ET.SubElement(n08, "N08_TIPAS_TIEK").text  = rivile_str(tipas_tiek)
+    ET.SubElement(n08, "N08_KODAS_DS").text    = rivile_str(client.get('kodas_ds', 'PT001'))
     ET.SubElement(n08, "N08_KODAS_XS_T").text  = "PVM"
     ET.SubElement(n08, "N08_KODAS_XS_P").text  = "PVM"
-    ET.SubElement(n08, "N08_VAL_POZ").text     = val_poz
-    ET.SubElement(n08, "N08_KODAS_VL_1").text  = currency
+    ET.SubElement(n08, "N08_VAL_POZ").text     = rivile_str(val_poz)
+    ET.SubElement(n08, "N08_KODAS_VL_1").text  = rivile_str(currency)
     ET.SubElement(n08, "N08_BUSENA").text      = "1"
-    ET.SubElement(n08, "N08_TIPAS").text       = tipas
+    ET.SubElement(n08, "N08_TIPAS").text       = rivile_str(tipas)
 
     n33 = ET.SubElement(n08, "N33")
     ET.SubElement(n33, "N33_NUTYL").text       = "1"
-    ET.SubElement(n33, "N33_KODAS_KS").text    = smart_str(client_code)   # тот же код, что и в N08_KODAS_KS
-    ET.SubElement(n33, "N33_S_KODAS").text     = smart_str(_s(client.get('iban')))
-    ET.SubElement(n33, "N33_SALIES_K").text    = smart_str(_s(client.get('country_iso')).upper())
+    ET.SubElement(n33, "N33_KODAS_KS").text    = rivile_str(client_code)   # тот же код, что и в N08_KODAS_KS
+    ET.SubElement(n33, "N33_S_KODAS").text     = rivile_str(_s(client.get('iban')))
+    ET.SubElement(n33, "N33_SALIES_K").text    = rivile_str(_s(client.get('country_iso')).upper())
 
     elements.append(n08)
-
-
-
-
-
-
 
 
 
@@ -1236,17 +1402,17 @@ def _add_client_n08(elements, client):
 #     """
 #     direction: 'pirkimas' | 'pardavimas'
 #     Подставляет:
-#       - I06_KODAS_SM  (atskaitingas asmuo)
-#       - I06_KODAS_SS  (apmokejimo saskaita)
+#       - I06_KODAS_SM  (atskaitingas_asmuo)
+#       - I06_KODAS_SS  (pinigu_saskaitos_kodas)
+#       - I06_KODAS_LS_1 (logistika)
 #     из user.rivile_gama_extra_fields.
 #     """
 #     extras = _get_gama_extras(user)
-#     if direction == "pirkimas":
-#         atsk = extras.get("pirkimas_atskaitingas_asmuo")
-#         acc  = extras.get("pirkimas_apmokejimo_sask")
-#     else:
-#         atsk = extras.get("pardavimas_atskaitingas_asmuo")
-#         acc  = extras.get("pardavimas_apmokejimo_sask")
+#     prefix = f"{direction}_"
+
+#     atsk = extras.get(prefix + "atskaitingas_asmuo")
+#     acc  = extras.get(prefix + "pinigu_saskaitos_kodas")
+#     log  = extras.get(prefix + "logistika")
 
 #     if atsk:
 #         ET.SubElement(i06, "I06_KODAS_SM").text = smart_str(atsk)
@@ -1255,6 +1421,10 @@ def _add_client_n08(elements, client):
 #     if acc:
 #         ET.SubElement(i06, "I06_KODAS_SS").text = smart_str(acc)
 #         logger.info("[RIVILE:I06] set I06_KODAS_SS=%r direction=%s", acc, direction)
+
+#     if log:
+#         ET.SubElement(i06, "I06_KODAS_LS_1").text = smart_str(log)
+#         logger.info("[RIVILE:I06] set I06_KODAS_LS_1=%r direction=%s", log, direction)
 
 # def _apply_line_extras(i07, user, direction: str):
 #     """
@@ -1267,10 +1437,7 @@ def _add_client_n08(elements, client):
 #     из user.rivile_gama_extra_fields.
 #     """
 #     extras = _get_gama_extras(user)
-#     if direction == "pirkimas":
-#         prefix = "pirkimas_"
-#     else:
-#         prefix = "pardavimas_"
+#     prefix = f"{direction}_"
 
 #     ser  = (extras.get(prefix + "serija")   or "").strip()
 #     cen  = (extras.get(prefix + "centras")  or "").strip()
@@ -1385,35 +1552,6 @@ def _add_client_n08(elements, client):
 #     return header + body + b"\n"
 
 
-# # def build_dok_nr(series: str, number: str) -> str:
-# #     """
-# #     Формирует DOK_NR строго как 'series-number', если series не пустая.
-# #     - Пустая series -> number
-# #     - Если number начинается с series (с дефисом или без) -> нормализует в 'series-number'
-# #     """
-# #     s = (series or "").strip()
-# #     n = (number or "").strip()
-
-# #     if not s:
-# #         res = n
-# #         logger.info("[RIVILE:DOK_NR] s='', n=%r -> %r", n, res)
-# #         return res
-# #     if not n:
-# #         logger.info("[RIVILE:DOK_NR] n='', s=%r -> %r", s, s)
-# #         return s
-
-# #     if n.startswith(s):
-# #         tail = n[len(s):]
-# #         if tail.startswith("-"):
-# #             tail = tail[1:]
-# #         res = f"{s}-{tail}"
-# #         logger.info("[RIVILE:DOK_NR] n startswith s: s=%r n=%r -> %r", s, n, res)
-# #         return res
-
-# #     res = f"{s}-{n}"
-# #     logger.info("[RIVILE:DOK_NR] s=%r n=%r -> %r", s, n, res)
-# #     return res
-
 # def build_dok_nr(series: str, number: str) -> str:
 #     """
 #     Формирует DOK_NR как конкатенацию 'series' + 'number' (БЕЗ дефиса).
@@ -1487,44 +1625,6 @@ def _add_client_n08(elements, client):
 #     logger.info("[RIVILE:PARTY] %s: empty id/vat/id_programoje -> ''", role)
 #     return ""
 
-
-# # def normalize_preke_paslauga_tipas(value: object) -> str:
-# #     """
-# #     Вернёт '1' | '2' | '3' из любого ввода.
-# #     Поддерживает: 1/2/3, 'preke/prekė/prekes/prekės', 'paslauga/paslaugos',
-# #     'kodas/kodai', пробелы, запятые/точки. Пусто/непонятно -> '1'.
-# #     """
-# #     if value is None:
-# #         logger.info("[RIVILE:TIPAS] value=None -> '1'")
-# #         return "1"
-# #     s = str(value).strip().lower()
-# #     if not s:
-# #         logger.info("[RIVILE:TIPAS] value='' -> '1'")
-# #         return "1"
-
-# #     try:
-# #         n = int(float(s.replace(",", ".")))
-# #         if n in (1, 2, 3):
-# #             logger.info("[RIVILE:TIPAS] numeric %r -> %r", s, n)
-# #             return str(n)
-# #     except ValueError:
-# #         pass
-
-# #     preke_syn    = {"preke", "prekė", "prekes", "prekės"}
-# #     paslauga_syn = {"paslauga", "paslaugos"}
-# #     kodas_syn    = {"kodas", "kodai"}
-
-# #     if s in preke_syn:
-# #         logger.info("[RIVILE:TIPAS] word %r -> '1'", s)
-# #         return "1"
-# #     if s in paslauga_syn:
-# #         logger.info("[RIVILE:TIPAS] word %r -> '2'", s)
-# #         return "2"
-# #     if s in kodas_syn:
-# #         logger.info("[RIVILE:TIPAS] word %r -> '3'", s)
-# #         return "3"
-# #     logger.info("[RIVILE:TIPAS] fallback for %r -> '1'", s)
-# #     return "1"
 
 # def normalize_preke_paslauga_tipas(value: object) -> str:
 #     """
@@ -1619,77 +1719,83 @@ def _add_client_n08(elements, client):
 #     return None
 
 
+# def _nz(v):
+#     """True, если есть непустая строка после strip()."""
+#     return bool((str(v).strip() if v is not None else ""))
+
 
 # # =========================================================
-# # 1) PREKĖS / PASLAУGOS / KODAI (N25)
+# # 1) PREKĖS / PASLAУGOS / KODAI (N17/N25)
 # # =========================================================
-# def export_prekes_paslaugos_kodai_group_to_rivile(documents):
+# def export_prekes_paslaugos_kodai_group_to_rivile(documents, user):
 #     """
 #     Возвращает три XML-потока БЕЗ <root>:
 #       - prekes_xml (N17)  — только товары
 #       - paslaugos_xml (N17) — только услуги
 #       - kodai_xml (N25)  — если doc.preke_paslauga == '3', формируем блоки <N25> по заданному шаблону
 #     """
-#     logger.info("[RIVILE:N17/N25] start, docs=%d", len(documents) if documents is not None else 0)
+#     logger.info("[RIVILE:N17/N25] start, docs=%d user=%s", 
+#                 len(documents) if documents is not None else 0,
+#                 getattr(user, 'id', None))
 #     prekes_dict = {}      # key: kodas -> Element("N17")
 #     paslaugos_dict = {}   # key: kodas -> Element("N17")
 #     kodai_dict = {}       # key: kodas -> Element("N25")
 
-#     def add_n17_record(target_dict, kodas, tipas, unit, pavadinimas, kodas_ds="PR001"):
+#     def add_n17_record(target_dict, kodas, tipas, unit, pavadinimas, kodas_ds, user, direction):
+#         """
+#         Создаёт N17 с подстановкой полей из rivile_gama_extra_fields.
+#         """
 #         if not kodas:
 #             return
 #         if kodas in target_dict:
 #             return
+        
 #         n17 = ET.Element("N17")
 #         ET.SubElement(n17, "N17_KODAS_PS").text = smart_str(kodas)
 #         ET.SubElement(n17, "N17_TIPAS").text    = smart_str(tipas or '1')
 #         ET.SubElement(n17, "N17_KODAS_US").text = smart_str(unit or "VNT")
 #         ET.SubElement(n17, "N17_PAV").text      = smart_str(pavadinimas or "Prekė")
-#         ET.SubElement(n17, "N17_KODAS_DS").text = smart_str(kodas_ds or "PR001")
+        
+#         # === Подстановка из rivile_gama_extra_fields ===
+#         extras = _get_gama_extras(user)
+#         prefix = f"{direction}_"
+        
+#         # saskaitos_rysio_kodas -> N17_KODAS_DS (fallback: PR001)
+#         rysio_kodas = extras.get(prefix + "saskaitos_rysio_kodas") or kodas_ds or "PR001"
+#         ET.SubElement(n17, "N17_KODAS_DS").text = smart_str(rysio_kodas)
+        
+#         # objektas -> N17_KODAS_OS
+#         obj = extras.get(prefix + "objektas")
+#         if obj:
+#             ET.SubElement(n17, "N17_KODAS_OS").text = smart_str(obj)
+        
+#         # logistika -> N17_KODAS_LS_1
+#         log = extras.get(prefix + "logistika")
+#         if log:
+#             ET.SubElement(n17, "N17_KODAS_LS_1").text = smart_str(log)
+        
+#         # prekes_grupe / paslaugos_grupe -> N17_KODAS_GS
+#         if tipas == '1':  # prekes
+#             grupe = extras.get(prefix + "prekes_grupe")
+#             if grupe:
+#                 ET.SubElement(n17, "N17_KODAS_GS").text = smart_str(grupe)
+#             # assembly
+#             assembly = extras.get("prekes_assembly_" + direction)
+#             if assembly:
+#                 ET.SubElement(n17, "N17_ASSEMBLY").text = smart_str(assembly)
+#         elif tipas == '2':  # paslaugos
+#             grupe = extras.get(prefix + "paslaugos_grupe")
+#             if grupe:
+#                 ET.SubElement(n17, "N17_KODAS_GS").text = smart_str(grupe)
+#             # assembly
+#             assembly = extras.get("paslaugos_assembly_" + direction)
+#             if assembly:
+#                 ET.SubElement(n17, "N17_ASSEMBLY").text = smart_str(assembly)
+        
 #         target_dict[kodas] = n17
-#         logger.info("[RIVILE:N17] added kodas=%r tipas=%r unit=%r", kodas, tipas, unit)
+#         logger.info("[RIVILE:N17] added kodas=%r tipas=%r direction=%s", kodas, tipas, direction)
 
-#     # def add_n25_record(kodai_dict, doc):
-#     #     kodas = getattr(doc, "prekes_kodas", None)
-#     #     if not kodas or kodas in kodai_dict:
-#     #         return
-
-#     #     pavadinimas = getattr(doc, "prekes_pavadinimas", None) or "Prekė"
-
-#     #     # TIPAS для N25 зависит от pirkimas/pardavimas
-#     #     pirk_pard = (getattr(doc, "pirkimas_pardavimas", "") or "").strip().lower()
-#     #     if pirk_pard == "pirkimas":
-#     #         tipas = "1"
-#     #     elif pirk_pard == "pardavimas":
-#     #         tipas = "2"
-#     #     else:
-#     #         tipas = "1"  # дефолт
-
-#     #     saskaita    = getattr(doc, "N25_KODAS_SS", None) or getattr(doc, "saskaita", None) or "5001"
-#     #     kodas_ds    = getattr(doc, "N25_KODAS_DS", None) or getattr(doc, "kodas_ds", None) or "PR001"
-#     #     unit        = getattr(doc, "unit", None) or getattr(doc, "N25_KODAS_US", None) or "VNT"
-#     #     frakcija    = getattr(doc, "N25_FRAKCIJA", None) or "100"
-#     #     suma        = getattr(doc, "N25_SUMA", None) or "0.00"
-#     #     tax         = getattr(doc, "N25_TAX", None) or "1"
-#     #     mokestis    = getattr(doc, "N25_MOKESTIS", None) or "1"
-#     #     poz_date    = getattr(doc, "N25_POZ_DATE", None) or "0"
-
-#     #     n25 = ET.Element("N25")
-#     #     ET.SubElement(n25, "N25_KODAS_BS").text = smart_str(kodas)
-#     #     ET.SubElement(n25, "N25_PAV").text      = smart_str(pavadinimas)
-#     #     ET.SubElement(n25, "N25_TIPAS").text    = tipas
-#     #     ET.SubElement(n25, "N25_KODAS_SS").text = smart_str(saskaita)
-#     #     ET.SubElement(n25, "N25_KODAS_DS").text = smart_str(kodas_ds)
-#     #     ET.SubElement(n25, "N25_KODAS_US").text = smart_str(unit)
-#     #     ET.SubElement(n25, "N25_FRAKCIJA").text = smart_str(str(frakcija))
-#     #     ET.SubElement(n25, "N25_SUMA").text     = smart_str(str(suma))
-#     #     ET.SubElement(n25, "N25_TAX").text      = smart_str(str(tax))
-#     #     ET.SubElement(n25, "N25_MOKESTIS").text = smart_str(str(mokestis))
-#     #     ET.SubElement(n25, "N25_POZ_DATE").text = smart_str(str(poz_date))
-#     #     kodai_dict[kodas] = n25
-#     #     logger.info("[RIVILE:N25] added kodas=%r tipas=%r saskaita=%r", kodas, tipas, saskaita)
-
-#     def add_n25_record(kodai_dict, doc, item=None):
+#     def add_n25_record(kodai_dict, doc, item=None, user=None, direction=None):
 #         """
 #         Создаёт N25 по данным line item, а если item=None — по doc.
 #         Один N25 на один kodas (ключ в kodai_dict).
@@ -1710,10 +1816,8 @@ def _add_client_n08(elements, client):
 #             )
 
 #         if not kodas:
-#             # нет кода – нет N25
 #             return
 #         if kodas in kodai_dict:
-#             # уже есть такой код – второй раз не создаем
 #             return
 
 #         # --- 2) Название ---
@@ -1727,26 +1831,31 @@ def _add_client_n08(elements, client):
 #             pavadinimas = getattr(doc, "prekes_pavadinimas", None) or "Prekė"
 
 #         # --- 3) TIPAS (1 – pirkimas, 2 – pardavimas) ---
-#         pirk_pard = (getattr(doc, "pirkimas_pardavimas", "") or "").strip().lower()
-#         if pirk_pard == "pirkimas":
+#         if direction == "pirkimas":
 #             tipas = "1"
-#         elif pirk_pard == "pardavimas":
+#         elif direction == "pardavimas":
 #             tipas = "2"
 #         else:
 #             tipas = "1"  # дефолт
 
-#         # --- 4) Остальные поля с приоритетом item → doc → дефолт ---
+#         # === Подстановка из rivile_gama_extra_fields ===
+#         extras = _get_gama_extras(user)
+#         prefix = f"{direction}_"
+
+#         # --- 4) Остальные поля с приоритетом item → doc → rivile_gama_extra_fields → дефолт ---
 #         if item is not None:
 #             saskaita = (
 #                 getattr(item, "N25_KODAS_SS", None)
 #                 or getattr(doc, "N25_KODAS_SS", None)
 #                 or getattr(doc, "saskaita", None)
+#                 or extras.get(prefix + "pinigu_saskaitos_kodas")
 #                 or "5001"
 #             )
 #             kodas_ds = (
 #                 getattr(item, "N25_KODAS_DS", None)
 #                 or getattr(doc, "N25_KODAS_DS", None)
 #                 or getattr(doc, "kodas_ds", None)
+#                 or extras.get(prefix + "saskaitos_rysio_kodas")
 #                 or "PR001"
 #             )
 #             unit = (
@@ -1784,11 +1893,13 @@ def _add_client_n08(elements, client):
 #             saskaita = (
 #                 getattr(doc, "N25_KODAS_SS", None)
 #                 or getattr(doc, "saskaita", None)
+#                 or extras.get(prefix + "pinigu_saskaitos_kodas")
 #                 or "5001"
 #             )
 #             kodas_ds = (
 #                 getattr(doc, "N25_KODAS_DS", None)
 #                 or getattr(doc, "kodas_ds", None)
+#                 or extras.get(prefix + "saskaitos_rysio_kodas")
 #                 or "PR001"
 #             )
 #             unit = (
@@ -1802,6 +1913,12 @@ def _add_client_n08(elements, client):
 #             mokestis = getattr(doc, "N25_MOKESTIS", None) or "1"
 #             poz_date = getattr(doc, "N25_POZ_DATE", None) or "0"
 
+#         # objektas -> N25_KODAS_OS
+#         objektas = extras.get(prefix + "objektas")
+        
+#         # kodo_grupe -> N25_KODAS_GS
+#         kodo_grupe = extras.get(prefix + "kodo_grupe")
+
 #         n25 = ET.Element("N25")
 #         ET.SubElement(n25, "N25_KODAS_BS").text = smart_str(kodas)
 #         ET.SubElement(n25, "N25_PAV").text      = smart_str(pavadinimas)
@@ -1814,31 +1931,49 @@ def _add_client_n08(elements, client):
 #         ET.SubElement(n25, "N25_TAX").text      = smart_str(str(tax))
 #         ET.SubElement(n25, "N25_MOKESTIS").text = smart_str(str(mokestis))
 #         ET.SubElement(n25, "N25_POZ_DATE").text = smart_str(str(poz_date))
+        
+#         # Добавляем поля из rivile_gama_extra_fields
+#         if objektas:
+#             ET.SubElement(n25, "N25_KODAS_OS").text = smart_str(objektas)
+#         if kodo_grupe:
+#             ET.SubElement(n25, "N25_KODAS_GS").text = smart_str(kodo_grupe)
 
 #         kodai_dict[kodas] = n25
-#         logger.info("[RIVILE:N25] added kodas=%r tipas=%r saskaita=%r (from %s)",
-#                     kodas, tipas, saskaita, "item" if item is not None else "doc")
+#         logger.info("[RIVILE:N25] added kodas=%r tipas=%r direction=%s saskaita=%r",
+#                     kodas, tipas, direction, saskaita)
 
 #     for doc in documents or []:
+#         # Определяем direction для этого документа
+#         direction = getattr(doc, "pirkimas_pardavimas", None)
+#         if not direction or direction not in ('pirkimas', 'pardavimas'):
+#             # fallback
+#             if _nz(getattr(doc, 'seller_id', None)) or _nz(getattr(doc, 'seller_vat_code', None)):
+#                 direction = 'pirkimas'
+#             elif _nz(getattr(doc, 'buyer_id', None)) or _nz(getattr(doc, 'buyer_vat_code', None)):
+#                 direction = 'pardavimas'
+#             else:
+#                 direction = 'pirkimas'  # дефолт
+        
+#         logger.info("[RIVILE:N17/N25] doc=%s direction=%s", getattr(doc, "pk", None), direction)
+        
 #         line_items = getattr(doc, "line_items", None)
 #         has_items = bool(line_items and hasattr(line_items, 'all') and line_items.exists())
-#         logger.info("[RIVILE:N17/N25] doc=%s has_items=%s", getattr(doc, "pk", None), has_items)
 
 #         if not has_items:
 #             tipas = normalize_preke_paslauga_tipas(getattr(doc, "preke_paslauga", None))
 #             kodas = (getattr(doc, "prekes_kodas", None) or getattr(doc, "prekes_barkodas", None) or "").strip()
-#             if not kodas:
+#             if not kodas and tipas != '3':
 #                 continue
 #             unit  = (getattr(doc, "unit", None) or "VNT").strip()
 #             pavadinimas = (getattr(doc, "prekes_pavadinimas", None) or "Prekė").strip()
 #             kodas_ds = (getattr(doc, "kodas_ds", None) or "PR001").strip()
 
 #             if tipas == '1':
-#                 add_n17_record(prekes_dict, kodas, '1', unit, pavadinimas, kodas_ds)
+#                 add_n17_record(prekes_dict, kodas, '1', unit, pavadinimas, kodas_ds, user, direction)
 #             elif tipas == '2':
-#                 add_n17_record(paslaugos_dict, kodas, '2', unit, pavadinimas, kodas_ds)
+#                 add_n17_record(paslaugos_dict, kodas, '2', unit, pavadinimas, kodas_ds, user, direction)
 #             elif tipas == '3':
-#                 add_n25_record(kodai_dict, doc)
+#                 add_n25_record(kodai_dict, doc, item=None, user=user, direction=direction)
 #         else:
 #             for item in line_items.all():
 #                 tipas = normalize_preke_paslauga_tipas(
@@ -1846,44 +1981,19 @@ def _add_client_n08(elements, client):
 #                 )
 #                 kodas = (getattr(item, "prekes_kodas", None) or getattr(item, "prekes_barkodas", None) or "").strip()
 #                 if not kodas and tipas != '3':
-#                     # Для N17 (prekes/paslaugos) мы уже делаем continue выше,
-#                     # можно оставить как есть, этот if по желанию.
-#                     pass
+#                     continue
 
 #                 unit  = (getattr(item, "unit", None) or "VNT").strip()
 #                 pavadinimas = (getattr(item, "prekes_pavadinimas", None) or "Prekė").strip()
 #                 kodas_ds = (getattr(item, "kodas_ds", None) or "PR001").strip()
 
 #                 if tipas == '1':
-#                     add_n17_record(prekes_dict, kodas, '1', unit, pavadinimas, kodas_ds)
+#                     add_n17_record(prekes_dict, kodas, '1', unit, pavadinimas, kodas_ds, user, direction)
 #                 elif tipas == '2':
-#                     add_n17_record(paslaugos_dict, kodas, '2', unit, pavadinimas, kodas_ds)
+#                     add_n17_record(paslaugos_dict, kodas, '2', unit, pavadinimas, kodas_ds, user, direction)
 #                 elif tipas == '3':
-#                     # ВАЖНО: теперь используем item
-#                     add_n25_record(kodai_dict, doc, item=item)
+#                     add_n25_record(kodai_dict, doc, item=item, user=user, direction=direction)
 
-                    
-#             # for item in line_items.all():
-#             #     tipas = normalize_preke_paslauga_tipas(
-#             #         getattr(item, "preke_paslauga", None) or getattr(doc, "preke_paslauga", None)
-#             #     )
-#             #     kodas = (getattr(item, "prekes_kodas", None) or getattr(item, "prekes_barkodas", None) or "").strip()
-#             #     if not kodas:
-#             #         continue
-#             #     unit  = (getattr(item, "unit", None) or "VNT").strip()
-#             #     pavadinimas = (getattr(item, "prekes_pavadinimas", None) or "Prekė").strip()
-#             #     kodas_ds = (getattr(item, "kodas_ds", None) or "PR001").strip()
-
-#             #     if tipas == '1':
-#             #         add_n17_record(prekes_dict, kodas, '1', unit, pavadinimas, kodas_ds)
-#             #     elif tipas == '2':
-#             #         add_n17_record(paslaugos_dict, kodas, '2', unit, pavadinimas, kodas_ds)
-#             #     elif tipas == '3':
-#             #         add_n25_record(kodai_dict, doc)
-
-#     # prekes_xml = b"".join(prettify_no_header(el) + b"\n" for el in prekes_dict.values())
-#     # paslaugos_xml = b"".join(prettify_no_header(el) + b"\n" for el in paslaugos_dict.values())
-#     # kodai_xml = b"".join(prettify_no_header(el) + b"\n" for el in kodai_dict.values())
 #     prekes_xml    = join_records_utf8(list(prekes_dict.values()))    if prekes_dict    else b""
 #     paslaugos_xml = join_records_utf8(list(paslaugos_dict.values())) if paslaugos_dict else b""
 #     kodai_xml     = join_records_utf8(list(kodai_dict.values()))     if kodai_dict     else b""
@@ -1991,7 +2101,7 @@ def _add_client_n08(elements, client):
 #                 if use_frac:
 #                     ET.SubElement(i07, "I07_FRAKCIJA").text = str(frac)
 
-#                 # источники кода без fallback’ов
+#                 # источники кода без fallback'ов
 #                 if line_map is not None:  # multi
 #                     code = (line_map or {}).get(getattr(item, "id", None))
 #                 else:                      # single
@@ -2124,7 +2234,7 @@ def _add_client_n08(elements, client):
 #                 if use_frac:
 #                     ET.SubElement(i07, "I07_FRAKCIJA").text = str(frac)
 
-#                 # источники кода без fallback’ов
+#                 # источники кода без fallback'ов
 #                 if line_map is not None:  # multi
 #                     code = (line_map or {}).get(getattr(item, "id", None))
 #                 else:                      # single
@@ -2173,11 +2283,6 @@ def _add_client_n08(elements, client):
 # # =========================================================
 # # 4) KLIENTAI (N08 + N33)
 # # =========================================================
-# def _nz(v):
-#     """True, если есть непустая строка после strip()."""
-#     return bool((str(v).strip() if v is not None else ""))
-
-
 # def export_clients_group_to_rivile(clients=None, documents=None):
 #     """
 #     Возвращает XML (N08 с вложенным N33) без <root>.
@@ -2299,10 +2404,6 @@ def _add_client_n08(elements, client):
 
 #     # --- 3) Склеиваем и возвращаем XML ---
 #     logger.info("[RIVILE:N08] total unique clients: %d", len(elements))
-#     # xml = b""
-#     # for el in elements:
-#     #     xml += prettify_ansi(el) + b"\n"
-#     # return expand_empty_tags(xml)
 #     xml = join_records_utf8(elements) if elements else b""
 #     return expand_empty_tags(xml)
 
@@ -2381,3 +2482,6 @@ def _add_client_n08(elements, client):
 #     ET.SubElement(n33, "N33_SALIES_K").text    = smart_str(_s(client.get('country_iso')).upper())
 
 #     elements.append(n08)
+
+
+

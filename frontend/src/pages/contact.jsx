@@ -152,7 +152,7 @@ const Contact = () => {
     >
       <Container maxWidth="lg">
         <Helmet>
-          <title>Mūsų kontaktai - Atlyginimo Skaičiuoklė</title>
+          <title>Mūsų kontaktai - DokSkenas</title>
           <meta
             name="description"
             content="Prireikus pagalbos ar turint pastebėjimų, susisiekite su mumis"

@@ -209,7 +209,7 @@ const BuhalterinenApskaita = () => {
     <Box sx={{ bgcolor: '#F9F9FA', minHeight: '100vh', padding: { xs: 2, sm: 5 }, paddingTop: { xs: '50px', sm: '70px'}, width: '100%' }}>
       <Helmet>
         <title>Automatizuota buhalterinė apskaita nuo 0,18 EUR/dok | DokSkenas</title>
-        <meta name="description" content="Sutaupykite iki 90% apskaitos išlaidų. DokSkenas automatiškai nuskaito dokumentus per 30 sekundžių. Išbandykite nemokamai - 50 dokumentų dovana!" />
+        <meta name="description" content="Sutaupykite iki 90% apskaitos išlaidų. DokSkenas automatiškai nuskaito dokumentus per 30 sekundžių. Išbandykite nemokamai!" />
       </Helmet>
 
       {/* Hero Section */}
