@@ -26,7 +26,6 @@ const routesToPrerender = [
 const distDir = path.resolve(__dirname, 'dist');
 const port = 4173;
 
-// Loader который показывается поверх контента
 const loaderStyles = `
 <style id="prerender-loader-styles">
   .prerender-loader {
@@ -68,7 +67,6 @@ const loaderHtml = `
   <div class="prerender-loader-text">Kraunama...</div>
 </div>
 <script>
-  // Убираем loader когда страница готова
   window.addEventListener('load', function() {
     var loader = document.getElementById('prerender-loader');
     var styles = document.getElementById('prerender-loader-styles');
@@ -95,29 +93,22 @@ async function startServer() {
 }
 
 function cleanHtml(html) {
-  // Удаляем title "DokSkenas" (без data-react-helmet)
   html = html.replace(/<title>DokSkenas<\/title>/g, '');
   html = html.replace(/<title>DokSkenas app<\/title>/g, '');
   
-  // Удаляем meta description БЕЗ data-react-helmet
   html = html.replace(
     /<meta name="description" content="[^"]*"(?! data-react-helmet)\s*\/?>/g,
     ''
   );
   
-  // Удаляем дубликаты пустых строк
   html = html.replace(/\n\s*\n/g, '\n');
   
   return html;
 }
 
 function addLoader(html) {
-  // Добавляем стили loader'а в <head>
   html = html.replace('</head>', loaderStyles + '</head>');
-  
-  // Добавляем loader HTML сразу после <body>
   html = html.replace(/<body([^>]*)>/, '<body$1>' + loaderHtml);
-  
   return html;
 }
 
@@ -154,13 +145,9 @@ async function prerender() {
         continue;
       }
 
-      // Чистим HTML от дубликатов
       html = cleanHtml(html);
-      
-      // Добавляем loader
       html = addLoader(html);
 
-      // Все страницы в папки, / -> dist/_home/index.html
       const folderName = route === '/' ? '_home' : route.replace(/^\//, '');
       const outPath = path.join(distDir, folderName, 'index.html');
 
