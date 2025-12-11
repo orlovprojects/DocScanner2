@@ -66,14 +66,7 @@ const loaderHtml = `
   <div class="prerender-loader-spinner"></div>
   <div class="prerender-loader-text">Kraunama...</div>
 </div>
-<script>
-  window.addEventListener('load', function() {
-    var loader = document.getElementById('prerender-loader');
-    var styles = document.getElementById('prerender-loader-styles');
-    if (loader) loader.remove();
-    if (styles) styles.remove();
-  });
-</script>
+
 `;
 
 async function startServer() {
@@ -100,6 +93,10 @@ function cleanHtml(html) {
     /<meta name="description" content="[^"]*"(?! data-react-helmet)\s*\/?>/g,
     ''
   );
+
+  html = html.replace(/<script[^>]*connect\.facebook\.net[^>]*><\/script>/g, '');
+
+  html = html.replace(/<script[^>]*googletagmanager\.com[^>]*><\/script>/g, '');
   
   html = html.replace(/\n\s*\n/g, '\n');
   

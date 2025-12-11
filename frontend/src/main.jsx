@@ -1,6 +1,6 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
-import { BrowserRouter } from 'react-router-dom'; // Добавляем BrowserRouter
+import { BrowserRouter } from 'react-router-dom';
 import App from './App.jsx';
 
 createRoot(document.getElementById('root')).render(
@@ -10,3 +10,8 @@ createRoot(document.getElementById('root')).render(
     </BrowserRouter>
   </StrictMode>
 );
+
+const loader = document.getElementById('prerender-loader');
+const loaderStyles = document.getElementById('prerender-loader-styles');
+if (loader) loader.remove();
+if (loaderStyles) loaderStyles.remove();
