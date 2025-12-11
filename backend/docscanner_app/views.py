@@ -58,6 +58,7 @@ from .exports.dineta import send_dineta_bundle, DinetaError
 from .exports.pragma4 import export_to_pragma40_xml
 from .exports.pragma3 import export_to_pragma_full, save_pragma_export_to_files
 from .exports.butent import export_to_butent
+from .exports.debetas import export_to_debetas
 from .validators.required_fields_checker import check_required_fields_for_export
 from .validators.math_validator_for_export import validate_document_math_for_export
 
@@ -518,22 +519,32 @@ def export_documents(request):
         logger.info("[EXP] RIVILE files_to_export=%s", [n for n, _ in files_to_export])
 
         # Jei profilyje nustatyta „rivile_strip_lt_letters" – nuimame diakritiką
-        if rivile_strip_lt and files_to_export:
-            new_files = []
-            for filename, xml_content in files_to_export:
-                if isinstance(xml_content, bytes):
-                    try:
-                        xml_text = xml_content.decode("utf-8", errors="ignore")
-                    except Exception:
-                        xml_text = xml_content.decode("latin-1", errors="ignore")
-                else:
-                    xml_text = xml_content
+        # if rivile_strip_lt and files_to_export:
+        #     new_files = []
+        #     for filename, xml_content in files_to_export:
+        #         # гарантируем, что работаем с bytes
+        #         if isinstance(xml_content, bytes):
+        #             try:
+        #                 # декодируем так же, как и писали — windows-1257
+        #                 xml_text = xml_content.decode("windows-1257", errors="ignore")
+        #             except Exception:
+        #                 # крайний случай – хотя сюда вряд ли попадём
+        #                 xml_text = xml_content.decode("latin-1", errors="ignore")
+        #         else:
+        #             xml_text = xml_content
 
-                stripped = strip_diacritics(xml_text)
-                logger.info("[EXP] RIVILE strip_lt applied to %s (len %d -> %d)",
-                            filename, len(xml_text), len(stripped))
-                new_files.append((filename, stripped))
-            files_to_export = new_files
+        #         stripped = strip_diacritics(xml_text)
+
+        #         # ВАЖНО: снова кодируем в windows-1257, чтобы файл реально был ANSI
+        #         stripped_bytes = stripped.encode("windows-1257", errors="replace")
+
+        #         logger.info(
+        #             "[EXP] RIVILE strip_lt applied to %s (len %d -> %d)",
+        #             filename, len(xml_text), len(stripped)
+        #         )
+        #         new_files.append((filename, stripped_bytes))
+
+        #     files_to_export = new_files
 
         if files_to_export:
             zip_buffer = io.BytesIO()
@@ -547,76 +558,6 @@ def export_documents(request):
         else:
             logger.warning("[EXP] RIVILE nothing to export")
             response = Response({"error": "No documents to export"}, status=400)
-    # elif export_type == 'rivile':
-    #     logger.info("[EXP] RIVILE export started")
-    #     assign_random_prekes_kodai(documents)
-
-    #     files_to_export = []
-
-    #     # 1) Клиенты (N08+N33): собираем ИЗ ДОКУМЕНТОВ; кэш больше не нужен
-    #     docs_for_clients = (pirkimai_docs or []) + (pardavimai_docs or [])
-    #     if docs_for_clients:
-    #         klientai_xml = export_clients_group_to_rivile(
-    #             clients=None,
-    #             documents=docs_for_clients,
-    #         )
-    #         if klientai_xml and klientai_xml.strip():
-    #             files_to_export.append(('klientai.eip', klientai_xml))
-    #             logger.info("[EXP] RIVILE clients exported")
-
-    #     # 2) ПИРКИМАИ (I06/I07)
-    #     if pirkimai_docs:
-    #         logger.info("[EXP] RIVILE exporting pirkimai: %d docs", len(pirkimai_docs))
-    #         pirkimai_xml = export_pirkimai_group_to_rivile(pirkimai_docs, request.user)
-    #         files_to_export.append(('pirkimai.eip', pirkimai_xml))
-
-    #     # 3) ПАРДАВИМАИ (I06/I07)
-    #     if pardavimai_docs:
-    #         logger.info("[EXP] RIVILE exporting pardavimai: %d docs", len(pardavimai_docs))
-    #         pardavimai_xml = export_pardavimai_group_to_rivile(pardavimai_docs, request.user)
-    #         files_to_export.append(('pardavimai.eip', pardavimai_xml))
-
-    #     # 4) N17/N25
-    #     prekes_xml, paslaugos_xml, kodai_xml = export_prekes_paslaugos_kodai_group_to_rivile(documents)
-    #     if prekes_xml and prekes_xml.strip():
-    #         files_to_export.append(('prekes.eip', prekes_xml))
-    #     if paslaugos_xml and paslaugos_xml.strip():
-    #         files_to_export.append(('paslaugos.eip', paslaugos_xml))
-    #     if kodai_xml and kodai_xml.strip():
-    #         files_to_export.append(('kodai.eip', kodai_xml))
-
-    #     logger.info("[EXP] RIVILE files_to_export=%s", [n for n, _ in files_to_export])
-
-    #     # Jei profilyje nustatyta „rivile_strip_lt_letters" – nuimame diakritiką
-    #     if rivile_strip_lt and files_to_export:
-    #         new_files = []
-    #         for filename, xml_content in files_to_export:
-    #             if isinstance(xml_content, bytes):
-    #                 try:
-    #                     xml_text = xml_content.decode("utf-8", errors="ignore")
-    #                 except Exception:
-    #                     xml_text = xml_content.decode("latin-1", errors="ignore")
-    #             else:
-    #                 xml_text = xml_content
-
-    #             stripped = strip_diacritics(xml_text)
-    #             logger.info("[EXP] RIVILE strip_lt applied to %s (len %d -> %d)",
-    #                         filename, len(xml_text), len(stripped))
-    #             new_files.append((filename, stripped))
-    #         files_to_export = new_files
-
-    #     if files_to_export:
-    #         zip_buffer = io.BytesIO()
-    #         with zipfile.ZipFile(zip_buffer, "w") as zf:
-    #             for filename, xml_content in files_to_export:
-    #                 zf.writestr(filename, xml_content)
-    #         zip_buffer.seek(0)
-    #         response = HttpResponse(zip_buffer.read(), content_type='application/zip')
-    #         response['Content-Disposition'] = f'attachment; filename={today_str}_rivile_eip.zip'
-    #         export_success = True
-    #     else:
-    #         logger.warning("[EXP] RIVILE nothing to export")
-    #         response = Response({"error": "No documents to export"}, status=400)
 
 
     # ========================= FINVALDA =========================
@@ -952,6 +893,78 @@ def export_documents(request):
             logger.warning("[EXP] AGNUM nothing to export")
             response = Response({"error": "No documents to export"}, status=400)
 
+
+    # ========================= DEBETAS =========================
+    elif export_type == 'debetas':
+        logger.info("[EXP] DEBETAS export started")
+        assign_random_prekes_kodai(documents)
+
+        # Берём только уже классифицированные документы (pirkimai + pardavimai)
+        all_docs = (pirkimai_docs or []) + (pardavimai_docs or [])
+
+        if not all_docs:
+            logger.warning("[EXP] DEBETAS no documents to export (no pirkimai/pardavimai)")
+            return Response({"error": "No documents to export"}, status=400)
+
+        try:
+            debetas_result = export_to_debetas(
+                documents=all_docs,
+                user=request.user,
+            )
+        except FileNotFoundError as e:
+            logger.exception("[EXP] DEBETAS template not found: %s", e)
+            return Response(
+                {
+                    "error": "Debetas template not found",
+                    "detail": str(e),
+                },
+                status=500,
+            )
+        except Exception as e:
+            logger.exception("[EXP] DEBETAS export failed: %s", e)
+            return Response(
+                {
+                    "error": "Debetas export failed",
+                    "detail": str(e),
+                },
+                status=500,
+            )
+
+        logger.info("[EXP] DEBETAS export result keys: %s", list(debetas_result.keys()))
+
+        # Если есть zip (и pirkimai, и pardavimai) — отдаём его
+        if debetas_result.get("zip"):
+            content = debetas_result["zip"]
+            filename = debetas_result.get("zip_filename", f"Debetas_Import_{today_str}.zip")
+            response = HttpResponse(content, content_type="application/zip")
+            response['Content-Disposition'] = f'attachment; filename="{filename}"'
+            export_success = True
+
+        # Если только pirkimai
+        elif debetas_result.get("pirkimai"):
+            content = debetas_result["pirkimai"]
+            filename = debetas_result.get("pirkimai_filename", f"Debetas_Pirkimai_{today_str}.csv")
+            response = HttpResponse(
+                content,
+                content_type='text/csv; charset=windows-1257'
+            )
+            response['Content-Disposition'] = f'attachment; filename="{filename}"'
+            export_success = True
+
+        # Если только pardavimai
+        elif debetas_result.get("pardavimai"):
+            content = debetas_result["pardavimai"]
+            filename = debetas_result.get("pardavimai_filename", f"Debetas_Pardavimai_{today_str}.csv")
+            response = HttpResponse(
+                content,
+                content_type='text/csv; charset=windows-1257'
+            )
+            response['Content-Disposition'] = f'attachment; filename="{filename}"'
+            export_success = True
+
+        else:
+            logger.warning("[EXP] DEBETAS nothing to export (empty result dict)")
+            response = Response({"error": "No documents to export"}, status=400)
 
 
     # ========================= RIVILĖ ERP (XLSX) =========================

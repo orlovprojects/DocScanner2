@@ -92,7 +92,7 @@ const GpmSkaiciuokle = () => {
             letterSpacing: 0.05,
           }}
         >
-          GPM skaičiuoklė 2025
+          GPM skaičiuoklė 2026
         </Typography>
 
         {/* ====== 1. GPM išskaiciavimas ====== */}
@@ -288,7 +288,7 @@ const GpmSkaiciuokle = () => {
           <Typography variant="body1" sx={{ m: 0 }}>
             Jeigu norite paskaičiuoti, kiek GPM mokėsite nuo savo atlyginimo, pasinaudokite mūsų{' '}
             <Link 
-              href="/2026" 
+              href="/" 
               underline="hover" 
               sx={{ fontWeight: 'bold', color: '#1976d2' }}
             >
@@ -448,7 +448,7 @@ const GpmSkaiciuokle = () => {
         </TableContainer>
 
         <Typography variant="body2" sx={{ color: '#666', fontStyle: 'italic' }}>
-          * Lentelėje nurodyti orientaciniai tarifai, galiojantys 2025 m. Tikslūs tarifai ir jų taikymo ribos 
+          * Lentelėje nurodyti orientaciniai tarifai, galiojantys 2026 m. Tikslūs tarifai ir jų taikymo ribos 
           gali skirtis priklausomai nuo šalies įstatymų, šeimyninės padėties ir kitų veiksnių. Kai kuriose 
           šalyse papildomai taikomi savivaldybių ar regioniniai mokesčiai.
         </Typography>
