@@ -11,7 +11,11 @@ createRoot(document.getElementById('root')).render(
   </StrictMode>
 );
 
-const loader = document.getElementById('prerender-loader');
-const loaderStyles = document.getElementById('prerender-loader-styles');
-if (loader) loader.remove();
-if (loaderStyles) loaderStyles.remove();
+requestAnimationFrame(() => {
+  requestAnimationFrame(() => {
+    const loader = document.getElementById('prerender-loader');
+    const loaderStyles = document.getElementById('prerender-loader-styles');
+    if (loader) loader.remove();
+    if (loaderStyles) loaderStyles.remove();
+  });
+});
