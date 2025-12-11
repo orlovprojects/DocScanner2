@@ -43,13 +43,13 @@ async function startServer() {
 }
 
 function cleanHtml(html) {
-  // Удаляем старый title (без data-react-helmet)
-  html = html.replace(/<title>DokSkenas[^<]*<\/title>/g, '');
+  // Удаляем title "DokSkenas" (без data-react-helmet)
+  html = html.replace(/<title>DokSkenas<\/title>/g, '');
   html = html.replace(/<title>DokSkenas app<\/title>/g, '');
   
-  // Удаляем старый meta description (без data-react-helmet)
+  // Удаляем meta description БЕЗ data-react-helmet
   html = html.replace(
-    /<meta name="description" content="Patogiai apskaičiuokite savo atlyginimą[^>]*>/g,
+    /<meta name="description" content="[^"]*"(?! data-react-helmet)\s*\/?>/g,
     ''
   );
   
@@ -95,7 +95,9 @@ async function prerender() {
       // Чистим HTML от дубликатов
       html = cleanHtml(html);
 
-      const outPath = path.join(distDir, route.replace(/^\//, ''), 'index.html');
+      // Все страницы в папки, / -> dist/_home/index.html
+      const folderName = route === '/' ? '_home' : route.replace(/^\//, '');
+      const outPath = path.join(distDir, folderName, 'index.html');
 
       fs.mkdirSync(path.dirname(outPath), { recursive: true });
       fs.writeFileSync(outPath, html, 'utf-8');
