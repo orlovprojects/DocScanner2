@@ -26,6 +26,58 @@ const routesToPrerender = [
 const distDir = path.resolve(__dirname, 'dist');
 const port = 4173;
 
+// Loader который показывается поверх контента
+const loaderStyles = `
+<style id="prerender-loader-styles">
+  .prerender-loader {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: #fafafa;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    z-index: 99999;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  }
+  .prerender-loader-spinner {
+    width: 48px;
+    height: 48px;
+    border: 4px solid #e0e0e0;
+    border-top-color: #1976d2;
+    border-radius: 50%;
+    animation: prerender-spin 1s linear infinite;
+  }
+  .prerender-loader-text {
+    margin-top: 16px;
+    color: #666;
+    font-size: 14px;
+  }
+  @keyframes prerender-spin {
+    to { transform: rotate(360deg); }
+  }
+</style>
+`;
+
+const loaderHtml = `
+<div class="prerender-loader" id="prerender-loader">
+  <div class="prerender-loader-spinner"></div>
+  <div class="prerender-loader-text">Kraunama...</div>
+</div>
+<script>
+  // Убираем loader когда страница готова
+  window.addEventListener('load', function() {
+    var loader = document.getElementById('prerender-loader');
+    var styles = document.getElementById('prerender-loader-styles');
+    if (loader) loader.remove();
+    if (styles) styles.remove();
+  });
+</script>
+`;
+
 async function startServer() {
   const app = express();
   app.use(express.static(distDir));
@@ -55,6 +107,16 @@ function cleanHtml(html) {
   
   // Удаляем дубликаты пустых строк
   html = html.replace(/\n\s*\n/g, '\n');
+  
+  return html;
+}
+
+function addLoader(html) {
+  // Добавляем стили loader'а в <head>
+  html = html.replace('</head>', loaderStyles + '</head>');
+  
+  // Добавляем loader HTML сразу после <body>
+  html = html.replace(/<body([^>]*)>/, '<body$1>' + loaderHtml);
   
   return html;
 }
@@ -94,6 +156,9 @@ async function prerender() {
 
       // Чистим HTML от дубликатов
       html = cleanHtml(html);
+      
+      // Добавляем loader
+      html = addLoader(html);
 
       // Все страницы в папки, / -> dist/_home/index.html
       const folderName = route === '/' ? '_home' : route.replace(/^\//, '');
