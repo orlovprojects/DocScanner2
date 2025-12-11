@@ -58,7 +58,7 @@ from .exports.dineta import send_dineta_bundle, DinetaError
 from .exports.pragma4 import export_to_pragma40_xml
 from .exports.pragma3 import export_to_pragma_full, save_pragma_export_to_files
 from .exports.butent import export_to_butent
-from .exports.debetas import export_to_debetas
+# from .exports.debetas import export_to_debetas
 from .validators.required_fields_checker import check_required_fields_for_export
 from .validators.math_validator_for_export import validate_document_math_for_export
 
@@ -894,77 +894,77 @@ def export_documents(request):
             response = Response({"error": "No documents to export"}, status=400)
 
 
-    # ========================= DEBETAS =========================
-    elif export_type == 'debetas':
-        logger.info("[EXP] DEBETAS export started")
-        assign_random_prekes_kodai(documents)
+    # # ========================= DEBETAS =========================
+    # elif export_type == 'debetas':
+    #     logger.info("[EXP] DEBETAS export started")
+    #     assign_random_prekes_kodai(documents)
 
-        # Берём только уже классифицированные документы (pirkimai + pardavimai)
-        all_docs = (pirkimai_docs or []) + (pardavimai_docs or [])
+    #     # Берём только уже классифицированные документы (pirkimai + pardavimai)
+    #     all_docs = (pirkimai_docs or []) + (pardavimai_docs or [])
 
-        if not all_docs:
-            logger.warning("[EXP] DEBETAS no documents to export (no pirkimai/pardavimai)")
-            return Response({"error": "No documents to export"}, status=400)
+    #     if not all_docs:
+    #         logger.warning("[EXP] DEBETAS no documents to export (no pirkimai/pardavimai)")
+    #         return Response({"error": "No documents to export"}, status=400)
 
-        try:
-            debetas_result = export_to_debetas(
-                documents=all_docs,
-                user=request.user,
-            )
-        except FileNotFoundError as e:
-            logger.exception("[EXP] DEBETAS template not found: %s", e)
-            return Response(
-                {
-                    "error": "Debetas template not found",
-                    "detail": str(e),
-                },
-                status=500,
-            )
-        except Exception as e:
-            logger.exception("[EXP] DEBETAS export failed: %s", e)
-            return Response(
-                {
-                    "error": "Debetas export failed",
-                    "detail": str(e),
-                },
-                status=500,
-            )
+    #     try:
+    #         debetas_result = export_to_debetas(
+    #             documents=all_docs,
+    #             user=request.user,
+    #         )
+    #     except FileNotFoundError as e:
+    #         logger.exception("[EXP] DEBETAS template not found: %s", e)
+    #         return Response(
+    #             {
+    #                 "error": "Debetas template not found",
+    #                 "detail": str(e),
+    #             },
+    #             status=500,
+    #         )
+    #     except Exception as e:
+    #         logger.exception("[EXP] DEBETAS export failed: %s", e)
+    #         return Response(
+    #             {
+    #                 "error": "Debetas export failed",
+    #                 "detail": str(e),
+    #             },
+    #             status=500,
+    #         )
 
-        logger.info("[EXP] DEBETAS export result keys: %s", list(debetas_result.keys()))
+    #     logger.info("[EXP] DEBETAS export result keys: %s", list(debetas_result.keys()))
 
-        # Если есть zip (и pirkimai, и pardavimai) — отдаём его
-        if debetas_result.get("zip"):
-            content = debetas_result["zip"]
-            filename = debetas_result.get("zip_filename", f"Debetas_Import_{today_str}.zip")
-            response = HttpResponse(content, content_type="application/zip")
-            response['Content-Disposition'] = f'attachment; filename="{filename}"'
-            export_success = True
+    #     # Если есть zip (и pirkimai, и pardavimai) — отдаём его
+    #     if debetas_result.get("zip"):
+    #         content = debetas_result["zip"]
+    #         filename = debetas_result.get("zip_filename", f"Debetas_Import_{today_str}.zip")
+    #         response = HttpResponse(content, content_type="application/zip")
+    #         response['Content-Disposition'] = f'attachment; filename="{filename}"'
+    #         export_success = True
 
-        # Если только pirkimai
-        elif debetas_result.get("pirkimai"):
-            content = debetas_result["pirkimai"]
-            filename = debetas_result.get("pirkimai_filename", f"Debetas_Pirkimai_{today_str}.csv")
-            response = HttpResponse(
-                content,
-                content_type='text/csv; charset=windows-1257'
-            )
-            response['Content-Disposition'] = f'attachment; filename="{filename}"'
-            export_success = True
+    #     # Если только pirkimai
+    #     elif debetas_result.get("pirkimai"):
+    #         content = debetas_result["pirkimai"]
+    #         filename = debetas_result.get("pirkimai_filename", f"Debetas_Pirkimai_{today_str}.csv")
+    #         response = HttpResponse(
+    #             content,
+    #             content_type='text/csv; charset=windows-1257'
+    #         )
+    #         response['Content-Disposition'] = f'attachment; filename="{filename}"'
+    #         export_success = True
 
-        # Если только pardavimai
-        elif debetas_result.get("pardavimai"):
-            content = debetas_result["pardavimai"]
-            filename = debetas_result.get("pardavimai_filename", f"Debetas_Pardavimai_{today_str}.csv")
-            response = HttpResponse(
-                content,
-                content_type='text/csv; charset=windows-1257'
-            )
-            response['Content-Disposition'] = f'attachment; filename="{filename}"'
-            export_success = True
+    #     # Если только pardavimai
+    #     elif debetas_result.get("pardavimai"):
+    #         content = debetas_result["pardavimai"]
+    #         filename = debetas_result.get("pardavimai_filename", f"Debetas_Pardavimai_{today_str}.csv")
+    #         response = HttpResponse(
+    #             content,
+    #             content_type='text/csv; charset=windows-1257'
+    #         )
+    #         response['Content-Disposition'] = f'attachment; filename="{filename}"'
+    #         export_success = True
 
-        else:
-            logger.warning("[EXP] DEBETAS nothing to export (empty result dict)")
-            response = Response({"error": "No documents to export"}, status=400)
+    #     else:
+    #         logger.warning("[EXP] DEBETAS nothing to export (empty result dict)")
+    #         response = Response({"error": "No documents to export"}, status=400)
 
 
     # ========================= RIVILĖ ERP (XLSX) =========================
