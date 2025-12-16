@@ -506,13 +506,13 @@ def _apply_sumiskai_defaults_from_user(db_doc, user) -> bool:
             return None
         s = str(v).strip().lower()
         mapping = {"preke": "1", "paslauga": "2", "kodas": "3"}
-        if s in ("1", "2", "3"):
+        if s in ("1", "2", "3", "4"):
             return s
         if s in mapping:
             return mapping[s]
         try:
             i = int(s)
-            if i in (1, 2, 3):
+            if i in (1, 2, 3, 4):
                 return str(i)
         except Exception:
             pass
