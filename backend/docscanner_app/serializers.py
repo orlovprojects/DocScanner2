@@ -433,6 +433,8 @@ class CustomUserSerializer(serializers.ModelSerializer):
     finvalda_extra_fields    = serializers.JSONField(required=False, allow_null=True)
     centas_extra_fields      = serializers.JSONField(required=False, allow_null=True)
     agnum_extra_fields       = serializers.JSONField(required=False, allow_null=True)
+    debetas_extra_fields       = serializers.JSONField(required=False, allow_null=True)
+    site_pro_extra_fields       = serializers.JSONField(required=False, allow_null=True)
 
     class Meta:
         model = CustomUser
@@ -446,7 +448,7 @@ class CustomUserSerializer(serializers.ModelSerializer):
             'purchase_defaults','sales_defaults','view_mode',
             'extra_settings', 'is_superuser','is_staff', 'lineitem_rules',
             'rivile_erp_extra_fields', 'rivile_gama_extra_fields', 'butent_extra_fields','finvalda_extra_fields',
-            'centas_extra_fields','agnum_extra_fields',
+            'centas_extra_fields','agnum_extra_fields','debetas_extra_fields','site_pro_extra_fields',
         ]
         read_only_fields = ('credits',)
         extra_kwargs = {
@@ -506,6 +508,12 @@ class CustomUserSerializer(serializers.ModelSerializer):
 
     def validate_agnum_extra_fields(self, value):
         return self._validate_extra_dict(value, "agnum_extra_fields")
+    
+    def validate_debetas_extra_fields(self, value):
+        return self._validate_extra_dict(value, "debetas_extra_fields")
+    
+    def validate_site_pro_extra_fields(self, value):
+        return self._validate_extra_dict(value, "site_pro_extra_fields")
 
 
 
@@ -611,6 +619,8 @@ class CustomUserSerializer(serializers.ModelSerializer):
         finvalda_extra = validated_data.pop('finvalda_extra_fields', None)
         centas_extra   = validated_data.pop('centas_extra_fields', None)
         agnum_extra    = validated_data.pop('agnum_extra_fields', None)
+        debetas_extra    = validated_data.pop('debetas_extra_fields', None)
+        site_pro_extra    = validated_data.pop('site_pro_extra_fields', None)
 
         user = CustomUser.objects.create_user(password=password, **validated_data)
         user.credits = 50
@@ -658,12 +668,19 @@ class CustomUserSerializer(serializers.ModelSerializer):
         if agnum_extra is not None:
             user.agnum_extra_fields = agnum_extra
 
+        if debetas_extra is not None:
+            user.debetas_extra_fields = debetas_extra
+
+        if site_pro_extra is not None:
+            user.site_pro_extra_fields = site_pro_extra
+
         user.save(update_fields=[
             'credits','purchase_defaults','sales_defaults',
             'extra_settings','lineitem_rules',
             'rivile_erp_extra_fields', 'rivile_gama_extra_fields',
             'butent_extra_fields','finvalda_extra_fields',
-            'centas_extra_fields','agnum_extra_fields',
+            'centas_extra_fields','agnum_extra_fields', 'debetas_extra_fields',
+            'site_pro_extra_fields',
         ])
         return user
     
@@ -732,6 +749,12 @@ class CustomUserSerializer(serializers.ModelSerializer):
 
         if 'agnum_extra_fields' in validated_data:
             instance.agnum_extra_fields = validated_data.pop('agnum_extra_fields')
+
+        if 'debetas_extra_fields' in validated_data:
+            instance.debetas_extra_fields = validated_data.pop('debetas_extra_fields')
+
+        if 'site_pro_extra_fields' in validated_data:
+            instance.site_pro_extra_fields = validated_data.pop('site_pro_extra_fields')
 
         # 🔹 lineitem_rules — ПОЛНАЯ ЗАМЕНА СПИСКА
         # фронт всегда шлёт текущий список (с нужным правилом удалённым/изменённым)

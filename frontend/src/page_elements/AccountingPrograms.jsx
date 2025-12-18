@@ -12,4 +12,5 @@ export const ACCOUNTING_PROGRAMS = [
   { value: "dineta", label: "Dineta" },
   { value: "optimum", label: "Optimum" },
   { value: "debetas", label: "Debetas" },
+  { value: "site_pro", label: "Site.pro (B1)" }
 ].sort((a, b) => a.label.localeCompare(b.label));

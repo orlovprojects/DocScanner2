@@ -81,6 +81,22 @@ export function AccountingProgramExtraSettings(props) {
     errorCentas,
     onSaveCentas,
 
+    // SitePro
+    siteProFields,
+    setSiteProFields,
+    savingSitePro,
+    successSitePro,
+    errorSitePro,
+    onSaveSitePro,
+
+    // Debetas
+    debetasFields,
+    setDebetasFields,
+    savingDebetas,
+    successDebetas,
+    errorDebetas,
+    onSaveDebetas,
+
     // Agnum
     agnumFields,
     setAgnumFields,
@@ -1103,6 +1119,333 @@ export function AccountingProgramExtraSettings(props) {
           {errorAgnum && (
             <Alert severity="error" sx={{ py: 0.5 }}>
               {errorAgnum}
+            </Alert>
+          )}
+        </Stack>
+      </Paper>
+    );
+  }
+
+
+// ---------- Debetas ----------
+  if (program === "debetas") {
+    return (
+      <Paper sx={{ p: 3, mb: 3 }}>
+        <Typography variant="h6" sx={{ mb: 2, fontWeight: 600 }}>
+          Debetas papildomi laukai
+        </Typography>
+
+        <Typography variant="body2" sx={{ mb: 2, color: "text.secondary" }}>
+          Nurodykite numatytuosius filialo, padalinio, objekto ir atsakingų asmenų laukus pirkimams ir pardavimams.
+        </Typography>
+
+        <Grid2 container spacing={3}>
+          {/* Pirkimas */}
+          <Grid2 size={{ xs: 12, md: 6 }}>
+            <Typography variant="subtitle1" sx={{ mb: 1, fontWeight: 500 }}>
+              Pirkimas
+            </Typography>
+            <Stack spacing={1.5}>
+              <TextField
+                label="Filialas"
+                size="small"
+                value={debetasFields.pirkimas_filialas}
+                onChange={(e) =>
+                  setDebetasFields((prev) => ({
+                    ...prev,
+                    pirkimas_filialas: e.target.value,
+                  }))
+                }
+                fullWidth
+              />
+              <TextField
+                label="Padalinys"
+                size="small"
+                value={debetasFields.pirkimas_padalinys}
+                onChange={(e) =>
+                  setDebetasFields((prev) => ({
+                    ...prev,
+                    pirkimas_padalinys: e.target.value,
+                  }))
+                }
+                fullWidth
+              />
+              <TextField
+                label="Objektas"
+                size="small"
+                value={debetasFields.pirkimas_objektas}
+                onChange={(e) =>
+                  setDebetasFields((prev) => ({
+                    ...prev,
+                    pirkimas_objektas: e.target.value,
+                  }))
+                }
+                fullWidth
+              />
+              <TextField
+                label="Materialiai atsakingas asmuo"
+                size="small"
+                value={debetasFields.pirkimas_materialiai_atsakingas_asmuo}
+                onChange={(e) =>
+                  setDebetasFields((prev) => ({
+                    ...prev,
+                    pirkimas_materialiai_atsakingas_asmuo: e.target.value,
+                  }))
+                }
+                fullWidth
+              />
+              <TextField
+                label="Atskaitingas asmuo"
+                size="small"
+                value={debetasFields.pirkimas_atskaitingas_asmuo}
+                onChange={(e) =>
+                  setDebetasFields((prev) => ({
+                    ...prev,
+                    pirkimas_atskaitingas_asmuo: e.target.value,
+                  }))
+                }
+                fullWidth
+              />
+            </Stack>
+          </Grid2>
+
+          {/* Pardavimas */}
+          <Grid2 size={{ xs: 12, md: 6 }}>
+            <Typography variant="subtitle1" sx={{ mb: 1, fontWeight: 500 }}>
+              Pardavimas
+            </Typography>
+            <Stack spacing={1.5}>
+              <TextField
+                label="Filialas"
+                size="small"
+                value={debetasFields.pardavimas_filialas}
+                onChange={(e) =>
+                  setDebetasFields((prev) => ({
+                    ...prev,
+                    pardavimas_filialas: e.target.value,
+                  }))
+                }
+                fullWidth
+              />
+              <TextField
+                label="Padalinys"
+                size="small"
+                value={debetasFields.pardavimas_padalinys}
+                onChange={(e) =>
+                  setDebetasFields((prev) => ({
+                    ...prev,
+                    pardavimas_padalinys: e.target.value,
+                  }))
+                }
+                fullWidth
+              />
+              <TextField
+                label="Objektas"
+                size="small"
+                value={debetasFields.pardavimas_objektas}
+                onChange={(e) =>
+                  setDebetasFields((prev) => ({
+                    ...prev,
+                    pardavimas_objektas: e.target.value,
+                  }))
+                }
+                fullWidth
+              />
+              <TextField
+                label="Materialiai atsakingas asmuo"
+                size="small"
+                value={debetasFields.pardavimas_materialiai_atsakingas_asmuo}
+                onChange={(e) =>
+                  setDebetasFields((prev) => ({
+                    ...prev,
+                    pardavimas_materialiai_atsakingas_asmuo: e.target.value,
+                  }))
+                }
+                fullWidth
+              />
+              <TextField
+                label="Atskaitingas asmuo"
+                size="small"
+                value={debetasFields.pardavimas_atskaitingas_asmuo}
+                onChange={(e) =>
+                  setDebetasFields((prev) => ({
+                    ...prev,
+                    pardavimas_atskaitingas_asmuo: e.target.value,
+                  }))
+                }
+                fullWidth
+              />
+            </Stack>
+          </Grid2>
+        </Grid2>
+
+        <Stack direction="row" spacing={2} sx={{ mt: 3 }} alignItems="center">
+          <Button
+            variant="contained"
+            onClick={onSaveDebetas}
+            disabled={savingDebetas}
+          >
+            Išsaugoti Debetas laukus
+          </Button>
+          {successDebetas && (
+            <Alert severity="success" sx={{ py: 0.5 }}>
+              Išsaugota!
+            </Alert>
+          )}
+          {errorDebetas && (
+            <Alert severity="error" sx={{ py: 0.5 }}>
+              {errorDebetas}
+            </Alert>
+          )}
+        </Stack>
+      </Paper>
+    );
+  }  
+
+  // ---------- Site.pro ----------
+  if (program === "site_pro") {
+    return (
+      <Paper sx={{ p: 3, mb: 3 }}>
+        <Typography variant="h6" sx={{ mb: 2, fontWeight: 600 }}>
+          Site.pro (B1) papildomi laukai
+        </Typography>
+
+        <Typography variant="body2" sx={{ mb: 2, color: "text.secondary" }}>
+          Nurodykite numatytuosius sandėlio ir objekto laukus pirkimams ir pardavimams.
+        </Typography>
+
+        <Grid2 container spacing={3}>
+          {/* Pirkimas */}
+          <Grid2 size={{ xs: 12, md: 6 }}>
+            <Typography variant="subtitle1" sx={{ mb: 1, fontWeight: 500 }}>
+              Pirkimas
+            </Typography>
+            <Stack spacing={1.5}>
+              <TextField
+                label="Prekės grupė"
+                size="small"
+                value={siteProFields.pirkimas_prekes_grupe}
+                onChange={(e) =>
+                  setSiteProFields((prev) => ({
+                    ...prev,
+                    pirkimas_prekes_grupe: e.target.value,
+                  }))
+                }
+                fullWidth
+              />
+              <TextField
+                label="Sandėlis"
+                size="small"
+                value={siteProFields.pirkimas_sandelis}
+                onChange={(e) =>
+                  setSiteProFields((prev) => ({
+                    ...prev,
+                    pirkimas_sandelis: e.target.value,
+                  }))
+                }
+                fullWidth
+              />
+              <TextField
+                label="Darbuotojas"
+                size="small"
+                value={siteProFields.pirkimas_darbuotojas}
+                onChange={(e) =>
+                  setSiteProFields((prev) => ({
+                    ...prev,
+                    pirkimas_darbuotojas: e.target.value,
+                  }))
+                }
+                fullWidth
+              />
+              <TextField
+                label="Kaštų centras"
+                size="small"
+                value={siteProFields.pirkimas_kastu_centras}
+                onChange={(e) =>
+                  setSiteProFields((prev) => ({
+                    ...prev,
+                    pirkimas_kastu_centras: e.target.value,
+                  }))
+                }
+                fullWidth
+              />
+            </Stack>
+          </Grid2>
+
+          {/* Pardavimas */}
+          <Grid2 size={{ xs: 12, md: 6 }}>
+            <Typography variant="subtitle1" sx={{ mb: 1, fontWeight: 500 }}>
+              Pardavimas
+            </Typography>
+            <Stack spacing={1.5}>
+              <TextField
+                label="Prekės grupė"
+                size="small"
+                value={siteProFields.pardavimas_prekes_grupe}
+                onChange={(e) =>
+                  setSiteProFields((prev) => ({
+                    ...prev,
+                    pardavimas_prekes_grupe: e.target.value,
+                  }))
+                }
+                fullWidth
+              />
+              <TextField
+                label="Sandėlis"
+                size="small"
+                value={siteProFields.pardavimas_sandelis}
+                onChange={(e) =>
+                  setSiteProFields((prev) => ({
+                    ...prev,
+                    pardavimas_sandelis: e.target.value,
+                  }))
+                }
+                fullWidth
+              />
+              <TextField
+                label="Darbuotojas"
+                size="small"
+                value={siteProFields.pardavimas_darbuotojas}
+                onChange={(e) =>
+                  setSiteProFields((prev) => ({
+                    ...prev,
+                    pardavimas_darbuotojas: e.target.value,
+                  }))
+                }
+                fullWidth
+              />
+              <TextField
+                label="Kaštų centras"
+                size="small"
+                value={siteProFields.pardavimas_kastu_centras}
+                onChange={(e) =>
+                  setSiteProFields((prev) => ({
+                    ...prev,
+                    pardavimas_kastu_centras: e.target.value,
+                  }))
+                }
+                fullWidth
+              />
+            </Stack>
+          </Grid2>
+        </Grid2>
+
+        <Stack direction="row" spacing={2} sx={{ mt: 3 }} alignItems="center">
+          <Button
+            variant="contained"
+            onClick={onSaveSitePro}
+            disabled={savingSitePro}
+          >
+            Išsaugoti Site.pro (B1) laukus
+          </Button>
+          {successSitePro && (
+            <Alert severity="success" sx={{ py: 0.5 }}>
+              Išsaugota!
+            </Alert>
+          )}
+          {errorSitePro && (
+            <Alert severity="error" sx={{ py: 0.5 }}>
+              {errorSitePro}
             </Alert>
           )}
         </Stack>

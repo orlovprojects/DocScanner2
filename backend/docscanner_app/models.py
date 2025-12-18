@@ -341,6 +341,8 @@ ACCOUNTING_PROGRAM_CHOICES = [
     ('butent', 'Būtent'),
     ('dineta', 'Dineta'),
     ('optimum', 'Optimum'),
+    ('debetas', 'Debetas'),
+    ('site_pro', 'Site.Pro (B1)'),
     # добавь нужные программы
 ]
 
@@ -399,6 +401,8 @@ class CustomUser(AbstractUser):
     finvalda_extra_fields    = models.JSONField(default=dict, blank=True)
     centas_extra_fields      = models.JSONField(default=dict, blank=True)
     agnum_extra_fields       = models.JSONField(default=dict, blank=True)
+    debetas_extra_fields       = models.JSONField(default=dict, blank=True)
+    site_pro_extra_fields       = models.JSONField(default=dict, blank=True)
 
     # --- NEW: UI režimas dokumentų sąrašui ---
     view_mode = models.CharField(

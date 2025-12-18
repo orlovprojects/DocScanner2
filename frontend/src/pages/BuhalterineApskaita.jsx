@@ -985,6 +985,8 @@ const BuhalterinenApskaita = () => {
             { label: 'Pragma 3.2 (.txt)', hasLink: false },
             { label: 'Pragma 4 (.xml)', hasLink: false },
             { label: 'Būtent (.xlsx)', hasLink: false },
+            { label: 'Site.pro (B1) (.xlsx)', hasLink: false },
+            { label: 'Debetas (.csv)', hasLink: false },
             { label: 'Excel (.xlsx)', hasLink: false },
           ].map((item, idx) => (
             <Box key={idx} sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>

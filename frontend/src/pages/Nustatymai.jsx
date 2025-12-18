@@ -591,6 +591,38 @@ export default function NustatymaiPage() {
   const [successCentas, setSuccessCentas] = useState(false);
   const [errorCentas, setErrorCentas] = useState("");
 
+  // --- Site.pro ---
+  const [siteProFields, setSiteProFields] = useState({
+    pirkimas_prekes_grupe: "",
+    pirkimas_sandelis: "",
+    pirkimas_darbuotojas: "",
+    pirkimas_kastu_centras: "",
+    pardavimas_prekes_grupe: "",
+    pardavimas_sandelis: "",
+    pardavimas_darbuotojas: "",
+    pardavimas_kastu_centras: "",
+  });
+  const [savingSitePro, setSavingSitePro] = useState(false);
+  const [successSitePro, setSuccessSitePro] = useState(false);
+  const [errorSitePro, setErrorSitePro] = useState("");
+
+  // --- Debetas ---
+  const [debetasFields, setDebetasFields] = useState({
+    pirkimas_filialas: "",
+    pirkimas_padalinys: "",
+    pirkimas_objektas: "",
+    pirkimas_materialiai_atsakingas_asmuo: "",
+    pirkimas_atskaitingas_asmuo: "",
+    pardavimas_filialas: "",
+    pardavimas_padalinys: "",
+    pardavimas_objektas: "",
+    pardavimas_materialiai_atsakingas_asmuo: "",
+    pardavimas_atskaitingas_asmuo: "",
+  });
+  const [savingDebetas, setSavingDebetas] = useState(false);
+  const [successDebetas, setSuccessDebetas] = useState(false);
+  const [errorDebetas, setErrorDebetas] = useState("");
+
   // --- Agnum ---
   const [agnumFields, setAgnumFields] = useState({
     pirkimas_sandelis: "",
@@ -737,6 +769,32 @@ export default function NustatymaiPage() {
         pirkimas_kastu_centras: cent.pirkimas_kastu_centras || "",
         pardavimas_sandelis: cent.pardavimas_sandelis || "",
         pardavimas_kastu_centras: cent.pardavimas_kastu_centras || "",
+      });
+
+      const debetas = data.debetas_extra_fields || {};
+      setDebetasFields({
+        pirkimas_filialas: debetas.pirkimas_filialas || "",
+        pirkimas_padalinys: debetas.pirkimas_padalinys || "",
+        pirkimas_objektas: debetas.pirkimas_objektas || "",
+        pirkimas_materialiai_atsakingas_asmuo: debetas.pirkimas_materialiai_atsakingas_asmuo || "",
+        pirkimas_atskaitingas_asmuo: debetas.pirkimas_atskaitingas_asmuo || "",
+        pardavimas_filialas: debetas.pardavimas_filialas || "",
+        pardavimas_padalinys: debetas.pardavimas_padalinys || "",
+        pardavimas_objektas: debetas.pardavimas_objektas || "",
+        pardavimas_materialiai_atsakingas_asmuo: debetas.pardavimas_materialiai_atsakingas_asmuo || "",
+        pardavimas_atskaitingas_asmuo: debetas.pardavimas_atskaitingas_asmuo || "",
+      });
+
+      const sitePro = data.site_pro_extra_fields || {};
+      setSiteProFields({
+        pirkimas_prekes_grupe: sitePro.pirkimas_prekes_grupe || "",
+        pirkimas_sandelis: sitePro.pirkimas_sandelis || "",
+        pirkimas_darbuotojas: sitePro.pirkimas_darbuotojas || "",
+        pirkimas_kastu_centras: sitePro.pirkimas_kastu_centras || "",
+        pardavimas_prekes_grupe: sitePro.pardavimas_prekes_grupe || "",
+        pardavimas_sandelis: sitePro.pardavimas_sandelis || "",
+        pardavimas_darbuotojas: sitePro.pardavimas_darbuotojas || "",
+        pardavimas_kastu_centras: sitePro.pardavimas_kastu_centras || "",
       });
 
       const agn = data.agnum_extra_fields || {};
@@ -1179,6 +1237,73 @@ export default function NustatymaiPage() {
       setSavingCentas(false);
     }
   };
+
+
+  const saveDebetasFields = async () => {
+      setSavingDebetas(true);
+      setErrorDebetas("");
+      setSuccessDebetas(false);
+
+      try {
+        await api.patch(
+          "/profile/",
+          { debetas_extra_fields: debetasFields },
+          { withCredentials: true }
+        );
+        setSuccessDebetas(true);
+        setTimeout(() => setSuccessDebetas(false), 2000);
+      } catch (e) {
+        const data = e?.response?.data;
+        let msg =
+          data?.debetas_extra_fields ||
+          data?.detail ||
+          "Nepavyko išsaugoti Debetas nustatymų.";
+        if (typeof msg === "object") {
+          try {
+            msg = JSON.stringify(msg);
+          } catch {
+            msg = "Nepavyko išsaugoti Debetas nustatymų.";
+          }
+        }
+        setErrorDebetas(msg);
+      } finally {
+        setSavingDebetas(false);
+      }
+    };
+
+
+  const saveSiteProFields = async () => {
+    setSavingSitePro(true);
+    setErrorSitePro("");
+    setSuccessSitePro(false);
+
+    try {
+      await api.patch(
+        "/profile/",
+        { site_pro_extra_fields: siteProFields },
+        { withCredentials: true }
+      );
+      setSuccessSitePro(true);
+      setTimeout(() => setSuccessSitePro(false), 2000);
+    } catch (e) {
+      const data = e?.response?.data;
+      let msg =
+        data?.site_pro_extra_fields ||
+        data?.detail ||
+        "Nepavyko išsaugoti Site.pro nustatymų.";
+      if (typeof msg === "object") {
+        try {
+          msg = JSON.stringify(msg);
+        } catch {
+          msg = "Nepavyko išsaugoti Site.pro nustatymų.";
+        }
+      }
+      setErrorSitePro(msg);
+    } finally {
+      setSavingSitePro(false);
+    }
+  };
+
 
   const saveAgnumFields = async () => {
     setSavingAgnum(true);
@@ -1795,6 +1920,20 @@ export default function NustatymaiPage() {
         successCentas={successCentas}
         errorCentas={errorCentas}
         onSaveCentas={saveCentasFields}
+        // Debetas
+        debetasFields={debetasFields}
+        setDebetasFields={setDebetasFields}
+        savingDebetas={savingDebetas}
+        successDebetas={successDebetas}
+        errorDebetas={errorDebetas}
+        onSaveDebetas={saveDebetasFields}
+        // SitePro
+        siteProFields={siteProFields}
+        setSiteProFields={setSiteProFields}
+        savingSitePro={savingSitePro}
+        successSitePro={successSitePro}
+        errorSitePro={errorSitePro}
+        onSaveSitePro={saveSiteProFields}
         // Agnum
         agnumFields={agnumFields}
         setAgnumFields={setAgnumFields}
