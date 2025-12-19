@@ -256,7 +256,7 @@ const Dokskenas = () => {
   useScrollToHash();
 
   // единый источник для видео и его названия
-  const YT_EMBED_URL = "https://www.youtube.com/embed/falGn4_S_5Y?si=LFmb3RYZCG59JKF8";
+  const YT_EMBED_URL = "https://www.youtube.com/embed/ByViuilYxZA";
   const VIDEO_TITLE = "DokSkenas demo";
 
   // отправка события ViewContent (один раз за сессию открытия)

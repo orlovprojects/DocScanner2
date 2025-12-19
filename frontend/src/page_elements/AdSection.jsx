@@ -25,7 +25,7 @@ function getYoutubeId(url) {
  */
 export default function AdSection({
   onOpenVideo,
-  videoUrl = "https://www.youtube.com/embed/falGn4_S_5Y?si=LFmb3RYZCG59JKF8",
+  videoUrl = "https://www.youtube.com/embed/ByViuilYxZA",
   videoTitle = "DokSkenas demo",
   onLearnMoreClick,
 }) {

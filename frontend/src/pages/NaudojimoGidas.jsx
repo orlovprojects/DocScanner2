@@ -192,7 +192,7 @@ export default function NaudojimoGidas() {
               lineHeight: 1.7,
             }}
           >
-            Viską, ko reikia žinoti apie efektyvų darbą su DokSkeną – paprastai ir aiškiai
+            Viskas, ko reikia žinoti apie efektyvų darbą su DokSkeną – paprastai ir aiškiai
           </Typography>
         </Box>
 
@@ -317,7 +317,7 @@ export default function NaudojimoGidas() {
         )}
 
         {/* Video */}
-        <Box sx={{ mb: { xs: 6, md: 9 } }}>
+        <Box sx={{ mb: { xs: 10, md: 15 } }}>
           <Typography
             variant="h2"
             textAlign="center"
@@ -325,7 +325,7 @@ export default function NaudojimoGidas() {
             fontSize={36}
             sx={{ mb: 3 }}
           >
-            Kaip pradėti su DokSkenu?
+            Kaip pradėti skaitmenizuoti su DokSkenu?
           </Typography>
           <Typography
             variant="body1"
@@ -350,7 +350,54 @@ export default function NaudojimoGidas() {
           >
             <Box
               component="iframe"
-              src="https://www.youtube.com/embed/falGn4_S_5Y"
+              src="https://www.youtube.com/embed/ByViuilYxZA"
+              title="DocScanner Intro"
+              allowFullScreen
+              sx={{
+                position: "absolute",
+                inset: 0,
+                width: "100%",
+                height: "100%",
+                border: 0,
+              }}
+            />
+          </Box>
+        </Box>
+
+        <Box sx={{ mb: { xs: 6, md: 9 } }}>
+          <Typography
+            variant="h3"
+            textAlign="center"
+            fontWeight={600}
+            fontSize={36}
+            sx={{ mb: 3 }}
+          >
+            Kaip automatiškai priskirti prekes/paslaugas/kodus iš savo apskaitos programos?
+          </Typography>
+          <Typography
+            variant="body1"
+            color="text.secondary"
+            align="center"
+            sx={{ mb: 4, maxWidth: 660, mx: "auto", lineHeight: 1.7 }}
+          >
+            Jei nenorite, kad būtų kuriamos naujos prekių/paslaugų/kodų kortelės skaitmenizuotiems dokumentams, galite nusistatyti, kad DokSkenas priskirtų korteles iš jūsų apskaitos programos.
+          </Typography>
+
+          <Box
+            sx={{
+              position: "relative",
+              width: "100%",
+              maxWidth: 860,
+              mx: "auto",
+              aspectRatio: "16/9",
+              borderRadius: 3,
+              overflow: "hidden",
+              backgroundColor: "#000",
+            }}
+          >
+            <Box
+              component="iframe"
+              src="https://www.youtube.com/embed/MftJl0_4jOE"
               title="DocScanner Intro"
               allowFullScreen
               sx={{

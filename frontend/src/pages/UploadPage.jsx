@@ -47,7 +47,7 @@ const EXPORT_TUTORIALS = {
 };
 
 // Onboarding video URL
-const ONBOARDING_VIDEO_URL = "https://www.youtube.com/embed/falGn4_S_5Y";
+const ONBOARDING_VIDEO_URL = "https://www.youtube.com/embed/ByViuilYxZA";
 
 // стабильный ключ контрагента
 const companyKey = (name, vat, id) => {

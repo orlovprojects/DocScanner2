@@ -182,7 +182,7 @@ const GpmSkaiciuokle = () => {
         <Box sx={{ mt: 4, mb: 5 }}>
           <AdSection
             onOpenVideo={() => setVideoOpen(true)}
-            videoUrl="https://www.youtube.com/embed/falGn4_S_5Y?si=LFmb3RYZCG59JKF8"
+            videoUrl="https://www.youtube.com/embed/ByViuilYxZA"
             videoTitle="DokSkenas demo"
             onLearnMoreClick={() => {}}
           />
@@ -459,7 +459,7 @@ const GpmSkaiciuokle = () => {
         <DialogContent sx={{ p: 0 }}>
           <Box
             component="iframe"
-            src="https://www.youtube.com/embed/falGn4_S_5Y?si=LFmb3RYZCG59JKF8"
+            src="https://www.youtube.com/embed/ByViuilYxZA"
             title="Demo Video"
             width="100%"
             height="600px"

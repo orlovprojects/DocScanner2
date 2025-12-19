@@ -166,7 +166,7 @@ const BuhalterinenApskaita = () => {
   const [docCount, setDocCount] = useState(200);
   useScrollToHash();
 
-  const YT_EMBED_URL = "https://www.youtube.com/embed/falGn4_S_5Y?si=LFmb3RYZCG59JKF8";
+  const YT_EMBED_URL = "https://www.youtube.com/embed/ByViuilYxZA";
   const VIDEO_TITLE = "DokSkenas demo";
 
   const sendViewContent = () => {

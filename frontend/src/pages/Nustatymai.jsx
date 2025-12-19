@@ -1658,7 +1658,7 @@ export default function NustatymaiPage() {
         </Typography>
         <Stack spacing={2} direction="column">
           <TextField
-            label="Įmonės pavadinimas *"
+            label="Įmonės pavadinimas"
             value={companyName}
             onChange={(e) => setCompanyName(e.target.value)}
             onBlur={() => setCompanyNameTouched(true)}
@@ -1668,7 +1668,7 @@ export default function NustatymaiPage() {
             helperText={companyNameTouched && !companyName.trim() ? "Privalomas laukas" : ""}
           />
           <TextField
-            label="Įmonės kodas *"
+            label="Įmonės kodas"
             value={companyCode}
             onChange={(e) => setCompanyCode(e.target.value)}
             onBlur={() => setCompanyNameTouched(true)}

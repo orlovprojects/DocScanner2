@@ -208,7 +208,7 @@ const AtlyginimoSkaiciuokle2025 = () => {
           <Box sx={{ display: { xs: 'block', md: 'none' } }}>
             <AdSection
               onOpenVideo={() => setVideoOpen(true)}
-              videoUrl="https://www.youtube.com/embed/falGn4_S_5Y?si=LFmb3RYZCG59JKF8"
+              videoUrl="https://www.youtube.com/embed/ByViuilYxZA"
               videoTitle="DokSkenas demo"
               onLearnMoreClick={handleLearnMoreClick}
             />
@@ -268,7 +268,7 @@ const AtlyginimoSkaiciuokle2025 = () => {
         <Box sx={{ display: { xs: 'none', md: 'block' } }}>
           <AdSection
             onOpenVideo={() => setVideoOpen(true)}
-            videoUrl="https://www.youtube.com/embed/falGn4_S_5Y?si=LFmb3RYZCG59JKF8"
+            videoUrl="https://www.youtube.com/embed/ByViuilYxZA"
             videoTitle="DokSkenas demo"
             onLearnMoreClick={handleLearnMoreClick}
           />
@@ -335,7 +335,7 @@ const AtlyginimoSkaiciuokle2025 = () => {
         <DialogContent sx={{ p: 0 }}>
           <Box
             component="iframe"
-            src="https://www.youtube.com/embed/falGn4_S_5Y?si=LFmb3RYZCG59JKF8"
+            src="https://www.youtube.com/embed/ByViuilYxZA"
             title="Demo Video"
             width="100%"
             height="600px"
