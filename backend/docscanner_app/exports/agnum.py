@@ -4,7 +4,7 @@ from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from datetime import date
 
 from django.utils.encoding import smart_str
-from .formatters import format_date_agnum, expand_empty_tags
+from .formatters import format_date_agnum, expand_empty_tags, COUNTRY_NAME_LT
 from ..models import CurrencyRate
 
 
@@ -86,6 +86,11 @@ def _agnum_empty_bool():
 def _agnum_pozymiai_100():
     return "0" * 100
 
+def country_name_lt(iso2: str) -> str:
+    code = (iso2 or "").strip().upper()
+    if not code:
+        return ""
+    return COUNTRY_NAME_LT.get(code, "")
 
 def _indent(elem, level=0):
     i = "\n" + "  " * level
@@ -320,6 +325,8 @@ def _build_agnum_customer_from_doc(doc) -> tuple[str, dict]:
     adr = _s(getattr(doc, "seller_address", ""))
     email = _s(getattr(doc, "seller_email", ""))
     country = _s(getattr(doc, "seller_country_iso", "")).upper()
+    country_name = country_name_lt(country)
+    seller_iban = _s(getattr(doc, "seller_iban", ""))
     rkod = _s(getattr(doc, "seller_id", "")) or _s(getattr(doc, "seller_vat_code", ""))
     pvmkod = _s(getattr(doc, "seller_vat_code", ""))
     currency = _s(getattr(doc, "currency", "EUR")).upper() or "EUR"
@@ -335,7 +342,7 @@ def _build_agnum_customer_from_doc(doc) -> tuple[str, dict]:
         "PVMKOD": pvmkod,
         "BKOD": _agnum_empty_varchar(),
         "BPAVAD": _agnum_empty_varchar(),
-        "BSASK": _agnum_empty_varchar(),
+        "BSASK": seller_iban or _agnum_empty_varchar(),
         "F1": _agnum_empty_varchar(),
         "F2": _agnum_empty_varchar(),
         "F3": _agnum_empty_varchar(),
@@ -355,7 +362,7 @@ def _build_agnum_customer_from_doc(doc) -> tuple[str, dict]:
         "ACC11": _agnum_empty_varchar(),
         "ACC12": _agnum_empty_varchar(),
         "SALIS_KOD": country or _agnum_empty_varchar(),
-        "SALIS": _agnum_empty_varchar(),
+        "SALIS": country_name or _agnum_empty_varchar(),
         "MIESTAS": _agnum_empty_varchar(),
         "GATVE": _agnum_empty_varchar(),
         "EMAIL": email,
@@ -568,7 +575,7 @@ def export_pirkimai_group_to_agnum(documents, user):
 
     customers_by_kod = {}
     goods_by_kod = {}
-    barcodes_set = set()
+    barcodes_qty = {}  # (kod, bkod) -> Decimal/float
     docs_data = []
 
     for doc in (documents or []):
@@ -595,7 +602,8 @@ def export_pirkimai_group_to_agnum(documents, user):
             fake_item = type("FakeItem", (), {})()
             setattr(fake_item, "prekes_kodas",
                     _s(getattr(doc, "prekes_kodas", "")) or "PREKE001")
-            setattr(fake_item, "prekes_barkodas", "")
+            setattr(fake_item, "prekes_barkodas",
+                _s(getattr(doc, "prekes_barkodas", "")))
             setattr(fake_item, "prekes_pavadinimas",
                     _s(getattr(doc, "prekes_pavadinimas", "")) or "Prekė")
             setattr(fake_item, "preke_paslauga", getattr(doc, "preke_paslauga", None))
@@ -618,15 +626,17 @@ def export_pirkimai_group_to_agnum(documents, user):
             if g_kod not in goods_by_kod:
                 goods_by_kod[g_kod] = g_attrs
 
-            barkodas = _s(getattr(item, "prekes_barkodas", ""))
+            barkodas = _s(getattr(item, "prekes_barkodas", "")) or _s(getattr(doc, "prekes_barkodas", ""))
             if barkodas:
-                key = (g_kod, barkodas, "1")
-                if key not in barcodes_set:
-                    barcodes_set.add(key)
+                qty = getattr(item, "quantity", None)
+                qtyD = _safe_D(qty if qty is not None else 1)
+                if qtyD <= 0:
+                    qtyD = Decimal("1")
+                barcodes_qty[(g_kod, barkodas)] = barcodes_qty.get((g_kod, barkodas), Decimal("0")) + qtyD
 
         # 4) документ (Documents/Item Type=2)
         currency = _s(getattr(doc, "currency", "EUR")).upper() or "EUR"
-        op_date = getattr(doc, "operation_date", None) or getattr(doc, "invoice_date", None)
+        op_date = getattr(doc, "operation_date", None) or getattr(doc, "invoice_date", None) or date.today()
         rate = get_currency_rate(currency, op_date) if currency != "EUR" else 1
 
         series = smart_str(getattr(doc, "document_series", "") or "")
@@ -650,7 +660,7 @@ def export_pirkimai_group_to_agnum(documents, user):
             "DATA": format_date_agnum(getattr(doc, "invoice_date", None)) or _agnum_empty_date(),
             "DATA_G": format_date_agnum(op_date) or _agnum_empty_date(),
             "DOKNR": doknr,
-            "DOKNR2": number,
+            "DOKNR2": _agnum_empty_varchar(),
             "KL_KOD": cust_kod,
             "KL_RKOD": cust_attrs.get("RKOD", _agnum_empty_varchar()),
             "SND_KOD": snd_kod,  # ← ИЗМЕНЕНО
@@ -738,13 +748,16 @@ def export_pirkimai_group_to_agnum(documents, user):
             ET.SubElement(item_el, "Row", r)
 
     barcodes_el = ET.SubElement(agnum, "Barcodes", {
-        "Count": str(len(barcodes_set)),
+        "Count": str(len(barcodes_qty)),
     })
-    for (kod, bkod, kiekis) in barcodes_set:
+    for (kod, bkod), kiekis in barcodes_qty.items():
+        # KIEKIS по гайду NUMERIC(12,2) -> делаем 2 знака и точку/запятую как нужно.
+        # Я бы оставил точку или использовал твой форматтер если AGNUM хочет запятую.
+        kiekis_str = _format_decimal_agnum(kiekis, precision=2)  # например "3,00"
         ET.SubElement(barcodes_el, "Item", {
             "KOD": kod,
             "BKOD": bkod,
-            "KIEKIS": kiekis,
+            "KIEKIS": kiekis_str,
         })
 
     _indent(agnum)
@@ -775,6 +788,8 @@ def _build_agnum_customer_from_buyer(doc) -> tuple[str, dict]:
     adr = _s(getattr(doc, "buyer_address", ""))
     email = _s(getattr(doc, "buyer_email", ""))
     country = _s(getattr(doc, "buyer_country_iso", "")).upper()
+    country_name = country_name_lt(country)
+    buyer_iban = _s(getattr(doc, "buyer_iban", ""))
     rkod = _s(getattr(doc, "buyer_id", "")) or _s(getattr(doc, "buyer_vat_code", ""))
     pvmkod = _s(getattr(doc, "buyer_vat_code", ""))
     currency = _s(getattr(doc, "currency", "EUR")).upper() or "EUR"
@@ -790,7 +805,7 @@ def _build_agnum_customer_from_buyer(doc) -> tuple[str, dict]:
         "PVMKOD": pvmkod,
         "BKOD": _agnum_empty_varchar(),
         "BPAVAD": _agnum_empty_varchar(),
-        "BSASK": _agnum_empty_varchar(),
+        "BSASK": buyer_iban or _agnum_empty_varchar(),
         "F1": _agnum_empty_varchar(),
         "F2": _agnum_empty_varchar(),
         "F3": _agnum_empty_varchar(),
@@ -810,7 +825,7 @@ def _build_agnum_customer_from_buyer(doc) -> tuple[str, dict]:
         "ACC11": _agnum_empty_varchar(),
         "ACC12": _agnum_empty_varchar(),
         "SALIS_KOD": country or _agnum_empty_varchar(),
-        "SALIS": _agnum_empty_varchar(),
+        "SALIS": country_name or _agnum_empty_varchar(),
         "MIESTAS": _agnum_empty_varchar(),
         "GATVE": _agnum_empty_varchar(),
         "EMAIL": email,
@@ -918,22 +933,27 @@ def _build_agnum_rows_for_pardavimas(doc, line_items, discount_pct=None, user_de
 
 
 def _get_agnum_default_account(user):
-    """Возвращает attrs для одного Accounts/Item."""
+    """Возвращает attrs для одного Accounts/Item (pardavimai)."""
     es = getattr(user, "extra_settings", {}) or {}
-    sask = _s(es.get("agnum_saskaita", "")) or "LT000000000000000000"
-    bank_kod = _s(es.get("agnum_bank_code", "")) or "00000"
-    bank_name = _s(es.get("agnum_bank_name", "")) or "BANKAS"
-    adr = _s(es.get("agnum_bank_address", "")) or ""
-    tlf = _s(es.get("agnum_bank_phone", "")) or ""
-    swift = _s(es.get("agnum_bank_swift", "")) or ""
+    seller_iban = _s(es.get("seller_iban", ""))  # ключ можешь поменять под свою модель
+
+    if seller_iban:
+        return {
+            "SASK": seller_iban,
+            "KOD": "",
+            "PAVAD": "",
+            "ADR": "",
+            "TLF": "",
+            "SWIFT": "",
+        }
 
     return {
-        "SASK": sask,
-        "KOD": bank_kod,
-        "PAVAD": bank_name,
-        "ADR": adr,
-        "TLF": tlf,
-        "SWIFT": swift,
+        "SASK": "LT000000000000000000",
+        "KOD": "00000",
+        "PAVAD": "BANKAS",
+        "ADR": "",
+        "TLF": "",
+        "SWIFT": "",
     }
 
 
@@ -961,7 +981,7 @@ def export_pardavimai_group_to_agnum(documents, user):
 
     customers_by_kod = {}
     goods_by_kod = {}
-    barcodes_set = set()
+    barcodes_qty = {}  # (kod, bkod) -> Decimal/float
     docs_data = []
 
     account_attrs = _get_agnum_default_account(user)
@@ -999,7 +1019,8 @@ def export_pardavimai_group_to_agnum(documents, user):
             fake_item = type("FakeItem", (), {})()
             setattr(fake_item, "prekes_kodas",
                     _s(getattr(doc, "prekes_kodas", "")) or "PREKE002")
-            setattr(fake_item, "prekes_barkodas", "")
+            setattr(fake_item, "prekes_barkodas",
+                _s(getattr(doc, "prekes_barkodas", "")))
             setattr(fake_item, "prekes_pavadinimas",
                     _s(getattr(doc, "prekes_pavadinimas", "")) or "Prekė")
             setattr(fake_item, "preke_paslauga", getattr(doc, "preke_paslauga", None))
@@ -1026,15 +1047,17 @@ def export_pardavimai_group_to_agnum(documents, user):
             if g_kod not in goods_by_kod:
                 goods_by_kod[g_kod] = g_attrs
 
-            barkodas = _s(getattr(item, "prekes_barkodas", ""))
+            barkodas = _s(getattr(item, "prekes_barkodas", "")) or _s(getattr(doc, "prekes_barkodas", ""))
             if barkodas:
-                key = (g_kod, barkodas, "1")
-                if key not in barcodes_set:
-                    barcodes_set.add(key)
+                qty = getattr(item, "quantity", None)
+                qtyD = _safe_D(qty if qty is not None else 1)
+                if qtyD <= 0:
+                    qtyD = Decimal("1")
+                barcodes_qty[(g_kod, barkodas)] = barcodes_qty.get((g_kod, barkodas), Decimal("0")) + qtyD
 
         # 4) документ (Documents/Item Type=4)
         currency = _s(getattr(doc, "currency", "EUR")).upper() or "EUR"
-        op_date = getattr(doc, "operation_date", None) or getattr(doc, "invoice_date", None)
+        op_date = getattr(doc, "operation_date", None) or getattr(doc, "invoice_date", None) or date.today()
         rate = get_currency_rate(currency, op_date) if currency != "EUR" else 1
 
         series = smart_str(getattr(doc, "document_series", "") or "")
@@ -1061,7 +1084,7 @@ def export_pardavimai_group_to_agnum(documents, user):
         doc_attrs = {
             "DATA": format_date_agnum(getattr(doc, "invoice_date", None)) or _agnum_empty_date(),
             "DOKNR": doknr,
-            "DOKNR2": number,
+            "DOKNR2": _agnum_empty_varchar(),
             "GVNR": _s(getattr(doc, "transport_document_number", "")),
             "KL_KOD": cust_kod,
             "KL_RKOD": cust_attrs.get("RKOD", _agnum_empty_varchar()),
@@ -1155,13 +1178,16 @@ def export_pardavimai_group_to_agnum(documents, user):
             ET.SubElement(item_el, "Row", r)
 
     barcodes_el = ET.SubElement(agnum, "Barcodes", {
-        "Count": str(len(barcodes_set)),
+        "Count": str(len(barcodes_qty)),
     })
-    for (kod, bkod, kiekis) in barcodes_set:
+    for (kod, bkod), kiekis in barcodes_qty.items():
+        # KIEKIS по гайду NUMERIC(12,2) -> делаем 2 знака и точку/запятую как нужно.
+        # Я бы оставил точку или использовал твой форматтер если AGNUM хочет запятую.
+        kiekis_str = _format_decimal_agnum(kiekis, precision=2)  # например "3,00"
         ET.SubElement(barcodes_el, "Item", {
             "KOD": kod,
             "BKOD": bkod,
-            "KIEKIS": kiekis,
+            "KIEKIS": kiekis_str,
         })
 
     _indent(agnum)

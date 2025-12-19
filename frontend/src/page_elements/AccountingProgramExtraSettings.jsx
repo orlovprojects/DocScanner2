@@ -1019,19 +1019,7 @@ export function AccountingProgramExtraSettings(props) {
             </Typography>
             <Stack spacing={1.5}>
               <TextField
-                label="Sandėlis"
-                size="small"
-                value={agnumFields.pirkimas_sandelis}
-                onChange={(e) =>
-                  setAgnumFields((prev) => ({
-                    ...prev,
-                    pirkimas_sandelis: e.target.value,
-                  }))
-                }
-                fullWidth
-              />
-              <TextField
-                label="Grupė"
+                label="Prekės grupė"
                 size="small"
                 value={agnumFields.pirkimas_grupe}
                 onChange={(e) =>
@@ -1043,7 +1031,19 @@ export function AccountingProgramExtraSettings(props) {
                 fullWidth
               />
               <TextField
-                label="Objektas"
+                label="Sandėlio kodas"
+                size="small"
+                value={agnumFields.pirkimas_sandelis}
+                onChange={(e) =>
+                  setAgnumFields((prev) => ({
+                    ...prev,
+                    pirkimas_sandelis: e.target.value,
+                  }))
+                }
+                fullWidth
+              />
+              <TextField
+                label="Objekto kodas"
                 size="small"
                 value={agnumFields.pirkimas_objektas}
                 onChange={(e) =>
@@ -1064,19 +1064,7 @@ export function AccountingProgramExtraSettings(props) {
             </Typography>
             <Stack spacing={1.5}>
               <TextField
-                label="Sandėlis"
-                size="small"
-                value={agnumFields.pardavimas_sandelis}
-                onChange={(e) =>
-                  setAgnumFields((prev) => ({
-                    ...prev,
-                    pardavimas_sandelis: e.target.value,
-                  }))
-                }
-                fullWidth
-              />
-              <TextField
-                label="Grupė"
+                label="Prekės grupė"
                 size="small"
                 value={agnumFields.pardavimas_grupe}
                 onChange={(e) =>
@@ -1088,7 +1076,19 @@ export function AccountingProgramExtraSettings(props) {
                 fullWidth
               />
               <TextField
-                label="Objektas"
+                label="Sandėlio kodas"
+                size="small"
+                value={agnumFields.pardavimas_sandelis}
+                onChange={(e) =>
+                  setAgnumFields((prev) => ({
+                    ...prev,
+                    pardavimas_sandelis: e.target.value,
+                  }))
+                }
+                fullWidth
+              />
+              <TextField
+                label="Objekto kodas"
                 size="small"
                 value={agnumFields.pardavimas_objektas}
                 onChange={(e) =>
