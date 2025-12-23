@@ -582,27 +582,25 @@ def _export_documents(documents, doc_type_filter, user, company_id_map):
 # =========================
 
 def _export_document_items(documents, doc_type_filter, user, product_id_map):
-    """
-    Экспорт товарных позиций документов в формат Pragma 3.2.
-    """
     lines = []
-    
+
     pragma3_fields = {}
     if user:
         pragma3_fields = getattr(user, 'pragma3_extra_fields', None) or {}
-    
-    if doc_type == 1:
+
+    # ✅ doc_type_filter определён (1=pirkimai, 2=pardavimai)
+    if doc_type_filter == 1:
         project_code = _s(pragma3_fields.get('pirkimas_projektas', ''))
     else:
         project_code = _s(pragma3_fields.get('pardavimas_projektas', ''))
-    
+
     for doc in documents or []:
         doc_id = getattr(doc, 'id', None)
         if not doc_id:
             continue
-        
+
         doc_type = _detect_document_type(doc)
-        
+
         if doc_type_filter and doc_type != doc_type_filter:
             continue
         
