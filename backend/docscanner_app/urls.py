@@ -29,6 +29,7 @@ from .views import (
     admin_users_simple,
     contact_form,
     DinetaSettingsView,
+    OptimumSettingsView,
 )
 
 from .views import TrackAdClickView
@@ -110,6 +111,7 @@ urlpatterns = [
     path("view-mode/", update_view_mode, name="user-view-mode"),
 
     path("settings/dineta/", DinetaSettingsView.as_view(), name="dineta-settings"),
+    path("settings/optimum/", OptimumSettingsView.as_view(), name="optimum-settings"),
 
     path("scanned-documents/<int:doc_id>/inline/", InlineDocUpdateView.as_view()),
     path("scanned-documents/<int:doc_id>/lineitem/<int:line_id>/inline/", InlineLineUpdateView.as_view()),

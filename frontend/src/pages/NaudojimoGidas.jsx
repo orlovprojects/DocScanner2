@@ -372,7 +372,7 @@ export default function NaudojimoGidas() {
             fontSize={36}
             sx={{ mb: 3 }}
           >
-            Kaip automatiškai priskirti prekes/paslaugas/kodus iš savo apskaitos programos?
+            Kaip automatiškai priskirti prekes/ paslaugas/ kodus iš savo apskaitos programos?
           </Typography>
           <Typography
             variant="body1"

@@ -81,6 +81,14 @@ export function AccountingProgramExtraSettings(props) {
     errorCentas,
     onSaveCentas,
 
+    // Pragma 3
+    pragma3Fields,
+    setPragma3Fields,
+    savingPragma3,
+    successPragma3,
+    errorPragma3,
+    onSavePragma3,
+
     // SitePro
     siteProFields,
     setSiteProFields,
@@ -1295,6 +1303,133 @@ export function AccountingProgramExtraSettings(props) {
           {errorDebetas && (
             <Alert severity="error" sx={{ py: 0.5 }}>
               {errorDebetas}
+            </Alert>
+          )}
+        </Stack>
+      </Paper>
+    );
+  }  
+
+  // ---------- Pragma 3 ----------
+  if (program === "pragma3") {
+    return (
+      <Paper sx={{ p: 3, mb: 3 }}>
+        <Typography variant="h6" sx={{ mb: 2, fontWeight: 600 }}>
+          Pragma 3 papildomi laukai
+        </Typography>
+
+        <Typography variant="body2" sx={{ mb: 2, color: "text.secondary" }}>
+          Nurodykite numatytuosius sandėlio, korespondencijos schemos ir projekto kodus pirkimams ir pardavimams.
+        </Typography>
+
+        <Grid2 container spacing={3}>
+          {/* Pirkimas */}
+          <Grid2 size={{ xs: 12, md: 6 }}>
+            <Typography variant="subtitle1" sx={{ mb: 1, fontWeight: 500 }}>
+              Pirkimas
+            </Typography>
+            <Stack spacing={1.5}>
+              <TextField
+                label="Sandėlis"
+                size="small"
+                value={pragma3Fields.pirkimas_sandelis}
+                onChange={(e) =>
+                  setPragma3Fields((prev) => ({
+                    ...prev,
+                    pirkimas_sandelis: e.target.value,
+                  }))
+                }
+                fullWidth
+              />
+              <TextField
+                label="Korespondencijos schema"
+                size="small"
+                value={pragma3Fields.pirkimas_korespondencija}
+                onChange={(e) =>
+                  setPragma3Fields((prev) => ({
+                    ...prev,
+                    pirkimas_korespondencija: e.target.value,
+                  }))
+                }
+                fullWidth
+              />
+              <TextField
+                label="Projekto kodas"
+                size="small"
+                value={pragma3Fields.pirkimas_projektas}
+                onChange={(e) =>
+                  setPragma3Fields((prev) => ({
+                    ...prev,
+                    pirkimas_projektas: e.target.value,
+                  }))
+                }
+                fullWidth
+              />
+            </Stack>
+          </Grid2>
+
+          {/* Pardavimas */}
+          <Grid2 size={{ xs: 12, md: 6 }}>
+            <Typography variant="subtitle1" sx={{ mb: 1, fontWeight: 500 }}>
+              Pardavimas
+            </Typography>
+            <Stack spacing={1.5}>
+              <TextField
+                label="Sandėlis"
+                size="small"
+                value={pragma3Fields.pardavimas_sandelis}
+                onChange={(e) =>
+                  setPragma3Fields((prev) => ({
+                    ...prev,
+                    pardavimas_sandelis: e.target.value,
+                  }))
+                }
+                fullWidth
+              />
+              <TextField
+                label="Korespondencijos schema"
+                size="small"
+                value={pragma3Fields.pardavimas_korespondencija}
+                onChange={(e) =>
+                  setPragma3Fields((prev) => ({
+                    ...prev,
+                    pardavimas_korespondencija: e.target.value,
+                  }))
+                }
+                fullWidth
+              />
+              <TextField
+                label="Projekto kodas"
+                size="small"
+                value={pragma3Fields.pardavimas_projektas}
+                onChange={(e) =>
+                  setPragma3Fields((prev) => ({
+                    ...prev,
+                    pardavimas_projektas: e.target.value,
+                  }))
+                }
+                fullWidth
+              />
+            </Stack>
+          </Grid2>
+        </Grid2>
+
+        <Stack direction="row" spacing={2} sx={{ mt: 3 }} alignItems="center">
+          <Button
+            variant="contained"
+            onClick={onSavePragma3}
+            disabled={savingPragma3}
+          >
+            Išsaugoti Pragma 3 laukus
+          </Button>
+          {successPragma3 && (
+            <Alert severity="success" sx={{ py: 0.5 }}>
+              Išsaugota!
+            </Alert>
+          )}
+          {errorPragma3 && (
+            <Alert severity="error" sx={{ py: 0.5 }}>
+              {errorPragma3}
             </Alert>
           )}
         </Stack>

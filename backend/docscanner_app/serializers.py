@@ -435,6 +435,7 @@ class CustomUserSerializer(serializers.ModelSerializer):
     agnum_extra_fields       = serializers.JSONField(required=False, allow_null=True)
     debetas_extra_fields       = serializers.JSONField(required=False, allow_null=True)
     site_pro_extra_fields       = serializers.JSONField(required=False, allow_null=True)
+    pragma3_extra_fields       = serializers.JSONField(required=False, allow_null=True)
 
     class Meta:
         model = CustomUser
@@ -449,6 +450,7 @@ class CustomUserSerializer(serializers.ModelSerializer):
             'extra_settings', 'is_superuser','is_staff', 'lineitem_rules',
             'rivile_erp_extra_fields', 'rivile_gama_extra_fields', 'butent_extra_fields','finvalda_extra_fields',
             'centas_extra_fields','agnum_extra_fields','debetas_extra_fields','site_pro_extra_fields',
+            'pragma3_extra_fields',
         ]
         read_only_fields = ('credits',)
         extra_kwargs = {
@@ -514,6 +516,9 @@ class CustomUserSerializer(serializers.ModelSerializer):
     
     def validate_site_pro_extra_fields(self, value):
         return self._validate_extra_dict(value, "site_pro_extra_fields")
+    
+    def validate_pragma3_extra_fields(self, value):
+        return self._validate_extra_dict(value, "pragma3_extra_fields")
 
 
 
@@ -621,6 +626,7 @@ class CustomUserSerializer(serializers.ModelSerializer):
         agnum_extra    = validated_data.pop('agnum_extra_fields', None)
         debetas_extra    = validated_data.pop('debetas_extra_fields', None)
         site_pro_extra    = validated_data.pop('site_pro_extra_fields', None)
+        pragma3_extra    = validated_data.pop('pragma3_extra_fields', None)
 
         user = CustomUser.objects.create_user(password=password, **validated_data)
         user.credits = 50
@@ -674,13 +680,16 @@ class CustomUserSerializer(serializers.ModelSerializer):
         if site_pro_extra is not None:
             user.site_pro_extra_fields = site_pro_extra
 
+        if pragma3_extra is not None:
+            user.pragma3_extra_fields = pragma3_extra
+
         user.save(update_fields=[
             'credits','purchase_defaults','sales_defaults',
             'extra_settings','lineitem_rules',
             'rivile_erp_extra_fields', 'rivile_gama_extra_fields',
             'butent_extra_fields','finvalda_extra_fields',
             'centas_extra_fields','agnum_extra_fields', 'debetas_extra_fields',
-            'site_pro_extra_fields',
+            'site_pro_extra_fields', 'pragma3_extra_fields',
         ])
         return user
     
@@ -755,6 +764,9 @@ class CustomUserSerializer(serializers.ModelSerializer):
 
         if 'site_pro_extra_fields' in validated_data:
             instance.site_pro_extra_fields = validated_data.pop('site_pro_extra_fields')
+
+        if 'pragma3_extra_fields' in validated_data:
+            instance.pragma3_extra_fields = validated_data.pop('pragma3_extra_fields')
 
         # 🔹 lineitem_rules — ПОЛНАЯ ЗАМЕНА СПИСКА
         # фронт всегда шлёт текущий список (с нужным правилом удалённым/изменённым)
@@ -1056,6 +1068,56 @@ class DinetaSettingsSerializer(serializers.Serializer):
             raise serializers.ValidationError({"password": "Password is required"})
 
         return data
+    
+
+
+class OptimumSettingsSerializer(serializers.Serializer):
+    key = serializers.CharField(write_only=True)
+
+    # метаданные (возвращаем наружу, key не возвращаем)
+    verified_at = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    last_ok = serializers.BooleanField(required=False)
+    last_error_at = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    last_error = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+
+    def to_representation(self, instance):
+        """
+        instance — dict из user.optimum_settings.
+        key наружу не отдаём.
+        """
+        if instance is None:
+            return None
+        data = dict(instance)
+        data.pop("key", None)
+        return data
+
+    def build_success_settings_dict(self, *, verified_at: str):
+        """
+        После is_valid(): строим dict для сохранения при SUCCESS.
+        """
+        raw_key = (self.validated_data.get("key") or "").strip()
+        if not raw_key:
+            raise serializers.ValidationError({"key": "Key is required"})
+
+        return {
+            "key": encrypt_password(raw_key),
+            "verified_at": verified_at,
+            "last_ok": True,
+            # очищаем ошибку
+            "last_error_at": None,
+            "last_error": "",
+        }
+
+    @staticmethod
+    def build_error_patch(*, error_at: str, error_msg: str):
+        """
+        Patch для сохранения при ERROR (key не трогаем!).
+        """
+        return {
+            "last_ok": False,
+            "last_error_at": error_at,
+            "last_error": (error_msg or "")[:300],  # коротко, чтобы не раздувать JSON
+        }
 
 
 

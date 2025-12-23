@@ -393,7 +393,8 @@ class CustomUser(AbstractUser):
 
     extra_settings = models.JSONField(blank=True, null=True)
 
-    dineta_settings = models.JSONField(blank=True, null=True)
+    dineta_settings = models.JSONField(default=dict, blank=True)
+    optimum_settings = models.JSONField(default=dict, blank=True)
 
     rivile_erp_extra_fields = models.JSONField(default=dict, blank=True)
     rivile_gama_extra_fields = models.JSONField(default=dict, blank=True)
@@ -403,6 +404,7 @@ class CustomUser(AbstractUser):
     agnum_extra_fields       = models.JSONField(default=dict, blank=True)
     debetas_extra_fields       = models.JSONField(default=dict, blank=True)
     site_pro_extra_fields       = models.JSONField(default=dict, blank=True)
+    pragma3_extra_fields       = models.JSONField(default=dict, blank=True)
 
     # --- NEW: UI režimas dokumentų sąrašui ---
     view_mode = models.CharField(

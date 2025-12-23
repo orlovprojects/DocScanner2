@@ -55,6 +55,7 @@ from .exports.rivile_erp import (
     export_documents_to_rivile_erp_xlsx,
 )
 from .exports.dineta import send_dineta_bundle, DinetaError
+# from .exports.optimum import optimum_hello, OptimumError
 from .exports.pragma4 import export_to_pragma40_xml
 from .exports.pragma3 import export_to_pragma_full, save_pragma_export_to_files
 from .exports.butent import export_to_butent
@@ -82,6 +83,7 @@ from .serializers import (
     LineItemSerializer,
     CustomUserAdminListSerializer,
     DinetaSettingsSerializer,
+    OptimumSettingsSerializer,
 )
 from django.db.models import Prefetch
 
@@ -350,7 +352,8 @@ def export_documents(request):
 
     today_str = date.today().strftime('%Y-%m-%d')
 
-    documents = ScannedDocument.objects.filter(pk__in=ids, user=user)
+    documents = ScannedDocument.objects.filter(pk__in=ids, user=user).prefetch_related('line_items')
+    # documents = ScannedDocument.objects.filter(pk__in=ids, user=user)
     if not documents:
         logger.warning("[EXP] no documents found by ids=%s user=%s", ids, log_ctx["user"])
         return Response({"error": "No documents found"}, status=404)
@@ -599,39 +602,55 @@ def export_documents(request):
 
 
 
-    # ====================================================================
-    # PRAGMA 3.2 - добавить этот блок в views.py после других export_type
-    # ====================================================================
-
     # ========================= PRAGMA 3.2 =========================
     elif export_type == 'pragma3':
         logger.info("[EXP] PRAGMA32 export started")
         assign_random_prekes_kodai(documents)
 
+        # Используем уже подготовленные документы с атрибутами от _apply_resolved
+        # (pirkimas_pardavimas, pvm_kodas, _pvm_line_map)
+        # ВАЖНО: добавь .prefetch_related('line_items') в начале функции где documents = ...
+        all_docs = (pirkimai_docs or []) + (pardavimai_docs or [])
+
         files_to_export = []
 
         try:
-            # Полный экспорт с автодобавлением справочников (4 файла)
+            # Полный экспорт (4 или 6 файлов)
             export_data = export_to_pragma_full(
-                documents=(pirkimai_docs or []) + (pardavimai_docs or []),
+                documents=all_docs,
+                user=request.user,
                 include_reference_data=True
             )
             
             logger.info("[EXP] PRAGMA32 export_data keys: %s", list(export_data.keys()))
 
-            # Добавляем файлы в список для архивации
-            if export_data.get('documents'):
+            # Pirkimai (если есть)
+            if export_data.get('pirkimai'):
+                files_to_export.append((
+                    f'{today_str}_pirkimai.txt',
+                    export_data['pirkimai']
+                ))
+            
+            if export_data.get('pirkimai_det'):
+                files_to_export.append((
+                    f'{today_str}_pirkimai_det.txt',
+                    export_data['pirkimai_det']
+                ))
+
+            # Pardavimai (если есть)
+            if export_data.get('pardavimai'):
                 files_to_export.append((
                     f'{today_str}_pardavimai.txt',
-                    export_data['documents']
+                    export_data['pardavimai']
                 ))
             
-            if export_data.get('items'):
+            if export_data.get('pardavimai_det'):
                 files_to_export.append((
                     f'{today_str}_pardavimai_det.txt',
-                    export_data['items']
+                    export_data['pardavimai_det']
                 ))
             
+            # Справочники (общие)
             if export_data.get('companies'):
                 files_to_export.append((
                     f'{today_str}_Imones.txt',
@@ -1212,6 +1231,57 @@ class DinetaSettingsView(APIView):
         # в ответ отдаём без пароля (serializer.instance → dict)
         response_serializer = DinetaSettingsSerializer(instance=settings_to_store)
         return Response(response_serializer.data, status=status.HTTP_200_OK)
+
+
+
+# Soxranenije user infy s Optimum i do soxranenija delajet probnyj Hello test
+class OptimumSettingsView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def put(self, request):
+        """
+        Вариант A:
+        - user вводит key -> backend делает Hello
+        - если Success: сохраняем key + verified_at + last_ok=true, чистим last_error*
+        - если Error: key НЕ сохраняем, но сохраняем last_ok=false + last_error_at + last_error
+        """
+        user = request.user
+
+        serializer = OptimumSettingsSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        raw_key = (serializer.validated_data.get("key") or "").strip()
+        now_iso = timezone.now().isoformat()
+
+        try:
+            optimum_hello(raw_key)
+        except OptimumError as exc:
+            # --- сохраняем метаданные ошибки (key не трогаем) ---
+            patch = OptimumSettingsSerializer.build_error_patch(
+                error_at=now_iso,
+                error_msg=str(exc) or "Optimum: klaida",
+            )
+
+            current = user.optimum_settings or {}
+            current.update(patch)
+            user.optimum_settings = current
+            user.save(update_fields=["optimum_settings"])
+
+            # фронту отдаём понятную ошибку
+            return Response(
+                {"detail": patch["last_error"] or "Nepavyko patikrinti Optimum API Key."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # --- SUCCESS: сохраняем новый key + метаданные ---
+        settings_to_store = serializer.build_success_settings_dict(verified_at=now_iso)
+
+        user.optimum_settings = settings_to_store
+        user.save(update_fields=["optimum_settings"])
+
+        response_serializer = OptimumSettingsSerializer(instance=settings_to_store)
+        return Response(response_serializer.data, status=status.HTTP_200_OK)
+
 
 
 
@@ -2861,25 +2931,21 @@ def contact_form(request):
 def send_newsletter():
     text_tpl = (
         "Sveiki,\n\n"
-        "dabar su DokSkenu apskaitą vesite dar lengviau.\n\n"
-        "Pridėjome automatizacijas ir skaitmenizuojant detaliai su eilutėmis.\n"
-        "Nustatymuose rasite skiltį \"Numatytosios prekių reikšmės (skaitmenizuojant detaliai)\",\n"
-        "kur galėsite nusistatyti sąlygas dokumentų eilutėms.\n\n"
-        "Jei jūsų sąlygos bus įvykdytos, eilutei priskirs jūsų išlaidų/pajamų kodą, tipą, "
-        "pavadinimą ar barkodą.\n"
-        "Sąlygas galit nusistatyti pagal pvm procentą, eilutės pavadinimą, "
-        "pirkėjo/pardavėjo rekvezitus.\n\n"
-        "Plačiau parodžiau šiame video: https://www.facebook.com/reel/1547084576311150\n\n"
-        "Jei turėsite pastebėjimų, rašykite.\n\n"
-        "Gero savaitgalio,\n"
+        "🎄 Sveikiname su artėjančiomis Kalėdomis ir Naujaisiais metais!\n\n"
+        "Nuoširdžiai dėkojame, kad šiais metais prisidėjote prie DokSkeno starto ir augimo.\n"
+        "Jūsų pasitikėjimas mums labai svarbus.\n\n"
+        "Kitais metais pažadame DokSkeną padaryti dar patogesnį ir inovatyvesnį.\n\n"
+        "Linkime sėkmės darbuose, sklandžių procesų ir puikių rezultatų Naujaisiais metais!\n\n"
+        "Su pagarba,\n"
+        "DokSkeno komanda\n"
         "Denis"
     )
 
     siusti_masini_laiska_visiems(
-        subject="Naujos DokSkeno automatizacijos",
+        subject="Sveikinimas iš DokSkeno komandos",
         text_template=text_tpl,
         html_template_name=None,      # ← НЕ используем HTML вообще
         extra_context=None,           # можно опустить
-        exclude_user_ids=[2, 16, 24, 31, 69, 105],   # кого исключить (опционально)
+        exclude_user_ids=[46, 2, 16, 24, 31, 69, 105, 133, ],   # кого исключить (опционально)
         tik_aktyviems=True,
     )

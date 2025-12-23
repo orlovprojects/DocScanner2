@@ -44,7 +44,7 @@ const PvmSkaiciuokle = () => {
   return (
     <Container maxWidth="lg" sx={{ marginBottom: "100px" }}>
       <Helmet>
-        <title>Tiksliausia PVM skaičiuoklė 2025 – DokSkenas</title>
+        <title>Tiksliausia PVM skaičiuoklė 2026 – DokSkenas</title>
         <meta
           name="description"
           content="Pasiskaičiuokite PVM dydį bei kainas su/be PVM, pasirenkant norimą PVM %"
@@ -71,7 +71,7 @@ const PvmSkaiciuokle = () => {
             letterSpacing: 0.05,
           }}
         >
-          PVM skaičiuoklė 2025
+          PVM skaičiuoklė 2026
         </Typography>
 
         {/* ====== BLOKAS 1 ====== */}
@@ -419,7 +419,7 @@ const PvmSkaiciuokle = () => {
         </ul>
 
         <Typography variant="h3" sx={{ fontSize: { xs: 20, sm: 24 }, fontWeight: "bold", mt: 6, mb: 1 }}>
-          Standartiniai PVM tarifai ES šalyse (2025)
+          Standartiniai PVM tarifai ES šalyse (2026)
         </Typography>
         <Box component="p" sx={{ m: 0, mb: 2 }}>
           Štai pagrindiniai, daugumai prekių ir paslaugų taikomi tarifai. Lengvatiniai tarifai taip pat
