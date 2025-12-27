@@ -6,6 +6,9 @@ from email.utils import formataddr
 from django.utils.timezone import now
 from django.contrib.auth import get_user_model
 
+import io
+import qrcode
+
 import logging
 import logging.config
 
@@ -246,3 +249,102 @@ def siusti_masini_laiska_visiems(
 
     logger.info(f"[BULK EMAIL DONE] Sėkmingai išsiųsta: {sent_count} laiškų.")
     return sent_count
+
+
+
+
+def siusti_mobilios_apps_kvietima(
+    *,
+    kvietejas,          # CustomUser, который приглашает
+    gavejo_email: str,  # кому отправляем приглашение
+    play_store_link: str,
+    mobile_key: str,
+) -> bool:
+    """
+    Siunčia kvietimą į DokSkenas mobilųjį app'ą:
+    - el. laiškas su nuoroda į Google Play (ar deeplink)
+    - QR kodas kaip priedas (PNG)
+    """
+    subject = "Kvietimas į DokSkenas mobilųjį aplikaciją"
+
+    # Paprasta tekstinė versija (fallback)
+    text_body = (
+        "Sveiki!\n\n"
+        "Jūs gavote kvietimą naudotis DokSkenas mobiliąja programėle.\n\n"
+        f"Nuoroda į aplikaciją:\n{play_store_link}\n\n"
+        "Jūsų mobilus raktas (jei reikėtų įvesti ranka):\n"
+        f"{mobile_key}\n\n"
+        "Pagarbiai,\n"
+        f"{getattr(kvietejas, 'get_full_name', lambda: kvietejas.username)() or kvietejas.username}\n"
+        "DokSkeno komanda\n"
+    )
+
+    # Bandome sugeneruoti HTML šabloną, jei jis yra
+    html_body = None
+    try:
+        html_body = render_to_string(
+            "emails/mobile_invitation.html",
+            {
+                "kvietejas": kvietejas,
+                "gavejo_email": gavejo_email,
+                "play_store_link": play_store_link,
+                "mobile_key": mobile_key,
+            },
+        )
+    except Exception as e:
+        # Jei šablono nėra ar klaida – loginam ir paliekam tik text_body
+        logger.warning(f"[MOBILE INVITE TEMPLATE WARNING] {e}")
+
+    try:
+        logger.info(
+            f"[MOBILE INVITE START] from_user_id={kvietejas.id}, "
+            f"from={kvietejas.email}, to={gavejo_email}"
+        )
+
+        msg = EmailMultiAlternatives(
+            subject=subject.strip(),
+            body=text_body,
+            from_email=formataddr(
+                ("Denis iš DokSkeno", settings.DEFAULT_FROM_EMAIL)
+            ),
+            to=[gavejo_email],
+        )
+
+        if html_body:
+            msg.attach_alternative(html_body, "text/html")
+
+        # --- Generuojame QR kodą ---
+        qr = qrcode.QRCode(
+            version=1,
+            box_size=10,
+            border=4,
+        )
+        qr.add_data(play_store_link)
+        qr.make(fit=True)
+        img = qr.make_image(fill_color="black", back_color="white")
+
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        buf.seek(0)
+        qr_png_data = buf.read()
+
+        # Prisegame QR kaip priedą
+        msg.attach("dokskenas_qr.png", qr_png_data, "image/png")
+
+        # Žymos / metadata, jei jos palaikomos
+        try:
+            msg.tags = ["mobile_invite"]
+            msg.metadata = {
+                "event": "mobile_invite",
+                "inviter_user_id": kvietejas.id,
+            }
+        except Exception:
+            pass
+
+        msg.send()
+        logger.info("[MOBILE INVITE SUCCESS]")
+        return True
+
+    except Exception as e:
+        logger.exception(f"[MOBILE INVITE ERROR] {e}")
+        return False

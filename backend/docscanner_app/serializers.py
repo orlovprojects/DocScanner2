@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from .models import CustomUser
-from .models import ScannedDocument, LineItem, ProductAutocomplete, ClientAutocomplete, AdClick, GuideCategoryPage, GuidePage
+from .models import ScannedDocument, LineItem, ProductAutocomplete, ClientAutocomplete, AdClick, GuideCategoryPage, GuidePage, MobileAccessKey
 import json
 from typing import Optional
 from django.db.models import IntegerField, Value
@@ -1118,6 +1118,32 @@ class OptimumSettingsSerializer(serializers.Serializer):
             "last_error_at": error_at,
             "last_error": (error_msg or "")[:300],  # коротко, чтобы не раздувать JSON
         }
+    
+
+
+class MobileAccessKeySerializer(serializers.ModelSerializer):
+    # фронт шлёт "email", а в модели sender_email – мапим через source
+    email = serializers.EmailField(source="sender_email")
+
+    class Meta:
+        model = MobileAccessKey
+        fields = [
+            "id",
+            "email",        # -> sender_email
+            "label",
+            "key_last4",
+            "is_active",
+            "created_at",
+            "last_used_at",
+            "revoked_at",
+        ]
+        read_only_fields = [
+            "id",
+            "key_last4",
+            "created_at",
+            "last_used_at",
+            "revoked_at",
+        ]
 
 
 

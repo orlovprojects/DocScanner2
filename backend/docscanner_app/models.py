@@ -6,6 +6,7 @@ import uuid
 import hashlib
 from django.conf import settings
 from django.utils import timezone
+import secrets
 
 #wagtail importy
 from wagtail.models import Page
@@ -406,6 +407,18 @@ class CustomUser(AbstractUser):
     site_pro_extra_fields       = models.JSONField(default=dict, blank=True)
     pragma3_extra_fields       = models.JSONField(default=dict, blank=True)
 
+    # mobile_key = models.CharField(max_length=64, unique=True, null=True, blank=True)
+
+    # def generate_mobile_key(self, save: bool = True) -> str:
+    #     """
+    #     Генерирует новый мобильный ключ для пользователя.
+    #     """
+    #     # token_urlsafe(32) даёт ~43 символа
+    #     self.mobile_key = secrets.token_urlsafe(32)
+    #     if save:
+    #         self.save(update_fields=["mobile_key"])
+    #     return self.mobile_key
+
     # --- NEW: UI režimas dokumentų sąrašui ---
     view_mode = models.CharField(
         max_length=16,
@@ -771,3 +784,141 @@ class GuidePage(Page):
         APIField("author_name"),
     ]
 
+
+
+
+
+def mobile_document_upload_to(instance, filename: str) -> str:
+    today = timezone.now().date()
+    base, ext = os.path.splitext(filename)
+    safe_name = base.replace(" ", "_")[:80]
+    return (
+        f"mobile/{instance.user_id}/"
+        f"{today.year}/{today.month:02d}/{today.day:02d}/"
+        f"{safe_name}{ext or '.pdf'}"
+    )
+
+
+class MobileAccessKey(models.Model):
+    """
+    Отдельный мобильный ключ для конкретного отправителя (email/label).
+    Ключ в БД хранится только как SHA256-хэш + последние 4 символа.
+    """
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="mobile_access_keys",
+    )
+
+    key_hash = models.CharField(
+        max_length=64,
+        unique=True,
+        db_index=True,
+        help_text="SHA256 hešas nuo pilno mobilio rakto",
+    )
+
+    key_last4 = models.CharField(
+        max_length=4,
+        db_index=True,
+        help_text="Paskutiniai 4 rakto simboliai (rodymui nustatymuose)",
+    )
+
+    sender_email = models.EmailField()
+    label = models.CharField(max_length=100, blank=True)
+
+    is_active = models.BooleanField(default=True, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    revoked_at = models.DateTimeField(null=True, blank=True)
+    last_used_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        status = "active" if self.is_active else "revoked"
+        return f"{self.sender_email} ({self.label or 'no label'}) [{status}]"
+
+    @staticmethod
+    def generate_raw_key() -> str:
+        return secrets.token_urlsafe(32)
+
+    @staticmethod
+    def make_hash(raw_key: str) -> str:
+        return hashlib.sha256(raw_key.encode("utf-8")).hexdigest()
+
+    @classmethod
+    def create_for_user(cls, user, sender_email: str, label: str | None = None):
+        raw_key = cls.generate_raw_key()
+        key_hash = cls.make_hash(raw_key)
+        obj = cls.objects.create(
+            user=user,
+            key_hash=key_hash,
+            key_last4=raw_key[-4:],
+            sender_email=sender_email,
+            label=label or "",
+        )
+        return obj, raw_key
+
+    def revoke(self):
+        if self.is_active:
+            self.is_active = False
+            self.revoked_at = timezone.now()
+            self.save(update_fields=["is_active", "revoked_at"])
+
+
+class MobileInboxDocument(models.Model):
+    """
+    Чистая таблица ИМЕННО для файлов из mobile app.
+
+    Тут просто лежат PDF, пока пользователь в вебе не решит:
+    'перенести эти документы в suvestinė'.
+    Никаких статусов не нужно — 'необработанные' = все записи,
+    у которых processed_document IS NULL.
+    """
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="mobile_inbox_documents",
+    )
+
+    access_key = models.ForeignKey(
+        MobileAccessKey,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="documents",
+        help_text="Конкретный моб. ключ, через который пришёл файл",
+    )
+
+    uploaded_file = models.FileField(upload_to=mobile_document_upload_to)
+    original_filename = models.CharField(max_length=255)
+    size_bytes = models.PositiveBigIntegerField(default=0)
+    page_count = models.PositiveIntegerField(null=True, blank=True)
+
+    sender_email = models.EmailField(
+        null=True,
+        blank=True,
+        db_index=True,
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    # 👇 опционально: связь с основным документом, если уже перенесли
+    processed_document = models.ForeignKey(
+        "ScannedDocument",    
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="source_mobile_documents",
+        help_text="Если не NULL – этот файл уже использован для основного Document",
+    )
+
+    processed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"MobileInboxDocument(id={self.id}, user={self.user_id}, filename={self.original_filename})"

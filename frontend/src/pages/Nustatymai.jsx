@@ -1,10 +1,12 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import {
   Box, Typography, FormControl, InputLabel, Select, MenuItem,
   Button, Alert, Tabs, Tab, Paper, TextField, Stack, RadioGroup,
   FormControlLabel, Radio, IconButton, Tooltip, Switch, Table, TableContainer,
   TableHead, TableRow, TableCell, TableBody, Grid2, Chip,
 } from "@mui/material";
+
+import DeleteIcon from "@mui/icons-material/Delete";
 import { alpha } from "@mui/material/styles";
 import EditIcon from '@mui/icons-material/Edit';
 import HelpOutlineIcon from "@mui/icons-material/HelpOutline";
@@ -478,6 +480,24 @@ export default function NustatymaiPage() {
     last_error: "",
   });
 
+  // ---- DokSkenas mobile keys ----
+  const [mobileKeys, setMobileKeys] = useState([]); // sąrašas visų kvietimų / raktų
+
+  const [mobileInviteForm, setMobileInviteForm] = useState({
+    email: "",
+    label: "",
+  });
+
+  const [mobileInviteLoading, setMobileInviteLoading] = useState(false);
+  const [mobileInviteSuccess, setMobileInviteSuccess] = useState(false);
+  const [mobileInviteError, setMobileInviteError] = useState("");
+
+  const formatMobileKeyMasked = (keyLast4) => {
+    if (!keyLast4) return "—";
+    // 8 звёздочек + последние 4 символа
+    return "********" + String(keyLast4).slice(-4);
+  };
+
   const [importTab, setImportTab] = useState(0);
 
   const [sumiskaiRole, setSumiskaiRole] = useState("buyer");
@@ -880,6 +900,24 @@ export default function NustatymaiPage() {
     });
   }, []);
 
+  const loadMobileKeys = useCallback(async () => {
+    try {
+      const { data } = await api.get("/mobile/keys/", {
+        withCredentials: true,
+      });
+
+      // ожидаем, что backend вернёт массив объектов:
+      // [{ id, email, label, link, is_active, created_at, ... }, ...]
+      setMobileKeys(Array.isArray(data) ? data : []);
+    } catch (e) {
+      console.error("Failed to load mobile keys", e);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadMobileKeys();
+  }, [loadMobileKeys]);
+
 
 
   useEffect(() => {
@@ -1114,6 +1152,7 @@ export default function NustatymaiPage() {
       setDinetaSaving(false);
     }
   };
+
 
   const refreshOptimumMeta = async () => {
     try {
@@ -1702,6 +1741,88 @@ export default function NustatymaiPage() {
 
   const handlePaslaugosAssemblyPardavimasChange = (e) => {
     setPaslaugosAssemblyPardavimas(Number(e.target.value));
+  };
+
+  const handleCreateMobileKey = async () => {
+    setMobileInviteError("");
+    setMobileInviteSuccess(false);
+
+    const email = (mobileInviteForm.email || "").trim();
+    const label = (mobileInviteForm.label || "").trim();
+
+    if (!email) {
+      setMobileInviteError("El. paštas yra privalomas.");
+      return;
+    }
+    if (!label) {
+      setMobileInviteError("Pavadinimas yra privalomas.");
+      return;
+    }
+
+    setMobileInviteLoading(true);
+    try {
+      const { data } = await api.post(
+        "/mobile/keys/",
+        { email, label },
+        { withCredentials: true }
+      );
+
+      // ожидаем, что backend вернёт созданный объект key
+      setMobileKeys((prev) => [data, ...prev]);
+
+      setMobileInviteSuccess(true);
+      setMobileInviteForm({ email: "", label: "" });
+      setTimeout(() => setMobileInviteSuccess(false), 2500);
+    } catch (e) {
+      const resp = e?.response?.data;
+      let msg =
+        resp?.detail ||
+        resp?.error ||
+        "Nepavyko sukurti ir išsiųsti kvietimo.";
+
+      if (typeof msg === "object") {
+        try {
+          msg = JSON.stringify(msg);
+        } catch {
+          msg = "Nepavyko sukurti ir išsiųsti kvietimo.";
+        }
+      }
+
+      setMobileInviteError(String(msg));
+    } finally {
+      setMobileInviteLoading(false);
+    }
+  };
+
+  const handleToggleMobileKey = async (id, isActive) => {
+    try {
+      const { data } = await api.patch(
+        `/mobile/keys/${id}/`,
+        { is_active: !isActive },
+        { withCredentials: true }
+      );
+
+      // или просто вручную обновить is_active, если backend ничего не возвращает
+      setMobileKeys((prev) =>
+        prev.map((item) =>
+          item.id === id ? { ...item, ...(data || { is_active: !isActive }) } : item
+        )
+      );
+    } catch (e) {
+      console.error("Failed to toggle mobile key", e);
+      // можно при желании показать Alert
+    }
+  };
+
+  const handleDeleteMobileKey = async (id) => {
+    if (!window.confirm("Ar tikrai ištrinti šį kvietimą?")) return;
+
+    try {
+      await api.delete(`/mobile/keys/${id}/`, { withCredentials: true });
+      setMobileKeys((prev) => prev.filter((item) => item.id !== id));
+    } catch (e) {
+      console.error("Failed to delete mobile key", e);
+    }
   };
 
   const handleSumiskaiRole = (nextRole) => {
@@ -3244,6 +3365,218 @@ export default function NustatymaiPage() {
                 Sukurkite pirmąją taisyklę aukščiau
               </Typography>
             </Box>
+          )}
+        </Box>
+      </Paper>
+      <Box mb={3}>
+        <Typography variant="h4" sx={{ mt: 10, fontWeight: 600 }}>Pakvietimai</Typography>
+      </Box>
+      {/* --- DokSkenas mobile app --- */}
+      <Paper sx={{ p: 3, mt: 3, mb: 4 }}>
+        <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 2, mb: 1 }}>
+          <Typography variant="h6" sx={{ fontWeight: 500 }}>
+            Kvietimai naudotis DokSkeno mobiliąja programėle
+          </Typography>
+        </Box>
+
+        <Typography variant="body2" sx={{ color: "text.secondary", mb: 1 }}>
+          Čia galite sukurti kvietimą naudotis DokSkeno mobiliąja programėle, per kurią gavėjas galės fotografuoti ir siųsti jums dokumentus. O jūs pasirinktus dokumentus lengvai perkelti į suvestinę skaitmenizuoti.
+        </Typography>
+        <Typography variant="body2" sx={{ color: "text.secondary", mb: 4 }}>
+          Gavėjas gaus el. laišką su nuoroda parsisiųsti mobiliąja programėle, kuri jau bus priskirta prie jūsų DokSkeno paskyros.
+        </Typography>
+
+        {/* Forma naujam kvietimui */}
+        <Box sx={{ mb: 2 }}>
+          <Typography variant="subtitle2" sx={{ mb: 1 }}>
+            Naujas kvietimas
+          </Typography>
+
+          <Stack
+            direction={{ xs: "column", sm: "row" }}
+            spacing={2}
+            sx={{ mb: 1 }}
+          >
+            <TextField
+              label="El. paštas"
+              type="email"
+              fullWidth
+              size="small"
+              value={mobileInviteForm.email}
+              onChange={(e) =>
+                setMobileInviteForm((prev) => ({ ...prev, email: e.target.value }))
+              }
+            />
+            <TextField
+              label="Pavadinimas"
+              fullWidth
+              size="small"
+              value={mobileInviteForm.label}
+              onChange={(e) =>
+                setMobileInviteForm((prev) => ({ ...prev, label: e.target.value }))
+              }
+            />
+          <Button
+            variant="contained"
+            onClick={handleCreateMobileKey}
+            disabled={mobileInviteLoading}
+            sx={{ whiteSpace: "nowrap", px: 3 }} // px = padding-left + padding-right
+          >
+            Išsiųsti
+          </Button>
+          </Stack>
+
+          {mobileInviteSuccess && (
+            <Alert severity="success" sx={{ mt: 1 }}>
+              Kvietimas sėkmingai sukurtas ir išsiųstas.
+            </Alert>
+          )}
+
+          {mobileInviteError && (
+            <Alert severity="error" sx={{ mt: 1 }}>
+              {mobileInviteError}
+            </Alert>
+          )}
+        </Box>
+
+        {/* Sąrašas sukurtų kvietimų / raktų */}
+        <Box sx={{ mt: 5 }}>
+          <Typography variant="subtitle2" sx={{ mb: 1, fontWeight: 600, }}>
+            Sukurti raktai
+          </Typography>
+
+          {mobileKeys.length === 0 ? (
+            <Typography variant="body2" sx={{ color: "text.secondary" }}>
+              Kol kas nėra sukurtų kvietimų.
+            </Typography>
+          ) : (
+            <>
+              {/* Desktop / tablet – lentelė */}
+              <Box sx={{ display: { xs: "none", md: "block" } }}>
+                <Table size="small">
+                  <TableHead>
+                    <TableRow>
+                      <TableCell>Pavadinimas</TableCell>
+                      <TableCell>El. paštas</TableCell>
+                      <TableCell>Raktas</TableCell>
+                      <TableCell align="right">Veiksmai</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {mobileKeys.map((item) => (
+                      <TableRow key={item.id}>
+                        <TableCell>{item.label || "—"}</TableCell>
+                        <TableCell>{item.email}</TableCell>
+                        <TableCell>
+                          <Typography variant="body2" sx={{ fontFamily: "monospace" }}>
+                            {formatMobileKeyMasked(item.key_last4)}
+                          </Typography>
+                        </TableCell>
+                        <TableCell align="right">
+                          <Stack direction="row" spacing={1} justifyContent="flex-end" alignItems="center">
+                            <Switch
+                              size="small"
+                              checked={!!item.is_active}
+                              onChange={() =>
+                                handleToggleMobileKey(item.id, !!item.is_active)
+                              }
+                            />
+                            <IconButton
+                              size="small"
+                              onClick={() => handleDeleteMobileKey(item.id)}
+                            >
+                              <DeleteIcon fontSize="small" />
+                            </IconButton>
+                          </Stack>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </Box>
+
+              {/* Mobile – kortelės, kad būtų patogiau naudoti pirštais */}
+              <Stack
+                spacing={1.5}
+                sx={{ mt: 1, display: { xs: "flex", md: "none" } }}
+              >
+                {mobileKeys.map((item) => (
+                  <Box
+                    key={item.id}
+                    sx={{
+                      border: "1px solid",
+                      borderColor: "divider",
+                      borderRadius: 2,
+                      p: 1.5,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      gap: 1.5,
+                    }}
+                  >
+                    <Box sx={{ minWidth: 0 }}>
+                      <Typography
+                        variant="subtitle2"
+                        sx={{
+                          fontWeight: 600,
+                          mb: 0.25,
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                          maxWidth: 200,
+                        }}
+                      >
+                        {item.label || "—"}
+                      </Typography>
+                      <Typography
+                        variant="body2"
+                        sx={{
+                          color: "text.secondary",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                          maxWidth: 200,
+                        }}
+                      >
+                        {item.email}
+                      </Typography>
+                      <Typography
+                        variant="caption"
+                        sx={{
+                          color: "text.secondary",
+                          fontFamily: "monospace",
+                          display: "block",
+                          mt: 0.5,
+                        }}
+                      >
+                        Raktas: {formatMobileKeyMasked(item.key_last4)}
+                      </Typography>
+                    </Box>
+
+                    <Stack
+                      direction="row"
+                      spacing={0.5}
+                      alignItems="center"
+                      sx={{ flexShrink: 0 }}
+                    >
+                      <Switch
+                        size="small"
+                        checked={!!item.is_active}
+                        onChange={() =>
+                          handleToggleMobileKey(item.id, !!item.is_active)
+                        }
+                      />
+                      <IconButton
+                        size="small"
+                        onClick={() => handleDeleteMobileKey(item.id)}
+                      >
+                        <DeleteIcon fontSize="small" />
+                      </IconButton>
+                    </Stack>
+                  </Box>
+                ))}
+              </Stack>
+            </>
           )}
         </Box>
       </Paper>

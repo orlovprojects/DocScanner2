@@ -10,6 +10,9 @@ import json
 from datetime import date, timedelta, time, datetime
 from decimal import Decimal
 import unicodedata
+from django.http import HttpRequest
+from django.contrib.auth import get_user_model
+
 
 
 # --- Django ---
@@ -71,6 +74,8 @@ from .models import (
     ClientAutocomplete,
     LineItem,
     AdClick,
+    MobileAccessKey,
+    MobileInboxDocument,
 )
 from .serializers import (
     CustomUserSerializer,
@@ -84,6 +89,7 @@ from .serializers import (
     CustomUserAdminListSerializer,
     DinetaSettingsSerializer,
     OptimumSettingsSerializer,
+    MobileAccessKeySerializer,
 )
 from django.db.models import Prefetch
 
@@ -111,9 +117,12 @@ from .serializers import (
     GuideArticleDetailSerializer,
 )
 
+
 #emails
 from .emails import siusti_sveikinimo_laiska, siusti_kontakto_laiska
 from .emails import siusti_masini_laiska_visiems
+from .emails import siusti_mobilios_apps_kvietima
+from .utils.play_store_link_gen import build_mobile_play_store_link
 
 from time import perf_counter
 
@@ -2949,3 +2958,295 @@ def send_newsletter():
         exclude_user_ids=[46, 2, 16, 24, 31, 69, 105, 133, ],   # кого исключить (опционально)
         tik_aktyviems=True,
     )
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def generate_mobile_key(request):
+    """
+    POST /api/mobile/generate-key/
+
+    Новая версия: создаёт ОТДЕЛЬНЫЙ MobileAccessKey для этого пользователя.
+
+    Ожидает (опционально):
+    - email: для какого отправителя (по умолчанию user.email)
+    - label: человекопонятное имя (pvz. "Jonas (ofisas)", "Kasa #2")
+
+    НИЧЕГО не шлёт по email – просто генерирует и возвращает.
+    """
+    user = request.user
+
+    raw_email = (request.data.get("email") or "").strip().lower()
+    label = (request.data.get("label") or "").strip()
+
+    if not raw_email:
+        # Если email не пришёл – пробуем взять email самого пользователя
+        raw_email = (user.email or "").strip().lower()
+
+    if not raw_email:
+        return Response({"error": "EMAIL_REQUIRED"}, status=400)
+
+    # создаём MobileAccessKey и получаем raw_key (строка, которую покажем/отправим)
+    access_key, raw_key = MobileAccessKey.create_for_user(
+        user=user,
+        sender_email=raw_email,
+        label=label or None,
+    )
+
+    play_store_link = build_mobile_play_store_link(raw_key)
+
+    return Response({
+        "id": access_key.id,
+        "mobile_key": raw_key,          # ПОЛНЫЙ ключ – покажем один раз
+        "key_last4": access_key.key_last4,
+        "sender_email": access_key.sender_email,
+        "label": access_key.label,
+        "play_store_link": play_store_link,
+    })
+
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def send_mobile_invitation(request):
+    """
+    POST /api/mobile/send-invitation/
+
+    Ожидает:
+    - email: получатель приглашения
+    - (опционально) label: pvz. "Jonas (ofisas)", "Kasa #2"
+
+    Действия:
+    - создаём новый MobileAccessKey для этого email
+    - строим Play Store ссылку с этим ключом
+    - шлём письмо (siusti_mobilios_apps_kvietima)
+    """
+    user = request.user
+
+    raw_email = (request.data.get("email") or "").strip().lower()
+    label = (request.data.get("label") or "").strip()
+
+    if not raw_email:
+        return Response({"error": "EMAIL_REQUIRED"}, status=400)
+
+    # создаём отдельный ключ под этот email
+    access_key, raw_key = MobileAccessKey.create_for_user(
+        user=user,
+        sender_email=raw_email,
+        label=label or None,
+    )
+
+    play_store_link = build_mobile_play_store_link(raw_key)
+
+    ok = siusti_mobilios_apps_kvietima(
+        kvietejas=user,
+        gavejo_email=raw_email,
+        play_store_link=play_store_link,
+        mobile_key=raw_key,  # важный момент: сюда кладём СЫРОЙ ключ
+    )
+
+    if not ok:
+        return Response(
+            {"error": "EMAIL_SEND_FAILED"},
+            status=500,
+        )
+
+    return Response({
+        "status": "OK",
+        "email": raw_email,
+        "label": access_key.label,
+        "key_last4": access_key.key_last4,
+        "play_store_link": play_store_link,
+        "id": access_key.id,
+    })
+
+
+User = get_user_model()
+
+
+@api_view(['POST'])
+@authentication_classes([])   # авторизация только по мобильному ключу
+@permission_classes([AllowAny])
+def mobile_upload_documents(request: HttpRequest):
+    """
+    POST /api/mobile/upload/
+
+    Headers:
+      X-Mobile-Key: <pilnas mobilus raktas>
+
+    Body (multipart/form-data):
+      files: <pdf1>, files: <pdf2>, ...
+      (neprivaloma) sender_email: jei nori perrašyti (dažniausiai nereikės)
+    """
+
+    raw_key = (
+        request.META.get("HTTP_X_MOBILE_KEY")
+        or request.data.get("mobile_key")
+    )
+
+    if not raw_key:
+        return Response(
+            {"error": "MOBILE_KEY_REQUIRED"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    key_hash = MobileAccessKey.make_hash(raw_key)
+
+    try:
+        access_key = MobileAccessKey.objects.select_related("user").get(
+            key_hash=key_hash,
+            is_active=True,
+        )
+    except MobileAccessKey.DoesNotExist:
+        return Response(
+            {"error": "INVALID_OR_REVOKED_MOBILE_KEY"},
+            status=status.HTTP_401_UNAUTHORIZED,
+        )
+
+    user = access_key.user
+
+    files = request.FILES.getlist("files")
+    if not files:
+        return Response(
+            {"error": "NO_FILES"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    sender_email = request.data.get("sender_email") or access_key.sender_email or None
+
+    access_key.last_used_at = timezone.now()
+    access_key.save(update_fields=["last_used_at"])
+
+    created_docs = []
+    for f in files:
+        doc = MobileInboxDocument.objects.create(
+            user=user,
+            access_key=access_key,
+            uploaded_file=f,
+            original_filename=f.name,
+            size_bytes=getattr(f, "size", 0) or 0,
+            page_count=None,
+            sender_email=sender_email,
+        )
+
+        created_docs.append({
+            "id": doc.id,
+            "original_filename": doc.original_filename,
+            "url": request.build_absolute_uri(doc.uploaded_file.url),
+            "size_bytes": doc.size_bytes,
+            "page_count": doc.page_count,
+            "sender_email": doc.sender_email,
+            "created_at": doc.created_at.isoformat(),
+        })
+
+    return Response(
+        {
+            "status": "OK",
+            "count": len(created_docs),
+            "documents": created_docs,
+        },
+        status=status.HTTP_201_CREATED,
+    )
+
+
+
+@api_view(["GET", "POST"])
+@permission_classes([IsAuthenticated])
+def mobile_access_keys_list_create(request):
+    """
+    GET  /api/mobile/keys/   -> sąrašas visų MobileAccessKey šitam user'iui
+    POST /api/mobile/keys/   -> sukuria naują MobileAccessKey ir išsiunčia kvietimą el. paštu
+
+    Body (POST):
+      - email (required)
+      - label (optional)
+    """
+    user = request.user
+
+    if request.method == "GET":
+        qs = MobileAccessKey.objects.filter(user=user).order_by("-created_at")
+        serializer = MobileAccessKeySerializer(qs, many=True)
+        return Response(serializer.data)
+
+    # POST
+    raw_email = (request.data.get("email") or "").strip().lower()
+    label = (request.data.get("label") or "").strip()
+
+    if not raw_email:
+        return Response({"error": "EMAIL_REQUIRED"}, status=status.HTTP_400_BAD_REQUEST)
+
+    # создаём отдельный ключ под этот email
+    access_key, raw_key = MobileAccessKey.create_for_user(
+        user=user,
+        sender_email=raw_email,
+        label=label or None,
+    )
+
+    play_store_link = build_mobile_play_store_link(raw_key)
+
+    ok = siusti_mobilios_apps_kvietima(
+        kvietejas=user,
+        gavejo_email=raw_email,
+        play_store_link=play_store_link,
+        mobile_key=raw_key,
+    )
+
+    if not ok:
+        return Response(
+            {"error": "EMAIL_SEND_FAILED"},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+    serializer = MobileAccessKeySerializer(access_key)
+    data = serializer.data
+    # play_store_link мы можем вернуть только здесь (когда ещё есть raw_key)
+    data["play_store_link"] = play_store_link
+
+    return Response(data, status=status.HTTP_201_CREATED)
+
+
+
+@api_view(["PATCH", "DELETE"])
+@permission_classes([IsAuthenticated])
+def mobile_access_key_detail(request, pk: int):
+    """
+    PATCH  /api/mobile/keys/<id>/   -> keičiam is_active (toggle)
+    DELETE /api/mobile/keys/<id>/   -> ištrinam raktą
+
+    PATCH body:
+      { "is_active": true/false }
+    """
+    try:
+        access_key = MobileAccessKey.objects.get(pk=pk, user=request.user)
+    except MobileAccessKey.DoesNotExist:
+        return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    if request.method == "DELETE":
+        access_key.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+    # PATCH
+    new_is_active = request.data.get("is_active", None)
+
+    # поддержим строки "true"/"false" на всякий случай
+    if isinstance(new_is_active, str):
+        new_is_active = new_is_active.lower() in ("1", "true", "yes", "on")
+
+    if new_is_active is None:
+        return Response(
+            {"detail": "is_active is required"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    if not new_is_active:
+        # выключаем аккуратно через метод модели (ставит revoked_at)
+        access_key.revoke()
+    else:
+        # включаем обратно, чистим revoked_at
+        if not access_key.is_active:
+            access_key.is_active = True
+            access_key.revoked_at = None
+            access_key.save(update_fields=["is_active", "revoked_at"])
+
+    serializer = MobileAccessKeySerializer(access_key)
+    return Response(serializer.data)

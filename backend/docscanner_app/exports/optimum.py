@@ -210,18 +210,23 @@ def _select_art_group_code(doc_type: str, preke_paslauga_int, customuser) -> str
       если 2/4 (PASLAUGA):
         pirkimas  -> pirkimas_paslaugos_grupe
         pardavimas-> pardavimas_paslaugos_grupe
-    - если значение пустое => fallback "PP"
+    - если значение пустое => fallback:
+        PREKE  -> "PR"
+        PASLAUGA -> "PA"
     """
     fields = _get_optimum_extra_fields(customuser)
 
     is_service = preke_paslauga_int in (2, 4)
+
     if not is_service:
         key = "pirkimas_prekes_grupe" if doc_type == "pirkimas" else "pardavimas_prekes_grupe"
+        fallback = "PR"
     else:
         key = "pirkimas_paslaugos_grupe" if doc_type == "pirkimas" else "pardavimas_paslaugos_grupe"
+        fallback = "PA"
 
     val = _s(fields.get(key, ""))
-    return val or "PP"
+    return val or fallback
 
 
 # =========================

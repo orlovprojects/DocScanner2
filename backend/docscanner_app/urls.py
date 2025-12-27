@@ -30,6 +30,11 @@ from .views import (
     contact_form,
     DinetaSettingsView,
     OptimumSettingsView,
+    generate_mobile_key,
+    send_mobile_invitation,
+    mobile_upload_documents,
+    mobile_access_keys_list_create,
+    mobile_access_key_detail,
 )
 
 from .views import TrackAdClickView
@@ -117,6 +122,12 @@ urlpatterns = [
     path("scanned-documents/<int:doc_id>/lineitem/<int:line_id>/inline/", InlineLineUpdateView.as_view()),
 
     path("api/contact/", contact_form, name="contact_form"),
+
+    path("mobile/generate-key/", generate_mobile_key, name="generate_mobile_key"),
+    path("mobile/send-invitation/", send_mobile_invitation, name="send_mobile_invitation"),
+    path("mobile/upload/", mobile_upload_documents, name="mobile_upload_documents"),
+    path("mobile/keys/", mobile_access_keys_list_create, name="mobile_access_keys"),
+    path("mobile/keys/<int:pk>/", mobile_access_key_detail, name="mobile_access_key_detail"),
 
 
 
