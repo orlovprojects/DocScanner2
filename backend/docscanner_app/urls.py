@@ -36,6 +36,8 @@ from .views import (
     mobile_access_keys_list_create,
     mobile_access_key_detail,
     web_mobile_inbox,
+    web_mobile_inbox_promote,
+    web_mobile_inbox_bulk_delete,
 )
 
 from .views import TrackAdClickView
@@ -130,6 +132,8 @@ urlpatterns = [
     path("mobile/keys/", mobile_access_keys_list_create, name="mobile_access_keys"),
     path("mobile/keys/<int:pk>/", mobile_access_key_detail, name="mobile_access_key_detail"),
     path("web/mobile-inbox/", web_mobile_inbox, name="web-mobile-inbox-list"),
+    path("web/mobile-inbox/promote/", web_mobile_inbox_promote, name="web-mobile-inbox-promote"),
+    path("web/mobile-inbox/bulk-delete/", web_mobile_inbox_bulk_delete, name="web-mobile-inbox-bulk-delete"),
 
 
 
