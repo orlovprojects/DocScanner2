@@ -27,6 +27,8 @@ import MoreVertIcon from "@mui/icons-material/MoreVert";
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 import WarningIcon from "@mui/icons-material/Warning";
 
+import FailuPreviewDialog from "../page_elements/FailuPreviewDialog";
+
 export default function IsKlientu() {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -40,6 +42,10 @@ export default function IsKlientu() {
   const [promoteInProgress, setPromoteInProgress] = useState(false);
   const [promoteError, setPromoteError] = useState(null);
   const [promoteCount, setPromoteCount] = useState(0);
+
+  // preview dialog
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [previewRow, setPreviewRow] = useState(null);
 
   // ==== helpers ====
 
@@ -144,7 +150,6 @@ export default function IsKlientu() {
 
     try {
       await api.post("/web/mobile-inbox/promote/", { ids });
-      // по завершении – обновляем таблицу
       await loadInbox();
       setSelectedIds((prev) => prev.filter((id) => !ids.includes(id)));
       setPromoteInProgress(false);
@@ -168,13 +173,19 @@ export default function IsKlientu() {
   // ==== preview ====
 
   const handlePreview = (row) => {
-    if (!row.preview_url) return;
-    window.open(row.preview_url, "_blank", "noopener,noreferrer");
+    if (!row?.preview_url && !Array.isArray(row?.preview_urls)) return;
+    setPreviewRow(row);
+    setPreviewOpen(true);
+  };
+
+  const handlePreviewClose = () => {
+    setPreviewOpen(false);
+    setPreviewRow(null);
   };
 
   return (
     <Box px={6} py={4}>
-      {/* Верхняя панель: кнопка "Skaitmenizuoti" + возможно счётчик */}
+      {/* Верхняя панель */}
       <Box
         sx={{
           mb: 2,
@@ -259,8 +270,14 @@ export default function IsKlientu() {
 
                     <TableCell
                       sx={{
-                        cursor: row.preview_url ? "pointer" : "default",
-                        color: row.preview_url ? "primary.main" : "inherit",
+                        cursor:
+                          row.preview_url || row.preview_urls
+                            ? "pointer"
+                            : "default",
+                        color:
+                          row.preview_url || row.preview_urls
+                            ? "primary.main"
+                            : "inherit",
                         maxWidth: 260,
                       }}
                       onClick={() => handlePreview(row)}
@@ -361,8 +378,11 @@ export default function IsKlientu() {
         </MenuItem>
       </Menu>
 
-      {/* Диалог прогресса сканирования */}
-      <Dialog open={promoteDialogOpen} onClose={promoteInProgress ? null : closePromoteDialog}>
+      {/* Диалог прогресса скaitmenizavimo */}
+      <Dialog
+        open={promoteDialogOpen}
+        onClose={promoteInProgress ? null : closePromoteDialog}
+      >
         <DialogTitle>Skaitmenizavimas</DialogTitle>
         <DialogContent sx={{ pt: 2, minWidth: 320 }}>
           {promoteInProgress && (
@@ -393,8 +413,8 @@ export default function IsKlientu() {
               <CheckCircleIcon color="success" />
               <Typography variant="body2">
                 {promoteCount === 1
-                  ? "1 failas buvo perkeltas į suvestinę ir skaitmenizuojamas."
-                  : `${promoteCount} failai buvo perkelti į suvestinę ir skaitmenizuojami.`}
+                  ? "1 failas buvo perkeltas į suvestinę и skaitmenizuojamas."
+                  : `${promoteCount} failai buvo perkelti į suvestinę и skaitmenizuojami.`}
               </Typography>
             </Box>
           )}
@@ -421,6 +441,13 @@ export default function IsKlientu() {
           )}
         </DialogActions>
       </Dialog>
+
+      {/* Новый диалог превью файлов */}
+      <FailuPreviewDialog
+        open={previewOpen}
+        onClose={handlePreviewClose}
+        file={previewRow}
+      />
     </Box>
   );
 }
