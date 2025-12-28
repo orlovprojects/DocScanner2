@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from .models import CustomUser
-from .models import ScannedDocument, LineItem, ProductAutocomplete, ClientAutocomplete, AdClick, GuideCategoryPage, GuidePage, MobileAccessKey
+from .models import ScannedDocument, LineItem, ProductAutocomplete, ClientAutocomplete, AdClick, GuideCategoryPage, GuidePage, MobileAccessKey, MobileInboxDocument
 import json
 from typing import Optional
 from django.db.models import IntegerField, Value
@@ -1145,6 +1145,32 @@ class MobileAccessKeySerializer(serializers.ModelSerializer):
             "revoked_at",
         ]
 
+
+
+class MobileInboxDocumentSerializer(serializers.ModelSerializer):
+    scanned_document_id = serializers.IntegerField(
+        source="processed_document_id",
+        read_only=True,
+    )
+    sender_label = serializers.CharField(
+        source="access_key.label",
+        read_only=True,
+    )
+
+    class Meta:
+        model = MobileInboxDocument
+        fields = [
+            "id",
+            "original_filename",
+            "size_bytes",
+            "page_count",
+            "sender_email",
+            "sender_label",
+            "created_at",
+            "preview_url",      
+            "is_processed",     
+            "scanned_document_id",
+        ]
 
 
 

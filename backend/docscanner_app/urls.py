@@ -35,6 +35,7 @@ from .views import (
     mobile_upload_documents,
     mobile_access_keys_list_create,
     mobile_access_key_detail,
+    web_mobile_inbox,
 )
 
 from .views import TrackAdClickView
@@ -128,6 +129,7 @@ urlpatterns = [
     path("mobile/upload/", mobile_upload_documents, name="mobile_upload_documents"),
     path("mobile/keys/", mobile_access_keys_list_create, name="mobile_access_keys"),
     path("mobile/keys/<int:pk>/", mobile_access_key_detail, name="mobile_access_key_detail"),
+    path("web/mobile-inbox/", web_mobile_inbox, name="web-mobile-inbox-list"),
 
 
 

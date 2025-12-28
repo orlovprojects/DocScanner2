@@ -35,6 +35,7 @@ import './styles/MainChart.css';
 
 import UploadPage from './pages/UploadPage';
 import NustatymaiPage from './pages/Nustatymai';
+import IsKlientu from './pages/IsKlientu';
 import Dokskenas from './pages/DokSkenas';
 import PvmCalculator from './pages/PVMskaiciuokle';
 import GpmSkaiciuokle from './pages/GPMskaiciuokle';
@@ -124,6 +125,14 @@ function App() {
           element={
             <PrivateRoute>
               <NustatymaiPage />
+            </PrivateRoute>
+          }
+        />
+        <Route
+          path="/is-klientu"
+          element={
+            <PrivateRoute>
+              <IsKlientu />
             </PrivateRoute>
           }
         />

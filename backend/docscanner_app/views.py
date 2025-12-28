@@ -13,7 +13,8 @@ import unicodedata
 from django.http import HttpRequest
 from django.contrib.auth import get_user_model
 
-
+from django.core.files.base import ContentFile
+from .tasks import process_uploaded_file_task 
 
 # --- Django ---
 from django.conf import settings
@@ -77,6 +78,7 @@ from .models import (
     MobileAccessKey,
     MobileInboxDocument,
 )
+
 from .serializers import (
     CustomUserSerializer,
     ViewModeSerializer,
@@ -90,6 +92,7 @@ from .serializers import (
     DinetaSettingsSerializer,
     OptimumSettingsSerializer,
     MobileAccessKeySerializer,
+    MobileInboxDocumentSerializer,
 )
 from django.db.models import Prefetch
 
@@ -3125,18 +3128,23 @@ def mobile_upload_documents(request: HttpRequest):
             uploaded_file=f,
             original_filename=f.name,
             size_bytes=getattr(f, "size", 0) or 0,
-            page_count=None,
+            page_count=None,          # page_count v budushchem mozhno budet peredavat iz mobile
             sender_email=sender_email,
+            is_processed=False,       # v inbox po umolchaniyu neperenesennyj
         )
+
+        # posle soxranenija u polja uploaded_file uzhe est .url
+        doc.preview_url = f"{settings.SITE_URL_BACKEND}{doc.uploaded_file.url}"
+        doc.save(update_fields=["preview_url"])
 
         created_docs.append({
             "id": doc.id,
             "original_filename": doc.original_filename,
-            "url": request.build_absolute_uri(doc.uploaded_file.url),
             "size_bytes": doc.size_bytes,
             "page_count": doc.page_count,
             "sender_email": doc.sender_email,
             "created_at": doc.created_at.isoformat(),
+            # bez URL-ov, kak dogovorilis'
         })
 
     return Response(
@@ -3250,3 +3258,173 @@ def mobile_access_key_detail(request, pk: int):
 
     serializer = MobileAccessKeySerializer(access_key)
     return Response(serializer.data)
+
+
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def web_mobile_inbox(request):
+    """
+    GET /api/web/mobile-inbox/
+
+    Список мобильных документов для текущего пользователя (WEB).
+
+    Показываем только те, которые ещё НЕ перенесены в suvestinę:
+      is_processed = False
+    """
+
+    user = request.user
+
+    qs = (
+        MobileInboxDocument.objects
+        .filter(user=user, is_processed=False)  # только "inbox"
+        .select_related("processed_document", "access_key")
+        .order_by("-created_at")
+    )
+
+    serializer = MobileInboxDocumentSerializer(qs, many=True)
+    return Response(serializer.data)
+
+
+#Udaliajem faily s IsKlientu spiska
+@api_view(["DELETE"])
+@permission_classes([IsAuthenticated])
+def web_mobile_inbox_bulk_delete(request):
+    """
+    DELETE /api/web/mobile-inbox/bulk-delete/
+
+    Body (JSON):
+      { "ids": [1, 2, 3, ...] }
+
+    Удаляет MobileInboxDocument текущего пользователя.
+    Логично удалять только те, что ещё не перенесены (is_processed=False).
+    """
+
+    user = request.user
+    ids = request.data.get("ids") or []
+
+    if not isinstance(ids, list) or not ids:
+        return Response(
+            {"error": "NO_IDS", "detail": "Pateikite bent vieną ID."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    docs = MobileInboxDocument.objects.filter(
+        user=user,
+        is_processed=False,
+        id__in=ids,
+    )
+
+    # Если хочешь чистить и физические файлы – можно так:
+    file_paths = []
+    for d in docs:
+        if d.uploaded_file and d.uploaded_file.name:
+            try:
+                file_paths.append(d.uploaded_file.path)
+            except Exception:
+                pass
+
+    deleted_count = docs.count()
+    docs.delete()
+
+    # Пытаемся удалить файлы с диска (не критично, если не получится)
+    for path in file_paths:
+        try:
+            if path and os.path.exists(path):
+                os.remove(path)
+        except Exception:
+            continue
+
+    return Response(
+        {"status": "OK", "count": deleted_count, "deleted_ids": ids},
+        status=status.HTTP_200_OK,
+    )
+
+
+#Perevodim vybranyje faily s IsKlientu v Suvestine (mobile file(original) i preview_url ostajuca)
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def web_mobile_inbox_promote(request):
+    """
+    POST /api/web/mobile-inbox/promote/
+    Body: { "ids": [1, 2, 3] }
+    """
+
+    user = request.user
+    ids = request.data.get("ids") or []
+
+    if not isinstance(ids, list) or not ids:
+        return Response(
+            {"error": "NO_IDS", "detail": "Pateikite bent vieną ID."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    mobile_docs = (
+        MobileInboxDocument.objects
+        .filter(user=user, is_processed=False, id__in=ids)
+        .select_related("access_key")
+    )
+
+    if not mobile_docs.exists():
+        return Response(
+            {"status": "OK", "count": 0, "processed_ids": []},
+            status=status.HTTP_200_OK,
+        )
+
+    processed_ids = []
+    scan_type = "sumiskai"  # пока фиксированно, как обычный web-upload
+
+    for mobile_doc in mobile_docs:
+        if not mobile_doc.uploaded_file:
+            continue
+
+        try:
+            with transaction.atomic():
+                # 1) забираем байты исходного PDF из MobileInboxDocument
+                original_file = mobile_doc.uploaded_file
+                original_file.open("rb")
+                content = original_file.read()
+                original_file.close()
+
+                # 2) создаём ScannedDocument с тем же original_filename
+                scanned = ScannedDocument(
+                    user=user,
+                    original_filename=mobile_doc.original_filename,
+                    status="processing",
+                    scan_type=scan_type,
+                )
+
+                # 3) сохраняем КОПИЮ файла (user_upload_path сгенерит своё имя)
+                scanned.file.save(
+                    original_file.name.split("/")[-1],
+                    ContentFile(content),
+                    save=True,
+                )
+                scanned.save()
+
+                # 4) помечаем mobile-док как перенесённый
+                mobile_doc.processed_document = scanned
+                mobile_doc.processed_at = timezone.now()
+                mobile_doc.is_processed = True
+                mobile_doc.save(
+                    update_fields=["processed_document", "processed_at", "is_processed"]
+                )
+
+                # 5) запускаем твой Celery-пайплайн
+                process_uploaded_file_task.delay(user.id, scanned.id, scan_type)
+
+                processed_ids.append(mobile_doc.id)
+
+        except Exception as e:
+            # логировать можно тут
+            continue
+
+    return Response(
+        {
+            "status": "OK",
+            "count": len(processed_ids),
+            "processed_ids": processed_ids,
+        },
+        status=status.HTTP_200_OK,
+    )

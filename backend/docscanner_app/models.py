@@ -789,14 +789,28 @@ class GuidePage(Page):
 
 
 def mobile_document_upload_to(instance, filename: str) -> str:
-    today = timezone.now().date()
+    """
+    Храним mobile-файлы в такой же структуре, как web:
+    uploads/<email_hash>/<uuid>_mob.<ext>
+
+    - email_hash = первые 16 символов sha256(email)
+    - uuid гарантирует уникальность, никаких конфликтов в inbox
+    - суффикс _mob чисто для отладки (видно, что это mobile-источник)
+    """
+    # email юзера (на всякий случай lower + fallback на пустую строку)
+    email = (getattr(instance.user, "email", "") or "").lower()
+    email_hash = hashlib.sha256(email.encode("utf-8")).hexdigest()[:16]
+
+    # расширение из исходного файла (если вдруг нет — считаем, что pdf)
     base, ext = os.path.splitext(filename)
-    safe_name = base.replace(" ", "_")[:80]
-    return (
-        f"mobile/{instance.user_id}/"
-        f"{today.year}/{today.month:02d}/{today.day:02d}/"
-        f"{safe_name}{ext or '.pdf'}"
-    )
+    ext = ext or ".pdf"
+
+    # уникальное имя, отличимое от web-аплоада по суффиксу _mob
+    unique_name = f"{uuid.uuid4().hex}_mob{ext}"
+
+    # кладём в ту же базовую папку, что и ScannedDocument: "uploads/<email_hash>/..."
+    return os.path.join("uploads", email_hash, unique_name)
+
 
 
 class MobileAccessKey(models.Model):
@@ -905,17 +919,28 @@ class MobileInboxDocument(models.Model):
 
     created_at = models.DateTimeField(auto_now_add=True)
 
-    # 👇 опционально: связь с основным документом, если уже перенесли
     processed_document = models.ForeignKey(
         "ScannedDocument",    
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
         related_name="source_mobile_documents",
-        help_text="Если не NULL – этот файл уже использован для основного Document",
     )
 
     processed_at = models.DateTimeField(null=True, blank=True)
+
+    # 🔹 новые реальные поля
+    is_processed = models.BooleanField(
+        default=False,
+        db_index=True,
+    )
+
+    preview_url = models.URLField(
+        max_length=500,
+        null=True,
+        blank=True,
+        help_text="Pilnas URL, kurį WEB gali naudoti peržiūrai (PDF/preview)",
+    )
 
     class Meta:
         ordering = ["-created_at"]

@@ -3447,7 +3447,7 @@ export default function NustatymaiPage() {
 
           {mobileKeys.length === 0 ? (
             <Typography variant="body2" sx={{ color: "text.secondary" }}>
-              Kol kas nėra sukurtų kvietimų.
+              Kol kas nėra sukurtų raktų
             </Typography>
           ) : (
             <>
