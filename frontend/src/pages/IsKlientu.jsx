@@ -172,11 +172,11 @@ export default function IsKlientu() {
 
   // ==== preview ====
 
-  const handlePreview = (row) => {
-    if (!row?.preview_url && !Array.isArray(row?.preview_urls)) return;
+    const handlePreview = (row) => {
+    if (!row?.preview_url) return;
     setPreviewRow(row);
     setPreviewOpen(true);
-  };
+    };
 
   const handlePreviewClose = () => {
     setPreviewOpen(false);
@@ -443,11 +443,11 @@ export default function IsKlientu() {
       </Dialog>
 
       {/* Новый диалог превью файлов */}
-      <FailuPreviewDialog
+        <FailuPreviewDialog
         open={previewOpen}
         onClose={handlePreviewClose}
         file={previewRow}
-      />
+        />
     </Box>
   );
 }

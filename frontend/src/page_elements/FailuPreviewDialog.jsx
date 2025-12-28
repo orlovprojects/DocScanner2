@@ -4,24 +4,14 @@ import {
   DialogTitle,
   DialogContent,
   IconButton,
-  Typography,
-  Box,
 } from "@mui/material";
 import CloseIcon from "@mui/icons-material/Close";
-import ZoomableImage from "../pages/ZoomableImage";
+import Box from "@mui/material/Box";
 
 export default function FailuPreviewDialog({ open, onClose, file }) {
-  if (!file) return null;
+  const url = file?.preview_url;
 
-  // Поддерживаем и один url, и массив страниц
-  let previewUrls = [];
-  if (Array.isArray(file.preview_urls)) {
-    previewUrls = file.preview_urls.slice(0, 5);
-  } else if (file.preview_url) {
-    previewUrls = [file.preview_url];
-  }
-
-  const hasPreview = previewUrls.length > 0;
+  if (!open || !url) return null;
 
   return (
     <Dialog
@@ -59,65 +49,21 @@ export default function FailuPreviewDialog({ open, onClose, file }) {
       <DialogContent
         dividers
         sx={{
-          minHeight: 400,
-          maxHeight: "80vh",
           p: 0,
-          display: "flex",
-          justifyContent: "center",
-          alignItems: "stretch",
-          bgcolor: "#f3f4f6",
+          height: "80vh",   // задаём явную высоту, чтобы iframe занял её целиком
         }}
       >
-        {hasPreview ? (
-          <Box
-            sx={{
-              flex: 1,
-              height: "100%",
-              overflow: "auto",
-              display: "flex",
-              flexDirection: "column",
-              alignItems: "center",
-              py: 2,
-              px: 2,
-              gap: 2,
-            }}
-          >
-            {previewUrls.map((url, idx) => (
-              <Box
-                key={idx}
-                sx={{
-                  width: "100%",
-                  maxWidth: 1000,
-                  // соотношение сторон условно “лист A4”
-                  aspectRatio: "3 / 4",
-                  bgcolor: "#fff",
-                  borderRadius: 2,
-                  boxShadow: "0 2px 8px #0001",
-                  overflow: "hidden",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                }}
-              >
-                <ZoomableImage src={url} />
-              </Box>
-            ))}
-          </Box>
-        ) : (
-          <Box
-            sx={{
-              flex: 1,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              p: 4,
-            }}
-          >
-            <Typography color="text.secondary">
-              Peržiūra negalima
-            </Typography>
-          </Box>
-        )}
+        <Box
+          component="iframe"
+          key={url} // чтобы при смене файла iframe перерисовывался
+          src={url}
+          title="Failo peržiūra"
+          sx={{
+            border: 0,
+            width: "100%",
+            height: "100%",
+          }}
+        />
       </DialogContent>
     </Dialog>
   );
