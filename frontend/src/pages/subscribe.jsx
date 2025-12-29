@@ -33,7 +33,7 @@ const Subscribe = () => {
     const query = new URLSearchParams(window.location.search);
     if (query.get("success")) {
       setMessage(
-        "🎉 Mokėjimas pavyko! Kreditai netrukus atsiras Jūsų paskyroje."
+        "🎉 Mokėjimas pavyko! Kreditai netrukus atsiras Jūsų paskyroje. PDF sąskaitą galite atsisiųsti iš Paskyra (ikonėlė) -> Mokėjimų istorija"
       );
     }
     if (query.get("canceled")) {

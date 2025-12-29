@@ -204,7 +204,7 @@ const Header = () => {
               </Button>
             )}
             {isAuthenticated ? (
-              <Tooltip title="Nustatymai">
+              <Tooltip title="Paskyra">
                 <IconButton
                   onClick={handleMenuClick}
                   size="small"

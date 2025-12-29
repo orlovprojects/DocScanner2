@@ -6,6 +6,9 @@ from django.db import transaction, IntegrityError
 from django.http import HttpResponse, HttpResponseBadRequest
 from datetime import datetime, timezone as dt_timezone
 from django.utils import timezone
+import random
+from django.db.models.functions import Cast
+from django.db.models import IntegerField
 
 from django.views.decorators.csrf import csrf_exempt
 from rest_framework.decorators import api_view, permission_classes
@@ -37,6 +40,24 @@ def _calc_credits_from_line_items(session) -> int:
         if price_id in PRICE_CREDITS_MAP:
             credits += PRICE_CREDITS_MAP[price_id] * int(qty)
     return credits
+
+
+def _generate_dok_number() -> str:
+    """Генерирует следующий dok_number: max + random(2..7)
+    Должна вызываться внутри transaction.atomic()
+    """
+    last = Payments.objects.select_for_update().filter(
+        dok_number__isnull=False
+    ).exclude(
+        dok_number=""
+    ).annotate(
+        dok_num_int=Cast("dok_number", IntegerField())
+    ).order_by("-dok_num_int").values_list("dok_num_int", flat=True).first()
+    
+    last_num = last or 0
+    new_num = last_num + random.randint(2, 7)
+    return str(new_num)
+
 
 @csrf_exempt
 @api_view(["POST"])
@@ -181,6 +202,7 @@ def StripeWebhookView(request):
             Payments.objects.create(
                 user=user,
                 stripe_event_id=event["id"],
+                dok_number=_generate_dok_number(),
                 session_id=session["id"],
                 payment_intent_id=(pi.get("id") if isinstance(pi, dict) else pi),
                 customer_id=customer_id,
