@@ -35,17 +35,13 @@ export default function PaymentInvoiceButton({ payment }) {
     try {
       setLoading(true);
 
-      // забираем подробные данные по платежу (уже с buyer / seller)
       const { data } = await api.get(`/payments/${payment.id}/invoice/`, {
         withCredentials: true,
       });
 
-      const currencyCode = (data.currency || payment.currency || "EUR").toUpperCase();
-      const amountNet = formatMoney(
-        data.net_amount != null ? data.net_amount : payment.net_amount
-      );
+      const currencyCode = (data.currency || "EUR").toUpperCase();
+      const amountNet = formatMoney(data.net_amount || payment.net_amount);
 
-      // sumos для InvoicePDF (PVM нет → все суммы одинаковые, PVM = 0)
       const asStr = (v) => v.toFixed(2).replace(".", ",");
 
       const sumos = {
@@ -55,62 +51,52 @@ export default function PaymentInvoiceButton({ payment }) {
         sumaSuPvm: asStr(amountNet),
       };
 
-      // seller: берём из бэкенда, если есть, иначе fallback
-      const seller =
-        data.seller || {
-          pavadinimas: "Denis Orlov - DokSkenas",
-          iv_numeris: "1292165",
-          imonesKodas: "",
-          pvmKodas: "",
-          adresas: "Kreivasis skg. 18-19, Vilnius",
-          telefonas: "",
-          bankoPavadinimas: "",
-          iban: "",
-          swift: "",
-        };
+      const seller = {
+        pavadinimas: "Denis Orlov - DokSkenas",
+        iv_numeris: "1292165",
+        pvmKodas: "",
+        adresas: "Kreivasis skg. 18-19, Vilnius",
+        telefonas: "",
+        bankoPavadinimas: "",
+        iban: "",
+        swift: "",
+      };
 
-      // buyer: либо из бэкенда, либо строим из старых полей
       const addr = data.buyer_address || {};
-      const buyer =
-        data.buyer || {
-          pavadinimas: data.buyer_name || data.buyer_email || "",
-          imonesKodas: data.buyer_company_code || "",
-          pvmKodas: data.buyer_vat_code || "",
-          adresas:
-            data.buyer_address_full ||
-            [addr.line1, addr.line2, addr.postal_code, addr.city]
-              .filter(Boolean)
-              .join(", "),
-          telefonas: data.buyer_phone || "",
-          bankoPavadinimas: "",
-          iban: "",
-          swift: "",
-        };
+      const buyer = {
+        pavadinimas: data.buyer_company_name || data.buyer_email || "",
+        imonesKodas: data.buyer_company_code || "",
+        pvmKodas: data.buyer_vat_code || "",
+        adresas:
+          data.buyer_company_address ||
+          [addr.line1, addr.line2, addr.postal_code, addr.city]
+            .filter(Boolean)
+            .join(", "),
+        telefonas: "",
+        bankoPavadinimas: "",
+        iban: data.buyer_company_iban || "",
+        swift: "",
+      };
 
-      // единственная строка — покупка кредитов
       const lineCredits = toNumber(
-        data.credits_purchased != null
-          ? data.credits_purchased
-          : payment.credits_purchased
+        data.credits_purchased || payment.credits_purchased
       );
-      const serviceCode = SERVICE_CODE_BY_CREDITS[lineCredits] || "CREDITS";
+      const serviceCode =
+        SERVICE_CODE_BY_CREDITS[lineCredits] || "CREDITS";
 
       const invoiceData = {
-        // валюта и PVM
         valiuta: currencyCode,
-        pvmTipas: "netaikoma", // инд. veikla, PVM netaikomas
+        pvmTipas: "netaikoma",
 
-        // идентификация счета
-        saskaitosSerija: data.series || "SF",
-        saskaitosNumeris: data.dok_number || String(data.id || payment.id),
-        saskaitosData: data.paid_at || payment.paid_at,
-        moketiIki: data.paid_at || payment.paid_at,
+        saskaitosSerija: "SF",
+        saskaitosNumeris: data.dok_number || String(data.id),
+        saskaitosData: data.paid_at,
+        moketiIki: data.paid_at,
         uzsakymoNumeris: null,
 
         seller,
         buyer,
 
-        // строки счета
         eilutes: [
           {
             pavadinimas: `${lineCredits} DokSkeno kreditų`,
@@ -127,15 +113,27 @@ export default function PaymentInvoiceButton({ payment }) {
         pvmProcent: 0,
       };
 
-      // генерим PDF на фронтенде
+      const apiBase = import.meta.env.VITE_BASE_API_URL;
+      let backendBase = window.location.origin;
+
+      if (apiBase) {
+        try {
+          backendBase = new URL(apiBase).origin;
+        } catch (e) {
+          console.warn("Cannot parse VITE_BASE_API_URL, fallback to window.location.origin");
+        }
+      }
+
+      const logoUrl = `${backendBase}/media/images/dokskenas_logo_for_invoice.jpg`;
+
       const blob = await pdf(
-        <InvoicePDF data={invoiceData} sumos={sumos} logo={null} />
+        <InvoicePDF data={invoiceData} sumos={sumos} logo={logoUrl} />
       ).toBlob();
 
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `saskaita-${invoiceData.saskaitosNumeris || data.id || payment.id}.pdf`;
+      a.download = `saskaita-${invoiceData.saskaitosNumeris || data.id}.pdf`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
