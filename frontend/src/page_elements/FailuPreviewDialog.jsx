@@ -9,16 +9,27 @@ import CloseIcon from "@mui/icons-material/Close";
 import Box from "@mui/material/Box";
 
 export default function FailuPreviewDialog({ open, onClose, file }) {
-  const url = file?.preview_url;
+  const rawUrl = file?.preview_url;
 
-  if (!open || !url) return null;
+  if (!open || !rawUrl) return null;
+
+  // Чуть „отдаляем“ первую страницу: показываем целиком
+  const pdfUrl = rawUrl.includes("#")
+    ? rawUrl
+    : `${rawUrl}#zoom=page-fit`;
 
   return (
     <Dialog
       open={open}
       onClose={onClose}
-      maxWidth="xl"
+      maxWidth="lg"
       fullWidth
+      PaperProps={{
+        sx: {
+          width: { xs: "100%", sm: "95%", md: "80%", lg: "70%" },
+          maxHeight: "90vh",
+        },
+      }}
     >
       <DialogTitle
         sx={{
@@ -50,13 +61,13 @@ export default function FailuPreviewDialog({ open, onClose, file }) {
         dividers
         sx={{
           p: 0,
-          height: "80vh",   // задаём явную высоту, чтобы iframe занял её целиком
+          height: { xs: "70vh", md: "75vh" },
         }}
       >
         <Box
           component="iframe"
-          key={url} // чтобы при смене файла iframe перерисовывался
-          src={url}
+          key={pdfUrl}
+          src={pdfUrl}
           title="Failo peržiūra"
           sx={{
             border: 0,

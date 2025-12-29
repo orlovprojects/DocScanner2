@@ -7,6 +7,9 @@ from django.db.models import IntegerField, Value
 from django.db.models.functions import Cast
 from django.db.models import Case, When
 from .utils.password_encryption import encrypt_password
+from django.urls import reverse
+
+from .models import Payments
 
 from .utils.lineitem_rules import normalize_lineitem_rules
 
@@ -1173,6 +1176,33 @@ class MobileInboxDocumentSerializer(serializers.ModelSerializer):
         ]
 
 
+
+class PaymentSerializer(serializers.ModelSerializer):
+    invoice_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Payments
+        fields = [
+            'id',
+            'paid_at',
+            'credits_purchased',
+            'net_amount',
+            'currency',
+            'dok_number',
+            'invoice_url',
+        ]
+
+    def get_invoice_url(self, obj):
+        """
+        Вернём абсолютный URL до API-эндпоинта PDF/данных для PDF.
+        Пока сделаем URL вида /api/payments/<id>/invoice/
+        """
+        request = self.context.get('request')
+        if not request:
+            return None
+
+        url = reverse('payments-invoice', kwargs={'pk': obj.pk})
+        return request.build_absolute_uri(url)
 
 
 

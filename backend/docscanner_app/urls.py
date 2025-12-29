@@ -38,6 +38,8 @@ from .views import (
     web_mobile_inbox,
     web_mobile_inbox_promote,
     web_mobile_inbox_bulk_delete,
+    payments_list,
+    payment_invoice,
 )
 
 from .views import TrackAdClickView
@@ -134,6 +136,9 @@ urlpatterns = [
     path("web/mobile-inbox/", web_mobile_inbox, name="web-mobile-inbox-list"),
     path("web/mobile-inbox/promote/", web_mobile_inbox_promote, name="web-mobile-inbox-promote"),
     path("web/mobile-inbox/bulk-delete/", web_mobile_inbox_bulk_delete, name="web-mobile-inbox-bulk-delete"),
+
+    path('payments/', payments_list, name='payments-list'),
+    path('payments/<int:pk>/invoice/', payment_invoice, name='payments-invoice'),
 
 
 

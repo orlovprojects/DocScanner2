@@ -77,6 +77,7 @@ from .models import (
     AdClick,
     MobileAccessKey,
     MobileInboxDocument,
+    Payments
 )
 
 from .serializers import (
@@ -93,6 +94,7 @@ from .serializers import (
     OptimumSettingsSerializer,
     MobileAccessKeySerializer,
     MobileInboxDocumentSerializer,
+    PaymentSerializer
 )
 from django.db.models import Prefetch
 
@@ -3428,3 +3430,50 @@ def web_mobile_inbox_promote(request):
         },
         status=status.HTTP_200_OK,
     )
+
+
+
+@api_view(["GET", "POST"])
+@permission_classes([IsAuthenticated])
+def payments_list(request):
+    """
+    /api/payments/
+    Возвращает историю платежей текущего пользователя.
+    GET и POST делают одно и то же, чтобы не ломать твой привычный паттерн.
+    """
+    qs = (
+        Payments.objects
+        .filter(user=request.user)
+        .order_by('-paid_at')
+    )
+
+    serializer = PaymentSerializer(
+        qs,
+        many=True,
+        context={'request': request},  # важно для invoice_url в сериализаторе
+    )
+    return Response(serializer.data)
+
+
+
+@api_view(["GET", "POST"])
+@permission_classes([IsAuthenticated])
+def payment_invoice(request, pk):
+    """
+    /api/payments/<pk>/invoice/
+    Данные по конкретному платежу — можно использовать для генерации PDF.
+    """
+    payment = get_object_or_404(Payments, pk=pk, user=request.user)
+
+    data = {
+      "id": payment.id,
+      "dok_number": payment.dok_number,
+      "paid_at": payment.paid_at,
+      "credits_purchased": payment.credits_purchased,
+      "net_amount": payment.net_amount,
+      "currency": payment.currency,
+      "buyer_email": payment.buyer_email,
+      "buyer_address": payment.buyer_address_json,
+    }
+
+    return Response(data)

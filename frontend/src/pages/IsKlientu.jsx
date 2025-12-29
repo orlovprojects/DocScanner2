@@ -26,6 +26,7 @@ import {
 import MoreVertIcon from "@mui/icons-material/MoreVert";
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 import WarningIcon from "@mui/icons-material/Warning";
+import DeleteIcon from "@mui/icons-material/Delete";
 
 import FailuPreviewDialog from "../page_elements/FailuPreviewDialog";
 
@@ -46,6 +47,11 @@ export default function IsKlientu() {
   // preview dialog
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewRow, setPreviewRow] = useState(null);
+
+  // delete confirm dialog
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [confirmIds, setConfirmIds] = useState([]);
+  const [confirmLoading, setConfirmLoading] = useState(false);
 
   // ==== helpers ====
 
@@ -107,7 +113,7 @@ export default function IsKlientu() {
     setMenuRowId(null);
   };
 
-  // ==== delete ====
+  // ==== delete core ====
 
   const handleDelete = async (ids) => {
     if (!ids || ids.length === 0) return;
@@ -123,9 +129,35 @@ export default function IsKlientu() {
     }
   };
 
-  const handleDeleteSingle = async (id) => {
+  // открываем диалог подтверждения
+  const openConfirmDelete = (ids) => {
+    if (!ids || ids.length === 0) return;
+    setConfirmIds(ids);
+    setConfirmOpen(true);
+  };
+
+  const handleConfirmClose = () => {
+    if (confirmLoading) return;
+    setConfirmOpen(false);
+    setConfirmIds([]);
+  };
+
+  const handleConfirmSubmit = async () => {
+    if (!confirmIds.length) return;
+    setConfirmLoading(true);
+    await handleDelete(confirmIds);
+    setConfirmLoading(false);
+    setConfirmOpen(false);
+    setConfirmIds([]);
+  };
+
+  const handleDeleteSingleFromMenu = (id) => {
     handleMenuClose();
-    await handleDelete([id]);
+    openConfirmDelete([id]);
+  };
+
+  const handleDeleteSelectedClick = () => {
+    openConfirmDelete(selectedIds);
   };
 
   // ==== promote / skaitmenizavimas ====
@@ -172,11 +204,11 @@ export default function IsKlientu() {
 
   // ==== preview ====
 
-    const handlePreview = (row) => {
+  const handlePreview = (row) => {
     if (!row?.preview_url) return;
     setPreviewRow(row);
     setPreviewOpen(true);
-    };
+  };
 
   const handlePreviewClose = () => {
     setPreviewOpen(false);
@@ -204,6 +236,27 @@ export default function IsKlientu() {
           >
             Skaitmenizuoti pasirinktus
           </Button>
+
+            <Tooltip title="Ištrinti pasirinktus">
+            <span>
+                <Button
+                variant="outlined"
+                size="small"
+                color="error"
+                startIcon={<DeleteIcon fontSize="small" />}
+                disabled={selectedIds.length === 0 || loading}
+                onClick={handleDeleteSelectedClick}
+                sx={{
+                    ml: 0.5,
+                    px: 1.5,
+                    textTransform: "none",
+                    borderRadius: 1,
+                }}
+                >
+                Ištrinti
+                </Button>
+            </span>
+            </Tooltip>
 
           {selectedIds.length > 0 && (
             <Typography variant="body2" sx={{ color: "text.secondary" }}>
@@ -270,14 +323,8 @@ export default function IsKlientu() {
 
                     <TableCell
                       sx={{
-                        cursor:
-                          row.preview_url || row.preview_urls
-                            ? "pointer"
-                            : "default",
-                        color:
-                          row.preview_url || row.preview_urls
-                            ? "primary.main"
-                            : "inherit",
+                        cursor: row.preview_url ? "pointer" : "default",
+                        color: row.preview_url ? "primary.main" : "inherit",
                         maxWidth: 260,
                       }}
                       onClick={() => handlePreview(row)}
@@ -370,7 +417,7 @@ export default function IsKlientu() {
         <MenuItem
           onClick={() => {
             if (menuRowId != null) {
-              handleDeleteSingle(menuRowId);
+              handleDeleteSingleFromMenu(menuRowId);
             }
           }}
         >
@@ -378,7 +425,7 @@ export default function IsKlientu() {
         </MenuItem>
       </Menu>
 
-      {/* Диалог прогресса скaitmenizavimo */}
+      {/* Диалог прогресса skaitmenizavimo */}
       <Dialog
         open={promoteDialogOpen}
         onClose={promoteInProgress ? null : closePromoteDialog}
@@ -413,8 +460,8 @@ export default function IsKlientu() {
               <CheckCircleIcon color="success" />
               <Typography variant="body2">
                 {promoteCount === 1
-                  ? "1 failas buvo perkeltas į suvestinę и skaitmenizuojamas."
-                  : `${promoteCount} failai buvo perkelti į suvestinę и skaitmenizuojami.`}
+                  ? "1 failas buvo perkeltas į suvestinę ir skaitmenizuojamas."
+                  : `${promoteCount} failai buvo perkelti į suvestinę ir skaitmenizuojami.`}
               </Typography>
             </Box>
           )}
@@ -442,12 +489,44 @@ export default function IsKlientu() {
         </DialogActions>
       </Dialog>
 
-      {/* Новый диалог превью файлов */}
-        <FailuPreviewDialog
+      {/* Диалог подтверждения удаления */}
+      <Dialog
+        open={confirmOpen}
+        onClose={confirmLoading ? null : handleConfirmClose}
+      >
+        <DialogTitle>Patvirtinkite ištrynimą</DialogTitle>
+        <DialogContent sx={{ pt: 1, minWidth: 320 }}>
+          <Typography variant="body2">
+            {confirmIds.length === 1
+              ? "Ar tikrai norite ištrinti šį failą?"
+              : `Ar tikrai norite ištrinti pasirinktus failus (${confirmIds.length})?`}
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleConfirmClose} disabled={confirmLoading}>
+            Atšaukti
+          </Button>
+          <Button
+            onClick={handleConfirmSubmit}
+            color="error"
+            variant="contained"
+            disabled={confirmLoading}
+            startIcon={
+              confirmLoading ? <CircularProgress size={14} /> : <DeleteIcon />
+            }
+          >
+            Ištrinti
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Диалог превью файлов (PDF) */}
+      <FailuPreviewDialog
         open={previewOpen}
         onClose={handlePreviewClose}
         file={previewRow}
-        />
+      />
     </Box>
   );
 }
+

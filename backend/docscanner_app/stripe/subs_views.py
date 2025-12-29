@@ -33,6 +33,8 @@ def StripeCreditCheckoutView(request):
         'price_1RfxUWIaJDydaLBY6Y3MGrBj': 100,
         'price_1RfxWUIaJDydaLBYJomOA1FD': 500,
         'price_1RfxY1IaJDydaLBY4YXDNSAO': 1000,
+        'price_1SjdLJIaJDydaLBYKixOTMNc': 5000,
+        'price_1SjdMMIaJDydaLBYAMXtAUra': 10000,
     }
     credits = PRICE_CREDITS_MAP.get(price_id)
     if credits is None:

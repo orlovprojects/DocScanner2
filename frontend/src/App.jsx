@@ -41,6 +41,7 @@ import PvmCalculator from './pages/PVMskaiciuokle';
 import GpmSkaiciuokle from './pages/GPMskaiciuokle';
 
 import { initMetaPixel } from './metaPixel';
+import MokejimuIstorija from './pages/MokejimuIstorija';
 
 function App() {
   const location = useLocation();
@@ -133,6 +134,14 @@ function App() {
           element={
             <PrivateRoute>
               <IsKlientu />
+            </PrivateRoute>
+          }
+        />
+        <Route
+          path="/mokejimu-istorija"
+          element={
+            <PrivateRoute>
+              <MokejimuIstorija />
             </PrivateRoute>
           }
         />

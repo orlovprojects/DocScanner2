@@ -627,6 +627,14 @@ class Payments(models.Model):
     # Credits
     credits_purchased = models.IntegerField(default=0)
 
+    dok_number = models.CharField(
+        max_length=50,
+        blank=True,
+        null=True,
+        db_index=True,
+        unique=True,
+    )
+
     # Buyer snapshot
     buyer_email = models.EmailField(blank=True, null=True)
     buyer_address_json = models.JSONField(default=dict, blank=True)
