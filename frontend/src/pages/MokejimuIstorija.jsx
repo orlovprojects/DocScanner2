@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api } from "../api/endpoints";
+import { Helmet } from "react-helmet";
 import {
   Box,
   Paper,
@@ -95,25 +96,32 @@ export default function MokejimuIstorija() {
 
   return (
     <Box px={6} py={4} sx={{ minHeight: "70vh" }}>
-      <Box
+        <Helmet>
+          <title>Mokėjimų istorija</title>
+          <meta
+            name="description"
+            content="Čia rasite sąskaitas už atliktus mokėjimus DokSkene."
+          />
+        </Helmet>
+        <Box
         sx={{
-          mb: 2,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          gap: 2,
-          maxWidth: 1180,
-          mx: "auto",
+            mb: 2,
+            maxWidth: 1180,
+            mx: "auto",
         }}
-      >
-        <Typography variant="h5">Mokėjimų istorija</Typography>
-
-        {hasPayments && (
-          <Typography variant="body2" sx={{ color: "text.secondary" }}>
-            Iš visо mokėjimų: {payments.length}
-          </Typography>
-        )}
-      </Box>
+        >
+        <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", mb: 0.5 }}>
+            <Typography variant="h5">Mokėjimų istorija</Typography>
+            {hasPayments && (
+            <Typography variant="body2" sx={{ color: "text.secondary" }}>
+                Iš viso mokėjimų: {payments.length}
+            </Typography>
+            )}
+        </Box>
+        <Typography variant="body2" sx={{ color: "text.secondary" }}>
+            Norint pakeisti savo įmonės rekvizitus PDF sąskaitose, pakeiskite įmonės duomenis nustatymuose, tada atsisiųskite naujas sąskaitas.
+        </Typography>
+        </Box>
 
       {error && (
         <Box
@@ -136,8 +144,8 @@ export default function MokejimuIstorija() {
         }}
       >
         <Table stickyHeader size="small">
-          <TableHead>
-            <TableRow>
+          <TableHead sx={{ "& th": { backgroundColor: "#FAFAFA" } }}>
+            <TableRow >
               <TableCell sx={{ fontWeight: 600 }}>Data</TableCell>
               <TableCell sx={{ fontWeight: 600 }}>Paslauga</TableCell>
               <TableCell sx={{ fontWeight: 600 }}>Paslaugos kodas</TableCell>
@@ -146,7 +154,7 @@ export default function MokejimuIstorija() {
                 align="right"
                 sx={{ fontWeight: 600, width: 80 }}
               >
-                PDF
+                PDF sąskaita
               </TableCell>
             </TableRow>
           </TableHead>
@@ -165,7 +173,7 @@ export default function MokejimuIstorija() {
                     variant="body2"
                     sx={{ color: "text.secondary" }}
                   >
-                    Mokėjimų nėra.
+                    Mokėjimų nėra
                   </Typography>
                 </TableCell>
               </TableRow>

@@ -62,21 +62,32 @@ export default function PaymentInvoiceButton({ payment }) {
         swift: "",
       };
 
-      const addr = data.buyer_address || {};
-      const buyer = {
-        pavadinimas: data.buyer_company_name || data.buyer_email || "",
-        imonesKodas: data.buyer_company_code || "",
-        pvmKodas: data.buyer_vat_code || "",
-        adresas:
-          data.buyer_company_address ||
-          [addr.line1, addr.line2, addr.postal_code, addr.city]
-            .filter(Boolean)
-            .join(", "),
-        telefonas: "",
-        bankoPavadinimas: "",
-        iban: data.buyer_company_iban || "",
-        swift: "",
-      };
+        const addr = data.buyer_address || {};
+
+        const buyer =
+        data.buyer && Object.keys(data.buyer).length > 0
+            ? {
+                ...data.buyer,
+                adresas:
+                data.buyer.adresas ||
+                [addr.line1, addr.line2, addr.postal_code, addr.city]
+                    .filter(Boolean)
+                    .join(", "),
+            }
+            : {
+                // fallback, esli vdrug buyer ne prishol
+                pavadinimas: data.buyer_email || "",
+                imonesKodas: "",
+                pvmKodas: "",
+                adresas: [addr.line1, addr.line2, addr.postal_code, addr.city]
+                .filter(Boolean)
+                .join(", "),
+                telefonas: "",
+                bankoPavadinimas: "",
+                iban: "",
+                swift: "",
+            };
+
 
       const lineCredits = toNumber(
         data.credits_purchased || payment.credits_purchased

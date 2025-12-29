@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api } from "../api/endpoints";
+import { Helmet } from "react-helmet";
 import {
   Box,
   Paper,
@@ -217,6 +218,13 @@ export default function IsKlientu() {
 
   return (
     <Box px={6} py={4}>
+        <Helmet>
+          <title>Failai iš klientų</title>
+          <meta
+            name="description"
+            content="Čia rasite failus atsiųstus jūsų klientų."
+          />
+        </Helmet>
       {/* Верхняя панель */}
       <Box
         sx={{
