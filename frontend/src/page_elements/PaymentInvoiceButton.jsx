@@ -113,18 +113,7 @@ export default function PaymentInvoiceButton({ payment }) {
         pvmProcent: 0,
       };
 
-      const apiBase = import.meta.env.VITE_BASE_API_URL;
-      let backendBase = window.location.origin;
-
-      if (apiBase) {
-        try {
-          backendBase = new URL(apiBase).origin;
-        } catch (e) {
-          console.warn("Cannot parse VITE_BASE_API_URL, fallback to window.location.origin");
-        }
-      }
-
-      const logoUrl = `${backendBase}/media/images/dokskenas_logo_for_invoice.jpg`;
+    const logoUrl = "/dokskenas_logo_for_invoice.jpg";
 
       const blob = await pdf(
         <InvoicePDF data={invoiceData} sumos={sumos} logo={logoUrl} />
