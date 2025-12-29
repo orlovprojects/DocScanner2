@@ -1,4 +1,3 @@
-// src/pages/MokejimuIstorija.jsx
 import { useEffect, useState } from "react";
 import { api } from "../api/endpoints";
 import {
@@ -10,14 +9,12 @@ import {
   TableCell,
   TableBody,
   TableContainer,
-  Button,
   Typography,
   CircularProgress,
   Alert,
-  Chip,
 } from "@mui/material";
+import PaymentInvoiceButton from "../page_elements/PaymentInvoiceButton";
 
-// Map kreditų -> kodas
 const SERVICE_CODE_BY_CREDITS = {
   100: "DOK1",
   500: "DOK2",
@@ -46,23 +43,15 @@ const formatDate = (dateStr) => {
   return d.toLocaleString("lt-LT");
 };
 
-// "100 DokSkeno kreditų"
 const getPaslaugaLabel = (payment) => {
   const credits = toNumber(payment.credits_purchased);
   if (!credits) return "DokSkeno kreditai";
   return `${credits} DokSkeno kreditų`;
 };
 
-// "DOK1" / "—"
 const getPaslaugosKodas = (payment) => {
   const credits = toNumber(payment.credits_purchased);
   return SERVICE_CODE_BY_CREDITS[credits] || "—";
-};
-
-const getInvoiceUrl = (payment) => {
-  if (payment.invoice_url) return payment.invoice_url;
-  if (!payment.id) return "#";
-  return `/payments/${payment.id}/invoice/`;
 };
 
 export default function MokejimuIstorija() {
@@ -80,7 +69,15 @@ export default function MokejimuIstorija() {
         const { data } = await api.get("/payments/", {
           withCredentials: true,
         });
-        setPayments(Array.isArray(data) ? data : []);
+
+        const arr = Array.isArray(data) ? data : [];
+        arr.sort((a, b) => {
+          const ad = a.paid_at ? new Date(a.paid_at).getTime() : 0;
+          const bd = b.paid_at ? new Date(b.paid_at).getTime() : 0;
+          return bd - ad;
+        });
+
+        setPayments(arr);
       } catch (e) {
         console.error("Failed to load payments", e);
         setError(
@@ -96,18 +93,8 @@ export default function MokejimuIstorija() {
     load();
   }, []);
 
-  const totalNet = payments.reduce(
-    (sum, p) => sum + toNumber(p.net_amount),
-    0
-  );
-  const totalCredits = payments.reduce(
-    (sum, p) => sum + toNumber(p.credits_purchased),
-    0
-  );
-
   return (
-    <Box px={6} py={4}>
-      {/* верхняя панель */}
+    <Box px={6} py={4} sx={{ minHeight: "70vh" }}>
       <Box
         sx={{
           mb: 2,
@@ -115,29 +102,16 @@ export default function MokejimuIstorija() {
           alignItems: "center",
           justifyContent: "space-between",
           gap: 2,
-          maxWidth: 1180, // чуть шире
+          maxWidth: 1180,
           mx: "auto",
         }}
       >
         <Typography variant="h5">Mokėjimų istorija</Typography>
 
         {hasPayments && (
-          <Box display="flex" alignItems="center" gap={2}>
-            <Typography variant="body2" sx={{ color: "text.secondary" }}>
-              Iš viso mokėjimų: {payments.length}
-            </Typography>
-            <Typography variant="body2" sx={{ color: "text.secondary" }}>
-              Iš viso kreditų: {totalCredits}
-            </Typography>
-            <Chip
-              size="small"
-              label={`Neto suma: ${formatAmount(
-                totalNet,
-                payments[0]?.currency || "EUR"
-              )}`}
-              sx={{ fontSize: 12 }}
-            />
-          </Box>
+          <Typography variant="body2" sx={{ color: "text.secondary" }}>
+            Iš visо mokėjimų: {payments.length}
+          </Typography>
         )}
       </Box>
 
@@ -156,7 +130,7 @@ export default function MokejimuIstorija() {
       <TableContainer
         component={Paper}
         sx={{
-          maxWidth: 1180, // немножко шире таблица
+          maxWidth: 1180,
           mx: "auto",
           maxHeight: 520,
         }}
@@ -170,9 +144,9 @@ export default function MokejimuIstorija() {
               <TableCell sx={{ fontWeight: 600 }}>Suma</TableCell>
               <TableCell
                 align="right"
-                sx={{ fontWeight: 600, width: 140 }}
+                sx={{ fontWeight: 600, width: 80 }}
               >
-                PDF sąskaita
+                PDF
               </TableCell>
             </TableRow>
           </TableHead>
@@ -235,16 +209,7 @@ export default function MokejimuIstorija() {
                   </TableCell>
 
                   <TableCell align="right">
-                    <Button
-                      variant="outlined"
-                      size="small"
-                      component="a"
-                      href={getInvoiceUrl(payment)}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                    >
-                      PDF sąskaita
-                    </Button>
+                    <PaymentInvoiceButton payment={payment} />
                   </TableCell>
                 </TableRow>
               ))

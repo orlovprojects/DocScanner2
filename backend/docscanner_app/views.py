@@ -3461,19 +3461,48 @@ def payments_list(request):
 def payment_invoice(request, pk):
     """
     /api/payments/<pk>/invoice/
-    Данные по конкретному платежу — можно использовать для генерации PDF.
+    Dati skirti PDF sąskaitai.
     """
     payment = get_object_or_404(Payments, pk=pk, user=request.user)
+    user = request.user  # CustomUser
+
+    # Pardavėjas 
+    seller = {
+        "pavadinimas": "Denis Orlov - DokSkenas",
+        "iv_numeris": "1292165",
+        "imonesKodas": "",  
+        "pvmKodas": "",
+        "adresas": "Kreivasis skg. 18-19, Vilnius",
+        "telefonas": "",
+        "bankoPavadinimas": "",
+        "iban": "",
+        "swift": "",
+    }
+
+    # Pirkėjas – klientas из CustomUser
+    buyer = {
+        "pavadinimas": user.company_name or user.email,
+        "imonesKodas": user.company_code or "",
+        "pvmKodas": user.vat_code or "",
+        "adresas": user.company_address or "",
+        "telefonas": "",
+        "bankoPavadinimas": "",
+        "iban": user.company_iban or "",
+        "swift": "",
+        "salis": user.company_country_iso or "",
+    }
 
     data = {
-      "id": payment.id,
-      "dok_number": payment.dok_number,
-      "paid_at": payment.paid_at,
-      "credits_purchased": payment.credits_purchased,
-      "net_amount": payment.net_amount,
-      "currency": payment.currency,
-      "buyer_email": payment.buyer_email,
-      "buyer_address": payment.buyer_address_json,
+        "id": payment.id,
+        "dok_number": payment.dok_number,
+        "paid_at": payment.paid_at,
+        "credits_purchased": payment.credits_purchased,
+        "net_amount": payment.net_amount,
+        "currency": (payment.currency or "EUR").upper(),
+        "buyer_email": payment.buyer_email,
+        "buyer_address": payment.buyer_address_json,
+        "seller": seller,
+        "buyer": buyer,
     }
 
     return Response(data)
