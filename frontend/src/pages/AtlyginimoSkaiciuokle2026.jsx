@@ -18,7 +18,7 @@ import {
  * ✅ PSD 6,98% be lubų. Papildoma pensija: 0% arba 3% (rodoma atskirai).
  */
 
-const VDU = 2304.5;   // VDU, kaip prašei (2025)
+const VDU = 2312.15;   // VDU, kaip prašei (2025)
 const MMA = 1153;
 
 // GPM ribos
@@ -475,7 +475,7 @@ function TaxInfo2026() {
         }}
       >
         <b>PASTABA:</b> Šioje skaičiuoklėje naudojame 2026 metų MMA ir VDU reikšmes –{" "}
-        <b>MMA: 1153 €</b>, <b>VDU: 2304,5 €</b>.
+        <b>MMA: 1153 €</b>, <b>VDU: 2312,15 €</b>.
       </Typography>
 
       {/* H2 – Atlyginimo mokesčių lentelė 2026 */}
