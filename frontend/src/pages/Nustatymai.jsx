@@ -1727,6 +1727,21 @@ export default function NustatymaiPage() {
     }
   };
 
+  const fixDeltaKey = "fix_delta";
+  const isFixDeltaEnabled = Boolean(extraSettings && extraSettings[fixDeltaKey] === 1);
+  const toggleFixDelta = async (e) => {
+    const checked = e.target.checked;
+    const next = { ...(extraSettings || {}) };
+    if (checked) next[fixDeltaKey] = 1; else if (fixDeltaKey in next) delete next[fixDeltaKey];
+    setExtraSettings(next);
+    try {
+      await api.patch("/profile/", { extra_settings: next }, { withCredentials: true });
+    } catch {
+      setExtraSettings(extraSettings || {});
+      alert("Nepavyko išsaugoti papildomų nustatymų.");
+    }
+  };
+
   const handlePrekesAssemblyPirkimasChange = (e) => {
     setPrekesAssemblyPirkimas(Number(e.target.value));
   };
@@ -2321,10 +2336,28 @@ export default function NustatymaiPage() {
       {/* 3. Papildomi nustatymai */}
       <Paper sx={{ p: 3, mb: 3, mt: 5 }}>
         <Typography variant="h6" sx={{ mb: 3, fontWeight: 600 }}>Papildomi nustatymai</Typography>
-        <FormControlLabel
-          control={<Switch checked={isOpDateFromDoc} onChange={toggleOpDateFromDoc} />}
-          label="Operacijos datą imti iš sąskaitos datos"
-        />
+        <Stack spacing={1}>
+          <FormControlLabel
+            control={<Switch checked={isOpDateFromDoc} onChange={toggleOpDateFromDoc} />}
+            label="Operacijos datą imti iš sąskaitos datos"
+          />
+          <FormControlLabel
+            control={<Switch checked={isFixDeltaEnabled} onChange={toggleFixDelta} />}
+            label={
+              <Box sx={{ display: "inline-flex", alignItems: "center", gap: 0.5 }}>
+                <span>Taisyti dokumento sumas kai skiriasi &lt;0,20</span>
+                <Tooltip
+                  arrow
+                  enterTouchDelay={0}
+                  leaveTouchDelay={4000}
+                  title="Sistema pataisys dokumento sumas, kai jos skiriasi nuo eilučių sumų iki 0,20. Pvz. dėl apvalinimų eilučių ir dokumento sumos gali skirtis ir apskaitos programos tokius dokumentus atmes."
+                >
+                  <HelpOutlineIcon fontSize="small" sx={{ color: "text.secondary" }} />
+                </Tooltip>
+              </Box>
+            }
+          />
+        </Stack>
 
         {program === "rivile" && (
           <Box sx={{ mt: 2 }}>

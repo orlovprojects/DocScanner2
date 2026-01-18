@@ -2620,6 +2620,10 @@ def register(request):
             user = serializer.save()
             logger.info(f"Пользователь {user.email} успешно зарегистрирован.")
 
+            # Устанавливаем default extra_settings
+            user.extra_settings = {"fix_delta": 1}
+            user.save(update_fields=["extra_settings"])
+
             # Создаём триал-подписку для нового пользователя
             create_trial_subscription(user)
 
@@ -2654,7 +2658,7 @@ def register(request):
             #     logger.exception(f"Не удалось поставить welcome email в очередь: {mail_err}")
 
             return Response({
-                "message": "User successfully registered!",
+                "message": "Registracija sėkminga!",
                 "user": {
                     "id": user.id,
                     "email": user.email,
