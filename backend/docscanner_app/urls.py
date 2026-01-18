@@ -40,8 +40,9 @@ from .views import (
     web_mobile_inbox_bulk_delete,
     payments_list,
     payment_invoice,
+    get_user_counterparties,
 )
-
+from . import views
 from .views import TrackAdClickView
 
 from rest_framework.routers import DefaultRouter
@@ -144,7 +145,7 @@ urlpatterns = [
 
 
 
-# Nachiat pokupku subscription cerez Stripe
+    # Nachiat pokupku subscription cerez Stripe
     # path('stripe/create-checkout-session/', StripeCheckoutView, name='stripe_checkout'),
 
     # Posle Stripe events (paymenta, prodlenija subscriptionsa) obnovliajet danyje subscriptionsa v BD
@@ -197,12 +198,37 @@ urlpatterns = [
     # path('subscription-status/', subscription_status, name='subscription_status'),
 
 
-#DLIA SUPERUSEROV!!!:
+    #DLIA SUPERUSEROV!!!:
 
     path('admin/documents_with_errors/', admin_documents_with_errors, name='admin_documents_with_errors'),
     path('superuser/dashboard-stats/', superuser_dashboard_stats, name="superuser_dashboard_stats"),
     path('admin/visi-failai/', admin_all_documents, name='admin_all_documents'),
     path("admin/users/", admin_users_simple, name="admin_users_simple"),
 
+
+    #Optimizacija skorosti
+
+    path("documents/counterparties/", get_user_counterparties),
+
     path("", include(router.urls)),
+
+
+
+
+    path("sessions/create/", views.create_session, name="session_create"),
+    path("sessions/<uuid:session_id>/status/", views.session_status, name="session_status"),
+    path("sessions/<uuid:session_id>/upload/", views.upload_batch, name="session_upload_batch"),
+    path("sessions/<uuid:session_id>/finalize/", views.finalize_session, name="session_finalize"),
+    
+    # Chunked upload для архивов
+    path("sessions/<uuid:session_id>/chunks/init/", views.chunk_init, name="chunk_init"),
+    path("sessions/<uuid:session_id>/chunks/<uuid:upload_id>/<int:index>/", views.upload_chunk, name="upload_chunk"),
+    path("sessions/<uuid:session_id>/chunks/<uuid:upload_id>/status/", views.chunk_status, name="chunk_status"),
+    path("sessions/<uuid:session_id>/chunks/<uuid:upload_id>/complete/", views.chunk_complete, name="chunk_complete"),
+
+    path("sessions/active/", views.active_sessions, name="sessions_active"),
+
+
+
+
 ]

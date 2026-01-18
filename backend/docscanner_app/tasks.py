@@ -1,37 +1,205 @@
 # tasks.py
-from celery import shared_task
-from decimal import Decimal
-from django.core.files.base import ContentFile
-from django.conf import settings
+import os
+import time
 import uuid
+import json
+import re
+import logging
+import logging.config
+from django.db.models import F
 
-from .models import ScannedDocument, CustomUser
+from decimal import Decimal
+
+from celery import shared_task
+from celery.exceptions import SoftTimeLimitExceeded
+
+from django.conf import settings
+from django.core.files.base import ContentFile
+from django.db import transaction
+from django.utils import timezone
+
+from .models import ScannedDocument, CustomUser, UploadSession
+
 from .utils.ocr import get_ocr_text as get_ocr_text_gcv
 from .utils.gemini_ocr import get_ocr_text_gemini
 from .utils.doc_type import detect_doc_type
+
 from .utils.gpt import ask_gpt_with_retry, DEFAULT_PROMPT, DETAILED_PROMPT
-from .utils.gemini import GEMINI_DEFAULT_PROMPT, GEMINI_DETAILED_PROMPT, ask_gemini_with_retry, is_truncated_json, repair_truncated_json_with_gemini_lite, request_full_json_with_gemini_lite
+from .utils.gemini import (
+    GEMINI_DEFAULT_PROMPT,
+    GEMINI_DETAILED_PROMPT,
+    ask_gemini_with_retry,
+    is_truncated_json,
+    repair_truncated_json_with_gemini_lite,
+    request_full_json_with_gemini_lite,
+)
+
 from .utils.similarity import calculate_max_similarity_percent
-from .utils.save_document import update_scanned_document
-from .validators.company_matcher import update_seller_buyer_info
-from .validators.verify_lt_company_match import update_seller_buyer_info_from_companies
-# from .utils.file_converter import normalize_uploaded_file
+from .utils.save_document import update_scanned_document, _apply_sumiskai_defaults_from_user
 from .utils.llm_json import parse_llm_json_robust
 from .utils.duplicates import is_duplicate_by_series_number
-from .utils.save_document import _apply_sumiskai_defaults_from_user
-from celery.exceptions import SoftTimeLimitExceeded
-
-import os
-import logging
-import logging.config
-import time
 from .utils.parsers import normalize_code_field
-import json
-import re
+from .utils.file_converter import normalize_any, ArchiveLimitError, MAX_SINGLE_FILE_BYTES
+
+from .validators.company_matcher import update_seller_buyer_info
+from .validators.verify_lt_company_match import update_seller_buyer_info_from_companies
 
 
 logging.config.dictConfig(settings.LOGGING)
 logger = logging.getLogger('docscanner_app')
+
+
+COST = {
+    "sumiskai": Decimal("1.00"),
+    "detaliai": Decimal("1.30"),
+}
+
+def _doc_cost(scan_type: str) -> Decimal:
+    return COST.get((scan_type or "").strip(), Decimal("1.00"))
+
+@transaction.atomic
+def settle_session_for_doc(doc_id: int):
+    # Сначала получаем doc БЕЗ select_for_update на связанных таблицах
+    doc = ScannedDocument.objects.select_for_update().get(id=doc_id)
+
+    if not doc.upload_session_id:
+        return
+    if doc.counted_in_session:
+        return
+
+    # Отдельно блокируем session и user
+    s = UploadSession.objects.select_for_update().get(id=doc.upload_session_id)
+    u = CustomUser.objects.select_for_update().get(id=doc.user_id)
+
+    cost = _doc_cost(doc.scan_type)
+
+    # === 1) архив-контейнер ===
+    if doc.is_archive_container:
+        # НЕ трогаем credits_reserved и reserved_credits!
+        # Кредиты резервировались за файлы ВНУТРИ архива, не за сам контейнер.
+        # Освобождение кредитов произойдёт когда обработаются распакованные файлы.
+        s.pending_archives = max((s.pending_archives or 0) - 1, 0)
+
+        doc.counted_in_session = True
+
+        s.save(update_fields=["pending_archives", "updated_at"])
+        doc.save(update_fields=["counted_in_session"])
+        return
+
+    # === 2) обычный документ (включая распакованные из архива) ===
+    s.processed_items = (s.processed_items or 0) + 1
+
+    # Успех = статус completed/exported И прошла валидация И готов к экспорту
+    success = (
+        doc.status in ("completed", "exported")
+        and getattr(doc, 'math_validation_passed', None) is True
+        and getattr(doc, 'ready_for_export', None) is True
+    )
+    
+    if success:
+        s.done_items = (s.done_items or 0) + 1
+        u.credits = (u.credits or Decimal("0")) - cost
+    else:
+        s.failed_items = (s.failed_items or 0) + 1
+
+    u.credits_reserved = max((u.credits_reserved or Decimal("0")) - cost, Decimal("0"))
+    s.reserved_credits = max((s.reserved_credits or Decimal("0")) - cost, Decimal("0"))
+
+    doc.counted_in_session = True
+
+    u.save(update_fields=["credits", "credits_reserved"])
+    s.save(update_fields=["processed_items", "done_items", "failed_items", "reserved_credits", "updated_at"])
+    doc.save(update_fields=["counted_in_session"])
+
+
+
+
+
+
+def maybe_finish_session_async(session_id):
+    if not session_id:
+        return
+    finish_session_task.delay(str(session_id))
+
+@shared_task
+def finish_session_task(session_id: str):
+    _maybe_finish_session(session_id)
+
+@transaction.atomic
+def _maybe_finish_session(session_id: str):
+    s = UploadSession.objects.select_for_update().get(id=session_id)
+
+    if s.stage != "processing":
+        return
+
+    # критерий завершения:
+    # - всё что поставили в работу (actual_items) обработано (processed_items)
+    # - и нет “висящих” архивов в распаковке
+    if (s.pending_archives or 0) == 0 and (s.actual_items or 0) > 0 and (s.processed_items or 0) >= (s.actual_items or 0):
+        s.stage = "done"
+        s.finished_at = timezone.now()
+        s.save(update_fields=["stage", "finished_at", "updated_at"])
+
+        kick_next_session_task.delay(s.user_id)
+
+@shared_task
+def kick_next_session_task(user_id: int):
+    maybe_start_next_session(user_id)
+
+@transaction.atomic
+def maybe_start_next_session(user_id: int):
+    # если уже есть processing — ничего не делаем
+    if UploadSession.objects.filter(user_id=user_id, stage="processing").exists():
+        return
+
+    nxt = (
+        UploadSession.objects
+        .select_for_update()
+        .filter(user_id=user_id, stage="queued")
+        .order_by("created_at")
+        .first()
+    )
+    if not nxt:
+        return
+
+    nxt.stage = "processing"
+    if not nxt.started_at:
+        nxt.started_at = timezone.now()
+    nxt.save(update_fields=["stage", "started_at", "updated_at"])
+
+    # запускаем обработку
+    start_session_processing.delay(str(nxt.id))
+
+
+def _settle_and_finish_if_session(doc: ScannedDocument):
+    if not doc:
+        return
+    if not getattr(doc, "upload_session_id", None):
+        return
+    try:
+        settle_session_for_doc(doc.id)
+    finally:
+        maybe_finish_session_async(doc.upload_session_id)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 def _extract_json_object(s: str) -> dict:
@@ -92,7 +260,8 @@ def ask_llm_with_fallback(raw_text: str, scan_type: str, logger):
     except NameError:
         gemini_prompt = DETAILED_PROMPT if scan_type == "detaliai" else DEFAULT_PROMPT
 
-    primary_model   = "gemini-2.5-flash"
+    primary_model   = "gemini-2.0-flash-lite"
+    # primary_model   = "gemini-2.5-flash"
     secondary_model = "gemini-2.5-flash-lite"   # альтернативно: "gemini-flash-lite-latest"
 
     # 1) Flash
@@ -173,6 +342,52 @@ def ask_llm_with_fallback(raw_text: str, scan_type: str, logger):
 #     return resp, "gpt"
 
 
+@shared_task
+def start_session_processing(session_id: str):
+    to_process = []
+    scan_type = None
+
+    with transaction.atomic():
+        s = UploadSession.objects.select_for_update().get(id=session_id)
+        scan_type = s.scan_type
+
+        qs = (
+            ScannedDocument.objects
+            .select_for_update()
+            .filter(upload_session=s, status="pending")
+            .only("id", "user_id")
+        )
+        docs = list(qs)
+
+        if not docs:
+            return
+
+        doc_ids = [d.id for d in docs]
+
+        total_cnt = len(doc_ids)
+        arch_cnt = ScannedDocument.objects.filter(id__in=doc_ids, is_archive_container=True).count()
+        normal_cnt = total_cnt - arch_cnt
+
+        # чтобы не запустить повторно
+        ScannedDocument.objects.filter(id__in=doc_ids).update(status="processing")
+
+        if arch_cnt:
+            UploadSession.objects.filter(id=s.id).update(pending_archives=F("pending_archives") + arch_cnt)
+
+        if normal_cnt:
+            UploadSession.objects.filter(id=s.id).update(actual_items=F("actual_items") + normal_cnt)
+
+
+        to_process = [(d.user_id, d.id) for d in docs]
+
+    # вне транзакции
+    for user_id, doc_id in to_process:
+        process_uploaded_file_task.delay(user_id, doc_id, scan_type)
+
+
+
+
+
 @shared_task(bind=True, soft_time_limit=600, time_limit=630, acks_late=True)
 def process_uploaded_file_task(self, user_id, doc_id, scan_type):
     """
@@ -242,9 +457,23 @@ def process_uploaded_file_task(self, user_id, doc_id, scan_type):
         t0 = _t()
         
         try:
-            from .utils.file_converter import normalize_any
+            from .utils.file_converter import normalize_any, ArchiveLimitError
             normalized_result = normalize_any(fake_file)
             _log_t("Normalize uploaded file", t0)
+            
+        except ArchiveLimitError as e:
+            # НОВОЕ: Слишком много файлов в архиве — критическая ошибка
+            _log_t("Normalize failed (archive limit)", t0)
+            t1 = _t()
+            doc.status = 'rejected'
+            doc.error_message = str(e)  # "Per daug failų archyve: 2500 (max 2000)"
+            doc.preview_url = None
+            doc.save(update_fields=['status', 'error_message', 'preview_url'])
+            _settle_and_finish_if_session(doc)
+            _log_t("Save rejected (archive limit)", t1)
+            logger.info(f"[TASK] Rejected archive limit exceeded: {original_filename} - {str(e)}")
+            _log_t("TOTAL", total_start)
+            return
             
         except ValueError as e:
             # Неподдерживаемый формат
@@ -254,10 +483,11 @@ def process_uploaded_file_task(self, user_id, doc_id, scan_type):
             doc.error_message = f"Nepalaikomas failo formatas: {str(e)}"
             doc.preview_url = None
             doc.save(update_fields=['status', 'error_message', 'preview_url'])
+            _settle_and_finish_if_session(doc)
             _log_t("Save rejected (unsupported format)", t1)
             logger.info(f"[TASK] Rejected unsupported format: {original_filename} - {str(e)}")
             _log_t("TOTAL", total_start)
-            return  # НЕ списываем кредиты!
+            return
             
         except Exception as e:
             # Другие ошибки нормализации
@@ -268,9 +498,10 @@ def process_uploaded_file_task(self, user_id, doc_id, scan_type):
             doc.error_message = f"Klaida apdorojant failą: {str(e)}"
             doc.preview_url = None
             doc.save(update_fields=['status', 'error_message', 'preview_url'])
+            _settle_and_finish_if_session(doc)
             _log_t("Save rejected (normalize error)", t1)
             _log_t("TOTAL", total_start)
-            return  # НЕ списываем кредиты!
+            return
 
         # 5) Обработка результата нормализации
         if isinstance(normalized_result, list):
@@ -279,6 +510,17 @@ def process_uploaded_file_task(self, user_id, doc_id, scan_type):
             # ============================================================
             file_count = len(normalized_result)
             logger.info(f"[TASK] Archive contains {file_count} processable files")
+            archive_skipped_data = {}
+            if normalized_result and '_archive_skipped' in normalized_result[0]:
+                archive_skipped_data = normalized_result[0].pop('_archive_skipped', {})
+
+            skipped_too_large = archive_skipped_data.get('too_large', [])
+            skipped_unsupported = archive_skipped_data.get('unsupported', [])
+
+            has_skipped = len(skipped_too_large) > 0 or len(skipped_unsupported) > 0
+
+            if has_skipped:
+                logger.info(f"[TASK] Archive skipped: {len(skipped_too_large)} too large, {len(skipped_unsupported)} unsupported")
             
             if file_count == 0:
                 # Пустой архив
@@ -287,6 +529,7 @@ def process_uploaded_file_task(self, user_id, doc_id, scan_type):
                 doc.error_message = "Archyve nerasta palaikomų failų"
                 doc.preview_url = None
                 doc.save(update_fields=['status', 'error_message', 'preview_url'])
+                _settle_and_finish_if_session(doc)
                 _log_t("Save rejected (empty archive)", t1)
                 logger.info(f"[TASK] Rejected empty archive: {original_filename}")
                 _log_t("TOTAL", total_start)
@@ -312,9 +555,37 @@ def process_uploaded_file_task(self, user_id, doc_id, scan_type):
             batch_id = uuid.uuid4()
             logger.info(f"[TASK] Created batch_id={batch_id} for {file_count} files from archive")
             
-            # УДАЛЯЕМ запись архива из БД (заменим её на реальные документы)
-            doc.delete()
-            logger.info(f"[TASK] Deleted archive record doc_id={doc_id}")
+            doc.is_archive_container = True
+
+            if has_skipped:
+                doc.status = "rejected"
+                
+                # Формируем сообщение об ошибках
+                error_parts = []
+                
+                if skipped_too_large:
+                    count = len(skipped_too_large)
+                    names = [f['name'] for f in skipped_too_large[:3]]
+                    names_str = ', '.join(names)
+                    if count > 3:
+                        names_str += f" ir dar {count - 3}..."
+                    error_parts.append(f"{count} per didelių failų (>{MAX_SINGLE_FILE_BYTES // (1024*1024)} MB): {names_str}")
+                
+                if skipped_unsupported:
+                    count = len(skipped_unsupported)
+                    names = [f['name'] for f in skipped_unsupported[:3]]
+                    names_str = ', '.join(names)
+                    if count > 3:
+                        names_str += f" ir dar {count - 3}..."
+                    error_parts.append(f"{count} nepalaikomų failų: {names_str}")
+                
+                doc.error_message = "Praleista: " + "; ".join(error_parts)
+            else:
+                doc.status = "completed"
+                doc.error_message = None
+
+            doc.preview_url = None
+            doc.save(update_fields=["is_archive_container", "status", "error_message", "preview_url"])
             
             # Создаём отдельные ScannedDocument для каждого файла
             created_docs = []
@@ -322,15 +593,21 @@ def process_uploaded_file_task(self, user_id, doc_id, scan_type):
                 try:
                     t2 = _t()
                     
+                    # Исправляем расширение: PDF→PNG после нормализации
+                    orig_name = normalized_file.get('original_filename', f'file_{i}.bin')
+                    new_ext = os.path.splitext(normalized_file['filename'])[1]
+                    base_name = os.path.splitext(orig_name)[0]
+                    corrected_filename = f"{base_name}{new_ext}"
+
                     # Создаём новый документ
                     new_doc = ScannedDocument.objects.create(
                         user=user,
-                        original_filename=normalized_file.get('original_filename', f'file_{i}.bin'),
+                        original_filename=corrected_filename,  # ← ЗДЕСЬ используем corrected_filename
                         status='processing',
                         scan_type=scan_type,
-                        # Если у вас есть поле batch_id в модели:
-                        # batch_id=batch_id,
-                        # batch_order=i,
+                        upload_session=doc.upload_session,       
+                        parent_document=doc,                     
+                        is_archive_container=False,              
                     )
                     
                     # Сохраняем нормализованный файл
@@ -347,7 +624,7 @@ def process_uploaded_file_task(self, user_id, doc_id, scan_type):
                     
                     logger.info(
                         f"[TASK] Created doc_id={new_doc.id} for file {i}/{file_count}: "
-                        f"{normalized_file.get('original_filename')}"
+                        f"{corrected_filename} (original: {orig_name})"
                     )
                     
                 except Exception as e:
@@ -358,6 +635,14 @@ def process_uploaded_file_task(self, user_id, doc_id, scan_type):
                 logger.error(f"[TASK] Failed to create ANY documents from archive {original_filename}")
                 _log_t("TOTAL (archive processing failed)", total_start)
                 return
+            
+            if doc.upload_session_id:
+                UploadSession.objects.filter(id=doc.upload_session_id).update(
+                    actual_items=F("actual_items") + len(created_docs)
+                )
+
+            _settle_and_finish_if_session(doc)
+
             
             logger.info(
                 f"[TASK] Successfully created {len(created_docs)} documents from archive. "
@@ -415,81 +700,6 @@ def process_uploaded_file_task(self, user_id, doc_id, scan_type):
         preview_url = f"{settings.SITE_URL_BACKEND}/media/{doc.file.name}"
         logger.info(f"[TASK] Preview URL: {preview_url}")
 
-        # # 3) Определить content_type
-        # t0 = _t()
-        # content_type = getattr(doc.file.file, 'content_type', None)
-        # if not content_type:
-        #     if file_path.lower().endswith('.pdf'):
-        #         content_type = 'application/pdf'
-        #     elif file_path.lower().endswith(('.jpg', '.jpeg')):
-        #         content_type = 'image/jpeg'
-        #     elif file_path.lower().endswith('.png'):
-        #         content_type = 'image/png'
-        # logger.info(f"[TASK] Detected content_type={content_type} for {original_filename}")
-        # _log_t("Detect content_type", t0)
-
-        # # 4) Если PDF — конвертация в PNG
-        # data = file_bytes
-        # if content_type == 'application/pdf':
-        #     class FakeUpload:
-        #         def __init__(self, name, content, content_type):
-        #             self.name = name
-        #             self._content = content
-        #             self.content_type = content_type
-        #             self._read = False
-        #         def read(self):
-        #             if not self._read:
-        #                 self._read = True
-        #                 return self._content
-        #             return b''
-
-        #     fake_file = FakeUpload(original_filename, file_bytes, content_type)
-
-        #     t0 = _t()
-        #     try:
-        #         normalized = normalize_uploaded_file(fake_file)
-        #         logger.info(f"[TASK] PDF normalized to PNG: {normalized['filename']}, size: {len(normalized['data'])}")
-        #     except Exception:
-        #         logger.exception(f"[TASK] Failed to normalize PDF: {original_filename}")
-        #         raise
-        #     _log_t("PDF→PNG normalize", t0)
-
-        #     # удалить исходный PDF
-        #     t0 = _t()
-        #     if doc.file and os.path.exists(file_path):
-        #         try:
-        #             doc.file.delete(save=False)
-        #             logger.info(f"[TASK] PDF deleted via .delete(): {file_path}")
-        #         except Exception as e:
-        #             logger.warning(f"[TASK] Couldn't delete PDF via delete(): {file_path}: {e}")
-        #         if os.path.exists(file_path):
-        #             try:
-        #                 os.remove(file_path)
-        #                 logger.info(f"[TASK] PDF deleted manually: {file_path}")
-        #             except Exception as e:
-        #                 logger.warning(f"[TASK] Couldn't manually delete PDF: {file_path}: {e}")
-        #     _log_t("Delete original PDF", t0)
-
-        #     # сохранить PNG
-        #     t0 = _t()
-        #     doc.file.save(normalized['filename'], ContentFile(normalized['data']), save=True)
-        #     logger.info(f"[TASK] PNG saved: {doc.file.name}, exists? {os.path.exists(doc.file.path)}")
-        #     doc.content_type = normalized['content_type']
-        #     doc.save()
-        #     doc.refresh_from_db()
-        #     logger.info(f"[TASK] After refresh: doc.file.name={doc.file.name}, doc.file.path={doc.file.path}, exists? {os.path.exists(doc.file.path)}")
-        #     _log_t("Save PNG to model field", t0)
-
-        #     file_path = doc.file.path
-        #     original_filename = doc.file.name
-        #     data = normalized['data']
-        # else:
-        #     logger.info(f"[TASK] Not a PDF, using as is: {original_filename}")
-
-        # # 5) preview_url
-        # t0 = _t()
-        # preview_url = f"{settings.SITE_URL_BACKEND}/media/{doc.file.name}"
-        # _log_t("Build preview_url", t0)
 
         # 6) OCR: Google Vision → fallback Gemini OCR
         t0 = _t()
@@ -510,6 +720,7 @@ def process_uploaded_file_task(self, user_id, doc_id, scan_type):
                 doc.error_message = gemini_err or gcv_err or "OCR returned empty text"
                 doc.preview_url = preview_url
                 doc.save(update_fields=['status', 'error_message', 'preview_url'])
+                _settle_and_finish_if_session(doc)
                 _log_t("Save rejected (OCR error)", t0)
                 logger.error(f"[TASK] OCR error (GCV+Gemini): {doc.error_message}")
                 _log_t("TOTAL", total_start)
@@ -538,6 +749,7 @@ def process_uploaded_file_task(self, user_id, doc_id, scan_type):
             doc.glued_raw_text = glued_text_for_db
             doc.preview_url = preview_url
             doc.save(update_fields=['status', 'error_message', 'raw_text', 'glued_raw_text', 'preview_url'])
+            _settle_and_finish_if_session(doc)
             _log_t("Save rejected (doc type)", t0)
             logger.info(f"[TASK] Rejected due to type: {found_type}")
             _log_t("TOTAL", total_start)
@@ -567,19 +779,6 @@ def process_uploaded_file_task(self, user_id, doc_id, scan_type):
         doc.save(update_fields=['similarity_percent'])  # , 'similar_doc_id'
         _log_t("Save similarity", t0)
 
-        # if similarity_percent > 98:
-        #     t0 = _t()
-        #     if similar_doc_id:
-        #         doc.status = 'rejected'
-        #         doc.error_message = f"Potencialus dublikatas (>98% panašumas) su dokumentu ID {similar_doc_id}"
-        #     else:
-        #         doc.status = 'rejected'
-        #         doc.error_message = "Potencialus dublikatas (>98% panašumas)"
-        #     doc.save(update_fields=['status', 'error_message'])
-        #     _log_t("Save rejected (duplicate)", t0)
-        #     logger.info(f"[TASK] Rejected as duplicate{f' of document {similar_doc_id}' if similar_doc_id else ''}")
-        #     _log_t("TOTAL", total_start)
-        #     return
 
         # Если похожесть высокая (>=95%), пробуем быстро вытащить серию/номер и проверить дубликат
         if similarity_percent >= 95:
@@ -631,6 +830,7 @@ def process_uploaded_file_task(self, user_id, doc_id, scan_type):
                         if not getattr(doc, "preview_url", None):
                             doc.preview_url = f"{settings.SITE_URL_BACKEND}/media/{doc.file.name}"
                         doc.save(update_fields=['status', 'error_message', 'preview_url'])
+                        _settle_and_finish_if_session(doc)
                         _log_t("Duplicate check (series/number @95%+)", t1)
                         logger.info("[TASK] Rejected as duplicate by series/number on high similarity (no credits deducted)")
                         _log_t("TOTAL", total_start)
@@ -732,7 +932,8 @@ def process_uploaded_file_task(self, user_id, doc_id, scan_type):
                     doc.status = 'rejected'
                     doc.error_message = "JSON klaida iš LLM"
                     doc.preview_url = preview_url
-                    doc.save()
+                    doc.save(update_fields=["status", "error_message", "preview_url"])
+                    _settle_and_finish_if_session(doc)
                     _log_t("Save rejected (JSON parse error)", t1)
                     _log_t("TOTAL", total_start)
                     return
@@ -812,41 +1013,6 @@ def process_uploaded_file_task(self, user_id, doc_id, scan_type):
 
 
 
-
-        # # 12) Парсинг JSON
-        # t0 = _t()
-        # try:
-        #     structured = parse_llm_json_robust(llm_resp)
-        # except Exception as parse_err:
-        #     _log_t("Parse JSON (failed)", t0)
-        #     logger.warning(f"[TASK] JSON parse failed from {source_model}: {parse_err}")
-        #     if source_model != "gpt-4.1":
-        #         t1 = _t()
-        #         prompt = DETAILED_PROMPT if scan_type == "detaliai" else DEFAULT_PROMPT
-        #         gpt_resp = ask_gpt_with_retry(glued_text_for_db or "", prompt, max_retries=1, wait_seconds=30)
-        #         _log_t("LLM (GPT retry after parse fail)", t1)
-
-        #         t2 = _t()
-        #         doc.gpt_raw_json = gpt_resp
-        #         doc.save(update_fields=['gpt_raw_json'])
-        #         _log_t("Save gpt_raw_json (after retry)", t2)
-
-        #         t3 = _t()
-        #         structured = parse_llm_json_robust(gpt_resp)
-        #         _log_t("Parse JSON (retry GPT)", t3)
-        #         source_model = "gpt-4.1"
-        #     else:
-        #         t1 = _t()
-        #         doc.status = 'rejected'
-        #         doc.error_message = "JSON klaida iš LLM"
-        #         doc.preview_url = preview_url
-        #         doc.save()
-        #         _log_t("Save rejected (JSON parse error)", t1)
-        #         _log_t("TOTAL", total_start)
-        #         return
-        # else:
-        #     _log_t("Parse JSON", t0)
-
         # 13) Проверка количества документов
         t0 = _t()
         docs_count = max(1, int(structured.get("docs", 1)))
@@ -859,6 +1025,7 @@ def process_uploaded_file_task(self, user_id, doc_id, scan_type):
             doc.error_message = "Daugiau nei 1 dokumentas faile"
             # оставляем сырые OCR-поля, чтобы юзер видел, что распознано
             doc.save(update_fields=['status', 'error_message'])
+            _settle_and_finish_if_session(doc)
             _log_t("Save rejected (multi-docs)", t1)
             logger.info("[TASK] Rejected due to multiple docs")
             _log_t("TOTAL", total_start)
@@ -884,6 +1051,7 @@ def process_uploaded_file_task(self, user_id, doc_id, scan_type):
                 doc.error_message = "Dublikatas: dokumentas su tokiu numeriu jau buvo įkeltas"
             doc.preview_url = preview_url
             doc.save(update_fields=['status', 'error_message', 'preview_url'])
+            _settle_and_finish_if_session(doc)
             _log_t("Duplicate check (number/series)", t0)  # <-- лог времени
             logger.info("[TASK] Rejected as duplicate by number/series (no credits deducted)")
             _log_t("TOTAL", total_start)
@@ -954,12 +1122,17 @@ def process_uploaded_file_task(self, user_id, doc_id, scan_type):
             logger.warning(f"[TASK] Preview optimization failed: {e}")
         _log_t("Optimize preview", t0)                          
 
-        # 17) Списание кредитов
+        # 17) Списание/освобождение резервов + финализация сессии
         t0 = _t()
-        credits_per_doc = Decimal("1.3") if scan_type == "detaliai" else Decimal("1")
-        user.credits -= credits_per_doc
-        user.save(update_fields=['credits'])
-        _log_t("Deduct credits & save user", t0)
+        doc.refresh_from_db(fields=["id", "status", "upload_session_id"])  # чтобы видеть финальный статус
+        if doc.upload_session_id:
+            _settle_and_finish_if_session(doc)
+        else:
+            # legacy режим без upload_session
+            credits_per_doc = Decimal("1.3") if scan_type == "detaliai" else Decimal("1")
+            user.credits -= credits_per_doc
+            user.save(update_fields=["credits"])
+        _log_t("Finalize credits/session", t0)
 
         _log_t("TOTAL", total_start)
 
@@ -983,6 +1156,7 @@ def process_uploaded_file_task(self, user_id, doc_id, scan_type):
                     except Exception:
                         pass
                 doc.save(update_fields=['status', 'error_message', 'preview_url'])
+                _settle_and_finish_if_session(doc)
             _log_t("Save rejected (soft time limit)", t0)
         finally:
             _log_t("TOTAL (soft time limit path)", total_start)
@@ -996,7 +1170,8 @@ def process_uploaded_file_task(self, user_id, doc_id, scan_type):
             if doc:
                 doc.status = 'rejected'
                 doc.error_message = str(e)
-                doc.save()  # фиксируем ошибку
+                doc.save(update_fields=["status", "error_message"])  # фиксируем ошибку
+                _settle_and_finish_if_session(doc)
             _log_t("Save rejected (exception path)", t0)
         finally:
             _log_t("TOTAL (exception path)", total_start)

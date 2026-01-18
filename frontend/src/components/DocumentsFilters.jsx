@@ -35,6 +35,14 @@ export default function DocumentsFilters({ filters, onFilterChange }) {
         value={filters.status}
         onChange={onFilterChange("status")}
         sx={{ minWidth: 210 }}
+        InputLabelProps={{ shrink: true }}
+        SelectProps={{
+          displayEmpty: true,
+          renderValue: (value) => {
+            const option = STATUS_OPTIONS.find((o) => o.value === value);
+            return option?.label || "Visi";
+          },
+        }}
       >
         {STATUS_OPTIONS.map((o) => (
           <MenuItem key={o.value} value={o.value}>

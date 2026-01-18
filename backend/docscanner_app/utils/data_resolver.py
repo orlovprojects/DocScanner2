@@ -4,7 +4,6 @@ from dataclasses import dataclass
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Any, Dict, Iterable, List, Literal, Optional, Tuple, TypedDict
 import logging
-
 from django.db.models import Prefetch, QuerySet
 
 # Project imports
@@ -1094,12 +1093,63 @@ class ExportPrepared(TypedDict, total=False):
     unknown: List[ExportResolvedDoc]
 
 
+# def prepare_export_groups(
+#     documents: Iterable[ScannedDocument],
+#     *,
+#     user: Any,
+#     overrides: Dict[str, str] | None,
+#     view_mode: ViewMode = "multi",
+#     base_vat_percent_getter=None,
+#     base_preke_paslauga_getter=None,
+# ) -> ExportPrepared:
+#     ctx = ResolveContext(
+#         user=user,
+#         view_mode=view_mode,
+#         purpose="export",
+#         overrides=overrides or {},
+#         cp_key=None,
+#     )
+
+#     def _get_base(doc: ScannedDocument) -> Tuple[Any, Any]:
+#         vat = base_vat_percent_getter(doc) if base_vat_percent_getter else getattr(doc, "vat_percent", None)
+#         ps  = base_preke_paslauga_getter(doc) if base_preke_paslauga_getter else getattr(doc, "preke_paslauga", None)
+#         return vat, ps
+
+#     out: ExportPrepared = {"pirkimai": [], "pardavimai": [], "unknown": []}
+
+#     for doc in documents:
+#         base_vat, base_ps = _get_base(doc)
+#         res = compute_pvm(
+#             doc,
+#             ctx,
+#             base_vat_percent=base_vat,
+#             base_preke_paslauga=base_ps,
+#             cp_selected=False,
+#         )
+#         pack: ExportResolvedDoc = {
+#             "doc": doc,
+#             "direction": res.get("pirkimas_pardavimas_code"),
+#             "pvm_kodas": res.get("pvm_kodas"),
+#             "line_items": res.get("line_items") or [],
+#         }
+#         if pack["direction"] == "pirkimas":
+#             out["pirkimai"].append(pack)
+#         elif pack["direction"] == "pardavimas":
+#             out["pardavimai"].append(pack)
+#         else:
+#             out["unknown"].append(pack)
+
+#     return out
+
+
+
 def prepare_export_groups(
     documents: Iterable[ScannedDocument],
     *,
     user: Any,
     overrides: Dict[str, str] | None,
     view_mode: ViewMode = "multi",
+    cp_key: Optional[str] = None,              # ✅ NEW
     base_vat_percent_getter=None,
     base_preke_paslauga_getter=None,
 ) -> ExportPrepared:
@@ -1108,8 +1158,11 @@ def prepare_export_groups(
         view_mode=view_mode,
         purpose="export",
         overrides=overrides or {},
-        cp_key=None,
+        cp_key=cp_key,                          # ✅ NEW
     )
+
+    # ✅ NEW: в multi export считаем, что контрагент выбран, если cp_key есть
+    cp_selected = bool(cp_key) and view_mode == "multi"
 
     def _get_base(doc: ScannedDocument) -> Tuple[Any, Any]:
         vat = base_vat_percent_getter(doc) if base_vat_percent_getter else getattr(doc, "vat_percent", None)
@@ -1120,19 +1173,22 @@ def prepare_export_groups(
 
     for doc in documents:
         base_vat, base_ps = _get_base(doc)
+
         res = compute_pvm(
             doc,
             ctx,
             base_vat_percent=base_vat,
             base_preke_paslauga=base_ps,
-            cp_selected=False,
+            cp_selected=cp_selected,             # ✅ CHANGED (was False)
         )
+
         pack: ExportResolvedDoc = {
             "doc": doc,
             "direction": res.get("pirkimas_pardavimas_code"),
             "pvm_kodas": res.get("pvm_kodas"),
             "line_items": res.get("line_items") or [],
         }
+
         if pack["direction"] == "pirkimas":
             out["pirkimai"].append(pack)
         elif pack["direction"] == "pardavimas":

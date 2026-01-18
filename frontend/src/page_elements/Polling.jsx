@@ -12,6 +12,11 @@ export function usePollingDocumentStatus({
   const triesRef = useRef(0);
 
   useEffect(() => {
+    // Добавлена проверка что docs это массив
+    if (!Array.isArray(docs)) {
+      return;
+    }
+
     const hasProcessing = docs.some(
       (doc) => doc.status === "processing" && doc.id && !doc.temp
     );
@@ -23,7 +28,12 @@ export function usePollingDocumentStatus({
           triesRef.current += 1;
           try {
             const { data } = await api.get("/documents/", { withCredentials: true });
-            setDocs(data);
+            // Проверяем что data.results это массив
+            if (Array.isArray(data.results)) {
+              setDocs(data.results);
+            } else if (Array.isArray(data)) {
+              setDocs(data);
+            }
           } catch (e) {
             // Можно обработать ошибку (например, показать toast)
           }
@@ -32,7 +42,7 @@ export function usePollingDocumentStatus({
             clearInterval(intervalRef.current);
             intervalRef.current = null;
             setDocs((prev) =>
-              prev.map((d) =>
+              (Array.isArray(prev) ? prev : []).map((d) =>
                 d.status === "processing"
                   ? {
                       ...d,
@@ -66,67 +76,3 @@ export function usePollingDocumentStatus({
     // eslint-disable-next-line
   }, [docs, setDocs, intervalMs, maxTries]);
 }
-
-
-
-// import { useEffect, useRef } from "react";
-// import { api } from "../api/endpoints";
-
-// // Используй как хук, чтобы запускать polling из UploadPage
-// export function usePollingDocumentStatus({ docs, setDocs, intervalMs = 3000, maxTries = 50 }) {
-//   const pollingRefs = useRef({});
-
-//   useEffect(() => {
-//     docs.forEach((doc) => {
-//       if (
-//         doc.status === "processing" &&
-//         doc.id &&
-//         !doc.temp &&
-//         !pollingRefs.current[doc.id]
-//       ) {
-//         let tries = 0;
-//         pollingRefs.current[doc.id] = setInterval(async () => {
-//           tries++;
-//           if (tries > maxTries) {
-//             clearInterval(pollingRefs.current[doc.id]);
-//             setDocs((prev) =>
-//               prev.map((d) =>
-//                 d.id === doc.id
-//                   ? { ...d, status: "rejected", error_message: "Per ilgai apdorojama. Dokumentas atmestas dėl laiko limito." }
-//                   : d
-//               )
-//             );
-//             delete pollingRefs.current[doc.id];
-//             return;
-//           }
-//           try {
-//             const { data } = await api.get(`/documents/${doc.id}/`);
-//             if (data.status !== "processing") {
-//               clearInterval(pollingRefs.current[doc.id]);
-//               setDocs((prev) =>
-//                 prev.map((d) => (d.id === data.id ? { ...d, ...data } : d))
-//               );
-//               delete pollingRefs.current[doc.id];
-//             }
-//           } catch (e) {
-//             clearInterval(pollingRefs.current[doc.id]);
-//             setDocs((prev) =>
-//               prev.map((d) =>
-//                 d.id === doc.id
-//                   ? { ...d, status: "rejected", error_message: "Klaida tikrinant statusą." }
-//                   : d
-//               )
-//             );
-//             delete pollingRefs.current[doc.id];
-//           }
-//         }, intervalMs);
-//       }
-//     });
-
-//     // Очистка всех polling при размонтировании
-//     return () => {
-//       Object.values(pollingRefs.current).forEach(clearInterval);
-//     };
-//     // eslint-disable-next-line
-//   }, [docs]);
-// }

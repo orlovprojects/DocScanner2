@@ -4,8 +4,9 @@ import io
 import logging
 import logging.config
 import os
+import uuid
 import tempfile
-import zipfile
+import zipfile, tarfile
 import json
 from datetime import date, timedelta, time, datetime
 from decimal import Decimal
@@ -16,6 +17,17 @@ from django.contrib.auth import get_user_model
 from django.core.files.base import ContentFile
 from .tasks import process_uploaded_file_task 
 
+from .tasks import start_session_processing
+
+
+from rest_framework.parsers import MultiPartParser, FormParser
+from django.utils.dateparse import parse_date
+from .serializers import ScannedDocumentListSerializer
+from .pagination import DocumentsCursorPagination
+
+
+
+
 # --- Django ---
 from django.conf import settings
 from django.db import transaction
@@ -24,13 +36,17 @@ from django.http import FileResponse, Http404, HttpResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.utils.dateparse import parse_date
+from django.core.files.base import File
+
+
 
 # --- Django REST Framework ---
 from rest_framework import generics, permissions, status
-from rest_framework.decorators import api_view, permission_classes, authentication_classes
+from rest_framework.decorators import api_view, permission_classes, authentication_classes, parser_classes
 from rest_framework.permissions import IsAuthenticated, AllowAny, IsAdminUser
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from django.views.decorators.csrf import csrf_exempt
 
 # --- DRF SimpleJWT ---
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
@@ -77,7 +93,9 @@ from .models import (
     AdClick,
     MobileAccessKey,
     MobileInboxDocument,
-    Payments
+    Payments,
+    UploadSession,
+    ChunkedUpload,
 )
 
 from .serializers import (
@@ -94,7 +112,8 @@ from .serializers import (
     OptimumSettingsSerializer,
     MobileAccessKeySerializer,
     MobileInboxDocumentSerializer,
-    PaymentSerializer
+    PaymentSerializer,
+    CounterpartySerializer,
 )
 from django.db.models import Prefetch
 
@@ -325,8 +344,77 @@ def export_documents(request):
     raw_overrides = request.data.get('overrides', {}) or {}
     mode_raw = (request.data.get('mode') or "").strip().lower()  # <<< NEW
 
+    scope = (request.data.get("scope") or "").strip().lower()
+    filters = request.data.get("filters") or {}
+    cp_key = (request.data.get("cp_key") or "").strip()
+
+    excluded_ids = request.data.get("excluded_ids") or []
+    excluded_ids = [int(x) for x in excluded_ids if str(x).isdigit()]
+
     logger.info("[EXP] start user=%s export_type_raw=%r ids=%s raw_overrides=%r mode_raw=%r",
                 log_ctx["user"], export_type, ids, raw_overrides, mode_raw)
+    
+    if scope == "filtered":
+        # multi требует выбранного контрагента
+        if mode_raw == "multi" and not cp_key:
+            return Response({"error": "Choose counterparty (cp_key) for multi export"}, status=400)
+
+        q = filters or {}
+        status_param = (q.get("status") or "").strip()
+        date_from = (q.get("from") or "").strip()
+        date_to = (q.get("to") or "").strip()
+        search = (q.get("search") or "").strip()
+
+        qs = ScannedDocument.objects.filter(user=request.user)
+
+        # --- те же фильтры, что в get_user_documents ---
+        if status_param:
+            qs = qs.filter(status=status_param)
+
+        tz = timezone.get_current_timezone()
+
+        if date_from:
+            d = parse_date(date_from)
+            if d:
+                dt_from = timezone.make_aware(datetime.combine(d, time.min), tz)
+                qs = qs.filter(uploaded_at__gte=dt_from)
+
+        if date_to:
+            d = parse_date(date_to)
+            if d:
+                dt_to = timezone.make_aware(datetime.combine(d, time.min), tz) + timedelta(days=1)
+                qs = qs.filter(uploaded_at__lt=dt_to)
+
+        if search:
+            qs = qs.filter(document_number__icontains=search)
+
+        # --- фильтр по контрагенту (как у тебя в /documents/) ---
+        if cp_key:
+            cp = cp_key.strip().lower()
+            if cp.startswith("id:"):
+                cp_id = cp.split("id:", 1)[1].strip()
+                if cp_id.isdigit():
+                    qs = qs.filter(Q(seller_id=int(cp_id)) | Q(buyer_id=int(cp_id)))
+            else:
+                qs = qs.filter(
+                    Q(seller_vat_code__iexact=cp) |
+                    Q(buyer_vat_code__iexact=cp) |
+                    Q(seller_name__icontains=cp) |
+                    Q(buyer_name__icontains=cp)
+                )
+
+        # --- ВАЖНО: экспортируем только "не серые" как в таблице ---
+        qs = qs.filter(
+            status__in=["completed", "exported"],
+            ready_for_export=True,
+            math_validation_passed=True,
+        )
+
+        ids = list(qs.values_list("id", flat=True))
+
+        if excluded_ids:
+            ids = [i for i in ids if i not in set(excluded_ids)]
+
 
     if not ids:
         logger.warning("[EXP] no ids provided")
@@ -380,8 +468,9 @@ def export_documents(request):
         prepared = prepare_export_groups(
             documents,
             user=user,
-            overrides=overrides if mode == 'multi' else {},  # <<< уважать переданный режим
-            view_mode=mode,                                   # <<< уважать переданный режим
+            overrides=overrides if mode == "multi" else {},
+            view_mode=mode,
+            cp_key=cp_key if mode == "multi" else None,   
         )
     except Exception as e:
         logger.exception("[EXP] prepare_export_groups failed: %s", e)
@@ -1399,26 +1488,327 @@ def bulk_delete_documents(request):
 # #poluciajem vsio infu iz BD dlia otobrazhenija v dashboard pri zagruzke
 
 # /documents/
-@api_view(['GET'])
+# @api_view(['GET'])
+# @permission_classes([IsAuthenticated])
+# def get_user_documents(request):
+#     user = request.user
+#     status = request.GET.get('status')
+#     date_from = request.GET.get('from')
+#     date_to = request.GET.get('to')
+
+#     docs = ScannedDocument.objects.filter(user=user)
+
+#     if status:
+#         docs = docs.filter(status=status)
+#     if date_from:
+#         docs = docs.filter(created_at__date__gte=parse_date(date_from))
+#     if date_to:
+#         docs = docs.filter(created_at__date__lte=parse_date(date_to))
+
+#     docs = docs.order_by('-uploaded_at').only(
+#         "id","original_filename","status","uploaded_at","preview_url",
+#         "document_number",
+#         "seller_name","seller_id","seller_vat_code","seller_vat_val",
+#         "buyer_name","buyer_id","buyer_vat_code","buyer_vat_val",
+#         "pirkimas_pardavimas","scan_type","ready_for_export","math_validation_passed",
+#     )
+
+#     serializer = ScannedDocumentListSerializer(docs, many=True)
+#     return Response(serializer.data)
+
+
+# @api_view(['GET'])
+# @permission_classes([IsAuthenticated])
+# def get_user_documents(request):
+#     user = request.user
+#     status = request.GET.get('status')
+#     date_from = request.GET.get('from')
+#     date_to = request.GET.get('to')
+
+#     docs = ScannedDocument.objects.filter(user=user)
+#     if status:
+#         docs = docs.filter(status=status)
+#     if date_from:
+#         docs = docs.filter(created_at__date__gte=parse_date(date_from))
+#     if date_to:
+#         docs = docs.filter(created_at__date__lte=parse_date(date_to))
+
+#     serializer = ScannedDocumentListSerializer(docs.order_by('-uploaded_at'), many=True)
+#     return Response(serializer.data)
+
+
+
+@api_view(["GET", "POST"])
 @permission_classes([IsAuthenticated])
+@parser_classes([MultiPartParser, FormParser])
 def get_user_documents(request):
     user = request.user
-    status = request.GET.get('status')
-    date_from = request.GET.get('from')
-    date_to = request.GET.get('to')
 
-    docs = ScannedDocument.objects.filter(user=user)
-    if status:
-        docs = docs.filter(status=status)
-    if date_from:
-        docs = docs.filter(created_at__date__gte=parse_date(date_from))
-    if date_to:
-        docs = docs.filter(created_at__date__lte=parse_date(date_to))
+    if request.method == "GET":
+        q = request.query_params
+        status_param = q.get("status")
+        date_from = q.get("from")
+        date_to = q.get("to")
+        search = q.get("search")
+        cp = q.get("cp")
+        
+        # NEW: параметры для archive_warnings
+        include_archive_warnings = q.get("include_archive_warnings", "").lower() == "true"
+        session_id = q.get("session_id")
 
-    serializer = ScannedDocumentListSerializer(docs.order_by('-uploaded_at'), many=True)
-    return Response(serializer.data)
+        qs = ScannedDocument.objects.filter(user=user, is_archive_container=False)
+
+        if status_param:
+            qs = qs.filter(status=status_param)
+
+        tz = timezone.get_current_timezone()
+
+        if date_from:
+            d = parse_date(date_from)
+            if d:
+                dt_from = timezone.make_aware(datetime.combine(d, time.min), tz)
+                qs = qs.filter(uploaded_at__gte=dt_from)
+
+        if date_to:
+            d = parse_date(date_to)
+            if d:
+                dt_to = timezone.make_aware(datetime.combine(d, time.min), tz) + timedelta(days=1)
+                qs = qs.filter(uploaded_at__lt=dt_to)
+
+        if search:
+            search = search.strip()
+            if search:
+                qs = qs.filter(document_number__icontains=search)
+
+        if cp:
+            cp = cp.strip().lower()
+            if cp.startswith("id:"):
+                cp_id = cp.split("id:", 1)[1].strip()
+                if cp_id.isdigit():
+                    qs = qs.filter(Q(seller_id=int(cp_id)) | Q(buyer_id=int(cp_id)))
+            else:
+                qs = qs.filter(
+                    Q(seller_vat_code__iexact=cp) |
+                    Q(buyer_vat_code__iexact=cp) |
+                    Q(seller_name__icontains=cp) |
+                    Q(buyer_name__icontains=cp)
+                )
+
+        # === Exportable count ===
+        exportable_qs = qs.filter(
+            status__in=["completed", "exported"],
+            ready_for_export=True,
+            math_validation_passed=True,
+        )
+
+        view_mode = getattr(user, "view_mode", "single")
+        if view_mode != "multi":
+            exportable_qs = exportable_qs.filter(pirkimas_pardavimas__in=["pirkimas", "pardavimas"])
+
+        exportable_total = 0 if (view_mode == "multi" and not cp) else exportable_qs.count()
+
+        qs = qs.order_by("-uploaded_at", "-id").only(
+            "id","original_filename","status","uploaded_at","preview_url",
+            "document_number",
+            "seller_name","seller_id","seller_vat_code","seller_vat_val",
+            "buyer_name","buyer_id","buyer_vat_code","buyer_vat_val",
+            "pirkimas_pardavimas","scan_type","ready_for_export","math_validation_passed",
+        )
+
+        paginator = DocumentsCursorPagination()
+        page = paginator.paginate_queryset(qs, request)
+        serializer = ScannedDocumentListSerializer(page, many=True)
+        resp = paginator.get_paginated_response(serializer.data)
+        resp.data["exportable_total"] = exportable_total
+
+        # === NEW: Архивы с ошибками (только если запрошено) ===
+        if include_archive_warnings and session_id:
+            archive_warnings_qs = ScannedDocument.objects.filter(
+                user=user,
+                is_archive_container=True,
+                upload_session_id=session_id,
+                error_message__startswith="Praleista"
+            )
+            
+            resp.data["archive_warnings"] = list(archive_warnings_qs.order_by("-uploaded_at").values(
+                "id", "original_filename", "error_message", "uploaded_at"
+            )[:50])
+
+        return resp
+
+    # POST upload
+    uploaded_file = request.FILES.get("file")
+    if not uploaded_file:
+        return Response({"detail": "file is required"}, status=status.HTTP_400_BAD_REQUEST)
+
+    doc = ScannedDocument.objects.create(
+        user=user,
+        file=uploaded_file,
+        original_filename=uploaded_file.name,
+        status="processing",
+    )
+    return Response(ScannedDocumentListSerializer(doc).data, status=status.HTTP_201_CREATED)
+
+# @api_view(["GET", "POST"])
+# @permission_classes([IsAuthenticated])
+# @parser_classes([MultiPartParser, FormParser])
+# def get_user_documents(request):
+#     user = request.user
+
+#     if request.method == "GET":
+#         q = request.query_params
+#         status_param = q.get("status")
+#         date_from = q.get("from")
+#         date_to = q.get("to")
+#         search = q.get("search")
+#         cp = q.get("cp")
+
+#         qs = ScannedDocument.objects.filter(user=user, is_archive_container=False)
+
+#         if status_param:
+#             qs = qs.filter(status=status_param)
+
+#         tz = timezone.get_current_timezone()
+
+#         if date_from:
+#             d = parse_date(date_from)
+#             if d:
+#                 dt_from = timezone.make_aware(datetime.combine(d, time.min), tz)
+#                 qs = qs.filter(uploaded_at__gte=dt_from)
+
+#         if date_to:
+#             d = parse_date(date_to)
+#             if d:
+#                 dt_to = timezone.make_aware(datetime.combine(d, time.min), tz) + timedelta(days=1)
+#                 qs = qs.filter(uploaded_at__lt=dt_to)
+
+#         if search:
+#             search = search.strip()
+#             if search:
+#                 qs = qs.filter(document_number__icontains=search)
+
+#         if cp:
+#             cp = cp.strip().lower()
+#             if cp.startswith("id:"):
+#                 cp_id = cp.split("id:", 1)[1].strip()
+#                 if cp_id.isdigit():
+#                     qs = qs.filter(Q(seller_id=int(cp_id)) | Q(buyer_id=int(cp_id)))
+#             else:
+#                 # пробуем как VAT (точное совпадение) или как имя (icontains)
+#                 qs = qs.filter(
+#                     Q(seller_vat_code__iexact=cp) |
+#                     Q(buyer_vat_code__iexact=cp) |
+#                     Q(seller_name__icontains=cp) |
+#                     Q(buyer_name__icontains=cp)
+#                 )
+
+#         # === NEW: сколько документов реально экспортируемо по текущим фильтрам ===
+#         exportable_qs = qs.filter(
+#             status__in=["completed", "exported"],
+#             ready_for_export=True,
+#             math_validation_passed=True,
+#         )
+
+#         view_mode = getattr(user, "view_mode", "single")
+#         if view_mode != "multi":
+#             exportable_qs = exportable_qs.filter(pirkimas_pardavimas__in=["pirkimas", "pardavimas"])
+
+#         # в multi без выбранного контрагента — считаем 0 (экспорт всё равно запрещён)
+#         exportable_total = 0 if (view_mode == "multi" and not cp) else exportable_qs.count()
+
+        
+
+#         qs = qs.order_by("-uploaded_at", "-id").only(
+#             "id","original_filename","status","uploaded_at","preview_url",
+#             "document_number",
+#             "seller_name","seller_id","seller_vat_code","seller_vat_val",
+#             "buyer_name","buyer_id","buyer_vat_code","buyer_vat_val",
+#             "pirkimas_pardavimas","scan_type","ready_for_export","math_validation_passed",
+#         )
+
+#         paginator = DocumentsCursorPagination()
+#         page = paginator.paginate_queryset(qs, request)
+#         serializer = ScannedDocumentListSerializer(page, many=True)
+#         resp = paginator.get_paginated_response(serializer.data)
+#         resp.data["exportable_total"] = exportable_total  # NEW
+#         return resp
+
+#     # POST upload
+#     uploaded_file = request.FILES.get("file")
+#     if not uploaded_file:
+#         return Response({"detail": "file is required"}, status=status.HTTP_400_BAD_REQUEST)
+
+#     doc = ScannedDocument.objects.create(
+#         user=user,
+#         file=uploaded_file,
+#         original_filename=uploaded_file.name,
+#         status="processing",
+#     )
+#     # фронт сможет сделать prepend
+#     return Response(ScannedDocumentListSerializer(doc).data, status=status.HTTP_201_CREATED)
 
 
+BIG_FIELDS = ("raw_text", "gpt_raw_json", "structured_json", "glued_raw_text")
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def get_document_detail(request, pk):
+    user = request.user
+
+    line_items_prefetch = Prefetch(
+        "line_items",
+        queryset=LineItem.objects.order_by("id")
+    )
+
+    # --- Суперюзер: оставляем как есть (все поля) ---
+    if user.is_superuser:
+        doc = get_object_or_404(
+            ScannedDocument.objects.prefetch_related(line_items_prefetch),
+            pk=pk
+        )
+        ser = ScannedDocumentAdminDetailSerializer(doc, context={"request": request})
+        data = ser.data
+
+        if getattr(user, "view_mode", None) == "multi":
+            cp_key = request.query_params.get("cp_key")
+            preview = build_preview(
+                doc,
+                user,
+                cp_key=cp_key,
+                view_mode="multi",
+                base_vat_percent=data.get("vat_percent"),
+                base_preke_paslauga=data.get("preke_paslauga"),
+            )
+            data["preview"] = preview
+
+        return Response(data)
+
+    # --- Обычный пользователь: НЕ читаем большие поля ---
+    qs = (
+        ScannedDocument.objects
+        .prefetch_related(line_items_prefetch)
+        .defer(*BIG_FIELDS)
+    )
+
+    doc = get_object_or_404(qs, pk=pk, user=user)
+
+    ser = ScannedDocumentDetailSerializer(doc, context={"request": request})
+    data = ser.data
+
+    if getattr(user, "view_mode", None) != "multi":
+        return Response(data)
+
+    cp_key = request.query_params.get("cp_key")
+    preview = build_preview(
+        doc,
+        user,
+        cp_key=cp_key,
+        view_mode="multi",
+        base_vat_percent=data.get("vat_percent"),
+        base_preke_paslauga=data.get("preke_paslauga"),
+    )
+    data["preview"] = preview
+    return Response(data)
 
 
 
@@ -1434,9 +1824,18 @@ def get_user_documents(request):
 #     """
 #     user = request.user
 
+#     # Prefetch с сортировкой для line_items
+#     line_items_prefetch = Prefetch(
+#         'line_items',
+#         queryset=LineItem.objects.order_by('id')
+#     )
+
 #     # --- Суперюзер ---
 #     if user.is_superuser:
-#         doc = get_object_or_404(ScannedDocument, pk=pk)
+#         doc = get_object_or_404(
+#             ScannedDocument.objects.prefetch_related(line_items_prefetch),
+#             pk=pk
+#         )
 #         ser = ScannedDocumentAdminDetailSerializer(doc, context={'request': request})
 #         data = ser.data
 
@@ -1455,7 +1854,11 @@ def get_user_documents(request):
 #         return Response(data)
 
 #     # --- Обычный пользователь (только свои документы) ---
-#     doc = get_object_or_404(ScannedDocument, pk=pk, user=user)
+#     doc = get_object_or_404(
+#         ScannedDocument.objects.prefetch_related(line_items_prefetch),
+#         pk=pk,
+#         user=user
+#     )
 #     ser = ScannedDocumentDetailSerializer(doc, context={'request': request})
 #     data = ser.data
 
@@ -1474,107 +1877,6 @@ def get_user_documents(request):
 #     )
 #     data["preview"] = preview
 #     return Response(data)
-
-@api_view(['GET'])
-@permission_classes([IsAuthenticated])
-def get_document_detail(request, pk):
-    """
-    Детали документа.
-    - Superuser: может смотреть ЛЮБОЙ документ; если view_mode == "multi", добавляем preview.
-    - Обычный пользователь:
-        * single-режим — просто данные из БД;
-        * multi-режим — добавляем preview (ничего в БД не пишем).
-    """
-    user = request.user
-
-    # Prefetch с сортировкой для line_items
-    line_items_prefetch = Prefetch(
-        'line_items',
-        queryset=LineItem.objects.order_by('id')
-    )
-
-    # --- Суперюзер ---
-    if user.is_superuser:
-        doc = get_object_or_404(
-            ScannedDocument.objects.prefetch_related(line_items_prefetch),
-            pk=pk
-        )
-        ser = ScannedDocumentAdminDetailSerializer(doc, context={'request': request})
-        data = ser.data
-
-        if getattr(user, "view_mode", None) == "multi":
-            cp_key = request.query_params.get("cp_key")
-            preview = build_preview(
-                doc,
-                user,
-                cp_key=cp_key,
-                view_mode="multi",
-                base_vat_percent=data.get("vat_percent"),
-                base_preke_paslauga=data.get("preke_paslauga"),
-            )
-            data["preview"] = preview
-
-        return Response(data)
-
-    # --- Обычный пользователь (только свои документы) ---
-    doc = get_object_or_404(
-        ScannedDocument.objects.prefetch_related(line_items_prefetch),
-        pk=pk,
-        user=user
-    )
-    ser = ScannedDocumentDetailSerializer(doc, context={'request': request})
-    data = ser.data
-
-    # preview только в multi-режиме
-    if getattr(user, "view_mode", None) != "multi":
-        return Response(data)
-
-    cp_key = request.query_params.get("cp_key")
-    preview = build_preview(
-        doc,
-        user,
-        cp_key=cp_key,
-        view_mode="multi",
-        base_vat_percent=data.get("vat_percent"),
-        base_preke_paslauga=data.get("preke_paslauga"),
-    )
-    data["preview"] = preview
-    return Response(data)
-
-
-# @api_view(['GET'])
-# @permission_classes([IsAuthenticated])
-# def get_document_detail(request, pk):
-#     """
-#     Детали документа.
-#     - В single-режиме: отдаем сериализованные данные из БД (без preview).
-#     - В multi-режиме: добавляем preview через data_resolver.build_preview (ничего в БД не пишем).
-#     """
-#     try:
-#         doc = ScannedDocument.objects.get(pk=pk, user=request.user)
-#     except ScannedDocument.DoesNotExist:
-#         return Response({'error': 'Not found'}, status=404)
-
-#     serializer = ScannedDocumentDetailSerializer(doc)
-#     data = serializer.data
-
-#     # Превью только в multi
-#     if getattr(request.user, "view_mode", None) != "multi":
-#         return Response(data)
-
-#     cp_key = request.query_params.get("cp_key")
-#     preview = build_preview(
-#         doc,
-#         request.user,
-#         cp_key=cp_key,
-#         view_mode="multi",
-#         base_vat_percent=data.get("vat_percent"),
-#         base_preke_paslauga=data.get("preke_paslauga"),
-#     )
-
-#     data["preview"] = preview
-#     return Response(data)
-
 
 
 
@@ -3506,3 +3808,673 @@ def payment_invoice(request, pk):
     }
 
     return Response(data)
+
+
+#Pagination dlia DocumentsTable
+
+# Optimizacija skorosti zagruzki
+
+def company_key(name, vat, cp_id):
+    cp_id = (cp_id or "").strip()
+    if cp_id:
+        return f"id:{cp_id}"
+    vat = (vat or "").strip().lower()
+    if vat:
+        return vat
+    name = (name or "").strip().lower()
+    return name
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def get_user_counterparties(request):
+    user = request.user
+    q = request.query_params
+
+    status_param = q.get("status")
+    date_from = q.get("from")
+    date_to = q.get("to")
+    search = (q.get("q") or "").strip().lower()
+    limit = int(q.get("limit") or 200)
+
+    qs = ScannedDocument.objects.filter(user=user, is_archive_container=False)
+
+    if status_param:
+        qs = qs.filter(status=status_param)
+
+    tz = timezone.get_current_timezone()
+
+    if date_from:
+        d = parse_date(date_from)
+        if d:
+            dt_from = timezone.make_aware(datetime.combine(d, time.min), tz)
+            qs = qs.filter(uploaded_at__gte=dt_from)
+
+    if date_to:
+        d = parse_date(date_to)
+        if d:
+            dt_to = timezone.make_aware(datetime.combine(d, time.min), tz) + timedelta(days=1)
+            qs = qs.filter(uploaded_at__lt=dt_to)
+
+    # агрегируем sellers
+    sellers = (
+        qs.exclude(seller_name__isnull=True, seller_name__exact="")
+          .values("seller_id", "seller_name", "seller_vat_code")
+          .annotate(docs_count=Count("id"))
+    )
+
+    # агрегируем buyers
+    buyers = (
+        qs.exclude(buyer_name__isnull=True, buyer_name__exact="")
+          .values("buyer_id", "buyer_name", "buyer_vat_code")
+          .annotate(docs_count=Count("id"))
+    )
+
+    merged = {}
+
+    def upsert(cp_id, name, vat, cnt):
+        key = company_key(name, vat, cp_id)
+        if not key:
+            return
+        item = merged.get(key)
+        if not item:
+            merged[key] = {
+                "key": key,
+                "id": (cp_id or "").strip() or None,
+                "name": name or "",
+                "vat": vat or "",
+                "docs_count": int(cnt or 0),
+            }
+        else:
+            item["docs_count"] += int(cnt or 0)
+            # “улучшаем” данные, если раньше было пусто
+            if not item["id"] and cp_id:
+                item["id"] = (cp_id or "").strip() or None
+            if not item["vat"] and vat:
+                item["vat"] = vat or ""
+            if not item["name"] and name:
+                item["name"] = name or ""
+
+    for r in sellers:
+        upsert(r.get("seller_id"), r.get("seller_name"), r.get("seller_vat_code"), r.get("docs_count"))
+
+    for r in buyers:
+        upsert(r.get("buyer_id"), r.get("buyer_name"), r.get("buyer_vat_code"), r.get("docs_count"))
+
+    items = list(merged.values())
+
+    # поиск по контрагентам (по имени/ват/id)
+    if search:
+        def match(it):
+            return (
+                search in (it.get("name") or "").lower()
+                or search in (it.get("vat") or "").lower()
+                or search in (it.get("id") or "").lower()
+            )
+        items = [x for x in items if match(x)]
+
+    items.sort(key=lambda x: (-(x.get("docs_count") or 0), (x.get("name") or "").lower()))
+    items = items[:limit]
+
+    ser = CounterpartySerializer(items, many=True)
+    return Response({"results": ser.data})
+
+
+
+
+#Создать сессию
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def create_session(request):
+    scan_type = (request.data.get("scan_type") or "sumiskai").strip()
+    client_total_files = int(request.data.get("client_total_files") or 0)
+
+    s = UploadSession.objects.create(
+        user=request.user,
+        scan_type=scan_type,
+        stage="uploading",
+        client_total_files=max(0, client_total_files),
+    )
+    return Response({"id": str(s.id), "stage": s.stage})
+
+
+#Статус сессии (для progress bar)
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def session_status(request, session_id):
+    s = UploadSession.objects.get(id=session_id, user=request.user)
+
+    return Response({
+        "id": str(s.id),
+        "stage": s.stage,
+        "client_total_files": s.client_total_files,
+        "uploaded_files": s.uploaded_files,
+        "uploaded_bytes": s.uploaded_bytes,
+        "expected_items": s.expected_items,
+        "actual_items": s.actual_items,
+        "processed_items": s.processed_items,
+        "done_items": s.done_items,
+        "failed_items": s.failed_items,
+        "pending_archives": s.pending_archives,
+        "reserved_credits": str(s.reserved_credits),
+        "error_message": s.error_message,
+        "created_at": s.created_at,
+        "updated_at": s.updated_at,
+    })
+
+
+
+#Upload обычных файлов батчами
+
+MAX_BATCH_BYTES = 300 * 1024 * 1024
+MAX_BATCH_FILES = 60
+
+ARCHIVE_EXTS = {".zip",".rar",".7z",".tar",".tgz",".tar.gz",".tar.bz2",".tar.xz",".tbz2"}
+
+def _ext(name: str) -> str:
+    n = (name or "").lower()
+    if n.endswith(".tar.gz"): return ".tar.gz"
+    if n.endswith(".tar.bz2"): return ".tar.bz2"
+    if n.endswith(".tar.xz"): return ".tar.xz"
+    import os
+    return os.path.splitext(n)[1]
+
+def _get_archive_format(filename: str) -> str:
+    """Определяет формат архива по расширению"""
+    lower = filename.lower()
+    if lower.endswith('.tar.gz') or lower.endswith('.tgz'):
+        return 'tar.gz'
+    if lower.endswith('.tar.bz2') or lower.endswith('.tbz2'):
+        return 'tar.bz2'
+    if lower.endswith('.tar.xz'):
+        return 'tar.xz'
+    if lower.endswith('.tar'):
+        return 'tar'
+    if lower.endswith('.zip'):
+        return 'zip'
+    if lower.endswith('.rar'):
+        return 'rar'
+    if lower.endswith('.7z'):
+        return '7z'
+    return ''
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+@parser_classes([MultiPartParser, FormParser])
+def upload_batch(request, session_id):
+    s = UploadSession.objects.get(id=session_id, user=request.user)
+    if s.stage not in ("uploading",):
+        return Response({"error": "Session is not in uploading stage"}, status=400)
+
+    files = list(request.FILES.getlist("files") or [])
+    if not files:
+        return Response({"error": "No files"}, status=400)
+
+    if len(files) > MAX_BATCH_FILES:
+        return Response({"error": f"Too many files in batch (max {MAX_BATCH_FILES})"}, status=400)
+
+    total_bytes = sum(getattr(f, "size", 0) or 0 for f in files)
+    if total_bytes > MAX_BATCH_BYTES:
+        return Response({"error": f"Batch too large (max {MAX_BATCH_BYTES} bytes)"}, status=400)
+
+    # запретим архивы тут — архивы только через chunk upload
+    for f in files:
+        if _ext(f.name) in ARCHIVE_EXTS:
+            return Response({"error": "Archives must be uploaded via chunk upload"}, status=400)
+
+    created_ids = []
+    with transaction.atomic():
+        for idx, f in enumerate(files, start=1):
+            doc = ScannedDocument.objects.create(
+                user=request.user,
+                upload_session=s,
+                status="pending",
+                original_filename=f.name,
+                scan_type=s.scan_type,
+                uploaded_size_bytes=int(getattr(f, "size", 0) or 0),
+            )
+            doc.file.save(f.name, f, save=True)
+            created_ids.append(doc.id)
+
+        s.uploaded_files = s.uploaded_files + len(files)
+        s.uploaded_bytes = s.uploaded_bytes + int(total_bytes)
+        s.save(update_fields=["uploaded_files","uploaded_bytes","updated_at"])
+
+    return Response({"ok": True, "created": len(created_ids)})
+
+
+
+#Chunk upload для архивов (ZIP/RAR/7Z/TAR), max 2GB
+
+MAX_ARCHIVE_SIZE = 2 * 1024 * 1024 * 1024  # 2GB
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def chunk_init(request, session_id):
+    s = UploadSession.objects.get(id=session_id, user=request.user)
+    if s.stage != "uploading":
+        return Response({"error":"Session not uploading"}, status=400)
+
+    filename = (request.data.get("filename") or "").strip()
+    total_size = int(request.data.get("total_size") or 0)
+    chunk_size = int(request.data.get("chunk_size") or 0)
+    total_chunks = int(request.data.get("total_chunks") or 0)
+
+    if not filename or total_size <= 0 or chunk_size <= 0 or total_chunks <= 0:
+        return Response({"error":"Bad init params"}, status=400)
+
+    if total_size > MAX_ARCHIVE_SIZE:
+        return Response({"error":"Archive too large (max 2GB)"}, status=400)
+
+    if _ext(filename) not in ARCHIVE_EXTS:
+        return Response({"error":"Not an archive filename"}, status=400)
+
+    # создаём tmp file path
+    import os, tempfile
+    tmp_dir = os.path.join(tempfile.gettempdir(), "doksken_chunks")
+    os.makedirs(tmp_dir, exist_ok=True)
+
+    cu = ChunkedUpload.objects.create(
+        user=request.user,
+        session=s,
+        filename=filename,
+        total_size=total_size,
+        chunk_size=chunk_size,
+        total_chunks=total_chunks,
+        received=[],
+        status="uploading",
+        tmp_path=os.path.join(tmp_dir, f"{uuid.uuid4().hex}.part"),
+    )
+
+    return Response({"upload_id": str(cu.id)})
+
+
+#upload chunk
+
+@api_view(["PUT"])
+@permission_classes([IsAuthenticated])
+def upload_chunk(request, session_id, upload_id, index):
+    s = UploadSession.objects.get(id=session_id, user=request.user)
+    cu = ChunkedUpload.objects.get(id=upload_id, user=request.user, session=s)
+
+    if cu.status != "uploading":
+        return Response({"error":"Not uploading"}, status=400)
+
+    index = int(index)
+    if index < 0 or index >= cu.total_chunks:
+        return Response({"error":"Bad index"}, status=400)
+
+    data = request.body or b""
+    if not data:
+        return Response({"error":"Empty chunk"}, status=400)
+
+    # проверки размера чанка
+    is_last = (index == cu.total_chunks - 1)
+    if not is_last and len(data) != cu.chunk_size:
+        return Response({"error":"Bad chunk size"}, status=400)
+    if is_last and len(data) > cu.chunk_size:
+        return Response({"error":"Bad last chunk size"}, status=400)
+
+    offset = index * cu.chunk_size
+    if offset + len(data) > cu.total_size:
+        return Response({"error":"Out of bounds"}, status=400)
+
+    # пишем по смещению
+    import os
+    os.makedirs(os.path.dirname(cu.tmp_path), exist_ok=True)
+    with open(cu.tmp_path, "ab") as f:
+        pass  # ensure file exists
+    with open(cu.tmp_path, "r+b") as f:
+        f.seek(offset)
+        f.write(data)
+
+    # отметить чанк полученным (атомарно)
+    with transaction.atomic():
+        cu = ChunkedUpload.objects.select_for_update().get(id=cu.id)
+        got = set(cu.received or [])
+        if index not in got:
+            got.add(index)
+            cu.received = sorted(got)
+            cu.save(update_fields=["received","updated_at"])
+
+        received_count = len(cu.received)
+
+    return Response({"ok": True, "received": received_count, "total": cu.total_chunks})
+
+
+
+#status (resume)
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def chunk_status(request, session_id, upload_id):
+    s = UploadSession.objects.get(id=session_id, user=request.user)
+    cu = ChunkedUpload.objects.get(id=upload_id, user=request.user, session=s)
+    return Response({
+        "upload_id": str(cu.id),
+        "status": cu.status,
+        "received": cu.received,
+        "total_chunks": cu.total_chunks,
+    })
+
+
+#complete → создать архив-контейнер ScannedDocument
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def chunk_complete(request, session_id, upload_id):
+    s = UploadSession.objects.get(id=session_id, user=request.user)
+    cu = ChunkedUpload.objects.get(id=upload_id, user=request.user, session=s)
+
+    if cu.status != "uploading":
+        return Response({"error":"Bad state"}, status=400)
+
+    got = set(cu.received or [])
+    if len(got) != cu.total_chunks:
+        return Response({"error":"Not all chunks uploaded"}, status=400)
+
+    if not os.path.exists(cu.tmp_path):
+        return Response({"error":"Missing tmp file"}, status=400)
+
+    if os.path.getsize(cu.tmp_path) != cu.total_size:
+        return Response({"error":"Size mismatch"}, status=400)
+
+    # НОВОЕ: определяем формат архива
+    archive_fmt = _get_archive_format(cu.filename)
+
+    # атомарно создаём архив-документ
+    with transaction.atomic():
+        # пометим upload complete
+        cu.status = "complete"
+        cu.save(update_fields=["status","updated_at"])
+
+        # создаём ScannedDocument container
+        doc = ScannedDocument.objects.create(
+            user=request.user,
+            upload_session=s,
+            status="pending",
+            original_filename=cu.filename,
+            scan_type=s.scan_type,
+            is_archive_container=True,
+            uploaded_size_bytes=cu.total_size,
+        )
+
+        # переносим tmp файл в FileField (через open)
+        with open(cu.tmp_path, "rb") as fp:
+            doc.file.save(cu.filename, File(fp), save=True)
+
+        # счётчики upload
+        s.uploaded_files = s.uploaded_files + 1
+        s.uploaded_bytes = s.uploaded_bytes + int(cu.total_size)
+        
+        # НОВОЕ: сохраняем формат архива в сессии
+        if archive_fmt:
+            current_formats = s.archive_formats or []
+            if archive_fmt not in current_formats:
+                current_formats.append(archive_fmt)
+            s.archive_formats = current_formats
+
+        s.save(update_fields=["uploaded_files", "uploaded_bytes", "archive_formats", "updated_at"])
+
+    # можно удалить tmp_path после успешного save (если storage локальный)
+    try:
+        os.remove(cu.tmp_path)
+    except Exception:
+        pass
+
+    return Response({"ok": True, "doc_id": doc.id})
+
+
+###Finalize: reserve credits + поставить в queued/processing
+
+#Подсчёт expected_items
+
+COST = {"sumiskai": Decimal("1.00"), "detaliai": Decimal("1.30")}
+
+def compute_expected_items(session: UploadSession) -> int:
+    # обычные файлы
+    base = ScannedDocument.objects.filter(upload_session=session, is_archive_container=False).count()
+
+    # архивы (минимальный preflight)
+    archives = ScannedDocument.objects.filter(upload_session=session, is_archive_container=True)
+    total_inside = 0
+
+    for a in archives:
+        path = a.file.path
+        ext = _ext(a.original_filename)
+
+        if ext == ".zip":
+            with zipfile.ZipFile(path) as zf:
+                for zi in zf.infolist():
+                    if zi.is_dir(): 
+                        continue
+                    name = zi.filename
+                    if not name: 
+                        continue
+                    total_inside += 1
+
+        elif ext in {".tar", ".tgz", ".tar.gz", ".tar.bz2", ".tar.xz", ".tbz2"}:
+            with tarfile.open(path, mode="r:*") as tf:
+                for m in tf.getmembers():
+                    if not m.isfile():
+                        continue
+                    total_inside += 1
+
+        elif ext == ".7z":
+            try:
+                import py7zr
+                with py7zr.SevenZipFile(path, mode='r') as sz:
+                    for name in sz.getnames():
+                        if not name.endswith('/'):
+                            total_inside += 1
+            except Exception as e:
+                logger.warning(f"Failed to read 7z archive {a.original_filename}: {e}")
+                total_inside += 1  # fallback
+
+        elif ext == ".rar":
+            try:
+                import rarfile
+                with rarfile.RarFile(path) as rf:
+                    for ri in rf.infolist():
+                        if ri.isdir():
+                            continue
+                        total_inside += 1
+            except Exception as e:
+                logger.warning(f"Failed to read rar archive {a.original_filename}: {e}")
+                total_inside += 1  # fallback
+
+        else:
+            # Неизвестный архив — считаем как 1 (безопаснее чем 0)
+            total_inside += 1
+
+    return base + total_inside
+
+# def compute_expected_items(session: UploadSession) -> int:
+#     # обычные файлы
+#     base = ScannedDocument.objects.filter(upload_session=session, is_archive_container=False).count()
+
+#     # архивы (минимальный preflight)
+#     archives = ScannedDocument.objects.filter(upload_session=session, is_archive_container=True)
+#     total_inside = 0
+
+#     for a in archives:
+#         path = a.file.path  # если storage не локальный — надо будет иначе
+#         ext = _ext(a.original_filename)
+
+#         if ext == ".zip":
+#             with zipfile.ZipFile(path) as zf:
+#                 for zi in zf.infolist():
+#                     if zi.is_dir(): 
+#                         continue
+#                     name = zi.filename
+#                     if not name: 
+#                         continue
+#                     # можно тут пропускать __MACOSX/Thumbs.db и т.п.
+#                     total_inside += 1
+
+#         elif ext in {".tar",".tgz",".tar.gz",".tar.bz2",".tar.xz",".tbz2"}:
+#             with tarfile.open(path, mode="r:*") as tf:
+#                 for m in tf.getmembers():
+#                     if not m.isfile():
+#                         continue
+#                     total_inside += 1
+
+#         else:
+#             # RAR/7Z: если хочешь пока без preflight — можно вернуть 0 и обрабатывать позже
+#             # но ты выбрал reserved_credits -> лучше добавить позже поддержку
+#             total_inside += 0
+
+#     return base + total_inside
+
+
+
+#reserve + stage
+
+@transaction.atomic
+def reserve_and_queue(session_id, user_id):
+    s = UploadSession.objects.select_for_update().get(id=session_id, user_id=user_id)
+    u = CustomUser.objects.select_for_update().get(id=user_id)
+
+    if s.stage not in ("uploading", "credit_check"):
+        return s
+
+    s.stage = "credit_check"
+    s.save(update_fields=["stage","updated_at"])
+
+    expected = compute_expected_items(s)
+    s.expected_items = expected
+    s.reserved_items = expected
+
+    cost = COST.get(s.scan_type, Decimal("1.00"))
+    needed = cost * Decimal(expected)
+
+    available = (u.credits or Decimal("0")) - (u.credits_reserved or Decimal("0"))
+    if available < needed:
+        s.stage = "blocked"
+        s.error_message = f"Nepakanka kreditų. Turite: {available:.0f} | Reikia: {needed:.0f}"
+        s.reserved_credits = Decimal("0.00")
+        s.save(update_fields=["stage","error_message","expected_items","reserved_items","reserved_credits","updated_at"])
+        return s
+
+    # reserve
+    u.credits_reserved = (u.credits_reserved or Decimal("0")) + needed
+    u.save(update_fields=["credits_reserved"])
+
+    s.reserved_credits = needed
+
+    has_processing = UploadSession.objects.filter(user_id=u.id, stage="processing").exists()
+    s.stage = "queued" if has_processing else "processing"
+    if s.stage == "processing" and not s.started_at:
+        s.started_at = timezone.now()
+
+    s.save(update_fields=["stage","expected_items","reserved_items","reserved_credits","started_at","updated_at"])
+    return s
+
+
+
+#finalize endpoint
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def finalize_session(request, session_id):
+    try:
+        s = UploadSession.objects.get(id=session_id, user=request.user)
+    except UploadSession.DoesNotExist:
+        return Response({"error": "Session not found"}, status=404)
+    
+    if s.stage not in ("uploading", "credit_check"):
+        return Response({
+            "id": str(s.id),
+            "stage": s.stage,
+            "error": "Session already finalized"
+        }, status=400)
+    
+    # Проверить что есть файлы
+    docs_count = ScannedDocument.objects.filter(upload_session=s).count()
+    if docs_count == 0:
+        return Response({"error": "No files uploaded"}, status=400)
+    
+    s = reserve_and_queue(session_id, request.user.id)
+    
+    if s.stage == "processing":
+        start_session_processing.delay(str(s.id))
+    
+    return Response({
+        "id": str(s.id),
+        "stage": s.stage,
+        "expected_items": s.expected_items,
+        "reserved_credits": str(s.reserved_credits),
+        "error_message": s.error_message or None,
+    })
+
+
+
+# @api_view(["GET"])
+# @permission_classes([IsAuthenticated])
+# def active_sessions(request):
+#     """Получить все активные сессии пользователя"""
+#     sessions = UploadSession.objects.filter(
+#         user=request.user,
+#         stage__in=["processing", "queued", "credit_check"]
+#     ).order_by("created_at")
+    
+#     result = []
+#     for s in sessions:
+#         result.append({
+#             "id": str(s.id),
+#             "stage": s.stage,
+#             "scan_type": s.scan_type,
+#             "uploaded_files": s.uploaded_files,
+#             "expected_items": s.expected_items,
+#             "actual_items": s.actual_items,
+#             "processed_items": s.processed_items,
+#             "done_items": s.done_items,
+#             "failed_items": s.failed_items,
+#             "created_at": s.created_at.isoformat(),
+#         })
+    
+#     return Response({"sessions": result})
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def active_sessions(request):
+    """Получить все активные сессии пользователя + недавно завершённые"""
+    now = timezone.now()
+    
+    # Активные сессии
+    active_qs = UploadSession.objects.filter(
+        user=request.user,
+        stage__in=["processing", "queued", "credit_check"]
+    )
+    
+    # Недавно завершённые (за последние 10 секунд) — чтобы показать финальный статус
+    recently_done_qs = UploadSession.objects.filter(
+        user=request.user,
+        stage="done",
+        finished_at__gte=now - timedelta(seconds=10)
+    )
+    
+    sessions = list(active_qs) + list(recently_done_qs)
+    sessions.sort(key=lambda s: s.created_at)
+    
+    result = []
+    for s in sessions:
+        result.append({
+            "id": str(s.id),
+            "stage": s.stage,
+            "scan_type": s.scan_type,
+            "uploaded_files": s.uploaded_files,
+            "expected_items": s.expected_items,
+            "actual_items": s.actual_items,
+            "processed_items": s.processed_items,
+            "done_items": s.done_items,
+            "failed_items": s.failed_items,
+            "created_at": s.created_at.isoformat(),
+            "finished_at": s.finished_at.isoformat() if s.finished_at else None,
+        })
+    
+    return Response({"sessions": result})
+

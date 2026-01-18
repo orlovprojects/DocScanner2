@@ -2012,7 +2012,7 @@ export default function NustatymaiPage() {
           ))}
         </Select>
 
-        <Box sx={{ mt: 2 }}>
+        {/* <Box sx={{ mt: 2 }}>
           <FormControlLabel
             control={<Switch checked={viewMode === "multi"} onChange={toggleViewMode} disabled={savingViewMode} />}
             label={
@@ -2027,7 +2027,7 @@ export default function NustatymaiPage() {
               </Box>
             }
           />
-        </Box>
+        </Box> */}
       </FormControl>
 
       {success && <Alert severity="success" sx={{ mb: 2 }}>Išsaugota!</Alert>}

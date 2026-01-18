@@ -7,6 +7,7 @@ import hashlib
 from django.conf import settings
 from django.utils import timezone
 import secrets
+from decimal import Decimal
 
 #wagtail importy
 from wagtail.models import Page
@@ -61,8 +62,113 @@ def user_upload_path(instance, filename):
     return os.path.join("uploads", email_hash, unique_name)
 
 
+# Dlia podsciota progresa v progress bar posle zagruzki failov
+class UploadSession(models.Model):
+    STAGES = [
+        ("uploading", "uploading"),
+        ("credit_check", "credit_check"),
+        ("queued", "queued"),
+        ("processing", "processing"),
+        ("done", "done"),
+        ("blocked", "blocked"),
+        ("failed", "failed"),
+    ]
+
+    ARCHIVE_FORMATS = [
+        ("", "None"),
+        ("zip", "ZIP"),
+        ("rar", "RAR"),
+        ("7z", "7Z"),
+        ("tar", "TAR"),
+        ("tar.gz", "TAR.GZ"),
+        ("tar.bz2", "TAR.BZ2"),
+        ("tar.xz", "TAR.XZ"),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="upload_sessions",
+    )
+
+    scan_type = models.CharField(max_length=32, default="sumiskai", db_index=True)
+    stage = models.CharField(max_length=32, choices=STAGES, default="uploading", db_index=True)
+
+    client_total_files = models.PositiveIntegerField(default=0)
+
+    uploaded_files = models.PositiveIntegerField(default=0)
+    uploaded_bytes = models.BigIntegerField(default=0)
+
+    expected_items = models.PositiveIntegerField(default=0)  # dlya credit-check (kak budto vsyo uspeshno)
+    actual_items = models.PositiveIntegerField(default=0)    # real'no postavleno v obrabotku
+    processed_items = models.PositiveIntegerField(default=0)
+    done_items = models.PositiveIntegerField(default=0)
+    failed_items = models.PositiveIntegerField(default=0)
+
+    pending_archives = models.PositiveIntegerField(default=0)
+
+    archive_formats = models.JSONField(default=list, blank=True)
+
+    error_message = models.TextField(blank=True, default="")
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    reserved_credits = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
+    reserved_items = models.PositiveIntegerField(default=0)  # сколько “единиц” зарезервили (expected docs)
+
+    started_at = models.DateTimeField(null=True, blank=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["user", "stage"]),
+            models.Index(fields=["created_at"]),
+        ]
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"UploadSession({self.id}) user={self.user_id} stage={self.stage}"
+    
+
+class ChunkedUpload(models.Model):
+    STATUS = [
+        ("uploading", "uploading"),
+        ("complete", "complete"),
+        ("failed", "failed"),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="chunked_uploads")
+    session = models.ForeignKey("UploadSession", on_delete=models.CASCADE, related_name="chunked_uploads")
+
+    filename = models.CharField(max_length=255)
+    total_size = models.BigIntegerField()
+    chunk_size = models.IntegerField()
+    total_chunks = models.IntegerField()
+
+    # simplest: список полученных индексов (не идеально для 10000, но для 2GB при chunk=10-25MB это ок)
+    received = models.JSONField(default=list, blank=True)  # e.g. [0,1,2,5,...]
+    status = models.CharField(max_length=16, choices=STATUS, default="uploading")
+
+    tmp_path = models.TextField(blank=True, default="")  # путь до .part
+    error_message = models.TextField(blank=True, default="")
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["user", "status"]),
+            models.Index(fields=["session", "status"]),
+        ]
+
+
+
 class ScannedDocument(models.Model):
     STATUS_CHOICES = [
+        ('pending', 'Tikrinami'),
         ('processing', 'Vykdomi'),
         ('completed', 'Atlikti (Neeksportuoti)'),
         ('rejected', 'Atmesti'),
@@ -204,13 +310,41 @@ class ScannedDocument(models.Model):
     ready_for_export = models.BooleanField(null=True, blank=True, default=None)
     math_validation_passed = models.BooleanField(null=True, blank=True, default=None)
 
+    # ===== Novyje dlia progress bar i razdelenija uploadov na neskolko sessij =====
+    upload_session = models.ForeignKey(
+        UploadSession,
+        null=True, blank=True,
+        on_delete=models.SET_NULL,
+        related_name="documents",
+    )
+
+    counted_in_session = models.BooleanField(default=False)
+
+    is_archive_container = models.BooleanField(default=False)
+
+    parent_document = models.ForeignKey(
+        "self",
+        null=True, blank=True,
+        on_delete=models.SET_NULL,
+        related_name="children",
+    )
+
+    upload_batch_index = models.PositiveIntegerField(null=True, blank=True)
+
+    uploaded_size_bytes = models.BigIntegerField(default=0)
+
     class Meta:
         indexes = [
-            models.Index(fields=["user"]),
-            models.Index(fields=["uploaded_at"]),
-            models.Index(fields=["seller_name"]),
+            models.Index(fields=["user", "-uploaded_at"], name="idx_user_uploaded_desc"),
+            models.Index(fields=["user", "status", "-uploaded_at"], name="idx_user_status_uploaded"),
+            # verxnije 2 indexa novyje, nize 3 kotoryje byli do verxnix
+            # models.Index(fields=["user"]),
+            # models.Index(fields=["uploaded_at"]),
+            # models.Index(fields=["seller_name"]),
             models.Index(fields=["user", "seller_name_normalized"], name="idx_user_seller_norm"),
             models.Index(fields=["user", "buyer_name_normalized"], name="idx_user_buyer_norm"),
+            models.Index(fields=["upload_session"]),
+            models.Index(fields=["parent_document"]),
         ]
 
     def __str__(self):
@@ -373,6 +507,9 @@ class CustomUser(AbstractUser):
     email = models.EmailField(unique=True)
 
     credits = models.DecimalField(max_digits=7, decimal_places=2, default=0)
+    credits_reserved = models.DecimalField(
+        max_digits=12, decimal_places=2, default=Decimal("0.00")
+    )
     stripe_customer_id = models.CharField(max_length=255, blank=True, null=True)
     subscription_status = models.CharField(max_length=50, blank=True, null=True)
     subscription_plan = models.CharField(max_length=255, blank=True, null=True)

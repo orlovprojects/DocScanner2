@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useEffect, useState, useRef } from "react";
 import { api } from "../api/endpoints";
 import {
   TableContainer,
@@ -20,7 +20,7 @@ import {
 } from "@mui/material";
 import { alpha, styled } from "@mui/material/styles";
 import WarningIcon from "@mui/icons-material/Warning";
-import PersonOffIcon from '@mui/icons-material/PersonOff';
+import PersonOffIcon from "@mui/icons-material/PersonOff";
 import FeedIcon from "@mui/icons-material/Feed";
 import HelpOutlineIcon from "@mui/icons-material/HelpOutline";
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
@@ -29,11 +29,13 @@ import SearchIcon from "@mui/icons-material/Search";
 import CloseIcon from "@mui/icons-material/Close";
 
 // Стилизованный контейнер поиска
-const SearchWrapper = styled(Box)(({ theme, focused }) => ({
+const SearchWrapper = styled(Box, {
+  shouldForwardProp: (prop) => prop !== "focused",
+})(({ theme, focused }) => ({
   display: "inline-flex",
   alignItems: "center",
-  backgroundColor: focused 
-    ? theme.palette.background.paper 
+  backgroundColor: focused
+    ? theme.palette.background.paper
     : alpha(theme.palette.action.hover, 0.04),
   borderRadius: 12,
   padding: "8px 14px",
@@ -41,13 +43,13 @@ const SearchWrapper = styled(Box)(({ theme, focused }) => ({
   cursor: "text",
   transition: "all 0.01s ease-out",
   border: `1.5px solid ${focused ? theme.palette.primary.main : "transparent"}`,
-  boxShadow: focused 
-    ? `0 0 0 3px ${alpha(theme.palette.primary.main, 0.1)}` 
+  boxShadow: focused
+    ? `0 0 0 3px ${alpha(theme.palette.primary.main, 0.1)}`
     : "none",
   width: focused ? 340 : 280,
   "&:hover": {
-    backgroundColor: focused 
-      ? theme.palette.background.paper 
+    backgroundColor: focused
+      ? theme.palette.background.paper
       : alpha(theme.palette.action.hover, 0.08),
     borderColor: focused ? theme.palette.primary.main : alpha(theme.palette.divider, 0.3),
   },
@@ -79,6 +81,10 @@ const ResultsChip = styled(Chip)(({ theme }) => ({
 export default function DocumentsTable({
   filtered,
   loading,
+  loadingMore = false,
+  hasMore = false,
+  loadMore,
+  onSearchChange,
   selectedRows,
   handleSelectRow,
   handleSelectAll,
@@ -87,22 +93,53 @@ export default function DocumentsTable({
   allowUnknownDirection = false,
   onDeleteDoc,
   showOwnerColumns = false,
+  selectAllChecked,
+  selectAllIndeterminate,
 }) {
   const [anchorEl, setAnchorEl] = useState(null);
   const [menuRowId, setMenuRowId] = useState(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchFocused, setSearchFocused] = useState(false);
+
   const inputRef = useRef(null);
+  const onSearchChangeRef = useRef(onSearchChange);
+  const loadMoreTriggerRef = useRef(null);
 
-  const allRows = filtered || [];
+  useEffect(() => {
+    onSearchChangeRef.current = onSearchChange;
+  }, [onSearchChange]);
 
-  // Фильтрация по document_number
-  const rows = allRows.filter((d) => {
-    if (!searchQuery.trim()) return true;
-    const docNum = (d.document_number || "").toLowerCase();
-    const query = searchQuery.toLowerCase().trim();
-    return docNum.includes(query);
-  });
+  useEffect(() => {
+    const t = setTimeout(() => {
+      onSearchChangeRef.current?.(searchQuery);
+    }, 300);
+    return () => clearTimeout(t);
+  }, [searchQuery]);
+
+  // IntersectionObserver для подгрузки ещё документов при прокрутке страницы
+  useEffect(() => {
+    if (!hasMore) return;
+    const el = loadMoreTriggerRef.current;
+    if (!el) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const entry = entries[0];
+        if (entry.isIntersecting && hasMore && !loadingMore && !loading) {
+          loadMore?.();
+        }
+      },
+      {
+        root: null,      // окно браузера
+        threshold: 0.1,  // достаточно, чтобы 10% было видно
+      }
+    );
+
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [hasMore, loadingMore, loading, loadMore]);
+
+  const rows = filtered || [];
 
   const handleMenuOpen = (event, rowId) => {
     setAnchorEl(event.currentTarget);
@@ -156,7 +193,7 @@ export default function DocumentsTable({
   };
 
   const exportableRows = rows.filter(canExport);
-  const exportableIds = exportableRows.map((r) => r.id);
+  const exportableIds = exportableRows.map((r) => String(r.id));
 
   const allExportableSelected =
     exportableIds.length > 0 &&
@@ -221,13 +258,13 @@ export default function DocumentsTable({
       {/* Современное поле поиска */}
       <Box sx={{ mb: 2.5, display: "flex", alignItems: "center", gap: 1.5 }}>
         <SearchWrapper focused={searchFocused} onClick={handleWrapperClick}>
-          <SearchIcon 
-            sx={{ 
+          <SearchIcon
+            sx={{
               color: searchFocused ? "primary.main" : "text.secondary",
               fontSize: 20,
               transition: "color 0.01s ease-out",
               cursor: "text",
-            }} 
+            }}
           />
           <StyledInputBase
             inputRef={inputRef}
@@ -238,13 +275,13 @@ export default function DocumentsTable({
             onBlur={() => setSearchFocused(false)}
           />
           {searchQuery && (
-            <IconButton 
-              size="small" 
+            <IconButton
+              size="small"
               onMouseDown={clearSearch}
-              sx={{ 
+              sx={{
                 p: 0.25,
                 color: "text.secondary",
-                "&:hover": { 
+                "&:hover": {
                   color: "text.primary",
                   backgroundColor: "action.hover",
                 },
@@ -256,23 +293,35 @@ export default function DocumentsTable({
         </SearchWrapper>
 
         {searchQuery && (
-          <ResultsChip 
-            label={`${rows.length} iš ${allRows.length}`}
+          <ResultsChip
+            label={`${rows.length}`}
             size="small"
           />
         )}
       </Box>
 
-      <TableContainer component={Paper} sx={{ maxHeight: 580 }}>
+      <TableContainer component={Paper}>
         <Table stickyHeader size="small">
           <TableHead>
             <TableRow>
               <TableCell padding="checkbox">
                 <Checkbox
-                  indeterminate={someExportableSelected}
-                  checked={allExportableSelected}
+                  indeterminate={
+                    typeof selectAllIndeterminate === "boolean"
+                      ? selectAllIndeterminate
+                      : someExportableSelected
+                  }
+                  checked={
+                    typeof selectAllChecked === "boolean"
+                      ? selectAllChecked
+                      : allExportableSelected
+                  }
                   onChange={() => {
-                    if (allExportableSelected) {
+                    // если нам сверху явно сказали "checked" (filtered mode),
+                    // то повторный клик должен триггерить handleSelectAll([]) на стороне родителя
+                    if (
+                      (typeof selectAllChecked === "boolean" ? selectAllChecked : allExportableSelected)
+                    ) {
                       handleSelectAll([]);
                     } else {
                       handleSelectAll(exportableIds);
@@ -307,8 +356,8 @@ export default function DocumentsTable({
               </TableRow>
             ) : rows.length === 0 ? (
               <TableRow>
-                <TableCell 
-                  colSpan={baseColCount + extraOwnerCols} 
+                <TableCell
+                  colSpan={baseColCount + extraOwnerCols}
                   align="center"
                   sx={{ py: 4, color: "text.secondary" }}
                 >
@@ -325,182 +374,177 @@ export default function DocumentsTable({
                 </TableCell>
               </TableRow>
             ) : (
-              rows.map((d) => {
-                const rowDisabled = !canExport(d);
+              <>
+                {rows.map((d) => {
+                  const rowDisabled = !canExport(d);
 
-                const shouldShowTooltip =
-                  rowDisabled && (d.status === "completed" || d.status === "exported");
+                  const shouldShowTooltip =
+                    rowDisabled && (d.status === "completed" || d.status === "exported");
 
-                const tooltipTitle = shouldShowTooltip
-                  ? "Ištaisykite klaidas prieš eksportuojant"
-                  : "";
+                  const tooltipTitle = shouldShowTooltip
+                    ? "Ištaisykite klaidas prieš eksportuojant"
+                    : "";
 
-                return (
-                  <TableRow key={String(d.id)} hover>
-                    <TableCell padding="checkbox">
-                      <Tooltip title={tooltipTitle}>
-                        <span>
-                          <Checkbox
-                            checked={!rowDisabled && selectedRows.includes(d.id)}
-                            onChange={handleSelectRow(d.id)}
-                            disabled={rowDisabled}
-                            inputProps={{ "aria-label": "select row" }}
-                          />
-                        </span>
-                      </Tooltip>
-                    </TableCell>
+                  return (
+                    <TableRow key={String(d.id)} hover>
+                      <TableCell padding="checkbox">
+                        <Tooltip title={tooltipTitle}>
+                          <span>
+                            <Checkbox
+                              checked={!rowDisabled && selectedRows.includes(String(d.id))}
+                              onChange={handleSelectRow(String(d.id))}
+                              disabled={rowDisabled}
+                              inputProps={{ "aria-label": "select row" }}
+                            />
+                          </span>
+                        </Tooltip>
+                      </TableCell>
 
-                    {showOwnerColumns && (
-                      <>
-                        <TableCell>{d.user_id ?? "—"}</TableCell>
-                        <TableCell>{d.owner_email || "—"}</TableCell>
-                      </>
+                      {showOwnerColumns && (
+                        <>
+                          <TableCell>{d.user_id ?? "—"}</TableCell>
+                          <TableCell>{d.owner_email || "—"}</TableCell>
+                        </>
+                      )}
+
+                      <TableCell
+                        sx={{ cursor: "pointer", color: "primary.main" }}
+                        onClick={() => d.onClickPreview?.(d)}
+                      >
+                        {d.original_filename}
+                      </TableCell>
+
+                      <TableCell>{renderScanType(d)}</TableCell>
+                      <TableCell>{renderDirectionCell(d)}</TableCell>
+
+                      <TableCell sx={{ verticalAlign: "middle", minHeight: 44 }}>
+                        <Box display="flex" alignItems="center">
+                          {iconForStatus(d)}&nbsp;{statusLabel(d)}
+
+                          {(d.status === "completed" || d.status === "exported") && (
+                            <>
+                              {d.ready_for_export === false && (
+                                <Tooltip title="Dokumente trūksta duomenų">
+                                  <FeedIcon
+                                    fontSize="small"
+                                    sx={{
+                                      ml: 0.25,
+                                      verticalAlign: "middle",
+                                      cursor: "pointer",
+                                      color: "#8136c1",
+                                    }}
+                                  />
+                                </Tooltip>
+                              )}
+                              {d.math_validation_passed === false && (
+                                <Tooltip title="Sumos nesutampa">
+                                  <WarningIcon
+                                    fontSize="small"
+                                    sx={{
+                                      ml: 0.25,
+                                      verticalAlign: "middle",
+                                      cursor: "pointer",
+                                      color: "#f17e67",
+                                    }}
+                                  />
+                                </Tooltip>
+                              )}
+                              {d.buyer_vat_val === "invalid" && (
+                                <Tooltip title="Negalioja pirkėjo PVM kodas">
+                                  <PersonOffIcon
+                                    fontSize="small"
+                                    sx={{
+                                      ml: 0.25,
+                                      verticalAlign: "middle",
+                                      cursor: "pointer",
+                                      color: "#f44336",
+                                    }}
+                                  />
+                                </Tooltip>
+                              )}
+                              {d.seller_vat_val === "invalid" && (
+                                <Tooltip title="Negalioja pardavėjo PVM kodas">
+                                  <PersonOffIcon
+                                    fontSize="small"
+                                    sx={{
+                                      ml: 0.25,
+                                      verticalAlign: "middle",
+                                      cursor: "pointer",
+                                      color: "#f44336",
+                                    }}
+                                  />
+                                </Tooltip>
+                              )}
+                              {(
+                                (d.buyer_id && d.seller_id && d.buyer_id === d.seller_id) ||
+                                (d.buyer_name && d.seller_name && d.buyer_name.trim() === d.seller_name.trim()) ||
+                                (d.buyer_vat_code && d.seller_vat_code && d.buyer_vat_code === d.seller_vat_code)
+                              ) && (
+                                <Tooltip title="Pirkėjo rekvizitai sutampa su pardavėjo rekvizitais">
+                                  <FeedIcon
+                                    fontSize="small"
+                                    sx={{
+                                      ml: 0.25,
+                                      verticalAlign: "middle",
+                                      cursor: "pointer",
+                                      color: "#ff9800",
+                                    }}
+                                  />
+                                </Tooltip>
+                              )}
+                            </>
+                          )}
+                        </Box>
+                      </TableCell>
+
+                      <TableCell>{d.fmt?.(d.uploaded_at) || ""}</TableCell>
+
+                      <TableCell align="right">
+                        <IconButton onClick={(e) => handleMenuOpen(e, d.id)}>
+                          <MoreVertIcon />
+                        </IconButton>
+                        <Menu
+                          anchorEl={anchorEl}
+                          open={Boolean(anchorEl) && menuRowId === d.id}
+                          onClose={handleMenuClose}
+                        >
+                          <MenuItem onClick={() => handleDeleteRow(d.id)}> Ištrinti </MenuItem>
+                        </Menu>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+
+                {hasMore && (
+                  <>
+                    {/* Видимый лоадер для пользователя */}
+                    {loadingMore && (
+                      <TableRow>
+                        <TableCell
+                          colSpan={baseColCount + extraOwnerCols}
+                          align="center"
+                        >
+                          <CircularProgress size={20} />
+                        </TableCell>
+                      </TableRow>
                     )}
 
-                    <TableCell
-                      sx={{ cursor: "pointer", color: "primary.main" }}
-                      onClick={() => d.onClickPreview?.(d)}
-                    >
-                      {d.original_filename}
-                    </TableCell>
-
-                    <TableCell>{renderScanType(d)}</TableCell>
-                    <TableCell>{renderDirectionCell(d)}</TableCell>
-
-                    {/* <TableCell sx={{ verticalAlign: "middle", minHeight: 44 }}>
-                      <Box display="flex" alignItems="center">
-                        {iconForStatus(d)}&nbsp;{statusLabel(d)}
-
-                        {(d.status === "completed" || d.status === "exported") && (
-                          <>
-                            {d.ready_for_export === false && (
-                              <Tooltip title="Dokumente trūksta duomenų">
-                                <FeedIcon
-                                  fontSize="small"
-                                  sx={{
-                                    ml: 0.25,
-                                    verticalAlign: "middle",
-                                    cursor: "pointer",
-                                    color: "#8136c1",
-                                  }}
-                                />
-                              </Tooltip>
-                            )}
-                            {d.math_validation_passed === false && (
-                              <Tooltip title="Sumos nesutampa">
-                                <WarningIcon
-                                  fontSize="small"
-                                  sx={{
-                                    ml: 0.25,
-                                    verticalAlign: "middle",
-                                    cursor: "pointer",
-                                    color: "#f17e67",
-                                  }}
-                                />
-                              </Tooltip>
-                            )}
-                          </>
-                        )}
-                      </Box>
-                    </TableCell> */}
-
-                    <TableCell sx={{ verticalAlign: "middle", minHeight: 44 }}>
-                      <Box display="flex" alignItems="center">
-                        {iconForStatus(d)}&nbsp;{statusLabel(d)}
-
-                        {(d.status === "completed" || d.status === "exported") && (
-                          <>
-                            {d.ready_for_export === false && (
-                              <Tooltip title="Dokumente trūksta duomenų">
-                                <FeedIcon
-                                  fontSize="small"
-                                  sx={{
-                                    ml: 0.25,
-                                    verticalAlign: "middle",
-                                    cursor: "pointer",
-                                    color: "#8136c1",
-                                  }}
-                                />
-                              </Tooltip>
-                            )}
-                            {d.math_validation_passed === false && (
-                              <Tooltip title="Sumos nesutampa">
-                                <WarningIcon
-                                  fontSize="small"
-                                  sx={{
-                                    ml: 0.25,
-                                    verticalAlign: "middle",
-                                    cursor: "pointer",
-                                    color: "#f17e67",
-                                  }}
-                                />
-                              </Tooltip>
-                            )}
-                            {d.buyer_vat_val === 'invalid' && (
-                              <Tooltip title="Negalioja pirkėjo PVM kodas">
-                                <PersonOffIcon
-                                  fontSize="small"
-                                  sx={{
-                                    ml: 0.25,
-                                    verticalAlign: "middle",
-                                    cursor: "pointer",
-                                    color: "#f44336",
-                                  }}
-                                />
-                              </Tooltip>
-                            )}
-                            {d.seller_vat_val === 'invalid' && (
-                              <Tooltip title="Negalioja pardavėjo PVM kodas">
-                                <PersonOffIcon
-                                  fontSize="small"
-                                  sx={{
-                                    ml: 0.25,
-                                    verticalAlign: "middle",
-                                    cursor: "pointer",
-                                    color: "#f44336",
-                                  }}
-                                />
-                              </Tooltip>
-                            )}
-                            {(
-                              (d.buyer_id && d.seller_id && d.buyer_id === d.seller_id) ||
-                              (d.buyer_name && d.seller_name && d.buyer_name.trim() === d.seller_name.trim()) ||
-                              (d.buyer_vat_code && d.seller_vat_code && d.buyer_vat_code === d.seller_vat_code)
-                            ) && (
-                              <Tooltip title="Pirkėjo rekvizitai sutampa su pardavėjo rekvizitais">
-                                <FeedIcon
-                                  fontSize="small"
-                                  sx={{
-                                    ml: 0.25,
-                                    verticalAlign: "middle",
-                                    cursor: "pointer",
-                                    color: "#ff9800",
-                                  }}
-                                />
-                              </Tooltip>
-                            )}
-                          </>
-                        )}
-                      </Box>
-                    </TableCell>
-
-                    <TableCell>{d.fmt?.(d.uploaded_at) || ""}</TableCell>
-
-                    <TableCell align="right">
-                      <IconButton onClick={(e) => handleMenuOpen(e, d.id)}>
-                        <MoreVertIcon />
-                      </IconButton>
-                      <Menu
-                        anchorEl={anchorEl}
-                        open={Boolean(anchorEl) && menuRowId === d.id}
-                        onClose={handleMenuClose}
+                    {/* Невидимый триггер для IntersectionObserver */}
+                    <TableRow>
+                      <TableCell
+                        colSpan={baseColCount + extraOwnerCols}
+                        align="center"
                       >
-                        <MenuItem onClick={() => handleDeleteRow(d.id)}> Ištrinti </MenuItem>
-                      </Menu>
-                    </TableCell>
-                  </TableRow>
-                );
-              })
+                        <Box
+                          ref={loadMoreTriggerRef}
+                          sx={{ height: 8 }}
+                        />
+                      </TableCell>
+                    </TableRow>
+                  </>
+                )}
+
+              </>
             )}
           </TableBody>
         </Table>
@@ -511,7 +555,7 @@ export default function DocumentsTable({
 
 
 
-// import { useState } from "react";
+// import { useEffect, useState, useRef } from "react";
 // import { api } from "../api/endpoints";
 // import {
 //   TableContainer,
@@ -528,27 +572,106 @@ export default function DocumentsTable({
 //   Menu,
 //   MenuItem,
 //   Box,
+//   InputBase,
+//   Chip,
 // } from "@mui/material";
+// import { alpha, styled } from "@mui/material/styles";
 // import WarningIcon from "@mui/icons-material/Warning";
+// import PersonOffIcon from '@mui/icons-material/PersonOff';
 // import FeedIcon from "@mui/icons-material/Feed";
 // import HelpOutlineIcon from "@mui/icons-material/HelpOutline";
 // import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 // import MoreVertIcon from "@mui/icons-material/MoreVert";
+// import SearchIcon from "@mui/icons-material/Search";
+// import CloseIcon from "@mui/icons-material/Close";
+
+// // Стилизованный контейнер поиска
+// const SearchWrapper = styled(Box, {
+//   shouldForwardProp: (prop) => prop !== "focused",
+// })(({ theme, focused }) => ({
+//   display: "inline-flex",
+//   alignItems: "center",
+//   backgroundColor: focused
+//     ? theme.palette.background.paper
+//     : alpha(theme.palette.action.hover, 0.04),
+//   borderRadius: 12,
+//   padding: "8px 14px",
+//   gap: 10,
+//   cursor: "text",
+//   transition: "all 0.01s ease-out",
+//   border: `1.5px solid ${focused ? theme.palette.primary.main : "transparent"}`,
+//   boxShadow: focused
+//     ? `0 0 0 3px ${alpha(theme.palette.primary.main, 0.1)}`
+//     : "none",
+//   width: focused ? 340 : 280,
+//   "&:hover": {
+//     backgroundColor: focused
+//       ? theme.palette.background.paper
+//       : alpha(theme.palette.action.hover, 0.08),
+//     borderColor: focused ? theme.palette.primary.main : alpha(theme.palette.divider, 0.3),
+//   },
+// }));
+
+
+// const StyledInputBase = styled(InputBase)(({ theme }) => ({
+//   flex: 1,
+//   fontSize: 14,
+//   "& input": {
+//     padding: 0,
+//     "&::placeholder": {
+//       color: theme.palette.text.secondary,
+//       opacity: 0.7,
+//     },
+//   },
+// }));
+
+// const ResultsChip = styled(Chip)(({ theme }) => ({
+//   height: 22,
+//   fontSize: 12,
+//   fontWeight: 500,
+//   backgroundColor: alpha(theme.palette.primary.main, 0.1),
+//   color: theme.palette.primary.main,
+//   "& .MuiChip-label": {
+//     padding: "0 8px",
+//   },
+// }));
 
 // export default function DocumentsTable({
 //   filtered,
 //   loading,
+//   loadingMore = false,
+//   hasMore = false,
+//   loadMore,
+//   onSearchChange,
 //   selectedRows,
 //   handleSelectRow,
-//   handleSelectAll, // ТЕПЕРЬ ожидаем, что сюда придёт массив id
+//   handleSelectAll,
 //   isRowExportable,
 //   reloadDocuments,
 //   allowUnknownDirection = false,
 //   onDeleteDoc,
 //   showOwnerColumns = false,
+//   selectAllChecked,
+//   selectAllIndeterminate,
 // }) {
 //   const [anchorEl, setAnchorEl] = useState(null);
 //   const [menuRowId, setMenuRowId] = useState(null);
+//   const [searchQuery, setSearchQuery] = useState("");
+//   const [searchFocused, setSearchFocused] = useState(false);
+//   const inputRef = useRef(null);
+//   const onSearchChangeRef = useRef(onSearchChange);
+
+//   useEffect(() => {
+//     onSearchChangeRef.current = onSearchChange;
+//   }, [onSearchChange]);
+
+//   useEffect(() => {
+//     const t = setTimeout(() => {
+//       onSearchChangeRef.current?.(searchQuery);
+//     }, 300);
+//     return () => clearTimeout(t);
+//   }, [searchQuery]);
+
 //   const rows = filtered || [];
 
 //   const handleMenuOpen = (event, rowId) => {
@@ -571,6 +694,17 @@ export default function DocumentsTable({
 //     }
 //   };
 
+//   const clearSearch = (e) => {
+//     e.preventDefault();
+//     e.stopPropagation();
+//     setSearchQuery("");     
+//     inputRef.current?.focus();
+//   };
+
+//   const handleWrapperClick = () => {
+//     inputRef.current?.focus();
+//   };
+
 //   const getDirectionToShow = (d) => {
 //     const raw =
 //       typeof d.effective_direction !== "undefined"
@@ -591,9 +725,8 @@ export default function DocumentsTable({
 //     return dir === "pirkimas" || dir === "pardavimas";
 //   };
 
-//   // ↓↓↓ ЭТОТ БЛОК — НОВАЯ ЛОГИКА ДЛЯ select-all ↓↓↓
 //   const exportableRows = rows.filter(canExport);
-//   const exportableIds = exportableRows.map((r) => r.id);
+//   const exportableIds = exportableRows.map((r) => String(r.id));
 
 //   const allExportableSelected =
 //     exportableIds.length > 0 &&
@@ -601,7 +734,6 @@ export default function DocumentsTable({
 
 //   const someExportableSelected =
 //     exportableIds.some((id) => selectedRows.includes(id)) && !allExportableSelected;
-//   // ↑↑↑ КОНЕЦ НОВОГО БЛОКА ↑↑↑
 
 //   const statusLabel = (d) => {
 //     if (d.status === "exported") return "Atliktas (Eksportuotas)";
@@ -655,171 +787,292 @@ export default function DocumentsTable({
 //   const extraOwnerCols = showOwnerColumns ? 2 : 0;
 
 //   return (
-//     <TableContainer component={Paper} sx={{ maxHeight: 580 }}>
-//       <Table stickyHeader size="small">
-//         <TableHead>
-//           <TableRow>
-//             <TableCell padding="checkbox">
-//               {/* ЧЕКБОКС В ХЕДЕРЕ — ИЗМЕНЁН */}
-//               <Checkbox
-//                 indeterminate={someExportableSelected}
-//                 checked={allExportableSelected}
-//                 onChange={() => {
-//                   if (allExportableSelected) {
-//                     // снять выбор со всех экспортируемых
-//                     handleSelectAll([]);
-//                   } else {
-//                     // выбрать только экспортируемые
-//                     handleSelectAll(exportableIds);
-//                   }
-//                 }}
-//                 inputProps={{ "aria-label": "select all exportable" }}
-//               />
-//             </TableCell>
+//     <Box>
+//       {/* Современное поле поиска */}
+//       <Box sx={{ mb: 2.5, display: "flex", alignItems: "center", gap: 1.5 }}>
+//         <SearchWrapper focused={searchFocused} onClick={handleWrapperClick}>
+//           <SearchIcon 
+//             sx={{ 
+//               color: searchFocused ? "primary.main" : "text.secondary",
+//               fontSize: 20,
+//               transition: "color 0.01s ease-out",
+//               cursor: "text",
+//             }} 
+//           />
+//           <StyledInputBase
+//             inputRef={inputRef}
+//             placeholder="Ieškoti pagal dok. numerį..."
+//             value={searchQuery}
+//             onChange={(e) => setSearchQuery(e.target.value)}
+//             onFocus={() => setSearchFocused(true)}
+//             onBlur={() => setSearchFocused(false)}
+//           />
+//           {searchQuery && (
+//             <IconButton 
+//               size="small" 
+//               onMouseDown={clearSearch}
+//               sx={{ 
+//                 p: 0.25,
+//                 color: "text.secondary",
+//                 "&:hover": { 
+//                   color: "text.primary",
+//                   backgroundColor: "action.hover",
+//                 },
+//               }}
+//             >
+//               <CloseIcon sx={{ fontSize: 18 }} />
+//             </IconButton>
+//           )}
+//         </SearchWrapper>
 
-//             {showOwnerColumns && (
-//               <>
-//                 <TableCell sx={{ fontWeight: 600 }}>User ID</TableCell>
-//                 <TableCell sx={{ fontWeight: 600 }}>Email</TableCell>
-//               </>
-//             )}
+//         {searchQuery && (
+//           <ResultsChip 
+//             label={`${rows.length}`}
+//             size="small"
+//           />
+//         )}
+//       </Box>
 
-//             <TableCell sx={{ fontWeight: 600 }}>Failas</TableCell>
-//             <TableCell sx={{ fontWeight: 600 }}>Skaitmenizavimo tipas</TableCell>
-//             <TableCell sx={{ fontWeight: 600 }}>Pirkimas / pardavimas</TableCell>
-//             <TableCell sx={{ fontWeight: 600 }}>Statusas</TableCell>
-//             <TableCell sx={{ fontWeight: 600 }}>Data</TableCell>
-//             <TableCell align="right"></TableCell>
-//           </TableRow>
-//         </TableHead>
-
-//         <TableBody>
-//           {loading ? (
+//       <TableContainer
+//         component={Paper}
+//         sx={{ maxHeight: 580 }}
+//         onScroll={(e) => {
+//           const el = e.currentTarget;
+//           const nearBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 120;
+//           if (nearBottom && hasMore && !loadingMore && !loading) {
+//             loadMore?.();
+//           }
+//         }}
+//       >
+//         <Table stickyHeader size="small">
+//           <TableHead>
 //             <TableRow>
-//               <TableCell colSpan={baseColCount + extraOwnerCols} align="center">
-//                 <CircularProgress size={24} />
+//               <TableCell padding="checkbox">
+//                 <Checkbox
+//                   indeterminate={
+//                     typeof selectAllIndeterminate === "boolean"
+//                       ? selectAllIndeterminate
+//                       : someExportableSelected
+//                   }
+//                   checked={
+//                     typeof selectAllChecked === "boolean"
+//                       ? selectAllChecked
+//                       : allExportableSelected
+//                   }
+//                   onChange={() => {
+//                     // если нам сверху явно сказали "checked" (filtered mode),
+//                     // то повторный клик должен триггерить handleSelectAll([]) на стороне родителя
+//                     if (
+//                       (typeof selectAllChecked === "boolean" ? selectAllChecked : allExportableSelected)
+//                     ) {
+//                       handleSelectAll([]);
+//                     } else {
+//                       handleSelectAll(exportableIds);
+//                     }
+//                   }}
+//                   inputProps={{ "aria-label": "select all exportable" }}
+//                 />
 //               </TableCell>
+
+//               {showOwnerColumns && (
+//                 <>
+//                   <TableCell sx={{ fontWeight: 600 }}>User ID</TableCell>
+//                   <TableCell sx={{ fontWeight: 600 }}>Email</TableCell>
+//                 </>
+//               )}
+
+//               <TableCell sx={{ fontWeight: 600 }}>Failas</TableCell>
+//               <TableCell sx={{ fontWeight: 600 }}>Skaitmenizavimo tipas</TableCell>
+//               <TableCell sx={{ fontWeight: 600 }}>Pirkimas / pardavimas</TableCell>
+//               <TableCell sx={{ fontWeight: 600 }}>Statusas</TableCell>
+//               <TableCell sx={{ fontWeight: 600 }}>Data</TableCell>
+//               <TableCell align="right"></TableCell>
 //             </TableRow>
-//           ) : (
-//             rows.map((d) => {
-//               const rowDisabled = !canExport(d);
+//           </TableHead>
 
-//               const shouldShowTooltip =
-//                 rowDisabled && (d.status === "completed" || d.status === "exported");
-
-//               const tooltipTitle = shouldShowTooltip
-//                 ? "Ištaisykite klaidas prieš eksportuojant"
-//                 : "";
-
-//               return (
-//                 <TableRow key={String(d.id)} hover>
-//                   <TableCell padding="checkbox">
-//                     <Tooltip title={tooltipTitle}>
-//                       <span>
-//                         {/* ЗДЕСЬ ТОЖЕ ИЗМЕНЕНИЕ: disabled строки НЕ показываются как checked */}
-//                         <Checkbox
-//                           checked={!rowDisabled && selectedRows.includes(d.id)}
-//                           onChange={handleSelectRow(d.id)}
-//                           disabled={rowDisabled}
-//                           inputProps={{ "aria-label": "select row" }}
-//                         />
-//                       </span>
-//                     </Tooltip>
-//                   </TableCell>
-
-//                   {showOwnerColumns && (
-//                     <>
-//                       <TableCell>{d.user_id ?? "—"}</TableCell>
-//                       <TableCell>{d.owner_email || "—"}</TableCell>
-//                     </>
+//           <TableBody>
+//             {loading ? (
+//               <TableRow>
+//                 <TableCell colSpan={baseColCount + extraOwnerCols} align="center">
+//                   <CircularProgress size={24} />
+//                 </TableCell>
+//               </TableRow>
+//             ) : rows.length === 0 ? (
+//               <TableRow>
+//                 <TableCell 
+//                   colSpan={baseColCount + extraOwnerCols} 
+//                   align="center"
+//                   sx={{ py: 4, color: "text.secondary" }}
+//                 >
+//                   {searchQuery ? (
+//                     <Box>
+//                       <Box sx={{ fontSize: 14, mb: 0.5 }}>Dokumentų nerasta</Box>
+//                       <Box sx={{ fontSize: 12, opacity: 0.7 }}>
+//                         Pabandykite kitą paieškos užklausą
+//                       </Box>
+//                     </Box>
+//                   ) : (
+//                     "Nėra dokumentų"
 //                   )}
+//                 </TableCell>
+//               </TableRow>
+//             ) : (
+//               <>
+//                 {rows.map((d) => {
+//                   const rowDisabled = !canExport(d);
 
-//                   <TableCell
-//                     sx={{ cursor: "pointer", color: "primary.main" }}
-//                     onClick={() => d.onClickPreview?.(d)}
-//                   >
-//                     {d.original_filename}
-//                   </TableCell>
+//                   const shouldShowTooltip =
+//                     rowDisabled && (d.status === "completed" || d.status === "exported");
 
-//                   <TableCell>{renderScanType(d)}</TableCell>
-//                   <TableCell>{renderDirectionCell(d)}</TableCell>
+//                   const tooltipTitle = shouldShowTooltip
+//                     ? "Ištaisykite klaidas prieš eksportuojant"
+//                     : "";
 
-//                   <TableCell sx={{ verticalAlign: "middle", minHeight: 44 }}>
-//                     <Box display="flex" alignItems="center">
-//                       {iconForStatus(d)}&nbsp;{statusLabel(d)}
+//                   return (
+//                     <TableRow key={String(d.id)} hover>
+//                       <TableCell padding="checkbox">
+//                         <Tooltip title={tooltipTitle}>
+//                           <span>
+//                             <Checkbox
+//                               checked={!rowDisabled && selectedRows.includes(String(d.id))}
+//                               onChange={handleSelectRow(String(d.id))}
+//                               disabled={rowDisabled}
+//                               inputProps={{ "aria-label": "select row" }}
+//                             />
+//                           </span>
+//                         </Tooltip>
+//                       </TableCell>
 
-//                       {(d.status === "completed" || d.status === "exported") && (
+//                       {showOwnerColumns && (
 //                         <>
-//                           {d.ready_for_export === false && (
-//                             <Tooltip title="Dokumente trūksta duomenų">
-//                               <FeedIcon
-//                                 fontSize="small"
-//                                 sx={{
-//                                   ml: 0.25,
-//                                   verticalAlign: "middle",
-//                                   cursor: "pointer",
-//                                   color: "#8136c1",
-//                                 }}
-//                               />
-//                             </Tooltip>
-//                           )}
-//                           {d.math_validation_passed === false && (
-//                             <Tooltip title="Sumos nesutampa">
-//                               <WarningIcon
-//                                 fontSize="small"
-//                                 sx={{
-//                                   ml: 0.25,
-//                                   verticalAlign: "middle",
-//                                   cursor: "pointer",
-//                                   color: "#f17e67",
-//                                 }}
-//                               />
-//                             </Tooltip>
-//                           )}
+//                           <TableCell>{d.user_id ?? "—"}</TableCell>
+//                           <TableCell>{d.owner_email || "—"}</TableCell>
 //                         </>
 //                       )}
-//                     </Box>
-//                   </TableCell>
 
-//                   <TableCell>{d.fmt?.(d.uploaded_at) || ""}</TableCell>
+//                       <TableCell
+//                         sx={{ cursor: "pointer", color: "primary.main" }}
+//                         onClick={() => d.onClickPreview?.(d)}
+//                       >
+//                         {d.original_filename}
+//                       </TableCell>
 
-//                   <TableCell align="right">
-//                     <IconButton onClick={(e) => handleMenuOpen(e, d.id)}>
-//                       <MoreVertIcon />
-//                     </IconButton>
-//                     <Menu
-//                       anchorEl={anchorEl}
-//                       open={Boolean(anchorEl) && menuRowId === d.id}
-//                       onClose={handleMenuClose}
-//                     >
-//                       <MenuItem onClick={() => handleDeleteRow(d.id)}> Ištrinti </MenuItem>
-//                     </Menu>
-//                   </TableCell>
-//                 </TableRow>
-//               );
-//             })
-//           )}
-//         </TableBody>
-//       </Table>
-//     </TableContainer>
+//                       <TableCell>{renderScanType(d)}</TableCell>
+//                       <TableCell>{renderDirectionCell(d)}</TableCell>
+
+//                       <TableCell sx={{ verticalAlign: "middle", minHeight: 44 }}>
+//                         <Box display="flex" alignItems="center">
+//                           {iconForStatus(d)}&nbsp;{statusLabel(d)}
+
+//                           {(d.status === "completed" || d.status === "exported") && (
+//                             <>
+//                               {d.ready_for_export === false && (
+//                                 <Tooltip title="Dokumente trūksta duomenų">
+//                                   <FeedIcon
+//                                     fontSize="small"
+//                                     sx={{
+//                                       ml: 0.25,
+//                                       verticalAlign: "middle",
+//                                       cursor: "pointer",
+//                                       color: "#8136c1",
+//                                     }}
+//                                   />
+//                                 </Tooltip>
+//                               )}
+//                               {d.math_validation_passed === false && (
+//                                 <Tooltip title="Sumos nesutampa">
+//                                   <WarningIcon
+//                                     fontSize="small"
+//                                     sx={{
+//                                       ml: 0.25,
+//                                       verticalAlign: "middle",
+//                                       cursor: "pointer",
+//                                       color: "#f17e67",
+//                                     }}
+//                                   />
+//                                 </Tooltip>
+//                               )}
+//                               {d.buyer_vat_val === "invalid" && (
+//                                 <Tooltip title="Negalioja pirkėjo PVM kodas">
+//                                   <PersonOffIcon
+//                                     fontSize="small"
+//                                     sx={{
+//                                       ml: 0.25,
+//                                       verticalAlign: "middle",
+//                                       cursor: "pointer",
+//                                       color: "#f44336",
+//                                     }}
+//                                   />
+//                                 </Tooltip>
+//                               )}
+//                               {d.seller_vat_val === "invalid" && (
+//                                 <Tooltip title="Negalioja pardavėjo PVM kodas">
+//                                   <PersonOffIcon
+//                                     fontSize="small"
+//                                     sx={{
+//                                       ml: 0.25,
+//                                       verticalAlign: "middle",
+//                                       cursor: "pointer",
+//                                       color: "#f44336",
+//                                     }}
+//                                   />
+//                                 </Tooltip>
+//                               )}
+//                               {(
+//                                 (d.buyer_id && d.seller_id && d.buyer_id === d.seller_id) ||
+//                                 (d.buyer_name && d.seller_name && d.buyer_name.trim() === d.seller_name.trim()) ||
+//                                 (d.buyer_vat_code && d.seller_vat_code && d.buyer_vat_code === d.seller_vat_code)
+//                               ) && (
+//                                 <Tooltip title="Pirkėjo rekvizitai sutampa su pardavėjo rekvizitais">
+//                                   <FeedIcon
+//                                     fontSize="small"
+//                                     sx={{
+//                                       ml: 0.25,
+//                                       verticalAlign: "middle",
+//                                       cursor: "pointer",
+//                                       color: "#ff9800",
+//                                     }}
+//                                   />
+//                                 </Tooltip>
+//                               )}
+//                             </>
+//                           )}
+//                         </Box>
+//                       </TableCell>
+
+//                       <TableCell>{d.fmt?.(d.uploaded_at) || ""}</TableCell>
+
+//                       <TableCell align="right">
+//                         <IconButton onClick={(e) => handleMenuOpen(e, d.id)}>
+//                           <MoreVertIcon />
+//                         </IconButton>
+//                         <Menu
+//                           anchorEl={anchorEl}
+//                           open={Boolean(anchorEl) && menuRowId === d.id}
+//                           onClose={handleMenuClose}
+//                         >
+//                           <MenuItem onClick={() => handleDeleteRow(d.id)}> Ištrinti </MenuItem>
+//                         </Menu>
+//                       </TableCell>
+//                     </TableRow>
+//                   );
+//                 })}
+
+//                 {hasMore && (
+//                   <TableRow>
+//                     <TableCell colSpan={baseColCount + extraOwnerCols} align="center">
+//                       {loadingMore ? <CircularProgress size={20} /> : null}
+//                     </TableCell>
+//                   </TableRow>
+//                 )}
+//               </>
+//             )}
+//           </TableBody>
+//         </Table>
+//       </TableContainer>
+//     </Box>
 //   );
 // }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 

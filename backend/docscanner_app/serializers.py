@@ -235,10 +235,10 @@ class ScannedDocumentDetailSerializer(serializers.ModelSerializer):
             "glued_raw_text": {"write_only": True},
         }
 
-    def get_line_items(self, obj):
-        # Просто сортируем по id, чтобы порядок всегда был стабильный
-        qs = obj.line_items.order_by("id")
-        return LineItemSerializer(qs, many=True).data
+    # def get_line_items(self, obj):
+    #     # Просто сортируем по id, чтобы порядок всегда был стабильный
+    #     qs = obj.line_items.order_by("id")
+    #     return LineItemSerializer(qs, many=True).data
 
 
 
@@ -1561,3 +1561,11 @@ class AdClickSerializer(serializers.ModelSerializer):
 
 
 
+# Optimizacija skorosti zagruzki
+
+class CounterpartySerializer(serializers.Serializer):
+    key = serializers.CharField()
+    id = serializers.CharField(allow_null=True, required=False)
+    name = serializers.CharField(allow_blank=True, required=False)
+    vat = serializers.CharField(allow_blank=True, required=False)
+    docs_count = serializers.IntegerField()

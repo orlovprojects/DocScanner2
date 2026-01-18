@@ -699,7 +699,7 @@ export default function PreviewDialog({
 
   return (
     <LocalizationProvider dateAdapter={AdapterDayjs} adapterLocale="lt">
-      <Dialog open={open} onClose={onClose} maxWidth="xl" fullWidth>
+      <Dialog open={open} onClose={onClose} maxWidth="xl" fullWidth TransitionProps={{ timeout: 0.1 }}>
         <DialogTitle
           sx={{
             fontWeight: 500,
