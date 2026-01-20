@@ -23,7 +23,7 @@ from .tasks import start_session_processing
 from rest_framework.parsers import MultiPartParser, FormParser
 from django.utils.dateparse import parse_date
 from .serializers import ScannedDocumentListSerializer
-from .pagination import DocumentsCursorPagination
+from .pagination import DocumentsCursorPagination, UsersCursorPagination, MobileInboxCursorPagination
 
 
 
@@ -173,42 +173,36 @@ def _today_dates():
     yesterday = today - timedelta(days=1)
     return today, yesterday
 
-def _count_by_date(model, date_field: str, target_date):
-    return model.objects.filter(**{f"{date_field}__date": target_date}).count()
-
-def _qs_by_date(model, date_field: str, target_date):
+def _qs_by_date(model, date_field: str, target_date, exclude_archives=True):
     start = timezone.make_aware(datetime.combine(target_date, time.min))
     end = timezone.make_aware(datetime.combine(target_date, time.max))
-    return model.objects.filter(**{f"{date_field}__range": (start, end)})
+    qs = model.objects.filter(**{f"{date_field}__range": (start, end)})
+    if exclude_archives:
+        qs = qs.filter(is_archive_container=False)
+    return qs
 
-def _qs_last_n_days(model, date_field: str, days: int):
+def _qs_last_n_days(model, date_field: str, days: int, exclude_archives=True):
     since = timezone.now() - timedelta(days=days)
-    return model.objects.filter(**{f"{date_field}__gte": since})
+    qs = model.objects.filter(**{f"{date_field}__gte": since})
+    if exclude_archives:
+        qs = qs.filter(is_archive_container=False)
+    return qs
 
-def _ensure_dict(maybe_json):
-    if not maybe_json:
-        return {}
-    if isinstance(maybe_json, dict):
-        return maybe_json
-    if isinstance(maybe_json, str):
-        try:
-            return json.loads(maybe_json)
-        except Exception:
-            return {}
-    return {}
-
-def _doc_has_issues(doc):
-    raw = getattr(doc, 'structured_json', None) or getattr(doc, 'gpt_raw_json', None) or {}
-    struct = _ensure_dict(raw)
-    res = summarize_doc_issues(struct)
-    return bool(res.get("has_issues"))
+def _qs_all_docs(exclude_archives=True):
+    qs = ScannedDocument.objects.all()
+    if exclude_archives:
+        qs = qs.filter(is_archive_container=False)
+    return qs
 
 def _count_errors_in_qs(qs):
-    n = 0
-    for doc in qs.only('id', 'structured_json', 'gpt_raw_json'):
-        if _doc_has_issues(doc):
-            n += 1
-    return n
+    """Ошибка = math_validation_passed=False ИЛИ ready_for_export=False"""
+    return qs.filter(
+        Q(math_validation_passed=False) | Q(ready_for_export=False)
+    ).count()
+
+def _count_rejected_in_qs(qs):
+    """Количество rejected документов"""
+    return qs.filter(status="rejected").count()
 
 def _pct(part, whole):
     return round((part / whole * 100.0), 2) if whole else 0.0
@@ -216,6 +210,14 @@ def _pct(part, whole):
 def _rate(ok_count, total_count):
     """% успешных (без ошибок) от общего количества."""
     return _pct(ok_count, total_count)
+
+def _rejected_stats(rejected, total):
+    """Статистика rejected: count, total, percent"""
+    return {
+        "rejected": rejected,
+        "total": total,
+        "pct": _pct(rejected, total),
+    }
 
 @api_view(["GET"])
 @permission_classes([IsSuperUser])
@@ -225,46 +227,56 @@ def superuser_dashboard_stats(request):
 
     today, yesterday = _today_dates()
 
-    qs_all      = ScannedDocument.objects.all()
-    qs_today    = _qs_by_date(ScannedDocument, doc_date_field, today)
-    qs_yesterday= _qs_by_date(ScannedDocument, doc_date_field, yesterday)
-    qs_7d       = _qs_last_n_days(ScannedDocument, doc_date_field, 7)
-    qs_30d      = _qs_last_n_days(ScannedDocument, doc_date_field, 30)
+    # Все QuerySet'ы исключают is_archive_container=True
+    qs_all       = _qs_all_docs()
+    qs_today     = _qs_by_date(ScannedDocument, doc_date_field, today)
+    qs_yesterday = _qs_by_date(ScannedDocument, doc_date_field, yesterday)
+    qs_7d        = _qs_last_n_days(ScannedDocument, doc_date_field, 7)
+    qs_30d       = _qs_last_n_days(ScannedDocument, doc_date_field, 30)
 
-    docs_today      = qs_today.count()
-    docs_yesterday  = qs_yesterday.count()
-    docs_7d         = qs_7d.count()
-    docs_30d        = qs_30d.count()
-    total_docs      = qs_all.count()
+    docs_today     = qs_today.count()
+    docs_yesterday = qs_yesterday.count()
+    docs_7d        = qs_7d.count()
+    docs_30d       = qs_30d.count()
+    total_docs     = qs_all.count()
 
-    err_today       = _count_errors_in_qs(qs_today)
-    err_yesterday   = _count_errors_in_qs(qs_yesterday)
-    err_7d          = _count_errors_in_qs(qs_7d)
-    err_30d         = _count_errors_in_qs(qs_30d)
-    err_total       = _count_errors_in_qs(qs_all)
+    # Ошибки (math_validation_passed=False OR ready_for_export=False)
+    err_today     = _count_errors_in_qs(qs_today)
+    err_yesterday = _count_errors_in_qs(qs_yesterday)
+    err_7d        = _count_errors_in_qs(qs_7d)
+    err_30d       = _count_errors_in_qs(qs_30d)
+    err_total     = _count_errors_in_qs(qs_all)
 
-    ok_today        = max(docs_today - err_today, 0)
-    ok_yesterday    = max(docs_yesterday - err_yesterday, 0)
-    ok_7d           = max(docs_7d - err_7d, 0)
-    ok_30d          = max(docs_30d - err_30d, 0)
-    ok_total        = max(total_docs - err_total, 0)
+    ok_today     = max(docs_today - err_today, 0)
+    ok_yesterday = max(docs_yesterday - err_yesterday, 0)
+    ok_7d        = max(docs_7d - err_7d, 0)
+    ok_30d       = max(docs_30d - err_30d, 0)
+    ok_total     = max(total_docs - err_total, 0)
 
-    # уникальные пользователи (пример из твоей версии)
+    # Rejected документы (status="rejected")
+    rej_today     = _count_rejected_in_qs(qs_today)
+    rej_yesterday = _count_rejected_in_qs(qs_yesterday)
+    rej_7d        = _count_rejected_in_qs(qs_7d)
+    rej_30d       = _count_rejected_in_qs(qs_30d)
+    rej_total     = _count_rejected_in_qs(qs_all)
+
+    # уникальные пользователи
     start_today = timezone.make_aware(datetime.combine(today, time.min))
     end_today   = timezone.make_aware(datetime.combine(today, time.max))
     unique_users_excl_1_2_today = (
         ScannedDocument.objects
+        .filter(is_archive_container=False)
         .exclude(user_id__in=[1, 2])
         .filter(**{f"{doc_date_field}__range": (start_today, end_today)})
         .values("user_id").distinct().count()
     )
 
     # пользователи/регистрации
-    new_users_today      = _count_by_date(CustomUser, user_date_field, today)
-    new_users_yesterday  = _count_by_date(CustomUser, user_date_field, yesterday)
-    new_users_7d         = _qs_last_n_days(CustomUser, user_date_field, 7).count()
-    new_users_30d        = _qs_last_n_days(CustomUser, user_date_field, 30).count()
-    total_users          = CustomUser.objects.count()
+    new_users_today     = CustomUser.objects.filter(**{f"{user_date_field}__date": today}).count()
+    new_users_yesterday = CustomUser.objects.filter(**{f"{user_date_field}__date": yesterday}).count()
+    new_users_7d        = _qs_last_n_days(CustomUser, user_date_field, 7, exclude_archives=False).count()
+    new_users_30d       = _qs_last_n_days(CustomUser, user_date_field, 30, exclude_archives=False).count()
+    total_users         = CustomUser.objects.count()
 
     # разбивка по типам
     st_sumiskai = qs_all.filter(scan_type="sumiskai").count()
@@ -272,19 +284,27 @@ def superuser_dashboard_stats(request):
 
     data = {
         "documents": {
-            "today":            {"count": docs_today,     "errors": err_today},
-            "yesterday":        {"count": docs_yesterday, "errors": err_yesterday},
-            "last_7_days":      {"count": docs_7d,        "errors": err_7d},
-            "last_30_days":     {"count": docs_30d,       "errors": err_30d},
-            "total":            {"count": total_docs,     "errors": err_total},
+            "today":       {"count": docs_today,     "errors": err_today},
+            "yesterday":   {"count": docs_yesterday, "errors": err_yesterday},
+            "last_7_days": {"count": docs_7d,        "errors": err_7d},
+            "last_30_days":{"count": docs_30d,       "errors": err_30d},
+            "total":       {"count": total_docs,     "errors": err_total},
 
-            # ✅ Новый блок — Success rate (без ошибок)
             "success_rate": {
-                "today":        _rate(ok_today,     docs_today),
-                "yesterday":    _rate(ok_yesterday, docs_yesterday),
-                "last_7_days":  _rate(ok_7d,        docs_7d),
-                "last_30_days": _rate(ok_30d,       docs_30d),
-                "total":        _rate(ok_total,     total_docs),
+                "today":       _rate(ok_today,     docs_today),
+                "yesterday":   _rate(ok_yesterday, docs_yesterday),
+                "last_7_days": _rate(ok_7d,        docs_7d),
+                "last_30_days":_rate(ok_30d,       docs_30d),
+                "total":       _rate(ok_total,     total_docs),
+            },
+
+            # ✅ Новый блок — Rejected статистика
+            "rejected": {
+                "today":       _rejected_stats(rej_today,     docs_today),
+                "yesterday":   _rejected_stats(rej_yesterday, docs_yesterday),
+                "last_7_days": _rejected_stats(rej_7d,        docs_7d),
+                "last_30_days":_rejected_stats(rej_30d,       docs_30d),
+                "total":       _rejected_stats(rej_total,     total_docs),
             },
 
             "unique_users_excluding_1_2_today": unique_users_excl_1_2_today,
@@ -2720,85 +2740,6 @@ def _ensure_dict(x):
             return {}
     return {}
 
-# def summarize_doc_issues(doc_struct):
-#     """
-#     Возвращает только 'error' на основании жестких критериев:
-#       - _check_minimum_anchors_ok == False
-#       - _doc_amounts_consistent == False
-#       - ar_sutapo == False И (любой из _lines_sum_matches_wo/with/vat == False)
-#       - 'красные' hints (DOC-LINES-NOT-MATCHING-*, LI-PRICE-MISMATCH, LI-ZERO-VAT-DISCOUNTS-MISMATCH)
-#       - в логах есть строки, начинающиеся на '❗'
-#     """
-#     doc = _ensure_dict(doc_struct)
-
-#     # --- логи / хинты ---
-#     logs = doc.get("_global_validation_log") or []
-#     if isinstance(logs, str):
-#         logs = [logs]
-#     hints = doc.get("_lines_structured_hints") or []
-#     if isinstance(hints, str):
-#         hints = [hints]
-
-#     bang = [s for s in logs if isinstance(s, str) and s.strip().startswith("❗")]
-#     red_hints = [h for h in hints if (
-#         isinstance(h, str) and (
-#             h.startswith("DOC-LINES-NOT-MATCHING-")
-#             or "LI-PRICE-MISMATCH" in h
-#             or "LI-ZERO-VAT-DISCOUNTS-MISMATCH" in h
-#         )
-#     )]
-
-#     # --- флаги согласованности ---
-#     min_ok        = bool(doc.get("_check_minimum_anchors_ok", True))
-#     doc_consistent= bool(doc.get("_doc_amounts_consistent", True))
-#     ar_sutapo     = bool(doc.get("ar_sutapo", True))
-
-#     match_wo   = doc.get("_lines_sum_matches_wo")
-#     match_with = doc.get("_lines_sum_matches_with")
-#     match_vat  = doc.get("_lines_sum_matches_vat")
-
-#     separate_vat = bool(doc.get("separate_vat"))
-#     vat_failed = (match_vat is False) if not separate_vat else False
-
-#     lines_failed = (match_wo is False) or (match_with is False) or vat_failed
-#     lines_block  = (not ar_sutapo) and lines_failed
-
-#     # --- error-условия ---
-#     errors = []
-#     if not min_ok:
-#         errors.append("min-anchors")
-#     if not doc_consistent:
-#         errors.append("doc-core")
-#     if lines_block:
-#         errors.append("lines-vs-doc")
-#     if red_hints:
-#         errors.append("hints")
-#     if bang:
-#         errors.append("bang")
-
-#     has_error = bool(errors)
-
-#     # --- оформление результата ---
-#     badges = []
-#     if not min_ok:        badges.append("min⊄")
-#     if not doc_consistent:badges.append("core✗")
-#     if lines_block:       badges.append("Σ(lines)≠doc")
-#     if red_hints:         badges.append("hint!")
-#     if bang:              badges.append(f"❗×{len(bang)}")
-
-#     # краткая сводка: приоритет — красный хинт → '❗' → бейджи
-#     summary = (red_hints[0] if red_hints else (bang[0] if bang else " ".join(badges)))[:300]
-
-#     issue_count = int(len(red_hints) + len(bang)
-#                       + (not min_ok) + (not doc_consistent) + (1 if lines_block else 0))
-
-#     return {
-#         "has_issues": has_error,
-#         "severity": "error" if has_error else "ok",
-#         "issue_badges": " ".join(badges),
-#         "issue_summary": summary,
-#         "issue_count": issue_count,
-#     }
 
 def _ensure_dict(x):
     if x is None:
@@ -2864,52 +2805,66 @@ def summarize_doc_issues(doc_struct):
     }
 
 
+
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def admin_documents_with_errors(request):
-    """Для superuser — документы всех пользователей с ошибками (все, без ограничения по дате)."""
+    """
+    Для superuser — документы всех пользователей с ошибками.
+    Ошибка = math_validation_passed=False ИЛИ ready_for_export=False
+    Курсорная пагинация с infinite scroll.
+    """
     user = request.user
     if not user.is_superuser:
         return Response({"detail": "Not authorized"}, status=status.HTTP_403_FORBIDDEN)
 
-    # фильтр по статусу — опционально
+    # Только документы с ошибками
+    qs = ScannedDocument.objects.select_related('user').filter(
+        Q(math_validation_passed=False) | Q(ready_for_export=False)
+    )
+
+    # --- фильтры ---
     status_filter = request.GET.get('status')
-
-    qs = ScannedDocument.objects.all()
-
     if status_filter:
         qs = qs.filter(status=status_filter)
 
-    # сортировка по времени загрузки (новые первыми)
-    qs = qs.order_by('-uploaded_at')
+    # Сортировка
+    qs = qs.order_by('-uploaded_at', '-id')
 
-    ser = ScannedDocumentListSerializer(qs, many=True)
+    # --- курсорная пагинация ---
+    paginator = DocumentsCursorPagination()
+    page = paginator.paginate_queryset(qs, request)
 
+    ser = ScannedDocumentListSerializer(page, many=True)
+
+    # --- обогащение данных ---
     data = []
-    for obj, row in zip(qs, ser.data):
-        doc_struct_raw = getattr(obj, 'structured_json', None) or getattr(obj, 'gpt_raw_json', None)
-        issues = summarize_doc_issues(doc_struct_raw)
-        if not issues["has_issues"]:
-            continue
-
+    for obj, row in zip(page, ser.data):
         r = dict(row)
-        r["owner_email"]   = getattr(obj.user, "email", None)
-        r["issue_has"]     = issues["has_issues"]
-        r["issue_badges"]  = issues["issue_badges"]
-        r["issue_summary"] = issues["issue_summary"]
-        r["issue_count"]   = issues["issue_count"]
+        r["user_id"] = getattr(obj.user, "id", None)
+        r["owner_email"] = getattr(obj.user, "email", None)
+        
+        # Показываем какая именно ошибка
+        badges = []
+        if not obj.math_validation_passed:
+            badges.append("MATH✗")
+        if not obj.ready_for_export:
+            badges.append("NOT_READY")
+        
+        r["issue_badges"] = " ".join(badges)
+        r["issue_has"] = True
         data.append(r)
 
-    return Response(data)
+    return paginator.get_paginated_response(data)
 
 
-#2) dlia visi-failai
+
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def admin_all_documents(request):
     """
     Для superuser — сводный список ВСЕХ документов всех пользователей.
-    Добавлены user_id и email.
+    Курсорная пагинация с infinite scroll.
     """
     user = request.user
     if not user.is_superuser:
@@ -2926,40 +2881,27 @@ def admin_all_documents(request):
     if owner:
         qs = qs.filter(user__email__icontains=owner)
 
-    from django.utils.dateparse import parse_datetime, parse_date
+    from django.utils.dateparse import parse_date
     from datetime import timedelta
 
-    def _parse_any_dt(value):
-        if not value:
-            return None
-        dt = parse_datetime(value)
-        if dt:
-            return dt
-        d = parse_date(value)
-        return d
-
-    date_from = _parse_any_dt(request.GET.get('date_from'))
-    date_to = _parse_any_dt(request.GET.get('date_to'))
+    date_from = request.GET.get('date_from')
+    date_to = request.GET.get('date_to')
 
     if date_from:
-        qs = qs.filter(uploaded_at__gte=date_from)
+        d = parse_date(date_from)
+        if d:
+            qs = qs.filter(uploaded_at__gte=d)
+
     if date_to:
-        # если только дата — добавим конец дня
-        if hasattr(date_to, 'hour'):
-            qs = qs.filter(uploaded_at__lt=date_to)
-        else:
-            qs = qs.filter(uploaded_at__lt=(date_to + timedelta(days=1)))
+        d = parse_date(date_to)
+        if d:
+            qs = qs.filter(uploaded_at__lt=d + timedelta(days=1))
 
-    # --- сортировка ---
-    order = request.GET.get('order') or '-uploaded_at'
-    if order not in {'uploaded_at', '-uploaded_at'}:
-        order = '-uploaded_at'
-    qs = qs.order_by(order)
+    # --- сортировка (курсорная пагинация требует фиксированный order) ---
+    qs = qs.order_by('-uploaded_at', '-id')
 
-    # --- пагинация ---
-    from rest_framework.pagination import PageNumberPagination
-    paginator = PageNumberPagination()
-    paginator.page_size = int(request.GET.get('page_size', 50))
+    # --- курсорная пагинация ---
+    paginator = DocumentsCursorPagination()
     page = paginator.paginate_queryset(qs, request)
 
     from .serializers import ScannedDocumentListSerializer
@@ -2971,19 +2913,15 @@ def admin_all_documents(request):
         doc_struct_raw = getattr(obj, 'structured_json', None) or getattr(obj, 'gpt_raw_json', None)
         issues = summarize_doc_issues(doc_struct_raw)
 
-        # вставляем user_id и email в начало
         enriched_row = {
             "user_id": getattr(obj.user, "id", None),
             "owner_email": getattr(obj.user, "email", None),
         }
         enriched_row.update(row)
-
-        # добавляем информацию о проблемах
         enriched_row["issue_has"] = issues["has_issues"]
         enriched_row["issue_badges"] = issues["issue_badges"]
         enriched_row["issue_summary"] = issues["issue_summary"]
         enriched_row["issue_count"] = issues["issue_count"]
-
         data.append(enriched_row)
 
     return paginator.get_paginated_response(data)
@@ -2995,14 +2933,24 @@ def admin_all_documents(request):
 def admin_users_simple(request):
     """
     Для superuser — список всех пользователей (CustomUser).
-    Без подписочных полей, без фильтров, без пагинации.
+    Курсорная пагинация с infinite scroll.
     """
     if not request.user.is_superuser:
         return Response({"detail": "Not authorized"}, status=status.HTTP_403_FORBIDDEN)
 
-    qs = CustomUser.objects.all().order_by("-date_joined")
-    ser = CustomUserAdminListSerializer(qs, many=True, context={'request': request})
-    return Response(ser.data)
+    qs = CustomUser.objects.all().order_by("-date_joined", "-id")
+    
+    # --- фильтры (опционально) ---
+    email = request.GET.get('email')
+    if email:
+        qs = qs.filter(email__icontains=email)
+    
+    # --- курсорная пагинация ---
+    paginator = UsersCursorPagination()
+    page = paginator.paginate_queryset(qs, request)
+    
+    ser = CustomUserAdminListSerializer(page, many=True, context={'request': request})
+    return paginator.get_paginated_response(ser.data)
 
 
 
@@ -3577,22 +3525,22 @@ def web_mobile_inbox(request):
     GET /api/web/mobile-inbox/
 
     Список мобильных документов для текущего пользователя (WEB).
-
-    Показываем только те, которые ещё НЕ перенесены в suvestinę:
-      is_processed = False
+    Курсорная пагинация с infinite scroll.
     """
-
     user = request.user
 
     qs = (
         MobileInboxDocument.objects
-        .filter(user=user, is_processed=False)  # только "inbox"
+        .filter(user=user, is_processed=False)
         .select_related("processed_document", "access_key")
-        .order_by("-created_at")
+        .order_by("-created_at", "-id")
     )
 
-    serializer = MobileInboxDocumentSerializer(qs, many=True)
-    return Response(serializer.data)
+    paginator = MobileInboxCursorPagination()
+    page = paginator.paginate_queryset(qs, request)
+
+    serializer = MobileInboxDocumentSerializer(page, many=True)
+    return paginator.get_paginated_response(serializer.data)
 
 
 #Udaliajem faily s IsKlientu spiska

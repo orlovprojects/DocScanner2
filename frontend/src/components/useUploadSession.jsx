@@ -210,6 +210,31 @@ function splitIntoBatches(files) {
   return batches;
 }
 
+// Throttle helper - вызывает fn не чаще чем раз в ms миллисекунд
+function createThrottle(fn, ms) {
+  let lastCall = 0;
+  let lastArgs = null;
+  let timeoutId = null;
+
+  return (...args) => {
+    lastArgs = args;
+    const now = Date.now();
+    const timeSinceLastCall = now - lastCall;
+
+    if (timeSinceLastCall >= ms) {
+      lastCall = now;
+      fn(...args);
+    } else if (!timeoutId) {
+      // Запланировать вызов с последними аргументами
+      timeoutId = setTimeout(() => {
+        lastCall = Date.now();
+        timeoutId = null;
+        if (lastArgs) fn(...lastArgs);
+      }, ms - timeSinceLastCall);
+    }
+  };
+}
+
 export function useUploadSession({ onUploadComplete, onError }) {
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState({
@@ -224,6 +249,9 @@ export function useUploadSession({ onUploadComplete, onError }) {
   const [skippedFiles, setSkippedFiles] = useState([]);
   const [validationErrors, setValidationErrors] = useState([]);
   const abortRef = useRef(false);
+  
+  // Ref для хранения актуального значения bytes (чтобы избежать stale closure)
+  const bytesRef = useRef(0);
 
   const clearSkipped = useCallback(() => {
     setSkippedFiles([]);
@@ -309,6 +337,7 @@ export function useUploadSession({ onUploadComplete, onError }) {
 
     setIsUploading(true);
     setError(null);
+    bytesRef.current = 0;
     setUploadProgress({
       current: 0,
       total: validFiles.length,
@@ -321,6 +350,14 @@ export function useUploadSession({ onUploadComplete, onError }) {
 
     let globalUploadedBytes = 0;
     let uploadedFilesCount = 0;
+
+    // Throttled update function - обновляем UI не чаще чем раз в 50ms
+    const throttledSetProgress = createThrottle((newBytes) => {
+      setUploadProgress(prev => ({
+        ...prev,
+        bytes: newBytes,
+      }));
+    }, 50);
 
     try {
       // 1. Create session
@@ -371,15 +408,16 @@ export function useUploadSession({ onUploadComplete, onError }) {
           currentFile: batch[0]?.name || "",
         }));
 
+        // Сохраняем базу для этого батча
+        const batchStartBytes = globalUploadedBytes;
+
         await api.post(`/sessions/${sid}/upload/`, formData, {
           headers: { "Content-Type": "multipart/form-data" },
           onUploadProgress: (progressEvent) => {
             if (progressEvent.lengthComputable) {
-              const batchProgress = progressEvent.loaded;
-              setUploadProgress(prev => ({
-                ...prev,
-                bytes: globalUploadedBytes + batchProgress,
-              }));
+              const currentBytes = batchStartBytes + progressEvent.loaded;
+              bytesRef.current = currentBytes;
+              throttledSetProgress(currentBytes);
             }
           },
         });
@@ -389,6 +427,7 @@ export function useUploadSession({ onUploadComplete, onError }) {
 
         console.log(`  Batch ${batchIdx + 1} complete. Total uploaded: ${formatBytes(globalUploadedBytes)}`);
 
+        // Финальное обновление после батча (без throttle)
         setUploadProgress(prev => ({
           ...prev,
           current: uploadedFilesCount,
@@ -410,15 +449,15 @@ export function useUploadSession({ onUploadComplete, onError }) {
         const archiveStartBytes = globalUploadedBytes;
 
         await uploadArchiveChunked(sid, archive, (chunkBytes) => {
-          setUploadProgress(prev => ({
-            ...prev,
-            bytes: archiveStartBytes + chunkBytes,
-          }));
+          const currentBytes = archiveStartBytes + chunkBytes;
+          bytesRef.current = currentBytes;
+          throttledSetProgress(currentBytes);
         });
 
         globalUploadedBytes += archive.size;
         uploadedFilesCount += 1;
 
+        // Финальное обновление после архива
         setUploadProgress(prev => ({
           ...prev,
           current: uploadedFilesCount,
@@ -493,11 +532,24 @@ export const UPLOAD_LIMITS = {
 // import { useState, useCallback, useRef } from "react";
 // import { api } from "../api/endpoints";
 
+// // ============ ЛИМИТЫ ============
+// // Батчи (для простых файлов)
 // const MAX_BATCH_FILES = 50;
-// const MAX_BATCH_BYTES = 250 * 1024 * 1024; // 250MB
-// const CHUNK_SIZE = 10 * 1024 * 1024; // 10MB для архивов
+// const MAX_BATCH_BYTES = 250 * 1024 * 1024; // 250 MB
 
-// const MAX_SINGLE_FILE_BYTES = 50 * 1024 * 1024; // 50MB для не-архивов
+// // Chunks (для архивов)
+// const CHUNK_SIZE = 10 * 1024 * 1024; // 10 MB
+
+// // Лимиты на один файл
+// const MAX_SINGLE_FILE_BYTES = 50 * 1024 * 1024; // 50 MB для обычных файлов
+// const MAX_SINGLE_ARCHIVE_BYTES = 2 * 1024 * 1024 * 1024; // 2 GB для одного архива
+
+// // Лимиты на весь upload
+// const MAX_TOTAL_FILES = 2000;          // макс файлов + архивов за upload
+// const MAX_TOTAL_BYTES = 2 * 1024 * 1024 * 1024; // 2 GB общий размер
+// const MAX_ARCHIVES_PER_UPLOAD = 100;   // макс архивов (если только архивы)
+// const MAX_ARCHIVES_IN_MIX = 100;        // макс архивов (если микс с файлами)
+// // ================================
 
 // const ARCHIVE_EXTS = [
 //   ".zip",
@@ -540,7 +592,6 @@ export const UPLOAD_LIMITS = {
 
 // const getFileExt = (filename) => {
 //   const lower = (filename || "").toLowerCase();
-//   // Handle double extensions like .tar.gz
 //   if (lower.endsWith(".tar.gz")) return ".tar.gz";
 //   if (lower.endsWith(".tar.bz2")) return ".tar.bz2";
 //   if (lower.endsWith(".tar.xz")) return ".tar.xz";
@@ -566,14 +617,27 @@ export const UPLOAD_LIMITS = {
 //   return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + " " + sizes[i];
 // }
 
-// // Validate files and separate into valid and skipped
+// /**
+//  * Валидация файлов с учётом всех лимитов
+//  * Возвращает: { valid, skipped, errors }
+//  * - valid: файлы которые можно загрузить
+//  * - skipped: файлы пропущенные из-за формата/размера
+//  * - errors: критические ошибки (превышены общие лимиты)
+//  */
 // function validateFiles(files) {
 //   const valid = [];
 //   const skipped = [];
+//   const errors = [];
+
+//   let totalBytes = 0;
+//   let archiveCount = 0;
+//   let archiveTotalBytes = 0;
+//   let regularCount = 0;
 
 //   for (const file of files) {
 //     const filename = file.name || "";
 //     const size = file.size || 0;
+//     const isArch = isArchive(filename);
 
 //     // Check format
 //     if (!isSupportedFormat(filename)) {
@@ -584,19 +648,66 @@ export const UPLOAD_LIMITS = {
 //       continue;
 //     }
 
-//     // Check size (only for non-archives)
-//     if (!isArchive(filename) && size > MAX_SINGLE_FILE_BYTES) {
+//     // Check size for regular files
+//     if (!isArch && size > MAX_SINGLE_FILE_BYTES) {
 //       skipped.push({
 //         name: filename,
-//         reason: `per didelis (${formatBytes(size)})`,
+//         reason: `per didelis failas (${formatBytes(size)}, max ${formatBytes(MAX_SINGLE_FILE_BYTES)})`,
+//       });
+//       continue;
+//     }
+
+//     // Check size for archives
+//     if (isArch && size > MAX_SINGLE_ARCHIVE_BYTES) {
+//       skipped.push({
+//         name: filename,
+//         reason: `per didelis archyvas (${formatBytes(size)}, max ${formatBytes(MAX_SINGLE_ARCHIVE_BYTES)})`,
 //       });
 //       continue;
 //     }
 
 //     valid.push(file);
+//     totalBytes += size;
+    
+//     if (isArch) {
+//       archiveCount++;
+//       archiveTotalBytes += size;
+//     } else {
+//       regularCount++;
+//     }
 //   }
 
-//   return { valid, skipped };
+//   // ============ Проверка общих лимитов ============
+  
+//   const totalCount = valid.length;
+//   const isMix = archiveCount > 0 && regularCount > 0;
+//   const isOnlyArchives = archiveCount > 0 && regularCount === 0;
+
+//   // Общее кол-во файлов
+//   if (totalCount > MAX_TOTAL_FILES) {
+//     errors.push(`Per daug failų: ${totalCount} (max ${MAX_TOTAL_FILES})`);
+//   }
+
+//   // Общий размер
+//   if (totalBytes > MAX_TOTAL_BYTES) {
+//     errors.push(`Per didelis bendras dydis: ${formatBytes(totalBytes)} (max ${formatBytes(MAX_TOTAL_BYTES)})`);
+//   }
+
+//   // Лимит архивов
+//   if (isOnlyArchives && archiveCount > MAX_ARCHIVES_PER_UPLOAD) {
+//     errors.push(`Per daug archyvų: ${archiveCount} (max ${MAX_ARCHIVES_PER_UPLOAD})`);
+//   }
+
+//   if (isMix && archiveCount > MAX_ARCHIVES_IN_MIX) {
+//     errors.push(`Per daug archyvų kartu su failais: ${archiveCount} (max ${MAX_ARCHIVES_IN_MIX})`);
+//   }
+
+//   // Общий размер архивов
+//   if (archiveTotalBytes > MAX_TOTAL_BYTES) {
+//     errors.push(`Per didelis archyvų bendras dydis: ${formatBytes(archiveTotalBytes)} (max ${formatBytes(MAX_TOTAL_BYTES)})`);
+//   }
+
+//   return { valid, skipped, errors };
 // }
 
 // // Умное разделение на батчи по количеству И размеру
@@ -608,7 +719,6 @@ export const UPLOAD_LIMITS = {
 //   for (const file of files) {
 //     const fileSize = file.size || 0;
 
-//     // Если добавление файла превысит лимиты — начинаем новый батч
 //     if (
 //       currentBatch.length >= MAX_BATCH_FILES ||
 //       (currentBytes + fileSize > MAX_BATCH_BYTES && currentBatch.length > 0)
@@ -641,10 +751,15 @@ export const UPLOAD_LIMITS = {
 //   });
 //   const [error, setError] = useState(null);
 //   const [skippedFiles, setSkippedFiles] = useState([]);
+//   const [validationErrors, setValidationErrors] = useState([]);
 //   const abortRef = useRef(false);
 
 //   const clearSkipped = useCallback(() => {
 //     setSkippedFiles([]);
+//   }, []);
+
+//   const clearValidationErrors = useCallback(() => {
+//     setValidationErrors([]);
 //   }, []);
 
 //   // Upload archive chunked
@@ -692,13 +807,23 @@ export const UPLOAD_LIMITS = {
 //     const fileList = Array.from(files);
     
 //     // Validate files
-//     const { valid: validFiles, skipped } = validateFiles(fileList);
+//     const { valid: validFiles, skipped, errors } = validateFiles(fileList);
     
-//     // Store skipped files to show warning later
+//     // Store skipped files to show warning
 //     setSkippedFiles(skipped);
+//     setValidationErrors(errors);
 
 //     if (skipped.length > 0) {
 //       console.log(`Skipped ${skipped.length} files:`, skipped);
+//     }
+
+//     // If there are critical errors, stop
+//     if (errors.length > 0) {
+//       console.error("Validation errors:", errors);
+//       const errorMsg = errors.join("\n");
+//       setError(errorMsg);
+//       onError?.(errorMsg);
+//       return;
 //     }
 
 //     // If no valid files, show error and return
@@ -870,8 +995,22 @@ export const UPLOAD_LIMITS = {
 //     uploadProgress,
 //     error,
 //     skippedFiles,
+//     validationErrors,
 //     clearSkipped,
+//     clearValidationErrors,
 //     startUpload,
 //     cancelUpload,
 //   };
 // }
+
+// // Экспортируем лимиты для использования в UI
+// export const UPLOAD_LIMITS = {
+//   MAX_SINGLE_FILE_BYTES,
+//   MAX_SINGLE_ARCHIVE_BYTES,
+//   MAX_TOTAL_FILES,
+//   MAX_TOTAL_BYTES,
+//   MAX_ARCHIVES_PER_UPLOAD,
+//   MAX_ARCHIVES_IN_MIX,
+//   formatBytes,
+// };
+

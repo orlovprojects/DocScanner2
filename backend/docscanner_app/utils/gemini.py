@@ -389,7 +389,7 @@ def _client_with_timeout(timeout_seconds: float | int | None) -> genai.Client:
 def ask_gemini(
     text: str,
     prompt: str,
-    model: str = "gemini-2.5-flash-lite",
+    model: str = "gemini-2.5-flash",
     temperature: float = 1.0,
     max_output_tokens: int = 20000,
     timeout_seconds: float | int | None = None,  # локальный override

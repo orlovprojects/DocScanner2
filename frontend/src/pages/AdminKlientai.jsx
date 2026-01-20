@@ -1,8 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import { Helmet } from "react-helmet";
 import {
   Box,
-  Button,
   Typography,
   Alert,
   LinearProgress,
@@ -28,6 +27,11 @@ export default function AdminUsers() {
 
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [nextCursor, setNextCursor] = useState(null);
+
+  const observerRef = useRef(null);
+  const sentinelRef = useRef(null);
 
   // 1) грузим профиль
   useEffect(() => {
@@ -38,23 +42,81 @@ export default function AdminUsers() {
       .finally(() => setMeLoaded(true));
   }, []);
 
-  // 2) грузим пользователей (для суперюзера)
-  const fetchUsers = async () => {
-    setLoading(true);
+  // Извлечение cursor из next URL
+  const extractCursor = (nextUrl) => {
+    if (!nextUrl) return null;
     try {
-      const { data } = await api.get("/admin/users/", { withCredentials: true });
-      setUsers(Array.isArray(data) ? data : []);
-    } catch (e) {
-      console.error("Nepavyko gauti vartotojų:", e);
-      setUsers([]);
-    } finally {
-      setLoading(false);
+      const url = new URL(nextUrl, window.location.origin);
+      return url.searchParams.get("cursor");
+    } catch {
+      return null;
     }
   };
 
+  // Построение URL
+  const buildUrl = useCallback((cursor = null) => {
+    const params = new URLSearchParams();
+    if (cursor) params.set("cursor", cursor);
+    const qs = params.toString();
+    return `/admin/users/${qs ? `?${qs}` : ""}`;
+  }, []);
+
+  // 2) первоначальная загрузка пользователей
+  const fetchUsers = useCallback(async () => {
+    setLoading(true);
+    try {
+      const { data } = await api.get(buildUrl(), { withCredentials: true });
+      setUsers(data.results || []);
+      setNextCursor(extractCursor(data.next));
+    } catch (e) {
+      console.error("Nepavyko gauti vartotojų:", e);
+      setUsers([]);
+      setNextCursor(null);
+    } finally {
+      setLoading(false);
+    }
+  }, [buildUrl]);
+
+  // Подгрузка следующей страницы
+  const loadMore = useCallback(async () => {
+    if (!nextCursor || loadingMore) return;
+
+    setLoadingMore(true);
+    try {
+      const { data } = await api.get(buildUrl(nextCursor), { withCredentials: true });
+      setUsers((prev) => [...prev, ...(data.results || [])]);
+      setNextCursor(extractCursor(data.next));
+    } catch (e) {
+      console.error("Nepavyko įkelti daugiau:", e);
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [nextCursor, loadingMore, buildUrl]);
+
+  // Initial load
   useEffect(() => {
     if (meLoaded && me?.is_superuser) fetchUsers();
-  }, [meLoaded]);
+  }, [meLoaded, me?.is_superuser, fetchUsers]);
+
+  // IntersectionObserver для infinite scroll
+  useEffect(() => {
+    if (observerRef.current) observerRef.current.disconnect();
+
+    observerRef.current = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting && nextCursor && !loadingMore && !loading) {
+          loadMore();
+        }
+      },
+      { rootMargin: "200px" }
+    );
+
+    if (sentinelRef.current) {
+      observerRef.current.observe(sentinelRef.current);
+    }
+
+    return () => observerRef.current?.disconnect();
+  }, [nextCursor, loadingMore, loading, loadMore]);
 
   // форматтеры
   const fmtDateTime = (iso) =>
@@ -78,20 +140,12 @@ export default function AdminUsers() {
   const programLabel = (value) =>
     ACCOUNTING_PROGRAMS.find((p) => p.value === value)?.label || value || "—";
 
-  const rows = useMemo(() => {
-    return [...(users || [])].sort((a, b) => {
-      const da = a?.date_joined ? new Date(a.date_joined).getTime() : 0;
-      const db = b?.date_joined ? new Date(b.date_joined).getTime() : 0;
-      return db - da;
-    });
-  }, [users]);
-
   if (meLoaded && !me?.is_superuser) {
     return (
-      <Box 
-        display="flex" 
-        alignItems="center" 
-        justifyContent="center" 
+      <Box
+        display="flex"
+        alignItems="center"
+        justifyContent="center"
         minHeight="70vh"
         px={3}
       >
@@ -109,10 +163,10 @@ export default function AdminUsers() {
       </Helmet>
 
       {/* Header */}
-      <Stack 
-        direction="row" 
-        alignItems="center" 
-        justifyContent="space-between" 
+      <Stack
+        direction="row"
+        alignItems="center"
+        justifyContent="space-between"
         mb={4}
         flexWrap="wrap"
         gap={2}
@@ -121,25 +175,25 @@ export default function AdminUsers() {
           <Typography variant="h4" fontWeight={300} letterSpacing={-0.5}>
             Vartotojai
           </Typography>
-          <Chip 
-            label={rows.length} 
+          <Chip
+            label={`${users.length}${nextCursor ? "+" : ""}`}
             size="medium"
-            sx={{ 
+            sx={{
               fontWeight: 500,
               bgcolor: "primary.50",
-              color: "primary.main"
+              color: "primary.main",
             }}
           />
         </Stack>
-        
+
         <Tooltip title="Atnaujinti duomenis">
-          <IconButton 
-            onClick={fetchUsers} 
+          <IconButton
+            onClick={fetchUsers}
             disabled={loading}
-            sx={{ 
+            sx={{
               border: "1px solid",
               borderColor: "divider",
-              "&:hover": { bgcolor: "action.hover" }
+              "&:hover": { bgcolor: "action.hover" },
             }}
           >
             <RefreshIcon />
@@ -150,13 +204,13 @@ export default function AdminUsers() {
       {loading && <LinearProgress sx={{ mb: 3, borderRadius: 1 }} />}
 
       {/* Table */}
-      <Paper 
-        elevation={0} 
-        sx={{ 
+      <Paper
+        elevation={0}
+        sx={{
           border: "1px solid",
           borderColor: "divider",
           borderRadius: 2,
-          overflow: "hidden"
+          overflow: "hidden",
         }}
       >
         <TableContainer sx={{ maxHeight: "calc(100vh - 250px)" }}>
@@ -175,41 +229,47 @@ export default function AdminUsers() {
               </TableRow>
             </TableHead>
             <TableBody>
-              {rows.map((u, idx) => (
-                <TableRow 
-                  key={u.id} 
+              {users.map((u, idx) => (
+                <TableRow
+                  key={u.id}
                   hover
                   sx={{
                     "&:last-child td": { borderBottom: 0 },
-                    bgcolor: idx % 2 === 0 ? "transparent" : "grey.50"
+                    bgcolor: idx % 2 === 0 ? "transparent" : "grey.50",
                   }}
                 >
                   <TableCell sx={{ color: "text.secondary", fontWeight: 500 }}>
                     {u.id}
                   </TableCell>
-                  <TableCell sx={{ fontWeight: 500 }}>
-                    {u.email || "—"}
-                  </TableCell>
+                  <TableCell sx={{ fontWeight: 500 }}>{u.email || "—"}</TableCell>
                   <TableCell sx={{ color: "text.secondary", fontSize: "0.875rem" }}>
                     {fmtDateTime(u.date_joined)}
                   </TableCell>
                   <TableCell>
-                    <Chip 
+                    <Chip
                       label={fmtCredits(u.credits)}
                       size="small"
-                      sx={{ 
+                      sx={{
                         fontWeight: 600,
                         minWidth: 60,
-                        bgcolor: parseFloat(fmtCredits(u.credits)) > 0 ? "success.50" : "grey.100",
-                        color: parseFloat(fmtCredits(u.credits)) > 0 ? "success.dark" : "text.secondary"
+                        bgcolor:
+                          parseFloat(fmtCredits(u.credits)) > 0
+                            ? "success.50"
+                            : "grey.100",
+                        color:
+                          parseFloat(fmtCredits(u.credits)) > 0
+                            ? "success.dark"
+                            : "text.secondary",
                       }}
                     />
                   </TableCell>
-                  <TableCell sx={{ 
-                    color: u.stripe_customer_id ? "text.primary" : "text.disabled",
-                    fontFamily: "monospace",
-                    fontSize: "0.875rem"
-                  }}>
+                  <TableCell
+                    sx={{
+                      color: u.stripe_customer_id ? "text.primary" : "text.disabled",
+                      fontFamily: "monospace",
+                      fontSize: "0.875rem",
+                    }}
+                  >
                     {u.stripe_customer_id || "—"}
                   </TableCell>
                   <TableCell sx={{ color: "text.secondary" }}>
@@ -218,11 +278,13 @@ export default function AdminUsers() {
                   <TableCell sx={{ color: "text.secondary" }}>
                     {u.company_name || "—"}
                   </TableCell>
-                  <TableCell sx={{ 
-                    color: "text.secondary",
-                    fontFamily: "monospace",
-                    fontSize: "0.875rem"
-                  }}>
+                  <TableCell
+                    sx={{
+                      color: "text.secondary",
+                      fontFamily: "monospace",
+                      fontSize: "0.875rem",
+                    }}
+                  >
                     {u.company_code || "—"}
                   </TableCell>
                   <TableCell sx={{ color: "text.secondary" }}>
@@ -230,15 +292,36 @@ export default function AdminUsers() {
                   </TableCell>
                 </TableRow>
               ))}
-              {!loading && rows.length === 0 && (
+
+              {/* Sentinel row для infinite scroll */}
+              <TableRow ref={sentinelRef}>
+                <TableCell colSpan={9} sx={{ p: 0, border: 0, height: 1 }} />
+              </TableRow>
+
+              {loadingMore && (
                 <TableRow>
-                  <TableCell 
-                    colSpan={9} 
-                    align="center"
-                    sx={{ py: 8, color: "text.disabled" }}
-                  >
-                    <Typography variant="body1">
-                      Duomenų nėra
+                  <TableCell colSpan={9} align="center" sx={{ py: 3 }}>
+                    <LinearProgress sx={{ maxWidth: 200, mx: "auto", mb: 1 }} />
+                    <Typography variant="body2" color="text.secondary">
+                      Kraunama daugiau...
+                    </Typography>
+                  </TableCell>
+                </TableRow>
+              )}
+
+              {!loading && !loadingMore && users.length === 0 && (
+                <TableRow>
+                  <TableCell colSpan={9} align="center" sx={{ py: 8, color: "text.disabled" }}>
+                    <Typography variant="body1">Duomenų nėra</Typography>
+                  </TableCell>
+                </TableRow>
+              )}
+
+              {!nextCursor && users.length > 0 && !loading && !loadingMore && (
+                <TableRow>
+                  <TableCell colSpan={9} align="center" sx={{ py: 2, color: "text.disabled" }}>
+                    <Typography variant="body2">
+                      Visi vartotojai įkelti ({users.length})
                     </Typography>
                   </TableCell>
                 </TableRow>

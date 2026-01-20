@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import { Helmet } from 'react-helmet';
 import {
   Box, Button, Typography, Alert, LinearProgress, Chip,
@@ -17,7 +17,13 @@ export default function AdminSuvestine() {
   const [selected, setSelected] = useState(null);
   const [user, setUser] = useState(null);
   const [userLoaded, setUserLoaded] = useState(false);
+
   const [loading, setLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [nextCursor, setNextCursor] = useState(null);
+
+  const observerRef = useRef(null);
+  const sentinelRef = useRef(null);
 
   // load profile
   useEffect(() => {
@@ -49,27 +55,88 @@ export default function AdminSuvestine() {
       <CheckCircleOutline color="success" />
     );
 
-  const fetchDocs = async () => {
-    setLoading(true);
+  // Извлечение cursor из next URL
+  const extractCursor = (nextUrl) => {
+    if (!nextUrl) return null;
     try {
-      const params = new URLSearchParams();
-      // ТОЛЬКО статус уходит на сервер (даты — больше нет)
-      if (filters.status) params.set("status", filters.status);
-
-      const { data } = await api.get(`/admin/documents_with_errors/?${params.toString()}`, { withCredentials: true });
-      setDocs(data);
-    } catch (e) {
-      console.error("Nepavyko gauti dokumentų:", e);
-    } finally {
-      setLoading(false);
+      const url = new URL(nextUrl, window.location.origin);
+      return url.searchParams.get("cursor");
+    } catch {
+      return null;
     }
   };
 
+  // Построение URL с фильтрами
+  const buildUrl = useCallback((cursor = null) => {
+    const params = new URLSearchParams();
+    if (filters.status) params.set("status", filters.status);
+    if (cursor) params.set("cursor", cursor);
+    return `/admin/documents_with_errors/?${params.toString()}`;
+  }, [filters.status]);
+
+  // Первоначальная загрузка
+  const fetchDocs = useCallback(async () => {
+    setLoading(true);
+    try {
+      const { data } = await api.get(buildUrl(), { withCredentials: true });
+      setDocs(data.results || []);
+      setNextCursor(extractCursor(data.next));
+    } catch (e) {
+      console.error("Nepavyko gauti dokumentų:", e);
+      setDocs([]);
+      setNextCursor(null);
+    } finally {
+      setLoading(false);
+    }
+  }, [buildUrl]);
+
+  // Подгрузка следующей страницы
+  const loadMore = useCallback(async () => {
+    if (!nextCursor || loadingMore) return;
+
+    setLoadingMore(true);
+    try {
+      const { data } = await api.get(buildUrl(nextCursor), { withCredentials: true });
+      setDocs(prev => [...prev, ...(data.results || [])]);
+      setNextCursor(extractCursor(data.next));
+    } catch (e) {
+      console.error("Nepavyko įkelti daugiau:", e);
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [nextCursor, loadingMore, buildUrl]);
+
+  // Initial load
   useEffect(() => {
     if (userLoaded && user?.is_superuser) fetchDocs();
-  }, [userLoaded]); // initial load
+  }, [userLoaded, user?.is_superuser, fetchDocs]);
 
-  // локальные фильтры дат (клиент-сайд), без запросов from/to
+  // Перезагрузка при изменении фильтра статуса
+  useEffect(() => {
+    if (userLoaded && user?.is_superuser) fetchDocs();
+  }, [filters.status]);
+
+  // IntersectionObserver для infinite scroll
+  useEffect(() => {
+    if (observerRef.current) observerRef.current.disconnect();
+
+    observerRef.current = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting && nextCursor && !loadingMore && !loading) {
+          loadMore();
+        }
+      },
+      { rootMargin: "200px" }
+    );
+
+    if (sentinelRef.current) {
+      observerRef.current.observe(sentinelRef.current);
+    }
+
+    return () => observerRef.current?.disconnect();
+  }, [nextCursor, loadingMore, loading, loadMore]);
+
+  // Локальные фильтры дат (клиент-сайд)
   const baseFiltered = useMemo(() => {
     if (!Array.isArray(docs)) return [];
     const df = filters.dateFrom ? new Date(filters.dateFrom) : null;
@@ -85,7 +152,7 @@ export default function AdminSuvestine() {
 
   const handleFilter = (f) => (e) => setFilters((p) => ({ ...p, [f]: e.target.value }));
 
-  // таблица ожидает обогащённые записи (как в UploadPage)
+  // подготовка данных для таблицы
   const tableData = useMemo(
     () =>
       (baseFiltered || []).map((d) => ({
@@ -107,9 +174,6 @@ export default function AdminSuvestine() {
     );
   }
 
-  const programLabel =
-    ACCOUNTING_PROGRAMS.find((p) => p.value === user?.default_accounting_program)?.label || "eksporto programa";
-
   return (
     <Box p={4}>
       <Helmet>
@@ -119,14 +183,18 @@ export default function AdminSuvestine() {
       <Box display="flex" alignItems="center" justifyContent="space-between" mb={2}>
         <Box display="flex" alignItems="center" gap={1}>
           <Typography variant="h5">Administratoriaus suvestinė</Typography>
-          <Chip size="small" label="Tik su klaidomis (visi laikotarpiai)" />
+          <Chip 
+            size="small" 
+            label={`Su klaidomis: ${docs.length}${nextCursor ? '+' : ''}`} 
+            color="error"
+            variant="outlined"
+          />
         </Box>
         <Button variant="outlined" onClick={fetchDocs} disabled={loading}>
           Atnaujinti
         </Button>
       </Box>
 
-      {/* Фильтры статуса/дат — статус уходит на сервер, даты фильтруются локально */}
       <DocumentsFilters filters={filters} onFilterChange={handleFilter} />
 
       {loading && <LinearProgress sx={{ mt: 2 }} />}
@@ -134,15 +202,34 @@ export default function AdminSuvestine() {
       <Box sx={{ mt: 2, overflow: "hidden" }}>
         <DocumentsTable
           filtered={tableData}
-          selectedRows={[]}                  // выбор отключён в админ-обзоре
-          isRowExportable={() => false}      // экспорт отключён; верни логику, если нужно
+          selectedRows={[]}
+          isRowExportable={() => false}
           handleSelectRow={() => () => {}}
           handleSelectAll={() => {}}
           loading={loading}
           allowUnknownDirection={true}
           reloadDocuments={fetchDocs}
           onDeleteDoc={(id) => setDocs(prev => prev.filter(d => d.id !== id))}
+          showOwnerColumns
         />
+
+        {/* Sentinel для infinite scroll */}
+        <Box ref={sentinelRef} sx={{ height: 1 }} />
+
+        {loadingMore && (
+          <Box sx={{ py: 2 }}>
+            <LinearProgress />
+            <Typography variant="body2" color="text.secondary" align="center" sx={{ mt: 1 }}>
+              Kraunama daugiau...
+            </Typography>
+          </Box>
+        )}
+
+        {!nextCursor && docs.length > 0 && !loading && (
+          <Typography variant="body2" color="text.secondary" align="center" sx={{ py: 2 }}>
+            Visi dokumentai su klaidomis įkelti ({docs.length})
+          </Typography>
+        )}
       </Box>
 
       <PreviewDialog

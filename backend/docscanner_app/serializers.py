@@ -235,10 +235,9 @@ class ScannedDocumentDetailSerializer(serializers.ModelSerializer):
             "glued_raw_text": {"write_only": True},
         }
 
-    # def get_line_items(self, obj):
-    #     # Просто сортируем по id, чтобы порядок всегда был стабильный
-    #     qs = obj.line_items.order_by("id")
-    #     return LineItemSerializer(qs, many=True).data
+    def get_line_items(self, obj):
+        qs = obj.line_items.order_by("id")
+        return LineItemSerializer(qs, many=True).data
 
 
 

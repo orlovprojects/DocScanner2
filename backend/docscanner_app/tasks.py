@@ -260,7 +260,7 @@ def ask_llm_with_fallback(raw_text: str, scan_type: str, logger):
     except NameError:
         gemini_prompt = DETAILED_PROMPT if scan_type == "detaliai" else DEFAULT_PROMPT
 
-    primary_model   = "gemini-2.0-flash-lite"
+    primary_model   = "gemini-2.5-flash"
     # primary_model   = "gemini-2.5-flash"
     secondary_model = "gemini-2.5-flash-lite"   # альтернативно: "gemini-flash-lite-latest"
 
@@ -904,7 +904,7 @@ def process_uploaded_file_task(self, user_id, doc_id, scan_type):
                     structured = parse_llm_json_robust(fixed_json)
                     _log_t("Parse JSON (after repair)", t_px)
 
-                    source_model = "gemini-2.5-lite"
+                    source_model = "gemini-2.5-flash-lite"
                     did_repair = True
 
                 except Exception as fix_err:

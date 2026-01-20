@@ -1,18 +1,20 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { Helmet } from 'react-helmet';
 import {
   Box,
   Card,
   CardContent,
   Typography,
-  Grid,
   CircularProgress,
   Alert,
   Chip,
   Divider,
   Paper,
   Stack,
+  IconButton,
+  Tooltip,
 } from "@mui/material";
+import Grid from "@mui/material/Grid2";
 import {
   Description,
   People,
@@ -22,7 +24,10 @@ import {
   CheckCircle,
   ErrorOutline,
   Percent,
+  Refresh,
+  Block,
 } from "@mui/icons-material";
+import { api } from "../api/endpoints";
 
 function DocStatItem({ label, count = 0, errors = 0, highlight = false }) {
   const ok = Math.max((count || 0) - (errors || 0), 0);
@@ -124,44 +129,64 @@ function StatCard({ title, items, icon: Icon, color = "primary" }) {
   );
 }
 
+function RejectedStatItem({ label, data }) {
+  const { rejected = 0, total = 0, pct = 0 } = data || {};
+  return (
+    <Box textAlign="center">
+      <Typography variant="caption" color="text.secondary">
+        {label}
+      </Typography>
+      <Typography variant="h6" fontWeight={700} color={rejected > 0 ? "error.main" : "text.primary"}>
+        {rejected} / {total}
+      </Typography>
+      <Typography variant="caption" color="text.secondary">
+        ({pct.toFixed(2)}%)
+      </Typography>
+    </Box>
+  );
+}
+
 export default function AdminDashboard() {
   const [stats, setStats] = useState(null);
   const [err, setErr] = useState(null);
+  const [loading, setLoading] = useState(false);
 
-  useEffect(() => {
-    const cached = sessionStorage.getItem("dashboardPrefetch");
-    if (cached) {
-      try {
-        const parsed = JSON.parse(cached);
-        setStats(parsed.data);
-        fetch("/api/superuser/dashboard-stats/", {
-          credentials: "include",
-          headers: { Accept: "application/json" },
-        })
-          .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
-          .then((fresh) => setStats(fresh))
-          .catch(() => {});
-        return;
-      } catch {
-        sessionStorage.removeItem("dashboardPrefetch");
+  const fetchStats = useCallback(async (useCache = true) => {
+    if (useCache) {
+      const cached = sessionStorage.getItem("dashboardPrefetch");
+      if (cached) {
+        try {
+          const parsed = JSON.parse(cached);
+          setStats(parsed.data);
+        } catch {
+          sessionStorage.removeItem("dashboardPrefetch");
+        }
       }
     }
-    (async () => {
-      try {
-        const res = await fetch("/api/superuser/dashboard-stats/", {
-          credentials: "include",
-          headers: { Accept: "application/json" },
-        });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = await res.json();
-        setStats(data);
-      } catch (e) {
-        setErr(e.message);
-      }
-    })();
+
+    setLoading(true);
+    try {
+      const { data } = await api.get("/superuser/dashboard-stats/", { withCredentials: true });
+      setStats(data);
+      setErr(null);
+    } catch (e) {
+      console.error("Nepavyko gauti statistikos:", e);
+      setErr(e.response?.data?.detail || e.message);
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
-  if (err) {
+  useEffect(() => {
+    fetchStats(true);
+  }, [fetchStats]);
+
+  const handleRefresh = () => {
+    sessionStorage.removeItem("dashboardPrefetch");
+    fetchStats(false);
+  };
+
+  if (err && !stats) {
     return (
       <Box sx={{ p: 3 }}>
         <Alert severity="error" sx={{ borderRadius: 2 }}>
@@ -183,6 +208,7 @@ export default function AdminDashboard() {
   const users = stats.users || {};
   const meta = stats.meta || {};
   const sr = docs.success_rate || {};
+  const rej = docs.rejected || {};
   const st = docs.scan_types || {};
 
   const fmtPct = (v) => (typeof v === "number" ? `${v.toFixed(2)}%` : "0.00%");
@@ -192,6 +218,7 @@ export default function AdminDashboard() {
       <Helmet>
         <title>Analytics</title>
       </Helmet>
+
       <Paper elevation={0} sx={{ p: 3, mb: 4, borderRadius: 3, border: 1, borderColor: "divider" }}>
         <Box display="flex" alignItems="center" justifyContent="space-between" flexWrap="wrap" gap={2}>
           <Box>
@@ -213,13 +240,28 @@ export default function AdminDashboard() {
               />
             </Box>
           </Box>
-          <Chip label="Aktyvus" color="success" sx={{ fontWeight: 700 }} />
+          <Stack direction="row" spacing={1} alignItems="center">
+            <Tooltip title="Atnaujinti duomenis">
+              <IconButton
+                onClick={handleRefresh}
+                disabled={loading}
+                sx={{
+                  border: "1px solid",
+                  borderColor: "divider",
+                  "&:hover": { bgcolor: "action.hover" },
+                }}
+              >
+                <Refresh />
+              </IconButton>
+            </Tooltip>
+            <Chip label="Aktyvus" color="success" sx={{ fontWeight: 700 }} />
+          </Stack>
         </Box>
       </Paper>
 
       <Grid container spacing={3}>
-        {/* Documents with improved error display */}
-        <Grid item xs={12} md={6}>
+        {/* Documents */}
+        <Grid size={{ xs: 12, md: 6 }}>
           <StatCard
             title="Dokumentai"
             icon={Description}
@@ -270,7 +312,7 @@ export default function AdminDashboard() {
         </Grid>
 
         {/* Users */}
-        <Grid item xs={12} md={6}>
+        <Grid size={{ xs: 12, md: 6 }}>
           <StatCard
             title="Naudotojai"
             icon={People}
@@ -288,7 +330,7 @@ export default function AdminDashboard() {
         </Grid>
 
         {/* Success rate card */}
-        <Grid item xs={12}>
+        <Grid size={12}>
           <Card
             elevation={0}
             sx={{
@@ -311,23 +353,23 @@ export default function AdminDashboard() {
                 </Box>
 
                 <Stack direction="row" spacing={3} flexWrap="wrap">
-                  <Box>
+                  <Box textAlign="center">
                     <Typography variant="caption" color="text.secondary">Šiandien</Typography>
                     <Typography variant="h6" fontWeight={700}>{fmtPct(sr?.today)}</Typography>
                   </Box>
-                  <Box>
+                  <Box textAlign="center">
                     <Typography variant="caption" color="text.secondary">Vakar</Typography>
                     <Typography variant="h6" fontWeight={700}>{fmtPct(sr?.yesterday)}</Typography>
                   </Box>
-                  <Box>
+                  <Box textAlign="center">
                     <Typography variant="caption" color="text.secondary">Pask. 7 d.</Typography>
                     <Typography variant="h6" fontWeight={700}>{fmtPct(sr?.last_7_days)}</Typography>
                   </Box>
-                  <Box>
+                  <Box textAlign="center">
                     <Typography variant="caption" color="text.secondary">Pask. 30 d.</Typography>
                     <Typography variant="h6" fontWeight={700}>{fmtPct(sr?.last_30_days)}</Typography>
                   </Box>
-                  <Box>
+                  <Box textAlign="center">
                     <Typography variant="caption" color="text.secondary">Viso</Typography>
                     <Typography variant="h6" fontWeight={700}>{fmtPct(sr?.total)}</Typography>
                   </Box>
@@ -337,8 +379,43 @@ export default function AdminDashboard() {
           </Card>
         </Grid>
 
+        {/* Rejected documents card */}
+        <Grid size={12}>
+          <Card
+            elevation={0}
+            sx={{
+              border: 1,
+              borderColor: "error.main",
+              bgcolor: "error.50",
+              borderRadius: 2,
+            }}
+          >
+            <CardContent>
+              <Box display="flex" alignItems="center" gap={2} flexWrap="wrap">
+                <Block sx={{ color: "error.main", fontSize: 32 }} />
+                <Box flex={1} minWidth={260}>
+                  <Typography variant="h6" fontWeight={800} color="error.dark">
+                    Atmesti dokumentai
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Rejected / Viso (procentas)
+                  </Typography>
+                </Box>
+
+                <Stack direction="row" spacing={3} flexWrap="wrap">
+                  <RejectedStatItem label="Šiandien" data={rej?.today} />
+                  <RejectedStatItem label="Vakar" data={rej?.yesterday} />
+                  <RejectedStatItem label="Pask. 7 d." data={rej?.last_7_days} />
+                  <RejectedStatItem label="Pask. 30 d." data={rej?.last_30_days} />
+                  <RejectedStatItem label="Viso" data={rej?.total} />
+                </Stack>
+              </Box>
+            </CardContent>
+          </Card>
+        </Grid>
+
         {/* System health info */}
-        <Grid item xs={12}>
+        <Grid size={12}>
           <Card
             elevation={0}
             sx={{

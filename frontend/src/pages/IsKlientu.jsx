@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { api } from "../api/endpoints";
 import { Helmet } from "react-helmet";
 import {
@@ -24,12 +24,14 @@ import {
   DialogActions,
   Typography,
   TextField,
+  LinearProgress,
 } from "@mui/material";
 import MoreVertIcon from "@mui/icons-material/MoreVert";
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 import WarningIcon from "@mui/icons-material/Warning";
 import DeleteIcon from "@mui/icons-material/Delete";
 import DocumentScannerIcon from "@mui/icons-material/DocumentScanner";
+import RefreshIcon from "@mui/icons-material/Refresh";
 
 import FailuPreviewDialog from "../page_elements/FailuPreviewDialog";
 
@@ -41,6 +43,8 @@ const SCAN_TYPES = [
 export default function IsKlientu() {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [nextCursor, setNextCursor] = useState(null);
 
   const [selectedIds, setSelectedIds] = useState([]);
 
@@ -52,35 +56,90 @@ export default function IsKlientu() {
   const [promoteError, setPromoteError] = useState(null);
   const [promoteCount, setPromoteCount] = useState(0);
 
-  // scan type
   const [scanType, setScanType] = useState("sumiskai");
 
-  // preview dialog
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewRow, setPreviewRow] = useState(null);
 
-  // delete confirm dialog
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [confirmIds, setConfirmIds] = useState([]);
   const [confirmLoading, setConfirmLoading] = useState(false);
 
+  const observerRef = useRef(null);
+  const sentinelRef = useRef(null);
+
   // ==== helpers ====
 
-  const loadInbox = async () => {
-    setLoading(true);
+  const extractCursor = (nextUrl) => {
+    if (!nextUrl) return null;
     try {
-      const resp = await api.get("/web/mobile-inbox/");
-      setRows(resp.data || []);
-    } catch (e) {
-      console.error("Failed to load mobile inbox", e);
-    } finally {
-      setLoading(false);
+      const url = new URL(nextUrl, window.location.origin);
+      return url.searchParams.get("cursor");
+    } catch {
+      return null;
     }
   };
 
+  const buildUrl = useCallback((cursor = null) => {
+    const params = new URLSearchParams();
+    if (cursor) params.set("cursor", cursor);
+    const qs = params.toString();
+    return `/web/mobile-inbox/${qs ? `?${qs}` : ""}`;
+  }, []);
+
+  const loadInbox = useCallback(async () => {
+    setLoading(true);
+    try {
+      const { data } = await api.get(buildUrl(), { withCredentials: true });
+      setRows(data.results || []);
+      setNextCursor(extractCursor(data.next));
+    } catch (e) {
+      console.error("Failed to load mobile inbox", e);
+      setRows([]);
+      setNextCursor(null);
+    } finally {
+      setLoading(false);
+    }
+  }, [buildUrl]);
+
+  const loadMore = useCallback(async () => {
+    if (!nextCursor || loadingMore) return;
+
+    setLoadingMore(true);
+    try {
+      const { data } = await api.get(buildUrl(nextCursor), { withCredentials: true });
+      setRows((prev) => [...prev, ...(data.results || [])]);
+      setNextCursor(extractCursor(data.next));
+    } catch (e) {
+      console.error("Failed to load more", e);
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [nextCursor, loadingMore, buildUrl]);
+
   useEffect(() => {
     loadInbox();
-  }, []);
+  }, [loadInbox]);
+
+  // IntersectionObserver для infinite scroll
+  useEffect(() => {
+    if (observerRef.current) observerRef.current.disconnect();
+
+    observerRef.current = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting && nextCursor && !loadingMore && !loading) {
+          loadMore();
+        }
+      },
+      { rootMargin: "200px" }
+    );
+
+    if (sentinelRef.current) {
+      observerRef.current.observe(sentinelRef.current);
+    }
+
+    return () => observerRef.current?.disconnect();
+  }, [nextCursor, loadingMore, loading, loadMore]);
 
   const formatDate = (isoString) => {
     if (!isoString) return "";
@@ -132,7 +191,8 @@ export default function IsKlientu() {
       await api.delete("/web/mobile-inbox/bulk-delete/", {
         data: { ids },
       });
-      await loadInbox();
+      // Удаляем локально вместо полной перезагрузки
+      setRows((prev) => prev.filter((r) => !ids.includes(r.id)));
       setSelectedIds((prev) => prev.filter((id) => !ids.includes(id)));
     } catch (e) {
       console.error("Failed to delete mobile inbox docs", e);
@@ -140,7 +200,6 @@ export default function IsKlientu() {
     }
   };
 
-  // открываем диалог подтверждения
   const openConfirmDelete = (ids) => {
     if (!ids || ids.length === 0) return;
     setConfirmIds(ids);
@@ -193,7 +252,8 @@ export default function IsKlientu() {
 
     try {
       await api.post("/web/mobile-inbox/promote/", { ids, scan_type: scanType });
-      await loadInbox();
+      // Удаляем promoted локально
+      setRows((prev) => prev.filter((r) => !ids.includes(r.id)));
       setSelectedIds((prev) => prev.filter((id) => !ids.includes(id)));
       setPromoteInProgress(false);
     } catch (e) {
@@ -264,23 +324,23 @@ export default function IsKlientu() {
             ))}
           </TextField>
 
-          {/* Skaitmenizuoti button - styled like "Įkelti failus" */}
-            <Button
+          {/* Skaitmenizuoti button */}
+          <Button
             variant="contained"
             startIcon={<DocumentScannerIcon />}
             disabled={selectedIds.length === 0 || loading}
             onClick={handlePromoteSelected}
             sx={{
-                ...(selectedIds.length > 0 && {
+              ...(selectedIds.length > 0 && {
                 backgroundColor: "#7c4dff",
                 "&:hover": {
-                    backgroundColor: "#651fff",
+                  backgroundColor: "#651fff",
                 },
-                }),
+              }),
             }}
-            >
+          >
             Skaitmenizuoti pasirinktus
-            </Button>
+          </Button>
 
           {/* Delete button */}
           <Tooltip title="Ištrinti pasirinktus">
@@ -305,10 +365,27 @@ export default function IsKlientu() {
           )}
         </Box>
 
-        <Typography variant="body2" sx={{ color: "text.secondary" }}>
-          Iš viso failų: {rows.length}
-        </Typography>
+        <Box display="flex" alignItems="center" gap={2}>
+          <Typography variant="body2" sx={{ color: "text.secondary" }}>
+            Įkelta: {rows.length}{nextCursor ? "+" : ""}
+          </Typography>
+          <Tooltip title="Atnaujinti">
+            <IconButton
+              onClick={loadInbox}
+              disabled={loading}
+              size="small"
+              sx={{
+                border: "1px solid",
+                borderColor: "divider",
+              }}
+            >
+              <RefreshIcon fontSize="small" />
+            </IconButton>
+          </Tooltip>
+        </Box>
       </Box>
+
+      {loading && <LinearProgress sx={{ mb: 1 }} />}
 
       <TableContainer component={Paper} sx={{ maxHeight: 580 }}>
         <Table stickyHeader size="small">
@@ -331,7 +408,7 @@ export default function IsKlientu() {
           </TableHead>
 
           <TableBody>
-            {loading ? (
+            {loading && rows.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={6} align="center">
                   <CircularProgress size={24} />
@@ -346,94 +423,122 @@ export default function IsKlientu() {
                 </TableCell>
               </TableRow>
             ) : (
-              rows.map((row) => {
-                const isSelected = selectedIds.includes(row.id);
-                const senderLabel = row.sender_label;
-                const senderEmail = row.sender_email;
+              <>
+                {rows.map((row) => {
+                  const isSelected = selectedIds.includes(row.id);
+                  const senderLabel = row.sender_label;
+                  const senderEmail = row.sender_email;
 
-                return (
-                  <TableRow key={row.id} hover>
-                    <TableCell padding="checkbox">
-                      <Checkbox
-                        checked={isSelected}
-                        onChange={handleToggleRow(row.id)}
-                        inputProps={{ "aria-label": "select row" }}
-                      />
-                    </TableCell>
+                  return (
+                    <TableRow key={row.id} hover>
+                      <TableCell padding="checkbox">
+                        <Checkbox
+                          checked={isSelected}
+                          onChange={handleToggleRow(row.id)}
+                          inputProps={{ "aria-label": "select row" }}
+                        />
+                      </TableCell>
 
-                    <TableCell
-                      sx={{
-                        cursor: row.preview_url ? "pointer" : "default",
-                        color: row.preview_url ? "primary.main" : "inherit",
-                        maxWidth: 260,
-                      }}
-                      onClick={() => handlePreview(row)}
-                    >
-                      <Tooltip title={row.original_filename || ""}>
-                        <span
-                          style={{
-                            display: "inline-block",
-                            overflow: "hidden",
-                            textOverflow: "ellipsis",
-                            whiteSpace: "nowrap",
-                            maxWidth: "100%",
-                          }}
-                        >
-                          {row.original_filename || "—"}
-                        </span>
-                      </Tooltip>
-                    </TableCell>
+                      <TableCell
+                        sx={{
+                          cursor: row.preview_url ? "pointer" : "default",
+                          color: row.preview_url ? "primary.main" : "inherit",
+                          maxWidth: 260,
+                        }}
+                        onClick={() => handlePreview(row)}
+                      >
+                        <Tooltip title={row.original_filename || ""}>
+                          <span
+                            style={{
+                              display: "inline-block",
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                              whiteSpace: "nowrap",
+                              maxWidth: "100%",
+                            }}
+                          >
+                            {row.original_filename || "—"}
+                          </span>
+                        </Tooltip>
+                      </TableCell>
 
-                    <TableCell>
-                      {senderLabel ? (
-                        <>
-                          <Typography variant="body2">{senderLabel}</Typography>
-                          {senderEmail && (
-                            <Typography
-                              variant="caption"
-                              sx={{ color: "text.secondary" }}
-                            >
-                              {senderEmail}
-                            </Typography>
-                          )}
-                        </>
-                      ) : senderEmail ? (
-                        <Typography variant="body2">{senderEmail}</Typography>
-                      ) : (
-                        <Typography
-                          variant="body2"
-                          sx={{ color: "text.disabled" }}
-                        >
-                          Nenurodytas
+                      <TableCell>
+                        {senderLabel ? (
+                          <>
+                            <Typography variant="body2">{senderLabel}</Typography>
+                            {senderEmail && (
+                              <Typography
+                                variant="caption"
+                                sx={{ color: "text.secondary" }}
+                              >
+                                {senderEmail}
+                              </Typography>
+                            )}
+                          </>
+                        ) : senderEmail ? (
+                          <Typography variant="body2">{senderEmail}</Typography>
+                        ) : (
+                          <Typography
+                            variant="body2"
+                            sx={{ color: "text.disabled" }}
+                          >
+                            Nenurodytas
+                          </Typography>
+                        )}
+                      </TableCell>
+
+                      <TableCell>
+                        <Chip
+                          label="Mob"
+                          size="small"
+                          sx={{ fontSize: 12, height: 22 }}
+                        />
+                      </TableCell>
+
+                      <TableCell>
+                        <Typography variant="body2">
+                          {formatDate(row.created_at)}
                         </Typography>
-                      )}
-                    </TableCell>
+                      </TableCell>
 
-                    <TableCell>
-                      <Chip
-                        label="Mob"
-                        size="small"
-                        sx={{ fontSize: 12, height: 22 }}
-                      />
-                    </TableCell>
+                      <TableCell align="right">
+                        <IconButton
+                          size="small"
+                          onClick={(e) => handleMenuOpen(e, row.id)}
+                        >
+                          <MoreVertIcon fontSize="small" />
+                        </IconButton>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
 
-                    <TableCell>
-                      <Typography variant="body2">
-                        {formatDate(row.created_at)}
+                {/* Sentinel row для infinite scroll */}
+                <TableRow ref={sentinelRef}>
+                  <TableCell colSpan={6} sx={{ p: 0, border: 0, height: 1 }} />
+                </TableRow>
+
+                {loadingMore && (
+                  <TableRow>
+                    <TableCell colSpan={6} align="center" sx={{ py: 2 }}>
+                      <LinearProgress sx={{ maxWidth: 200, mx: "auto", mb: 1 }} />
+                      <Typography variant="body2" color="text.secondary">
+                        Kraunama daugiau...
                       </Typography>
                     </TableCell>
+                  </TableRow>
+                )}
 
-                    <TableCell align="right">
-                      <IconButton
-                        size="small"
-                        onClick={(e) => handleMenuOpen(e, row.id)}
-                      >
-                        <MoreVertIcon fontSize="small" />
-                      </IconButton>
+                {!nextCursor && rows.length > 0 && !loading && !loadingMore && (
+                  <TableRow>
+                    <TableCell colSpan={6} align="center" sx={{ py: 2, color: "text.disabled" }}>
+                      <Typography variant="body2">
+                        Visi failai įkelti ({rows.length})
+                      </Typography>
                     </TableCell>
                   </TableRow>
-                );
-              })
+                )}
+              </>
             )}
           </TableBody>
         </Table>
@@ -468,7 +573,7 @@ export default function IsKlientu() {
       {/* Диалог прогресса skaitmenizavimo */}
       <Dialog
         open={promoteDialogOpen}
-        onClose={promoteInProgress ? null : closePromoteDialog}
+        onClose={promoteInProgress ? undefined : closePromoteDialog}
       >
         <DialogTitle>Skaitmenizavimas</DialogTitle>
         <DialogContent sx={{ pt: 2, minWidth: 320 }}>
@@ -532,7 +637,7 @@ export default function IsKlientu() {
       {/* Диалог подтверждения удаления */}
       <Dialog
         open={confirmOpen}
-        onClose={confirmLoading ? null : handleConfirmClose}
+        onClose={confirmLoading ? undefined : handleConfirmClose}
       >
         <DialogTitle>Patvirtinkite ištrynimą</DialogTitle>
         <DialogContent sx={{ pt: 1, minWidth: 320 }}>
@@ -569,545 +674,3 @@ export default function IsKlientu() {
     </Box>
   );
 }
-
-
-// import { useEffect, useState } from "react";
-// import { api } from "../api/endpoints";
-// import { Helmet } from "react-helmet";
-// import {
-//   Box,
-//   Paper,
-//   Table,
-//   TableBody,
-//   TableCell,
-//   TableContainer,
-//   TableHead,
-//   TableRow,
-//   Checkbox,
-//   IconButton,
-//   Tooltip,
-//   Chip,
-//   Button,
-//   CircularProgress,
-//   Menu,
-//   MenuItem,
-//   Dialog,
-//   DialogTitle,
-//   DialogContent,
-//   DialogActions,
-//   Typography,
-// } from "@mui/material";
-// import MoreVertIcon from "@mui/icons-material/MoreVert";
-// import CheckCircleIcon from "@mui/icons-material/CheckCircle";
-// import WarningIcon from "@mui/icons-material/Warning";
-// import DeleteIcon from "@mui/icons-material/Delete";
-
-// import FailuPreviewDialog from "../page_elements/FailuPreviewDialog";
-
-// export default function IsKlientu() {
-//   const [rows, setRows] = useState([]);
-//   const [loading, setLoading] = useState(false);
-
-//   const [selectedIds, setSelectedIds] = useState([]);
-
-//   const [menuAnchorEl, setMenuAnchorEl] = useState(null);
-//   const [menuRowId, setMenuRowId] = useState(null);
-
-//   const [promoteDialogOpen, setPromoteDialogOpen] = useState(false);
-//   const [promoteInProgress, setPromoteInProgress] = useState(false);
-//   const [promoteError, setPromoteError] = useState(null);
-//   const [promoteCount, setPromoteCount] = useState(0);
-
-//   // preview dialog
-//   const [previewOpen, setPreviewOpen] = useState(false);
-//   const [previewRow, setPreviewRow] = useState(null);
-
-//   // delete confirm dialog
-//   const [confirmOpen, setConfirmOpen] = useState(false);
-//   const [confirmIds, setConfirmIds] = useState([]);
-//   const [confirmLoading, setConfirmLoading] = useState(false);
-
-//   // ==== helpers ====
-
-//   const loadInbox = async () => {
-//     setLoading(true);
-//     try {
-//       const resp = await api.get("/web/mobile-inbox/");
-//       setRows(resp.data || []);
-//     } catch (e) {
-//       console.error("Failed to load mobile inbox", e);
-//     } finally {
-//       setLoading(false);
-//     }
-//   };
-
-//   useEffect(() => {
-//     loadInbox();
-//   }, []);
-
-//   const formatDate = (isoString) => {
-//     if (!isoString) return "";
-//     try {
-//       const d = new Date(isoString);
-//       return d.toLocaleString("lt-LT");
-//     } catch {
-//       return isoString;
-//     }
-//   };
-
-//   // ==== selection ====
-
-//   const handleToggleRow = (id) => () => {
-//     setSelectedIds((prev) =>
-//       prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
-//     );
-//   };
-
-//   const handleToggleAll = () => {
-//     if (selectedIds.length === rows.length) {
-//       setSelectedIds([]);
-//     } else {
-//       setSelectedIds(rows.map((r) => r.id));
-//     }
-//   };
-
-//   const allSelected = rows.length > 0 && selectedIds.length === rows.length;
-//   const someSelected =
-//     selectedIds.length > 0 && selectedIds.length < rows.length;
-
-//   // ==== menu ====
-
-//   const handleMenuOpen = (event, rowId) => {
-//     setMenuAnchorEl(event.currentTarget);
-//     setMenuRowId(rowId);
-//   };
-
-//   const handleMenuClose = () => {
-//     setMenuAnchorEl(null);
-//     setMenuRowId(null);
-//   };
-
-//   // ==== delete core ====
-
-//   const handleDelete = async (ids) => {
-//     if (!ids || ids.length === 0) return;
-//     try {
-//       await api.delete("/web/mobile-inbox/bulk-delete/", {
-//         data: { ids },
-//       });
-//       await loadInbox();
-//       setSelectedIds((prev) => prev.filter((id) => !ids.includes(id)));
-//     } catch (e) {
-//       console.error("Failed to delete mobile inbox docs", e);
-//       alert("Įvyko klaida trinant failus iš klientų.");
-//     }
-//   };
-
-//   // открываем диалог подтверждения
-//   const openConfirmDelete = (ids) => {
-//     if (!ids || ids.length === 0) return;
-//     setConfirmIds(ids);
-//     setConfirmOpen(true);
-//   };
-
-//   const handleConfirmClose = () => {
-//     if (confirmLoading) return;
-//     setConfirmOpen(false);
-//     setConfirmIds([]);
-//   };
-
-//   const handleConfirmSubmit = async () => {
-//     if (!confirmIds.length) return;
-//     setConfirmLoading(true);
-//     await handleDelete(confirmIds);
-//     setConfirmLoading(false);
-//     setConfirmOpen(false);
-//     setConfirmIds([]);
-//   };
-
-//   const handleDeleteSingleFromMenu = (id) => {
-//     handleMenuClose();
-//     openConfirmDelete([id]);
-//   };
-
-//   const handleDeleteSelectedClick = () => {
-//     openConfirmDelete(selectedIds);
-//   };
-
-//   // ==== promote / skaitmenizavimas ====
-
-//   const openPromoteDialog = (count) => {
-//     setPromoteCount(count);
-//     setPromoteError(null);
-//     setPromoteInProgress(true);
-//     setPromoteDialogOpen(true);
-//   };
-
-//   const closePromoteDialog = () => {
-//     setPromoteDialogOpen(false);
-//     setPromoteInProgress(false);
-//     setPromoteError(null);
-//     setPromoteCount(0);
-//   };
-
-//   const doPromote = async (ids) => {
-//     if (!ids || ids.length === 0) return;
-//     openPromoteDialog(ids.length);
-
-//     try {
-//       await api.post("/web/mobile-inbox/promote/", { ids });
-//       await loadInbox();
-//       setSelectedIds((prev) => prev.filter((id) => !ids.includes(id)));
-//       setPromoteInProgress(false);
-//     } catch (e) {
-//       console.error("Failed to promote mobile docs", e);
-//       setPromoteError("Įvyko klaida perkeliant failus į suvestinę.");
-//       setPromoteInProgress(false);
-//     }
-//   };
-
-//   const handlePromoteSelected = () => {
-//     if (selectedIds.length === 0) return;
-//     doPromote(selectedIds);
-//   };
-
-//   const handlePromoteSingle = (id) => {
-//     handleMenuClose();
-//     doPromote([id]);
-//   };
-
-//   // ==== preview ====
-
-//   const handlePreview = (row) => {
-//     if (!row?.preview_url) return;
-//     setPreviewRow(row);
-//     setPreviewOpen(true);
-//   };
-
-//   const handlePreviewClose = () => {
-//     setPreviewOpen(false);
-//     setPreviewRow(null);
-//   };
-
-//   return (
-//     <Box px={6} py={4}>
-//         <Helmet>
-//           <title>Failai iš klientų</title>
-//           <meta
-//             name="description"
-//             content="Čia rasite failus atsiųstus jūsų klientų."
-//           />
-//         </Helmet>
-//       {/* Верхняя панель */}
-//       <Box
-//         sx={{
-//           mb: 2,
-//           display: "flex",
-//           alignItems: "center",
-//           justifyContent: "space-between",
-//           gap: 2,
-//         }}
-//       >
-//         <Box display="flex" alignItems="center" gap={1}>
-//           <Button
-//             variant="contained"
-//             size="small"
-//             disabled={selectedIds.length === 0 || loading}
-//             onClick={handlePromoteSelected}
-//           >
-//             Skaitmenizuoti pasirinktus
-//           </Button>
-
-//             <Tooltip title="Ištrinti pasirinktus">
-//             <span>
-//                 <Button
-//                 variant="outlined"
-//                 size="small"
-//                 color="error"
-//                 startIcon={<DeleteIcon fontSize="small" />}
-//                 disabled={selectedIds.length === 0 || loading}
-//                 onClick={handleDeleteSelectedClick}
-//                 sx={{
-//                     ml: 0.5,
-//                     px: 1.5,
-//                     textTransform: "none",
-//                     borderRadius: 1,
-//                 }}
-//                 >
-//                 Ištrinti
-//                 </Button>
-//             </span>
-//             </Tooltip>
-
-//           {selectedIds.length > 0 && (
-//             <Typography variant="body2" sx={{ color: "text.secondary" }}>
-//               Pasirinkta: {selectedIds.length}
-//             </Typography>
-//           )}
-//         </Box>
-
-//         <Typography variant="body2" sx={{ color: "text.secondary" }}>
-//           Iš viso failų: {rows.length}
-//         </Typography>
-//       </Box>
-
-//       <TableContainer component={Paper} sx={{ maxHeight: 580 }}>
-//         <Table stickyHeader size="small">
-//           <TableHead>
-//             <TableRow>
-//               <TableCell padding="checkbox">
-//                 <Checkbox
-//                   indeterminate={someSelected}
-//                   checked={allSelected}
-//                   onChange={handleToggleAll}
-//                   inputProps={{ "aria-label": "select all" }}
-//                 />
-//               </TableCell>
-//               <TableCell sx={{ fontWeight: 600 }}>Failas</TableCell>
-//               <TableCell sx={{ fontWeight: 600 }}>Siuntėjas</TableCell>
-//               <TableCell sx={{ fontWeight: 600 }}>Siuntimo tipas</TableCell>
-//               <TableCell sx={{ fontWeight: 600 }}>Data</TableCell>
-//               <TableCell align="right" sx={{ fontWeight: 600 }} />
-//             </TableRow>
-//           </TableHead>
-
-//           <TableBody>
-//             {loading ? (
-//               <TableRow>
-//                 <TableCell colSpan={6} align="center">
-//                   <CircularProgress size={24} />
-//                 </TableCell>
-//               </TableRow>
-//             ) : rows.length === 0 ? (
-//               <TableRow>
-//                 <TableCell colSpan={6} align="center" sx={{ py: 4 }}>
-//                   <Typography variant="body2" sx={{ color: "text.secondary" }}>
-//                     Nėra naujų failų iš klientų
-//                   </Typography>
-//                 </TableCell>
-//               </TableRow>
-//             ) : (
-//               rows.map((row) => {
-//                 const isSelected = selectedIds.includes(row.id);
-//                 const senderLabel = row.sender_label;
-//                 const senderEmail = row.sender_email;
-
-//                 return (
-//                   <TableRow key={row.id} hover>
-//                     <TableCell padding="checkbox">
-//                       <Checkbox
-//                         checked={isSelected}
-//                         onChange={handleToggleRow(row.id)}
-//                         inputProps={{ "aria-label": "select row" }}
-//                       />
-//                     </TableCell>
-
-//                     <TableCell
-//                       sx={{
-//                         cursor: row.preview_url ? "pointer" : "default",
-//                         color: row.preview_url ? "primary.main" : "inherit",
-//                         maxWidth: 260,
-//                       }}
-//                       onClick={() => handlePreview(row)}
-//                     >
-//                       <Tooltip title={row.original_filename || ""}>
-//                         <span
-//                           style={{
-//                             display: "inline-block",
-//                             overflow: "hidden",
-//                             textOverflow: "ellipsis",
-//                             whiteSpace: "nowrap",
-//                             maxWidth: "100%",
-//                           }}
-//                         >
-//                           {row.original_filename || "—"}
-//                         </span>
-//                       </Tooltip>
-//                     </TableCell>
-
-//                     <TableCell>
-//                       {senderLabel ? (
-//                         <>
-//                           <Typography variant="body2">{senderLabel}</Typography>
-//                           {senderEmail && (
-//                             <Typography
-//                               variant="caption"
-//                               sx={{ color: "text.secondary" }}
-//                             >
-//                               {senderEmail}
-//                             </Typography>
-//                           )}
-//                         </>
-//                       ) : senderEmail ? (
-//                         <Typography variant="body2">{senderEmail}</Typography>
-//                       ) : (
-//                         <Typography
-//                           variant="body2"
-//                           sx={{ color: "text.disabled" }}
-//                         >
-//                           Nenurodytas
-//                         </Typography>
-//                       )}
-//                     </TableCell>
-
-//                     <TableCell>
-//                       <Chip
-//                         label="Mob"
-//                         size="small"
-//                         sx={{ fontSize: 12, height: 22 }}
-//                       />
-//                     </TableCell>
-
-//                     <TableCell>
-//                       <Typography variant="body2">
-//                         {formatDate(row.created_at)}
-//                       </Typography>
-//                     </TableCell>
-
-//                     <TableCell align="right">
-//                       <IconButton
-//                         size="small"
-//                         onClick={(e) => handleMenuOpen(e, row.id)}
-//                       >
-//                         <MoreVertIcon fontSize="small" />
-//                       </IconButton>
-//                     </TableCell>
-//                   </TableRow>
-//                 );
-//               })
-//             )}
-//           </TableBody>
-//         </Table>
-//       </TableContainer>
-
-//       {/* Меню по 3 точкам */}
-//       <Menu
-//         anchorEl={menuAnchorEl}
-//         open={Boolean(menuAnchorEl)}
-//         onClose={handleMenuClose}
-//       >
-//         <MenuItem
-//           onClick={() => {
-//             if (menuRowId != null) {
-//               handlePromoteSingle(menuRowId);
-//             }
-//           }}
-//         >
-//           Skaitmenizuoti
-//         </MenuItem>
-//         <MenuItem
-//           onClick={() => {
-//             if (menuRowId != null) {
-//               handleDeleteSingleFromMenu(menuRowId);
-//             }
-//           }}
-//         >
-//           Ištrinti
-//         </MenuItem>
-//       </Menu>
-
-//       {/* Диалог прогресса skaitmenizavimo */}
-//       <Dialog
-//         open={promoteDialogOpen}
-//         onClose={promoteInProgress ? null : closePromoteDialog}
-//       >
-//         <DialogTitle>Skaitmenizavimas</DialogTitle>
-//         <DialogContent sx={{ pt: 2, minWidth: 320 }}>
-//           {promoteInProgress && (
-//             <Box
-//               sx={{
-//                 display: "flex",
-//                 alignItems: "center",
-//                 gap: 2,
-//                 py: 1,
-//               }}
-//             >
-//               <CircularProgress size={24} />
-//               <Typography variant="body2">
-//                 Failai perkeliami į suvestinę ir ruošiami skaitmenizavimui...
-//               </Typography>
-//             </Box>
-//           )}
-
-//           {!promoteInProgress && !promoteError && (
-//             <Box
-//               sx={{
-//                 display: "flex",
-//                 alignItems: "center",
-//                 gap: 1.5,
-//                 py: 1,
-//               }}
-//             >
-//               <CheckCircleIcon color="success" />
-//               <Typography variant="body2">
-//                 {promoteCount === 1
-//                   ? "1 failas buvo perkeltas į suvestinę ir skaitmenizuojamas."
-//                   : `${promoteCount} failai buvo perkelti į suvestinę ir skaitmenizuojami.`}
-//               </Typography>
-//             </Box>
-//           )}
-
-//           {!promoteInProgress && promoteError && (
-//             <Box
-//               sx={{
-//                 display: "flex",
-//                 alignItems: "center",
-//                 gap: 1.5,
-//                 py: 1,
-//               }}
-//             >
-//               <WarningIcon color="error" />
-//               <Typography variant="body2" sx={{ color: "error.main" }}>
-//                 {promoteError}
-//               </Typography>
-//             </Box>
-//           )}
-//         </DialogContent>
-//         <DialogActions>
-//           {!promoteInProgress && (
-//             <Button onClick={closePromoteDialog}>Uždaryti</Button>
-//           )}
-//         </DialogActions>
-//       </Dialog>
-
-//       {/* Диалог подтверждения удаления */}
-//       <Dialog
-//         open={confirmOpen}
-//         onClose={confirmLoading ? null : handleConfirmClose}
-//       >
-//         <DialogTitle>Patvirtinkite ištrynimą</DialogTitle>
-//         <DialogContent sx={{ pt: 1, minWidth: 320 }}>
-//           <Typography variant="body2">
-//             {confirmIds.length === 1
-//               ? "Ar tikrai norite ištrinti šį failą?"
-//               : `Ar tikrai norite ištrinti pasirinktus failus (${confirmIds.length})?`}
-//           </Typography>
-//         </DialogContent>
-//         <DialogActions>
-//           <Button onClick={handleConfirmClose} disabled={confirmLoading}>
-//             Atšaukti
-//           </Button>
-//           <Button
-//             onClick={handleConfirmSubmit}
-//             color="error"
-//             variant="contained"
-//             disabled={confirmLoading}
-//             startIcon={
-//               confirmLoading ? <CircularProgress size={14} /> : <DeleteIcon />
-//             }
-//           >
-//             Ištrinti
-//           </Button>
-//         </DialogActions>
-//       </Dialog>
-
-//       {/* Диалог превью файлов (PDF) */}
-//       <FailuPreviewDialog
-//         open={previewOpen}
-//         onClose={handlePreviewClose}
-//         file={previewRow}
-//       />
-//     </Box>
-//   );
-// }
-
