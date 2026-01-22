@@ -29,7 +29,8 @@
     "react-ga4": "^2.1.0",
     "react-helmet": "^6.1.0",
     "react-pdf": "^10.0.1",
-    "react-router-dom": "^6.28.0"
+    "react-router-dom": "^6.28.0",
+    "react-window": "^2.2.5"
   },
   "devDependencies": {
     "@eslint/js": "^9.13.0",

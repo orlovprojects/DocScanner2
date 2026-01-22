@@ -986,6 +986,62 @@ def _compute_pvm_sumiskai_multi(
     )
 
 
+# def compute_pvm(
+#     doc: ScannedDocument,
+#     ctx: ResolveContext,
+#     *,
+#     base_vat_percent: Any,
+#     base_preke_paslauga: Any,
+#     cp_selected: bool,
+# ) -> PvmResult:
+#     direction = resolve_direction(doc, ctx)
+
+#     if ctx.view_mode == "single":
+#         pvm_doc = _nz(getattr(doc, "pvm_kodas", None))
+#         if ctx.purpose == "export":
+#             has_lineitems = LineItem.objects.filter(document=doc).exists()
+#             pvm_doc = normalize_for_purpose(pvm_doc, has_lineitems=has_lineitems, purpose=ctx.purpose)
+
+#         return PvmResult(
+#             pirkimas_pardavimas_code=_nz(getattr(doc, "pirkimas_pardavimas", None)),
+#             pirkimas_pardavimas_label=_pp_label(_nz(getattr(doc, "pirkimas_pardavimas", None)), cp_selected),
+#             pvm_kodas=pvm_doc,
+#             pvm_kodas_label=_pvm_label(pvm_doc, cp_selected),
+#             line_items=[],
+#         )
+
+#     scan_type = (_nz(getattr(doc, "scan_type", None)) or "").lower()
+#     if scan_type == "detaliai" and LineItem.objects.filter(document=doc).exists():
+#         result = _compute_pvm_detaliai_multi(
+#             doc, direction, cp_selected, base_vat_percent, base_preke_paslauga
+#         )
+#     else:
+#         result = _compute_pvm_sumiskai_multi(
+#             doc, direction, cp_selected, base_vat_percent, base_preke_paslauga
+#         )
+
+#     has_lineitems = bool(result.get("line_items"))
+#     result["pvm_kodas"] = normalize_for_purpose(
+#         result.get("pvm_kodas"), has_lineitems=has_lineitems, purpose=ctx.purpose
+#     )
+#     result["pvm_kodas_label"] = _pvm_label(result.get("pvm_kodas"), cp_selected)
+
+#     if ctx.purpose == "preview" and not cp_selected:
+#         result["pvm_kodas"] = None
+#         result["pvm_kodas_label"] = "Pasirinkite kontrahentą"
+#         if result.get("line_items"):
+#             li = []
+#             for item in result["line_items"]:
+#                 li.append({
+#                     "id": item.get("id"),
+#                     "pvm_kodas": None,
+#                     "pvm_kodas_label": "Pasirinkite kontrahentą",
+#                 })
+#             result["line_items"] = li
+
+#     return result
+
+
 def compute_pvm(
     doc: ScannedDocument,
     ctx: ResolveContext,
@@ -993,6 +1049,7 @@ def compute_pvm(
     base_vat_percent: Any,
     base_preke_paslauga: Any,
     cp_selected: bool,
+    skip_line_items: bool = False,  # <-- новый параметр
 ) -> PvmResult:
     direction = resolve_direction(doc, ctx)
 
@@ -1008,6 +1065,12 @@ def compute_pvm(
             pvm_kodas=pvm_doc,
             pvm_kodas_label=_pvm_label(pvm_doc, cp_selected),
             line_items=[],
+        )
+
+    # Для preview с skip_line_items — не грузим line items вообще
+    if skip_line_items:
+        return _compute_pvm_sumiskai_multi(
+            doc, direction, cp_selected, base_vat_percent, base_preke_paslauga
         )
 
     scan_type = (_nz(getattr(doc, "scan_type", None)) or "").lower()
@@ -1054,6 +1117,31 @@ def normalize_for_purpose(
 # Facades for views/exports (kept)
 # ==============================
 
+# def build_preview(
+#     doc: ScannedDocument,
+#     user: Any,
+#     *,
+#     cp_key: Optional[str],
+#     view_mode: ViewMode,
+#     base_vat_percent: Any,
+#     base_preke_paslauga: Any,
+# ) -> PvmResult:
+#     ctx = ResolveContext(
+#         user=user,
+#         view_mode=view_mode,
+#         purpose="preview",
+#         overrides={},
+#         cp_key=cp_key,
+#     )
+#     cp_selected = bool(cp_key)
+#     return compute_pvm(
+#         doc,
+#         ctx,
+#         base_vat_percent=base_vat_percent,
+#         base_preke_paslauga=base_preke_paslauga,
+#         cp_selected=cp_selected,
+#     )
+
 def build_preview(
     doc: ScannedDocument,
     user: Any,
@@ -1077,6 +1165,7 @@ def build_preview(
         base_vat_percent=base_vat_percent,
         base_preke_paslauga=base_preke_paslauga,
         cp_selected=cp_selected,
+        skip_line_items=True,  # передаём в compute_pvm, НЕ в ResolveContext
     )
 
 

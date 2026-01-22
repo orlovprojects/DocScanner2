@@ -2,6 +2,7 @@ import { LocalizationProvider } from '@mui/x-date-pickers';
 import { AdapterDayjs } from '@mui/x-date-pickers/AdapterDayjs';
 import dayjs from 'dayjs';
 import 'dayjs/locale/lt';
+import React from 'react';
 
 import {
   Dialog,
@@ -17,6 +18,7 @@ import {
   Tooltip,
   Button,
   Chip,
+  CircularProgress,
 } from "@mui/material";
 import DeleteIcon from "@mui/icons-material/Delete";
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
@@ -27,7 +29,7 @@ import HourglassEmptyIcon from '@mui/icons-material/HourglassEmpty';
 import ZoomableImage from "../pages/ZoomableImage";
 import { EXTRA_FIELDS_CONFIG } from "../pages/extraFieldsConfig";
 import { api } from "../api/endpoints";
-import { useEffect, useRef, useState, useMemo } from "react";
+import { useEffect, useRef, useState, useMemo, useCallback } from "react";
 import CloseIcon from '@mui/icons-material/Close';
 import IconButton from '@mui/material/IconButton';
 
@@ -35,7 +37,7 @@ import EditableCell from "../components/EditableCell";
 import EditableAutoCell from "../components/EditableAutoCell";
 
 
-
+const LINE_ITEMS_LIMIT = 30;
 
 
 const mapVatStatus = (status) => {
@@ -52,15 +54,124 @@ const mapVatStatus = (status) => {
         color: "error",
         icon: <ErrorIcon />,
       };
-    // "not_provided" или null → вообще не показываем чип
     default:
       return null;
   }
 };
 
+const ltEilutes = (n) => {
+  const num = Math.abs(Number(n) || 0);
+  const last2 = num % 100;
+  const last1 = num % 10;
 
+  if (last2 >= 11 && last2 <= 19) return "eilučių"; // 11–19 
+  if (last1 === 1) return "eilutė";                 // 1, 21, 31...
+  if (last1 >= 2 && last1 <= 9) return "eilutės";   // 2–9, 22–29...
+  return "eilučių";                                 // 0, 10, 20, 30...
+};
 
+const LineItemCard = React.memo(({ 
+  item, 
+  index,
+  canDelete,
+  previewLinePvm,
+  onDelete,
+  onProductSelect,
+  onProductClear,
+  onSaveFields,
+  formatNumberPreview,
+  PRODUCT_FIELDS,
+  EXTRA_FIELDS_CONFIG,
+}) => {
+  return (
+    <Box
+      sx={{
+        mb: 2,
+        p: 2,
+        border: "1px solid #eee",
+        borderRadius: 2,
+        background: "#fff",
+        position: "relative",
+      }}
+    >
+      <Tooltip title={canDelete ? "Ištrinti eilutę" : "Negalima ištrinti vienintelės eilutės"}>
+        <IconButton
+          size="small"
+          onClick={() => canDelete && onDelete(item.id)}
+          disabled={!canDelete}
+          sx={{
+            position: "absolute",
+            top: 6,
+            right: 6,
+            color: "text.secondary",
+            "&:hover": canDelete ? { color: "error.main" } : undefined,
+          }}
+        >
+          <DeleteIcon fontSize="small" />
+        </IconButton>
+      </Tooltip>
 
+      <Typography
+        sx={{
+          fontWeight: 100,
+          marginBottom: 3,
+          fontStyle: "italic",
+        }}
+      >
+        {`Prekė #${index + 1}`}
+      </Typography>
+
+      {PRODUCT_FIELDS.map(({ field, label }) => {
+        const cfg = EXTRA_FIELDS_CONFIG.product.find(f => f.name === field);
+        return (
+          <Stack
+            key={`${item.id}-${field}`}
+            direction="row"
+            alignItems="center"
+            spacing={1}
+            sx={{ mb: 1 }}
+          >
+            <Typography color="text.secondary" sx={{ minWidth: 130, color: "black" }}>
+              {label}
+            </Typography>
+
+            <EditableAutoCell
+              label={cfg?.label || "Pasirinkite…"}
+              value={item[field] || ""}
+              searchUrl={cfg?.search}
+              onSelect={onProductSelect(item.id)}
+              onManualSave={(text) => onSaveFields(item.id, { [field]: text || null })}
+              onClear={onProductClear(item.id)}
+              sx={{
+                flex: 1,
+                "& .MuiInputBase-root": {
+                  minHeight: "28px",
+                  background: "transparent",
+                  fontSize: "14px",
+                  px: 1,
+                },
+                "& input": { padding: 0, fontSize: "14px", fontWeight: 700 },
+              }}
+            />
+          </Stack>
+        );
+      })}
+
+      <Stack spacing={0.5} mt={1} mb={1}>
+        <Typography>Mato vnt: <EditableCell value={item.unit} onSave={(v) => onSaveFields(item.id, "unit", v)} /></Typography>
+        <Typography>Kiekis: <EditableCell value={item.quantity} inputType="number" onSave={(v) => onSaveFields(item.id, "quantity", v)} renderDisplay={(v) => <b>{formatNumberPreview(v)}</b>} /></Typography>
+        <Typography>Kaina: <EditableCell value={item.price} inputType="number" onSave={(v) => onSaveFields(item.id, "price", v)} renderDisplay={(v) => <b>{formatNumberPreview(v)}</b>} /></Typography>
+        <Typography>Suma (be PVM): <EditableCell value={item.subtotal} inputType="number" onSave={(v) => onSaveFields(item.id, "subtotal", v)} renderDisplay={(v) => <b>{formatNumberPreview(v)}</b>} /></Typography>
+        <Typography>PVM: <EditableCell value={item.vat} inputType="number" onSave={(v) => onSaveFields(item.id, "vat", v)} renderDisplay={(v) => <b>{formatNumberPreview(v)}</b>} /></Typography>
+        <Typography>PVM %: <EditableCell value={item.vat_percent} inputType="number" onSave={(v) => onSaveFields(item.id, "vat_percent", v)} renderDisplay={(v) => <b>{formatNumberPreview(v)}</b>} /></Typography>
+        <Typography>PVM klasė: <b>{previewLinePvm}</b></Typography>
+        <Typography>Suma (su PVM): <EditableCell value={item.total} inputType="number" onSave={(v) => onSaveFields(item.id, "total", v)} renderDisplay={(v) => <b>{formatNumberPreview(v)}</b>} /></Typography>
+        <Typography>Nuolaida (be PVM): <b>{formatNumberPreview(item.discount_wo_vat)}</b></Typography>
+        <Typography>Nuolaida (su PVM): <b>{formatNumberPreview(item.discount_with_vat)}</b></Typography>
+      </Stack>
+    </Box>
+  );
+});
 
 
 export default function PreviewDialog({
@@ -83,6 +194,25 @@ export default function PreviewDialog({
   const lastReqIdRef = useRef(0);
   const abortRef = useRef(null);
 
+  // Line items lazy loading state
+  const [lineItemsLoaded, setLineItemsLoaded] = useState([]);
+  const [lineItemsOffset, setLineItemsOffset] = useState(0);
+  const [lineItemsTotal, setLineItemsTotal] = useState(0);
+  const [lineItemsLoading, setLineItemsLoading] = useState(false);
+  const [lineItemsLoadingMore, setLineItemsLoadingMore] = useState(false);
+  const [accordionExpanded, setAccordionExpanded] = useState(false);
+  const lineItemsContainerRef = useRef(null);
+
+  // Closing state для мгновенного закрытия
+  const [closing, setClosing] = useState(false);
+  const closingRef = useRef(false);
+
+  const lineItemsReqLockRef = useRef(false);
+
+  useEffect(() => {
+    closingRef.current = closing;
+  }, [closing]);
+
   const mkKey = (id, vat, name) => {
     const idStr = id == null ? "" : String(id).trim();
     if (idStr) return `id:${idStr}`;
@@ -103,6 +233,133 @@ export default function PreviewDialog({
 
   const ppText = (code) =>
     code === "pirkimas" ? "Pirkimas" : code === "pardavimas" ? "Pardavimas" : "Pasirinkite kontrahentą";
+
+  // Load line items with pagination
+
+  const loadLineItems = useCallback(async (docId, offset = 0, append = false) => {
+    if (closingRef.current) return;
+    if (lineItemsReqLockRef.current) return;
+
+    lineItemsReqLockRef.current = true;
+    if (append) setLineItemsLoadingMore(true);
+    else setLineItemsLoading(true);
+
+    try {
+      const res = await api.get(`/documents/${docId}/lineitems/`, {
+        params: {
+          limit: LINE_ITEMS_LIMIT,
+          offset,
+          ...(isMulti && selectedCpKey ? { cp_key: selectedCpKey } : {}),
+        },
+        withCredentials: true,
+      });
+
+      if (closingRef.current) return;
+
+      const { results = [], count = 0 } = res.data || {};
+      setLineItemsTotal(count);
+
+      setLineItemsLoaded(prev => {
+        const next = append ? [...prev, ...results] : results;
+        const map = new Map();
+        for (const x of next) map.set(String(x.id), x);
+        return Array.from(map.values());
+      });
+
+      setLineItemsOffset(prev => (append ? prev + results.length : results.length));
+    } catch (e) {
+      console.error("Failed to load line items:", e);
+    } finally {
+      lineItemsReqLockRef.current = false;
+      if (!closingRef.current) {
+        setLineItemsLoading(false);
+        setLineItemsLoadingMore(false);
+      }
+    }
+  }, [isMulti, selectedCpKey]);
+
+  // const loadLineItems = useCallback(async (docId, offset = 0, append = false) => {
+  //   if (closingRef.current) return;
+  //   if (lineItemsReqLockRef.current) return;   // 🔒 синхронный лок
+
+  //   lineItemsReqLockRef.current = true;
+  //   if (append) setLineItemsLoadingMore(true);
+  //   else setLineItemsLoading(true);
+
+  //   try {
+  //     const res = await api.get(`/documents/${docId}/lineitems/`, {
+  //       params: {
+  //         limit: LINE_ITEMS_LIMIT,
+  //         offset,
+  //         ...(isMulti && selectedCpKey ? { cp_key: selectedCpKey } : {}),
+  //       },
+  //       withCredentials: true,
+  //     });
+
+  //     if (closingRef.current) return;
+
+  //     const { results = [], count = 0 } = res.data || {};
+
+  //     // count — истина
+  //     setLineItemsTotal(count);
+
+  //     // loaded — без дублей (на случай гонок/повторов)
+  //     setLineItemsLoaded(prev => {
+  //       const next = append ? [...prev, ...results] : results;
+
+  //       const map = new Map();
+  //       for (const x of next) map.set(String(x.id), x);
+
+  //       return Array.from(map.values());
+  //     });
+
+  //     // offset считаем от фактически добавленного количества
+  //     setLineItemsOffset(prev => (append ? prev + results.length : results.length));
+  //   } catch (e) {
+  //     console.error("Failed to load line items:", e);
+  //   } finally {
+  //     lineItemsReqLockRef.current = false;
+  //     if (!closingRef.current) {
+  //       setLineItemsLoading(false);
+  //       setLineItemsLoadingMore(false);
+  //     }
+  //   }
+  // }, []);
+
+  const loadMoreLineItems = useCallback(() => {
+    if (closingRef.current) return;
+    if (!selected?.id) return;
+
+    // если уже всё загрузили — стоп
+    if (lineItemsOffset >= lineItemsTotal) return;
+
+    loadLineItems(selected.id, lineItemsOffset, true);
+  }, [selected?.id, lineItemsOffset, lineItemsTotal, loadLineItems]);
+
+  const handleClose = useCallback(() => {
+    // 1) моментально убираем тяжелое из DOM
+    setClosing(true);
+    setAccordionExpanded(false);
+
+    // 2) прерываем запросы (если есть)
+    abortRef.current?.abort();
+    abortRef.current = null;
+
+    // 3) закрываем диалог сразу
+    onClose();
+
+    // 4) тяжелые сбросы уже после закрытия (не мешают клику)
+    setTimeout(() => {
+      setLineItemsLoaded([]);
+      setLineItemsOffset(0);
+      setLineItemsTotal(0);
+      setLineItemsLoading(false);
+      setLocalPreview(null);
+      prevDocId.current = null;
+
+      setClosing(false);
+    }, 0);
+  }, [onClose]);
 
   const refreshDocument = async (id) => {
     if (abortRef.current) abortRef.current.abort();
@@ -134,6 +391,9 @@ export default function PreviewDialog({
       setSelected(res.data);
       setDocs(prev => prev.map(d => sameId(d.id, id) ? res.data : d));
 
+      // Update line items total count
+      setLineItemsTotal(res.data.line_items_count || 0);
+
       if (isMulti) {
         if (selectedCpKey) {
           setLocalPreview(res.data.preview || null);
@@ -160,20 +420,42 @@ export default function PreviewDialog({
   };
 
   useEffect(() => {
-    if (
-      open &&
-      selected?.id &&
-      !String(selected.id).startsWith("temp-") &&
-      prevDocId.current !== selected.id
-    ) {
+    const container = lineItemsContainerRef.current;
+    if (!container || !accordionExpanded || closingRef.current) return;
+
+    const handleScroll = () => {
+      if (closingRef.current) return;
+      if (lineItemsLoading) return;
+      if (lineItemsLoaded.length >= lineItemsTotal) return;
+
+      const { scrollTop, scrollHeight, clientHeight } = container;
+      if (scrollHeight - scrollTop - clientHeight < 200) {
+        loadMoreLineItems();
+      }
+    };
+
+    container.addEventListener("scroll", handleScroll);
+    return () => container.removeEventListener("scroll", handleScroll);
+  }, [
+    accordionExpanded,
+    loadMoreLineItems,
+    lineItemsLoading,
+    lineItemsLoaded.length,
+    lineItemsTotal,
+    selected?.id,
+  ]);
+
+
+  // Reset line items state when document changes
+  useEffect(() => {
+    if (open && selected?.id && !String(selected.id).startsWith("temp-") && prevDocId.current !== selected.id) {
       setLocalPreview(null);
+      setLineItemsLoaded([]);
+      setLineItemsOffset(0);
+      setLineItemsTotal(0);
+      setAccordionExpanded(false);
       refreshDocument(selected.id);
       prevDocId.current = selected.id;
-    }
-    if (!open) {
-      prevDocId.current = null;
-      setLocalPreview(null);
-      setPreviewLoading(false);
     }
   }, [open, selected?.id]);
 
@@ -183,10 +465,10 @@ export default function PreviewDialog({
     }
   }, [selectedCpKey]);
 
+  // УБРАН useEffect со scroll addEventListener - используем onItemsRendered в List
+
   const programKey = user?.default_accounting_program;
   const extraFields = programKey ? (EXTRA_FIELDS_CONFIG[programKey] || []) : [];
-
-  const lineItems = Array.isArray(selected?.line_items) ? selected.line_items : [];
 
   const hasAnyCounterparty =
     !!(selected?.buyer_id || selected?.buyer_vat_code || selected?.buyer_name) ||
@@ -351,27 +633,19 @@ export default function PreviewDialog({
       { withCredentials: true }
     );
 
+    // Update in loaded line items
+    setLineItemsLoaded(prev =>
+      prev.map(li => sameId(li.id, lineItemId) ? { ...li, ...res.data } : li)
+    );
+
     setSelected(prev => ({
       ...prev,
-      line_items: Array.isArray(prev?.line_items)
-        ? prev.line_items.map(li =>
-            sameId(li.id, lineItemId) ? { ...li, ...res.data } : li
-          )
-        : [],
+      line_items_count: prev.line_items_count,
     }));
 
     setDocs(prev =>
       prev.map(d =>
-        sameId(d.id, selected.id)
-          ? {
-              ...d,
-              line_items: Array.isArray(d.line_items)
-                ? d.line_items.map(li =>
-                    sameId(li.id, lineItemId) ? { ...li, ...res.data } : li
-                  )
-                : [],
-            }
-          : d
+        sameId(d.id, selected.id) ? { ...d } : d
       )
     );
 
@@ -389,28 +663,9 @@ export default function PreviewDialog({
       { withCredentials: true }
     );
 
-    setSelected(prev => ({
-      ...prev,
-      line_items: Array.isArray(prev?.line_items)
-        ? prev.line_items.map(li =>
-            sameId(li.id, lineItemId) ? { ...li, ...res.data } : li
-          )
-        : [],
-    }));
-
-    setDocs(prev =>
-      prev.map(d =>
-        sameId(d.id, selected.id)
-          ? {
-              ...d,
-              line_items: Array.isArray(d.line_items)
-                ? d.line_items.map(li =>
-                    sameId(li.id, lineItemId) ? { ...li, ...res.data } : li
-                  )
-                : [],
-            }
-          : d
-      )
+    // Update in loaded line items
+    setLineItemsLoaded(prev =>
+      prev.map(li => sameId(li.id, lineItemId) ? { ...li, ...res.data } : li)
     );
 
     if (isMulti) {
@@ -456,10 +711,25 @@ export default function PreviewDialog({
   ];
 
   const accordionRef = useRef(null);
-  const lastItemRef = useRef(null);
 
   const handleAccordionChange = (event, expanded) => {
-    if (expanded && accordionRef.current) {
+    setAccordionExpanded(expanded);
+
+    if (!expanded) {
+      setLineItemsLoaded([]);
+      setLineItemsOffset(0);
+      return;
+    }
+
+    // открыли: всегда стартуем с нуля
+    setLineItemsLoaded([]);
+    setLineItemsOffset(0);
+
+    if (selected?.id && (selected?.line_items_count > 0 || lineItemsTotal > 0)) {
+      loadLineItems(selected.id, 0, false);
+    }
+
+    if (accordionRef.current) {
       setTimeout(() => {
         accordionRef.current.scrollIntoView({ behavior: "smooth", block: "start" });
       }, 200);
@@ -567,13 +837,13 @@ export default function PreviewDialog({
       }
     }
 
+    // Update in loaded line items
+    setLineItemsLoaded(prev =>
+      prev.map(li => String(li.id) === String(lineId) ? { ...li, ...changed } : li)
+    );
+
     setSelected(prev => ({
       ...prev,
-      line_items: Array.isArray(prev?.line_items)
-        ? prev.line_items.map(li =>
-            String(li.id) === String(lineId) ? { ...li, ...changed } : li
-          )
-        : [],
       ...(mathValidationResult !== null && { 
         math_validation_passed: mathValidationResult 
       })
@@ -583,11 +853,6 @@ export default function PreviewDialog({
       String(d.id) === String(selected.id)
         ? {
             ...d,
-            line_items: Array.isArray(d.line_items)
-              ? d.line_items.map(li =>
-                  String(li.id) === String(lineId) ? { ...li, ...changed } : li
-                )
-              : [],
             ...(mathValidationResult !== null && { 
               math_validation_passed: mathValidationResult 
             })
@@ -603,27 +868,33 @@ export default function PreviewDialog({
     const res = await api.post(`/scanned-documents/${selected.id}/add-lineitem/`, {}, { withCredentials: true });
     const newItem = res.data;
 
+    // Add to loaded line items
+    setLineItemsLoaded(prev => [...prev, newItem]);
+    setLineItemsTotal(prev => prev + 1);
+
     setSelected(prev => ({
       ...prev,
-      line_items: [...(prev.line_items || []), newItem],
+      line_items_count: (prev.line_items_count || 0) + 1,
     }));
 
     setDocs(prev =>
       prev.map(d =>
         String(d.id) === String(selected.id)
-          ? { ...d, line_items: [...(d.line_items || []), newItem] }
+          ? { ...d, line_items_count: (d.line_items_count || 0) + 1 }
           : d
       )
     );
 
+    // Скролл к последнему элементу через List ref
     setTimeout(() => {
-      lastItemRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-    }, 300);
+      const el = lineItemsContainerRef.current;
+      if (el) el.scrollTop = el.scrollHeight;
+    }, 0);
   };
 
   const deleteLineItem = async (lineId) => {
     if (!selected?.id) return;
-    const currentCount = Array.isArray(selected?.line_items) ? selected.line_items.length : 0;
+    const currentCount = lineItemsLoaded.length;
     if (currentCount <= 1) {
       window.alert("Negalima ištrinti vienintelės eilutės.");
       return;
@@ -634,15 +905,20 @@ export default function PreviewDialog({
 
     await api.delete(`/scanned-documents/${selected.id}/delete-lineitem/${lineId}/`, { withCredentials: true });
 
+    // Remove from loaded line items
+    setLineItemsLoaded(prev => prev.filter(li => li.id !== lineId));
+    setLineItemsTotal(prev => prev - 1);
+    setLineItemsOffset(prev => Math.max(0, prev - 1));
+
     setSelected(prev => ({
       ...prev,
-      line_items: (prev.line_items || []).filter(li => li.id !== lineId),
+      line_items_count: Math.max(0, (prev.line_items_count || 1) - 1),
     }));
 
     setDocs(prev =>
       prev.map(d =>
         String(d.id) === String(selected.id)
-          ? { ...d, line_items: (d.line_items || []).filter(li => li.id !== lineId) }
+          ? { ...d, line_items_count: Math.max(0, (d.line_items_count || 1) - 1) }
           : d
       )
     );
@@ -697,9 +973,13 @@ export default function PreviewDialog({
     );
   };
 
+  const lineItemsCount = (lineItemsTotal ?? selected?.line_items_count ?? 0);
+
+  const headerLoading = accordionExpanded && lineItemsLoading;
+
   return (
     <LocalizationProvider dateAdapter={AdapterDayjs} adapterLocale="lt">
-      <Dialog open={open} onClose={onClose} maxWidth="xl" fullWidth TransitionProps={{ timeout: 0.1 }}>
+      <Dialog open={open} onClose={handleClose} maxWidth="xl" fullWidth TransitionProps={{ timeout: 0.1 }}>
         <DialogTitle
           sx={{
             fontWeight: 500,
@@ -713,11 +993,12 @@ export default function PreviewDialog({
           Peržiūra
           <IconButton
             aria-label="close"
-            onClick={onClose}
+            onClick={handleClose}
             sx={{
               position: 'absolute',
               right: 10,
               top: 8,
+              zIndex: 2000,
               color: (theme) => theme.palette.grey[500],
               p: 1,
             }}
@@ -734,7 +1015,8 @@ export default function PreviewDialog({
             '*': { fontSize: "inherit" },
             minHeight: 400,
             maxHeight: "80vh",
-            overflow: "auto"
+            overflow: "auto",
+            pointerEvents: closing ? "none" : "auto",
           }}
         >
           <Box
@@ -778,100 +1060,6 @@ export default function PreviewDialog({
                   Dokumento tipas: <b>{selected.document_type || "—"}</b>
                 </Typography>
                 <Divider sx={{ my: 1 }} />
-
-                {/* <Grid2 container spacing={2} sx={{ mb: 2 }}>
-                  <Grid2 size={6}>
-                    <Typography sx={{ mb: 1.5, fontWeight: 500, fontSize: "0.95rem" }}>Pirkėjas</Typography>
-                    {["buyer_name", "buyer_id", "buyer_vat_code"].map((field) => {
-                      return (
-                        <Box key={field} sx={{ mb: 1 }}>
-                          <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 0.25 }}>
-                            {EXTRA_FIELDS_CONFIG.client.find(f => f.name === field)?.label || field}
-                          </Typography>
-                          <EditableAutoCell
-                            fieldName={field}
-                            label={EXTRA_FIELDS_CONFIG.client.find(f => f.name === field)?.label || "Pasirinkite…"}
-                            value={selected[field] || ""}
-                            searchUrl={EXTRA_FIELDS_CONFIG.client.find(f => f.name === field)?.search}
-                            onSelect={handleClientSelect("buyer")}
-                            onManualSave={async (text) => {
-                              if (!selected?.id) return;
-                              const res = await api.patch(
-                                `/scanned-documents/${selected.id}/extra-fields/`,
-                                { [field]: text || null },
-                                { withCredentials: true }
-                              );
-                              setSelected(res.data);
-                              setDocs(prev => prev.map(d => String(d.id) === String(selected.id) ? res.data : d));
-                              if (isMulti) await refreshDocument(selected.id);
-                            }}
-                            onClear={async () => {
-                              await handleClientClear("buyer")();
-                            }}
-                            sx={{
-                              width: "100%",
-                              "& .MuiInputBase-root": {
-                                fontSize: "0.875rem",
-                              },
-                              "& input": {
-                                fontSize: "0.875rem",
-                              },
-                            }}
-                          />
-                        </Box>
-                      );
-                    })}
-                  </Grid2>
-
-                  <Grid2 size={6}>
-                    <Typography sx={{ mb: 1.5, fontWeight: 500, fontSize: "0.95rem" }}>Pardavėjas</Typography>
-                    {["seller_name", "seller_id", "seller_vat_code"].map((field) => {
-                      const fieldNameForAuto = field.includes("_name")
-                        ? "prekes_pavadinimas"
-                        : field.includes("_id")
-                          ? "prekes_kodas"
-                          : "prekes_barkodas";
-
-                      return (
-                        <Box key={field} sx={{ mb: 1 }}>
-                          <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 0.25 }}>
-                            {EXTRA_FIELDS_CONFIG.client.find(f => f.name === field)?.label || field}
-                          </Typography>
-                          <EditableAutoCell
-                            fieldName={fieldNameForAuto}
-                            label={EXTRA_FIELDS_CONFIG.client.find(f => f.name === field)?.label || "Pasirinkite…"}
-                            value={selected[field] || ""}
-                            searchUrl={EXTRA_FIELDS_CONFIG.client.find(f => f.name === field)?.search}
-                            onSelect={handleClientSelect("seller")}
-                            onManualSave={async (text) => {
-                              if (!selected?.id) return;
-                              const res = await api.patch(
-                                `/scanned-documents/${selected.id}/extra-fields/`,
-                                { [field]: text || null },
-                                { withCredentials: true }
-                              );
-                              setSelected(res.data);
-                              setDocs(prev => prev.map(d => String(d.id) === String(selected.id) ? res.data : d));
-                              if (isMulti) await refreshDocument(selected.id);
-                            }}
-                            onClear={async () => {
-                              await handleClientClear("seller")();
-                            }}
-                            sx={{
-                              width: "100%",
-                              "& .MuiInputBase-root": {
-                                fontSize: "0.875rem",
-                              },
-                              "& input": {
-                                fontSize: "0.875rem",
-                              },
-                            }}
-                          />
-                        </Box>
-                      );
-                    })}
-                  </Grid2>
-                </Grid2> */}
 
                 <Grid2 container spacing={2} sx={{ mb: 2 }}>
                   <Grid2 size={6}>
@@ -1107,10 +1295,28 @@ export default function PreviewDialog({
                   )}
                 </Stack>
 
-                {selected.scan_type === "detaliai" && lineItems.length > 0 && (
-                  <Accordion sx={{ mt: 1, background: "#fafafa" }} onChange={handleAccordionChange} ref={accordionRef}>
+                {selected.scan_type === "detaliai" && lineItemsCount > 0 && (
+                  <Accordion 
+                    expanded={!closing && accordionExpanded}
+                    onChange={handleAccordionChange} 
+                    ref={accordionRef}
+                    sx={{ mt: 1, background: "#fafafa" }}
+                  >
                     <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-                      <Typography>Prekė(s):</Typography>
+                      <Box sx={{ display: "flex", alignItems: "center", gap: 1, width: "100%" }}>
+                        <Typography>
+                          Prekė(s): {lineItemsCount} {ltEilutes(lineItemsCount)}
+                        </Typography>
+
+                        {/* loader только справа от текста */}
+                        {headerLoading && (
+                          <CircularProgress
+                            size={26}        // было 16 — сделай 20-24
+                            thickness={8}    // “жирность” круга (по умолчанию 3.6)
+                            sx={{ ml: 1 }}
+                          />
+                        )}
+                      </Box>
                     </AccordionSummary>
                     <AccordionDetails>
                       <Box sx={{ display: "flex", justifyContent: "flex-end", mb: 2 }}>
@@ -1123,102 +1329,80 @@ export default function PreviewDialog({
                           + Pridėti eilutę
                         </Button>
                       </Box>
-                      {lineItems.map((item, idx) => {
-                        const canDelete = lineItems.length > 1;
-                        const previewLinePvm = isMulti
-                          ? (previewLinePvmById(item.id) || (previewLoading ? "Skaičiuojama…" : "—"))
-                          : (item.pvm_kodas || item.vat_class || "—");
-                        return (
-                          <Box
-                            key={item.id ?? `li-${idx}`}
-                            ref={idx === lineItems.length - 1 ? lastItemRef : null}
-                            sx={{
-                              mb: 2,
-                              p: 2,
-                              border: "1px solid #eee",
-                              borderRadius: 2,
-                              background: "#fff",
-                              position: "relative",
-                            }}
-                          >
-                            <Tooltip title={canDelete ? "Ištrinti eilutę" : "Negalima ištrinti vienintelės eilutės"}>
-                              <IconButton
-                                size="small"
-                                onClick={() => canDelete && deleteLineItem(item.id)}
-                                disabled={!canDelete}
-                                sx={{
-                                  position: "absolute",
-                                  top: 6,
-                                  right: 6,
-                                  color: "text.secondary",
-                                  "&:hover": canDelete ? { color: "error.main" } : undefined,
-                                }}
-                              >
-                                <DeleteIcon fontSize="small" />
-                              </IconButton>
-                            </Tooltip>
+                      
+                      {!closing && accordionExpanded && (
+                        <Box
+                          ref={lineItemsContainerRef}
+                          sx={{ maxHeight: 500, overflowY: "auto", pr: 1 }}
+                        >
+                          {lineItemsLoaded.map((item, index) => {
+                            const canDelete = lineItemsLoaded.length > 1;
+                            const previewLinePvm = isMulti
+                              ? (item.pvm_kodas_label || item.pvm_kodas || (previewLoading ? "Skaičiuojama…" : "—"))
+                              : (item.pvm_kodas || item.vat_class || "—");
 
-                            <Typography
-                              sx={{
-                                fontWeight: 100,
-                                marginBottom: 3,
-                                fontStyle: "italic",
-                              }}
-                            >
-                              {`Prekė #${idx + 1}`}
+                            return (
+                              <LineItemCard
+                                key={item.id}
+                                item={item}
+                                index={index}
+                                canDelete={canDelete}
+                                previewLinePvm={previewLinePvm}
+                                onDelete={deleteLineItem}
+                                onProductSelect={handleLineItemProductSelect}
+                                onProductClear={handleLineItemProductClear}
+                                onSaveFields={saveLineFields}
+                                formatNumberPreview={formatNumberPreview}
+                                PRODUCT_FIELDS={PRODUCT_FIELDS}
+                                EXTRA_FIELDS_CONFIG={EXTRA_FIELDS_CONFIG}
+                              />
+                            );
+                          })}
+
+                          {accordionExpanded && lineItemsLoading && lineItemsLoaded.length === 0 && (
+                            <Box sx={{ display: "flex", justifyContent: "center", py: 2 }}>
+                              <CircularProgress size={24} />
+                            </Box>
+                          )}
+
+                          {!lineItemsLoading && lineItemsLoaded.length === 0 && lineItemsTotal === 0 && (
+                            <Typography color="text.secondary" sx={{ textAlign: "center", py: 2 }}>
+                              Nėra prekių
                             </Typography>
+                          )}
 
-                            {PRODUCT_FIELDS.map(({ field, label }) => {
-                              const cfg = EXTRA_FIELDS_CONFIG.product.find(f => f.name === field);
-                              return (
-                                <Stack
-                                  key={`${item.id}-${field}`}
-                                  direction="row"
-                                  alignItems="center"
-                                  spacing={1}
-                                  sx={{ mb: 1 }}
+                          {lineItemsLoaded.length > 0 && lineItemsLoaded.length < lineItemsTotal && (
+                            <Box sx={{ display: "flex", justifyContent: "center", py: 1.5 }}>
+                              <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                                <Button
+                                  onClick={loadMoreLineItems}
+                                  variant="text"
+                                  disabled={lineItemsLoadingMore}
+                                  sx={{ minHeight: 36 }}
                                 >
-                                  <Typography color="text.secondary" sx={{ minWidth: 130, color: "black" }}>
-                                    {label}
-                                  </Typography>
+                                  Įkelti daugiau ({lineItemsTotal - lineItemsLoaded.length} liko)
+                                </Button>
 
-                                  <EditableAutoCell
-                                    label={cfg?.label || "Pasirinkite…"}
-                                    value={item[field] || ""}
-                                    searchUrl={cfg?.search}
-                                    onSelect={handleLineItemProductSelect(item.id)}
-                                    onManualSave={(text) => saveLineFields(item.id, { [field]: text || null })}
-                                    onClear={handleLineItemProductClear(item.id)}
-                                    sx={{
-                                      flex: 1,
-                                      "& .MuiInputBase-root": {
-                                        minHeight: "28px",
-                                        background: "transparent",
-                                        fontSize: "14px",
-                                        px: 1,
-                                      },
-                                      "& input": { padding: 0, fontSize: "14px", fontWeight: 700 },
-                                    }}
-                                  />
-                                </Stack>
-                              );
-                            })}
-
-                            <Stack spacing={0.5} mt={1} mb={1}>
-                              <Typography>Mato vnt: <EditableCell value={item.unit} onSave={(v) => saveLineFields(item.id, "unit", v)} /></Typography>
-                              <Typography>Kiekis: <EditableCell value={item.quantity} inputType="number" onSave={(v) => saveLineFields(item.id, "quantity", v)} renderDisplay={(v) => <b>{formatNumberPreview(v)}</b>} /></Typography>
-                              <Typography>Kaina: <EditableCell value={item.price} inputType="number" onSave={(v) => saveLineFields(item.id, "price", v)} renderDisplay={(v) => <b>{formatNumberPreview(v)}</b>} /></Typography>
-                              <Typography>Suma (be PVM): <EditableCell value={item.subtotal} inputType="number" onSave={(v) => saveLineFields(item.id, "subtotal", v)} renderDisplay={(v) => <b>{formatNumberPreview(v)}</b>} /></Typography>
-                              <Typography>PVM: <EditableCell value={item.vat} inputType="number" onSave={(v) => saveLineFields(item.id, "vat", v)} renderDisplay={(v) => <b>{formatNumberPreview(v)}</b>} /></Typography>
-                              <Typography>PVM %: <EditableCell value={item.vat_percent} inputType="number" onSave={(v) => saveLineFields(item.id, "vat_percent", v)} renderDisplay={(v) => <b>{formatNumberPreview(v)}</b>} /></Typography>
-                              <Typography>PVM klasė: <b>{previewLinePvm}</b></Typography>
-                              <Typography>Suma (su PVM): <EditableCell value={item.total} inputType="number" onSave={(v) => saveLineFields(item.id, "total", v)} renderDisplay={(v) => <b>{formatNumberPreview(v)}</b>} /></Typography>
-                              <Typography>Nuolaida (be PVM): <b>{formatNumberPreview(item.discount_wo_vat)}</b></Typography>
-                              <Typography>Nuolaida (su PVM): <b>{formatNumberPreview(item.discount_with_vat)}</b></Typography>
-                            </Stack>
-                          </Box>
-                        );
-                      })}
+                                {lineItemsLoadingMore && (
+                                  <CircularProgress size={26} thickness={8} />
+                                )}
+                              </Box>
+                            </Box>
+                          )}
+                        </Box>
+                      )}          
+                      
+                      {!closing && accordionExpanded && lineItemsLoading && lineItemsLoaded.length === 0 && (
+                        <Box sx={{ display: "flex", justifyContent: "center", py: 2 }}>
+                          <CircularProgress size={28} thickness={5} />
+                        </Box>
+                      )}
+                      
+                      {!closing && accordionExpanded && !lineItemsLoading && lineItemsLoaded.length === 0 && lineItemsTotal === 0 && (
+                        <Typography color="text.secondary" sx={{ textAlign: 'center', py: 2 }}>
+                          Nėra prekių
+                        </Typography>
+                      )}
                     </AccordionDetails>
                   </Accordion>
                 )}
@@ -1334,6 +1518,9 @@ export default function PreviewDialog({
 
 
 
+
+
+
 // import { LocalizationProvider } from '@mui/x-date-pickers';
 // import { AdapterDayjs } from '@mui/x-date-pickers/AdapterDayjs';
 // import dayjs from 'dayjs';
@@ -1348,18 +1535,20 @@ export default function PreviewDialog({
 //   Divider,
 //   Accordion, AccordionSummary, AccordionDetails,
 //   Stack,
-//   Alert,
 //   Grid2,
 //   Paper,
 //   Tooltip,
 //   Button,
+//   Chip,
 // } from "@mui/material";
 // import DeleteIcon from "@mui/icons-material/Delete";
 // import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 // import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
+// import CheckCircleIcon from '@mui/icons-material/CheckCircle';
+// import ErrorIcon from '@mui/icons-material/Error';
+// import HourglassEmptyIcon from '@mui/icons-material/HourglassEmpty';
 // import ZoomableImage from "../pages/ZoomableImage";
 // import { EXTRA_FIELDS_CONFIG } from "../pages/extraFieldsConfig";
-// import DynamicAutocomplete from "./DynamicAutocomplete";
 // import { api } from "../api/endpoints";
 // import { useEffect, useRef, useState, useMemo } from "react";
 // import CloseIcon from '@mui/icons-material/Close';
@@ -1367,6 +1556,35 @@ export default function PreviewDialog({
 
 // import EditableCell from "../components/EditableCell";
 // import EditableAutoCell from "../components/EditableAutoCell";
+
+
+
+
+
+// const mapVatStatus = (status) => {
+//   switch (status) {
+//     case "valid":
+//       return {
+//         label: "PVM galioja",
+//         color: "success",
+//         icon: <CheckCircleIcon />,
+//       };
+//     case "invalid":
+//       return {
+//         label: "PVM negalioja",
+//         color: "error",
+//         icon: <ErrorIcon />,
+//       };
+//     // "not_provided" или null → вообще не показываем чип
+//     default:
+//       return null;
+//   }
+// };
+
+
+
+
+
 
 // export default function PreviewDialog({
 //   open,
@@ -1383,13 +1601,11 @@ export default function PreviewDialog({
 
 //   const sameId = (a, b) => String(a) === String(b);
 
-//   // ==== анти-мигание: локальный превью-стейт + отмена гонок =====
 //   const [localPreview, setLocalPreview] = useState(null);
 //   const [previewLoading, setPreviewLoading] = useState(false);
 //   const lastReqIdRef = useRef(0);
 //   const abortRef = useRef(null);
 
-//   // helper для стабильного ключа компании
 //   const mkKey = (id, vat, name) => {
 //     const idStr = id == null ? "" : String(id).trim();
 //     if (idStr) return `id:${idStr}`;
@@ -1398,7 +1614,6 @@ export default function PreviewDialog({
 //     return normVat || normName;
 //   };
 
-//   // оптимистичное направление на клиенте от выбранного контрагента
 //   const optimisticDirection = useMemo(() => {
 //     if (!isMulti || !selected) return null;
 //     if (!selectedCpKey) return null;
@@ -1413,13 +1628,11 @@ export default function PreviewDialog({
 //     code === "pirkimas" ? "Pirkimas" : code === "pardavimas" ? "Pardavimas" : "Pasirinkite kontrahentą";
 
 //   const refreshDocument = async (id) => {
-//     // отменяем предыдущий запрос
 //     if (abortRef.current) abortRef.current.abort();
 //     const controller = new AbortController();
 //     abortRef.current = controller;
 //     const reqId = ++lastReqIdRef.current;
 
-//     // оптимистично проставим направление сразу (без скачков)
 //     if (isMulti) {
 //       setPreviewLoading(true);
 //       setLocalPreview(prev => ({
@@ -1439,7 +1652,6 @@ export default function PreviewDialog({
 //         params: (isMulti && selectedCpKey) ? { cp_key: selectedCpKey } : {},
 //       });
 
-//       // защита от гонок
 //       if (reqId !== lastReqIdRef.current) return;
 
 //       setSelected(res.data);
@@ -1449,7 +1661,6 @@ export default function PreviewDialog({
 //         if (selectedCpKey) {
 //           setLocalPreview(res.data.preview || null);
 //         } else {
-//           // контрагент не выбран — принудительно показываем "Pasirinkite kontrahentą"
 //           const pv = res.data.preview || {};
 //           setLocalPreview({
 //             ...pv,
@@ -1466,13 +1677,11 @@ export default function PreviewDialog({
 //         }
 //       }
 //     } catch (e) {
-//       // abort — ок, молчим
 //     } finally {
 //       if (reqId === lastReqIdRef.current) setPreviewLoading(false);
 //     }
 //   };
 
-//   // Подтянуть документ при открытии/смене дока
 //   useEffect(() => {
 //     if (
 //       open &&
@@ -1489,34 +1698,19 @@ export default function PreviewDialog({
 //       setLocalPreview(null);
 //       setPreviewLoading(false);
 //     }
-//     // eslint-disable-next-line
 //   }, [open, selected?.id]);
 
-//   // В multi: при смене выбранного контрагента — сразу пересчитать превью
 //   useEffect(() => {
 //     if (open && isMulti && selected?.id) {
 //       refreshDocument(selected.id);
 //     }
-//     // eslint-disable-next-line
 //   }, [selectedCpKey]);
 
 //   const programKey = user?.default_accounting_program;
 //   const extraFields = programKey ? (EXTRA_FIELDS_CONFIG[programKey] || []) : [];
 
-//   const productCodeField = extraFields.find((f) => /prekes_kodas/i.test(f.name))?.name;
-//   const productNameField = extraFields.find((f) => /prekes_pavadinimas/i.test(f.name))?.name;
-
-//   // Валидация
-//   const validationFields = [
-//     selected?.val_subtotal_match,
-//     selected?.val_vat_match,
-//     selected?.val_total_match,
-//   ];
-//   const showValidationWarning = validationFields.some((val) => val === false);
-
 //   const lineItems = Array.isArray(selected?.line_items) ? selected.line_items : [];
 
-//   // === PREVIEW labels для multi (берём из localPreview), single — из документа
 //   const hasAnyCounterparty =
 //     !!(selected?.buyer_id || selected?.buyer_vat_code || selected?.buyer_name) ||
 //     !!(selected?.seller_id || selected?.seller_vat_code || selected?.seller_name);
@@ -1537,25 +1731,12 @@ export default function PreviewDialog({
 //         : "Pasirinkite kontrahentą")
 //     : (selected?.pvm_kodas || "—");
 
-//   // const ppLabel = isMulti
-//   //   ? (localPreview?.pirkimas_pardavimas_label || (hasAnyCounterparty ? "—" : "Pasirinkite kontrahentą"))
-//   //   : (selected?.pirkimas_pardavimas === "pirkimas"
-//   //       ? "Pirkimas"
-//   //       : selected?.pirkimas_pardavimas === "pardavimas"
-//   //         ? "Pardavimas"
-//   //         : "—");
-
-//   // const pvmLabel = isMulti
-//   //   ? (localPreview?.pvm_kodas_label || (hasAnyCounterparty ? (previewLoading ? "Skaičiuojama…" : "—") : "Pasirinkite kontrahentą"))
-//   //   : (selected?.pvm_kodas || "—");
-
 //   const previewLinePvmById = (lineId) => {
 //     const arr = localPreview?.line_items || [];
 //     const hit = arr.find(li => String(li.id) === String(lineId));
 //     return hit?.pvm_kodas_label || hit?.pvm_kodas || null;
 //   };
 
-//   // Клиент (buyer/seller)
 //   const handleClientSelect = (type) => async (valueObj) => {
 //     if (!valueObj || !selected?.id) return;
 
@@ -1641,7 +1822,6 @@ export default function PreviewDialog({
 //     }
 //   };
 
-//   // Продукт документа (sumiskai)
 //   const handleProductSelect = async (valueObj) => {
 //     if (!valueObj || !selected?.id) return;
 //     const data = {
@@ -1680,7 +1860,6 @@ export default function PreviewDialog({
 //     }
 //   };
 
-//   // Продукт конкретной строки (detaliai)
 //   const handleLineItemProductSelect = (lineItemId) => async (valueObj) => {
 //     if (!valueObj || !selected?.id) return;
 //     const data = {
@@ -1762,8 +1941,6 @@ export default function PreviewDialog({
 //     }
 //   };
 
-
-//   // ----- RAW DATA (только для админ-просмотра) -----
 //   const gluedRawText = useMemo(() => {
 //     const v = selected?.glued_raw_text;
 //     return typeof v === "string" ? v : (v == null ? "" : String(v));
@@ -1794,7 +1971,6 @@ export default function PreviewDialog({
 //   const copyToClipboard = async (text) => {
 //     try { await navigator.clipboard.writeText(text || ""); } catch {}
 //   };
-//   // END ----- RAW DATA (только для админ-просмотра)
 
 //   const PRODUCT_FIELDS = [
 //     { field: "prekes_pavadinimas", label: "Prekės pavadinimas:" },
@@ -1815,22 +1991,20 @@ export default function PreviewDialog({
 
 //   if (!selected) return null;
 
-//  //Editable cell
-
 //   const CURRENCIES = [
-//   "EUR","USD","GBP",
-//   "AED","AFN","ALL","AMD","ANG","AOA","ARS","AUD","AWG","AZN","BAM","BBD","BDT","BGN","BHD",
-//   "BIF","BMD","BND","BOB","BOV","BRL","BSD","BTN","BWP","BYN","BZD","CAD","CDF","CHE","CHF",
-//   "CHW","CLF","CLP","CNY","COP","COU","CRC","CUC","CUP","CVE","CZK","DJF","DKK","DOP","DZD",
-//   "EGP","ERN","ETB","FJD","FKP","GEL","GHS","GIP","GMD","GNF","GTQ","GYD","HKD","HNL","HRK",
-//   "HTG","HUF","IDR","ILS","INR","IQD","IRR","ISK","JMD","JOD","JPY","KES","KGS","KHR","KMF",
-//   "KPW","KRW","KWD","KYD","KZT","LAK","LBP","LKR","LRD","LSL","LYD","MAD","MDL","MGA","MKD",
-//   "MMK","MNT","MOP","MRU","MUR","MVR","MWK","MXN","MXV","MYR","MZN","NAD","NGN","NIO","NOK",
-//   "NPR","NZD","OMR","PAB","PEN","PGK","PHP","PKR","PLN","PYG","QAR","RON","RSD","RUB","RWF",
-//   "SAR","SBD","SCR","SDG","SEK","SGD","SHP","SLE","SLL","SOS","SRD","SSP","STN","SVC","SZL",
-//   "THB","TJS","TMT","TND","TOP","TRY","TTD","TWD","TZS","UAH","UGX","USN","UYI","UYU","UZS",
-//   "VED","VEF","VND","VUV","WST","XAF","XAG","XAU","XBA","XBB","XBC","XBD","XCD","XDR","XOF",
-//   "XPD","XPF","XPT","XSU","XUA","YER","ZAR","ZMW","ZWL"
+//     "EUR","USD","GBP",
+//     "AED","AFN","ALL","AMD","ANG","AOA","ARS","AUD","AWG","AZN","BAM","BBD","BDT","BGN","BHD",
+//     "BIF","BMD","BND","BOB","BOV","BRL","BSD","BTN","BWP","BYN","BZD","CAD","CDF","CHE","CHF",
+//     "CHW","CLF","CLP","CNY","COP","COU","CRC","CUC","CUP","CVE","CZK","DJF","DKK","DOP","DZD",
+//     "EGP","ERN","ETB","FJD","FKP","GEL","GHS","GIP","GMD","GNF","GTQ","GYD","HKD","HNL","HRK",
+//     "HTG","HUF","IDR","ILS","INR","IQD","IRR","ISK","JMD","JOD","JPY","KES","KGS","KHR","KMF",
+//     "KPW","KRW","KWD","KYD","KZT","LAK","LBP","LKR","LRD","LSL","LYD","MAD","MDL","MGA","MKD",
+//     "MMK","MNT","MOP","MRU","MUR","MVR","MWK","MXN","MXV","MYR","MZN","NAD","NGN","NIO","NOK",
+//     "NPR","NZD","OMR","PAB","PEN","PGK","PHP","PKR","PLN","PYG","QAR","RON","RSD","RUB","RWF",
+//     "SAR","SBD","SCR","SDG","SEK","SGD","SHP","SLE","SLL","SOS","SRD","SSP","STN","SVC","SZL",
+//     "THB","TJS","TMT","TND","TOP","TRY","TTD","TWD","TZS","UAH","UGX","USN","UYI","UYU","UZS",
+//     "VED","VEF","VND","VUV","WST","XAF","XAG","XAU","XBA","XBB","XBC","XBD","XCD","XDR","XOF",
+//     "XPD","XPF","XPT","XSU","XUA","YER","ZAR","ZMW","ZWL"
 //   ];
 //   const TAIP_NE = [{ label:"Taip", value:true }, { label:"Ne", value:false }];
 
@@ -1846,35 +2020,18 @@ export default function PreviewDialog({
 //     if (Number.isNaN(n)) throw new Error("Turi būti skaičius");
 //     return n;
 //   };
-//   const ensureCurrency = (v) => {
-//     if (v == null || v === "") return "";
-//     const up = String(v).trim().toUpperCase();
-//     if (!CURRENCIES.includes(up)) throw new Error("Netinkama valiuta (ISO-3)");
-//     return up;
-//   };
-//   const ensureTaipNe = (v) => {
-//     if (v == null || v === "") return null;
-//     if (typeof v === "boolean") return v;
-//     const s = String(v).trim().toLowerCase();
-//     if (s === "taip") return true;
-//     if (s === "ne") return false;
-//     throw new Error("Leidžiama: Taip / Ne");
-//   };
 
-//   // helper: нормализуем значение (пустые -> null, числа как числа)
 //   const normVal = (v) => {
 //     if (v === "" || v === undefined) return null;
-//     // если это строка числа — приводим
 //     if (typeof v === "string" && v.trim() !== "" && !isNaN(Number(v))) return Number(v);
 //     return v;
 //   };
 
-//   // DOC: поддерживает saveDocFields({document_number: "INV-1"}) ИЛИ saveDocFields("document_number","INV-1")
 //   const saveDocFields = async (patchOrField, maybeValue) => {
 //     if (!selected?.id) return;
 
 //     const updates = Array.isArray(patchOrField)
-//       ? patchOrField // [[field,value], ...] — если захочешь батчи
+//       ? patchOrField
 //       : (typeof patchOrField === "object" && patchOrField !== null)
 //         ? Object.entries(patchOrField)
 //         : [[patchOrField, maybeValue]];
@@ -1889,8 +2046,16 @@ export default function PreviewDialog({
 //         { withCredentials: true }
 //       );
 
-//       // обновим selected точечно (без тяжёлого GET)
-//       latestSelected = { ...latestSelected, [field]: res.data[field] };
+//       latestSelected = { 
+//         ...latestSelected, 
+//         [field]: res.data[field],
+//         ...(res.data.ready_for_export !== undefined && { 
+//           ready_for_export: res.data.ready_for_export 
+//         }),
+//         ...(res.data.math_validation_passed !== undefined && { 
+//           math_validation_passed: res.data.math_validation_passed 
+//         })
+//       };
 //     }
 
 //     setSelected(latestSelected);
@@ -1899,7 +2064,6 @@ export default function PreviewDialog({
 //     if (isMulti) await refreshDocument(latestSelected.id);
 //   };
 
-//   // LINE: saveLineFields(lineId, {price: 9.99}) ИЛИ saveLineFields(lineId, "price", 9.99)
 //   const saveLineFields = async (lineId, patchOrField, maybeValue) => {
 //     if (!selected?.id || !lineId) return;
 
@@ -1910,6 +2074,7 @@ export default function PreviewDialog({
 //         : [[patchOrField, maybeValue]];
 
 //     let changed = {};
+//     let mathValidationResult = null;
 
 //     for (const [field, raw] of updates) {
 //       const value = normVal(raw);
@@ -1919,9 +2084,12 @@ export default function PreviewDialog({
 //         { withCredentials: true }
 //       );
 //       changed[field] = res.data[field];
+      
+//       if (res.data.math_validation_passed !== undefined) {
+//         mathValidationResult = res.data.math_validation_passed;
+//       }
 //     }
 
-//     // локально обновим только нужную строку
 //     setSelected(prev => ({
 //       ...prev,
 //       line_items: Array.isArray(prev?.line_items)
@@ -1929,6 +2097,9 @@ export default function PreviewDialog({
 //             String(li.id) === String(lineId) ? { ...li, ...changed } : li
 //           )
 //         : [],
+//       ...(mathValidationResult !== null && { 
+//         math_validation_passed: mathValidationResult 
+//       })
 //     }));
 
 //     setDocs(prev => prev.map(d =>
@@ -1940,18 +2111,15 @@ export default function PreviewDialog({
 //                   String(li.id) === String(lineId) ? { ...li, ...changed } : li
 //                 )
 //               : [],
+//             ...(mathValidationResult !== null && { 
+//               math_validation_passed: mathValidationResult 
+//             })
 //           }
 //         : d
 //     ));
 
 //     if (isMulti) await refreshDocument(selected.id);
 //   };
-
-
-
-//   // Dobavit / udalit lineitem
-
-//   // === ДОБАВИТЬ LINE ITEM ===
 
 //   const addLineItem = async () => {
 //     if (!selected?.id) return;
@@ -1971,13 +2139,11 @@ export default function PreviewDialog({
 //       )
 //     );
 
-//     // плавный скролл после добавления
 //     setTimeout(() => {
 //       lastItemRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
 //     }, 300);
 //   };
 
-//   // === УДАЛИТЬ LINE ITEM ===
 //   const deleteLineItem = async (lineId) => {
 //     if (!selected?.id) return;
 //     const currentCount = Array.isArray(selected?.line_items) ? selected.line_items.length : 0;
@@ -2005,10 +2171,58 @@ export default function PreviewDialog({
 //     );
 //   };
 
+//   const renderValidationFlags = () => {
+//     const readyForExport = selected?.ready_for_export;
+//     const mathValidation = selected?.math_validation_passed;
+
+//     return (
+//       <Box sx={{ mb: 2, display: 'flex', gap: 1.5, flexWrap: 'wrap' }}>
+//         <Chip
+//           icon={
+//             readyForExport === true ? <CheckCircleIcon /> :
+//             readyForExport === false ? <ErrorIcon /> :
+//             <HourglassEmptyIcon />
+//           }
+//           label={
+//             readyForExport === true ? "Paruošta eksportui" :
+//             readyForExport === false ? "Trūksta duomenų" :
+//             "Laukiama patvirtinimo"
+//           }
+//           color={
+//             readyForExport === true ? "success" :
+//             readyForExport === false ? "error" :
+//             "default"
+//           }
+//           variant={readyForExport === null ? "outlined" : "filled"}
+//           size="small"
+//         />
+
+//         <Chip
+//           icon={
+//             mathValidation === true ? <CheckCircleIcon /> :
+//             mathValidation === false ? <ErrorIcon /> :
+//             <HourglassEmptyIcon />
+//           }
+//           label={
+//             mathValidation === true ? "Sumos sutampa" :
+//             mathValidation === false ? "Sumos nesutampa" :
+//             "Laukiama patikrinimo"
+//           }
+//           color={
+//             mathValidation === true ? "success" :
+//             mathValidation === false ? "warning" :
+//             "default"
+//           }
+//           variant={mathValidation === null ? "outlined" : "filled"}
+//           size="small"
+//         />
+//       </Box>
+//     );
+//   };
 
 //   return (
 //     <LocalizationProvider dateAdapter={AdapterDayjs} adapterLocale="lt">
-//       <Dialog open={open} onClose={onClose} maxWidth="xl" fullWidth>
+//       <Dialog open={open} onClose={onClose} maxWidth="xl" fullWidth TransitionProps={{ timeout: 0.1 }}>
 //         <DialogTitle
 //           sx={{
 //             fontWeight: 500,
@@ -2046,7 +2260,6 @@ export default function PreviewDialog({
 //             overflow: "auto"
 //           }}
 //         >
-//           {/* Preview слева (sticky) */}
 //           <Box
 //             width="50%"
 //             sx={{
@@ -2072,19 +2285,13 @@ export default function PreviewDialog({
 //             )}
 //           </Box>
 
-//           {/* Правая колонка */}
 //           <Box width="50%" sx={{ px: 0.5 }}>
 //             {selected.error_message ? (
 //               <Typography color="error">{selected.error_message}</Typography>
 //             ) : (
 //               <>
-//                 {showValidationWarning && (
-//                   <Alert severity="warning" sx={{ mb: 2, fontSize: "inherit" }}>
-//                     <b>Dėmesio!</b> Kai kurios sumos galimai nesutampa. Patikrinkite dokumentą!
-//                   </Alert>
-//                 )}
+//                 {renderValidationFlags()}
 
-//                 {/* Всегда показываем, но источник разный */}
 //                 <Typography gutterBottom>
 //                   Pirkimas/pardavimas:&nbsp;
 //                   <b>{ppLabel}{isMulti && previewLoading ? "…" : ""}</b>
@@ -2095,19 +2302,17 @@ export default function PreviewDialog({
 //                 </Typography>
 //                 <Divider sx={{ my: 1 }} />
 
-//                 {/* Покупатель / Продавец */}
-//                 <Grid2 container spacing={2} sx={{ mb: 2 }}>
+//                 {/* <Grid2 container spacing={2} sx={{ mb: 2 }}>
 //                   <Grid2 size={6}>
 //                     <Typography sx={{ mb: 1.5, fontWeight: 500, fontSize: "0.95rem" }}>Pirkėjas</Typography>
 //                     {["buyer_name", "buyer_id", "buyer_vat_code"].map((field) => {
-                      
 //                       return (
 //                         <Box key={field} sx={{ mb: 1 }}>
 //                           <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 0.25 }}>
 //                             {EXTRA_FIELDS_CONFIG.client.find(f => f.name === field)?.label || field}
 //                           </Typography>
 //                           <EditableAutoCell
-//                             fieldName={field} 
+//                             fieldName={field}
 //                             label={EXTRA_FIELDS_CONFIG.client.find(f => f.name === field)?.label || "Pasirinkite…"}
 //                             value={selected[field] || ""}
 //                             searchUrl={EXTRA_FIELDS_CONFIG.client.find(f => f.name === field)?.search}
@@ -2144,19 +2349,19 @@ export default function PreviewDialog({
 //                   <Grid2 size={6}>
 //                     <Typography sx={{ mb: 1.5, fontWeight: 500, fontSize: "0.95rem" }}>Pardavėjas</Typography>
 //                     {["seller_name", "seller_id", "seller_vat_code"].map((field) => {
-//                       const fieldNameForAuto = field.includes("_name") 
-//                         ? "prekes_pavadinimas" 
-//                         : field.includes("_id") 
-//                           ? "prekes_kodas" 
+//                       const fieldNameForAuto = field.includes("_name")
+//                         ? "prekes_pavadinimas"
+//                         : field.includes("_id")
+//                           ? "prekes_kodas"
 //                           : "prekes_barkodas";
-                      
+
 //                       return (
 //                         <Box key={field} sx={{ mb: 1 }}>
 //                           <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 0.25 }}>
 //                             {EXTRA_FIELDS_CONFIG.client.find(f => f.name === field)?.label || field}
 //                           </Typography>
 //                           <EditableAutoCell
-//                             fieldName={fieldNameForAuto}  // ← используем маппинг для getOptionLabel
+//                             fieldName={fieldNameForAuto}
 //                             label={EXTRA_FIELDS_CONFIG.client.find(f => f.name === field)?.label || "Pasirinkite…"}
 //                             value={selected[field] || ""}
 //                             searchUrl={EXTRA_FIELDS_CONFIG.client.find(f => f.name === field)?.search}
@@ -2189,11 +2394,163 @@ export default function PreviewDialog({
 //                       );
 //                     })}
 //                   </Grid2>
+//                 </Grid2> */}
+
+//                 <Grid2 container spacing={2} sx={{ mb: 2 }}>
+//                   <Grid2 size={6}>
+//                     <Typography sx={{ mb: 1.5, fontWeight: 500, fontSize: "0.95rem" }}>
+//                       Pirkėjas
+//                     </Typography>
+//                     {["buyer_name", "buyer_id", "buyer_vat_code"].map((field) => {
+//                       const isVatField = field === "buyer_vat_code";
+//                       const vatMeta = isVatField ? mapVatStatus(selected?.buyer_vat_val) : null;
+
+//                       return (
+//                         <Box key={field} sx={{ mb: 1 }}>
+//                           <Box sx={{ display: "flex", alignItems: "center", gap: 0.5, mb: 0.25 }}>
+//                             <Typography variant="caption" color="text.secondary">
+//                               {EXTRA_FIELDS_CONFIG.client.find((f) => f.name === field)?.label ||
+//                                 field}
+//                             </Typography>
+//                             {isVatField && vatMeta && (
+//                               <Chip
+//                                 icon={vatMeta.icon}
+//                                 label={vatMeta.label}
+//                                 color={vatMeta.color}
+//                                 size="small"
+//                                 sx={{
+//                                   height: 18,
+//                                   fontSize: "0.7rem",
+//                                   "& .MuiChip-label": { px: 0.5, pr: 1 },
+//                                   "& .MuiChip-icon": { fontSize: "0.9rem", ml: 0.5, mr: 0.025 },
+//                                 }}
+//                               />
+//                             )}
+//                           </Box>
+//                           <EditableAutoCell
+//                             fieldName={field}
+//                             label={
+//                               EXTRA_FIELDS_CONFIG.client.find((f) => f.name === field)?.label ||
+//                               "Pasirinkite…"
+//                             }
+//                             value={selected[field] || ""}
+//                             searchUrl={EXTRA_FIELDS_CONFIG.client.find((f) => f.name === field)?.search}
+//                             onSelect={handleClientSelect("buyer")}
+//                             onManualSave={async (text) => {
+//                               if (!selected?.id) return;
+//                               const res = await api.patch(
+//                                 `/scanned-documents/${selected.id}/extra-fields/`,
+//                                 { [field]: text || null },
+//                                 { withCredentials: true }
+//                               );
+//                               setSelected(res.data);
+//                               setDocs((prev) =>
+//                                 prev.map((d) =>
+//                                   String(d.id) === String(selected.id) ? res.data : d
+//                                 )
+//                               );
+//                               if (isMulti) await refreshDocument(selected.id);
+//                             }}
+//                             onClear={async () => {
+//                               await handleClientClear("buyer")();
+//                             }}
+//                             sx={{
+//                               width: "100%",
+//                               "& .MuiInputBase-root": {
+//                                 fontSize: "0.875rem",
+//                               },
+//                               "& input": {
+//                                 fontSize: "0.875rem",
+//                               },
+//                             }}
+//                           />
+//                         </Box>
+//                       );
+//                     })}
+//                   </Grid2>
+
+//                   <Grid2 size={6}>
+//                     <Typography sx={{ mb: 1.5, fontWeight: 500, fontSize: "0.95rem" }}>
+//                       Pardavėjas
+//                     </Typography>
+//                     {["seller_name", "seller_id", "seller_vat_code"].map((field) => {
+//                       const isVatField = field === "seller_vat_code";
+//                       const vatMeta = isVatField ? mapVatStatus(selected?.seller_vat_val) : null;
+
+//                       const fieldNameForAuto = field.includes("_name")
+//                         ? "prekes_pavadinimas"
+//                         : field.includes("_id")
+//                         ? "prekes_kodas"
+//                         : "prekes_barkodas";
+
+//                       return (
+//                         <Box key={field} sx={{ mb: 1 }}>
+//                           <Box sx={{ display: "flex", alignItems: "center", gap: 0.5, mb: 0.25 }}>
+//                             <Typography variant="caption" color="text.secondary">
+//                               {EXTRA_FIELDS_CONFIG.client.find((f) => f.name === field)?.label ||
+//                                 field}
+//                             </Typography>
+//                             {isVatField && vatMeta && (
+//                               <Chip
+//                                 icon={vatMeta.icon}
+//                                 label={vatMeta.label}
+//                                 color={vatMeta.color}
+//                                 size="small"
+//                                 sx={{
+//                                   height: 18,
+//                                   fontSize: "0.7rem",
+//                                   "& .MuiChip-label": { px: 0.5, pr: 1 },
+//                                   "& .MuiChip-icon": { fontSize: "0.9rem", ml: 0.5, mr: 0.025 },
+//                                 }}
+//                               />
+//                             )}
+//                           </Box>
+//                           <EditableAutoCell
+//                             fieldName={fieldNameForAuto}
+//                             label={
+//                               EXTRA_FIELDS_CONFIG.client.find((f) => f.name === field)?.label ||
+//                               "Pasirinkite…"
+//                             }
+//                             value={selected[field] || ""}
+//                             searchUrl={EXTRA_FIELDS_CONFIG.client.find((f) => f.name === field)?.search}
+//                             onSelect={handleClientSelect("seller")}
+//                             onManualSave={async (text) => {
+//                               if (!selected?.id) return;
+//                               const res = await api.patch(
+//                                 `/scanned-documents/${selected.id}/extra-fields/`,
+//                                 { [field]: text || null },
+//                                 { withCredentials: true }
+//                               );
+//                               setSelected(res.data);
+//                               setDocs((prev) =>
+//                                 prev.map((d) =>
+//                                   String(d.id) === String(selected.id) ? res.data : d
+//                                 )
+//                               );
+//                               if (isMulti) await refreshDocument(selected.id);
+//                             }}
+//                             onClear={async () => {
+//                               await handleClientClear("seller")();
+//                             }}
+//                             sx={{
+//                               width: "100%",
+//                               "& .MuiInputBase-root": {
+//                                 fontSize: "0.875rem",
+//                               },
+//                               "& input": {
+//                                 fontSize: "0.875rem",
+//                               },
+//                             }}
+//                           />
+//                         </Box>
+//                       );
+//                     })}
+//                   </Grid2>
 //                 </Grid2>
+
 
 //                 <Divider sx={{ my: 1 }} />
 
-//                 {/* Даты, суммы и т.п. */}
 //                 <Stack spacing={0.5} mt={1} mb={1}>
 //                   <Typography>Sąskaitos data: <EditableCell value={selected.invoice_date} inputType="date" onSave={(v) => saveDocFields("invoice_date", ensureDate(v))} /></Typography>
 //                   <Typography>Mokėti iki: <EditableCell value={selected.due_date} inputType="date" onSave={(v) => saveDocFields("due_date", ensureDate(v))} /></Typography>
@@ -2202,7 +2559,7 @@ export default function PreviewDialog({
 //                   <Typography>Sąskaitos numeris: <EditableCell value={selected.document_number} onSave={(v) => saveDocFields("document_number", v)} /></Typography>
 //                   <Typography>Užsakymo numeris: <EditableCell value={selected.order_number} onSave={(v) => saveDocFields("order_number", v)} /></Typography>
 //                   <Typography>Nuolaida sąskaitai (be PVM): <EditableCell value={selected.invoice_discount_wo_vat} inputType="number" onSave={(v) => saveDocFields("invoice_discount_wo_vat", ensureNumber(v))} renderDisplay={(v) => <b>{formatNumberPreview(v)}</b>} /></Typography>
-//                   <Typography>Nuolaida sąskaitai (su PVM): <EditableCell value={selected.invoice_discount_with_vat} inputType="number" onSave={(v) => saveDocFields("invoice_discount_with_vat", ensureNumber(v))} renderDisplay={(v) => <b>{formatNumberPreview(v)}</b>} /></Typography>                  
+//                   <Typography>Nuolaida sąskaitai (su PVM): <EditableCell value={selected.invoice_discount_with_vat} inputType="number" onSave={(v) => saveDocFields("invoice_discount_with_vat", ensureNumber(v))} renderDisplay={(v) => <b>{formatNumberPreview(v)}</b>} /></Typography>
 //                   <Typography>Suma (be PVM): <EditableCell value={selected.amount_wo_vat} inputType="number" onSave={(v) => saveDocFields("amount_wo_vat", ensureNumber(v))} renderDisplay={(v) => <b>{formatNumberPreview(v)}</b>} /></Typography>
 //                   <Typography>PVM: <EditableCell value={selected.vat_amount} inputType="number" onSave={(v) => saveDocFields("vat_amount", ensureNumber(v))} renderDisplay={(v) => <b>{formatNumberPreview(v)}</b>} /></Typography>
 //                   <Typography>PVM %: <EditableCell value={selected.vat_percent} inputType="number" onSave={(v) => saveDocFields("vat_percent", ensureNumber(v))} renderDisplay={(v) => <b>{formatNumberPreview(v)}</b>} /></Typography>
@@ -2224,12 +2581,11 @@ export default function PreviewDialog({
 //                     renderDisplay={(v)=> (v===true ? "Taip" : v===false ? "Ne" : "—")}
 //                   /></Typography>
 
-//                   {/* sumiskai: товар на уровне документа */}
 //                   {selected.scan_type === "sumiskai" && (
 //                     <Grid2 container spacing={2} sx={{ mb: 2 }}>
 //                       <Grid2 xs={12}>
 //                         {PRODUCT_FIELDS.map(({ field, label }) => {
-//                           const cfg = EXTRA_FIELDS_CONFIG.product.find(f => f.name === field); // ← ДОБАВИЛИ
+//                           const cfg = EXTRA_FIELDS_CONFIG.product.find(f => f.name === field);
 
 //                           return (
 //                             <Stack
@@ -2244,11 +2600,11 @@ export default function PreviewDialog({
 //                               </Typography>
 
 //                               <EditableAutoCell
-//                                 label={label}                         // можно брать готовый label из PRODUCT_FIELDS
-//                                 value={selected[field] || ""}         // конкретное поле документа
-//                                 searchUrl={cfg?.search}               // endpoint из конфигурации
-//                                 onSelect={handleProductSelect}        // подставит ВСЕ 3 поля (как раньше)
-//                                 onManualSave={(text) =>               // ручная правка ТОЛЬКО текущего поля
+//                                 label={label}
+//                                 value={selected[field] || ""}
+//                                 searchUrl={cfg?.search}
+//                                 onSelect={handleProductSelect}
+//                                 onManualSave={(text) =>
 //                                   saveDocFields({ [field]: text || null })
 //                                 }
 //                                 onClear={() => handleProductClear()}
@@ -2274,7 +2630,6 @@ export default function PreviewDialog({
 //                   )}
 //                 </Stack>
 
-//                 {/* Prekės (accordion) */}
 //                 {selected.scan_type === "detaliai" && lineItems.length > 0 && (
 //                   <Accordion sx={{ mt: 1, background: "#fafafa" }} onChange={handleAccordionChange} ref={accordionRef}>
 //                     <AccordionSummary expandIcon={<ExpandMoreIcon />}>
@@ -2290,7 +2645,7 @@ export default function PreviewDialog({
 //                         >
 //                           + Pridėti eilutę
 //                         </Button>
-//                       </Box>                      
+//                       </Box>
 //                       {lineItems.map((item, idx) => {
 //                         const canDelete = lineItems.length > 1;
 //                         const previewLinePvm = isMulti
@@ -2299,7 +2654,7 @@ export default function PreviewDialog({
 //                         return (
 //                           <Box
 //                             key={item.id ?? `li-${idx}`}
-//                             ref={idx === lineItems.length - 1 ? lastItemRef : null} // 👈 ref к последнему
+//                             ref={idx === lineItems.length - 1 ? lastItemRef : null}
 //                             sx={{
 //                               mb: 2,
 //                               p: 2,
@@ -2309,7 +2664,6 @@ export default function PreviewDialog({
 //                               position: "relative",
 //                             }}
 //                           >
-//                             {/* delete icon */}
 //                             <Tooltip title={canDelete ? "Ištrinti eilutę" : "Negalima ištrinti vienintelės eilutės"}>
 //                               <IconButton
 //                                 size="small"
@@ -2338,7 +2692,7 @@ export default function PreviewDialog({
 //                             </Typography>
 
 //                             {PRODUCT_FIELDS.map(({ field, label }) => {
-//                               const cfg = EXTRA_FIELDS_CONFIG.product.find(f => f.name === field); // ← берём endpoint+label для конкретного поля
+//                               const cfg = EXTRA_FIELDS_CONFIG.product.find(f => f.name === field);
 //                               return (
 //                                 <Stack
 //                                   key={`${item.id}-${field}`}
@@ -2353,11 +2707,9 @@ export default function PreviewDialog({
 
 //                                   <EditableAutoCell
 //                                     label={cfg?.label || "Pasirinkite…"}
-//                                     value={item[field] || ""}                     // текущее значение строки
-//                                     searchUrl={cfg?.search}                       // endpoint автодополнения для этого поля
-//                                     // при выборе из списка — обновляем ВСЕ 3 поля (как и раньше)
+//                                     value={item[field] || ""}
+//                                     searchUrl={cfg?.search}
 //                                     onSelect={handleLineItemProductSelect(item.id)}
-//                                     // ручное сохранение — только это поле
 //                                     onManualSave={(text) => saveLineFields(item.id, { [field]: text || null })}
 //                                     onClear={handleLineItemProductClear(item.id)}
 //                                     sx={{
@@ -2375,55 +2727,7 @@ export default function PreviewDialog({
 //                               );
 //                             })}
 
-
-//                             {/* {PRODUCT_FIELDS.map(({ field, label }) => (
-//                               <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }} key={field}>
-//                                 <Typography color="text.secondary" sx={{ minWidth: 130, color: "black" }}>
-//                                   {label}
-//                                 </Typography>
-//                                 <DynamicAutocomplete
-//                                   key={`${item.id ?? `idx-${idx}`}-${item.prekes_kodas ?? ""}-${item.prekes_pavadinimas ?? ""}-${item.prekes_barkodas ?? ""}`}
-//                                   field={EXTRA_FIELDS_CONFIG.product.find((f) => f.name === field)}
-//                                   selectedValue={{
-//                                     prekes_kodas: item.prekes_kodas,
-//                                     prekes_pavadinimas: item.prekes_pavadinimas,
-//                                     prekes_barkodas: item.prekes_barkodas,
-//                                   }}
-//                                   onSelect={handleLineItemProductSelect(item.id)}
-//                                   onClear={handleLineItemProductClear(item.id)}
-//                                   fullWidth
-//                                   size="small"
-//                                   sx={{
-//                                     mb: 1,
-//                                     "& .MuiInputBase-root": {
-//                                       minHeight: "28px",
-//                                       background: "transparent",
-//                                       fontSize: "14px",
-//                                       px: 1,
-//                                     },
-//                                     "& input": {
-//                                       padding: 0,
-//                                       fontSize: "14px",
-//                                       fontWeight: 700,
-//                                     },
-//                                   }}
-//                                 />
-//                               </Stack>
-//                             ))} */}
-
 //                             <Stack spacing={0.5} mt={1} mb={1}>
-//                               {/* <Typography>Mato vnt: <b>{item.unit || "—"}</b></Typography>
-//                               <Typography>Kiekis: <b>{formatNumberPreview(item.quantity)}</b></Typography>
-//                               <Typography>Kaina: <b>{formatNumberPreview(item.price)}</b></Typography>
-//                               <Typography>Suma (be PVM): <b>{formatNumberPreview(item.subtotal)}</b></Typography>
-//                               <Typography>PVM: <b>{formatNumberPreview(item.vat)}</b></Typography>
-//                               <Typography>PVM %: <b>{formatNumberPreview(item.vat_percent)}</b></Typography>
-//                               <Typography>PVM klasė: <b>{previewLinePvm}</b></Typography>
-//                               <Typography>Suma (su PVM): <b>{formatNumberPreview(item.total)}</b></Typography>
-//                               <Typography>Nuolaida (be PVM): <b>{formatNumberPreview(item.discount_wo_vat)}</b></Typography>
-//                               <Typography>Nuolaida (su PVM): <b>{formatNumberPreview(item.discount_with_vat)}</b></Typography>
-//   */}
-
 //                               <Typography>Mato vnt: <EditableCell value={item.unit} onSave={(v) => saveLineFields(item.id, "unit", v)} /></Typography>
 //                               <Typography>Kiekis: <EditableCell value={item.quantity} inputType="number" onSave={(v) => saveLineFields(item.id, "quantity", v)} renderDisplay={(v) => <b>{formatNumberPreview(v)}</b>} /></Typography>
 //                               <Typography>Kaina: <EditableCell value={item.price} inputType="number" onSave={(v) => saveLineFields(item.id, "price", v)} renderDisplay={(v) => <b>{formatNumberPreview(v)}</b>} /></Typography>
@@ -2447,7 +2751,6 @@ export default function PreviewDialog({
 //                       <Typography sx={{ fontWeight: 500 }}>Admin: Raw duomenys</Typography>
 //                     </AccordionSummary>
 //                     <AccordionDetails>
-//                       {/* OCR (glued) */}
 //                       <Box sx={{ mb: 2 }}>
 //                         <Box display="flex" alignItems="center" justifyContent="space-between" mb={1}>
 //                           <Typography variant="subtitle2">OCR (glued_raw_text)</Typography>
@@ -2469,7 +2772,6 @@ export default function PreviewDialog({
 
 //                       <Divider sx={{ my: 2 }} />
 
-//                       {/* Structured JSON */}
 //                       <Box>
 //                         <Box display="flex" alignItems="center" justifyContent="space-between" mb={1}>
 //                           <Typography variant="subtitle2">Structured JSON</Typography>
@@ -2496,7 +2798,6 @@ export default function PreviewDialog({
 //                         </Paper>
 //                       </Box>
 
-//                       {/* GPT raw JSON — третья панель только для админа */}
 //                       {user?.is_superuser && (
 //                         <>
 //                           <Divider sx={{ my: 2 }} />

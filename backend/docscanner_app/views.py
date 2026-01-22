@@ -23,7 +23,7 @@ from .tasks import start_session_processing
 from rest_framework.parsers import MultiPartParser, FormParser
 from django.utils.dateparse import parse_date
 from .serializers import ScannedDocumentListSerializer
-from .pagination import DocumentsCursorPagination, UsersCursorPagination, MobileInboxCursorPagination
+from .pagination import DocumentsCursorPagination, UsersCursorPagination, MobileInboxCursorPagination, LineItemPagination
 
 
 
@@ -116,7 +116,30 @@ from .serializers import (
     CounterpartySerializer,
 )
 from django.db.models import Prefetch
+from django.db.models import Count
 
+from typing import Any, Optional
+
+from django.shortcuts import get_object_or_404
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import IsAuthenticated
+
+# <-- поправь пути импорта под свой проект
+from .models import ScannedDocument
+from .serializers import LineItemSerializer
+from .pagination import LineItemPagination
+
+from .utils.data_resolver import (
+    ResolveContext,
+    resolve_direction,
+    auto_select_pvm_code,
+    _pvm_label,
+    _nz,
+    _normalize_vat_percent,
+    _normalize_ps,
+    _ps_to_bin,
+    _need_geo,
+)
 
 from .tasks import process_uploaded_file_task
 from .utils.data_resolver import build_preview
@@ -1770,24 +1793,20 @@ def get_user_documents(request):
 
 BIG_FIELDS = ("raw_text", "gpt_raw_json", "structured_json", "glued_raw_text")
 
+
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 def get_document_detail(request, pk):
     user = request.user
 
-    line_items_prefetch = Prefetch(
-        "line_items",
-        queryset=LineItem.objects.order_by("id")
-    )
-
-    # --- Суперюзер: оставляем как есть (все поля) ---
     if user.is_superuser:
         doc = get_object_or_404(
-            ScannedDocument.objects.prefetch_related(line_items_prefetch),
+            ScannedDocument.objects.annotate(line_items_count=Count("line_items")),
             pk=pk
         )
         ser = ScannedDocumentAdminDetailSerializer(doc, context={"request": request})
         data = ser.data
+        data["line_items_count"] = doc.line_items_count  # уже посчитано
 
         if getattr(user, "view_mode", None) == "multi":
             cp_key = request.query_params.get("cp_key")
@@ -1803,17 +1822,16 @@ def get_document_detail(request, pk):
 
         return Response(data)
 
-    # --- Обычный пользователь: НЕ читаем большие поля ---
     qs = (
         ScannedDocument.objects
-        .prefetch_related(line_items_prefetch)
         .defer(*BIG_FIELDS)
+        .annotate(line_items_count=Count("line_items"))
     )
-
     doc = get_object_or_404(qs, pk=pk, user=user)
 
     ser = ScannedDocumentDetailSerializer(doc, context={"request": request})
     data = ser.data
+    data["line_items_count"] = doc.line_items_count  # уже посчитано
 
     if getattr(user, "view_mode", None) != "multi":
         return Response(data)
@@ -1832,31 +1850,23 @@ def get_document_detail(request, pk):
 
 
 
-# @api_view(['GET'])
+# @api_view(["GET"])
 # @permission_classes([IsAuthenticated])
 # def get_document_detail(request, pk):
-#     """
-#     Детали документа.
-#     - Superuser: может смотреть ЛЮБОЙ документ; если view_mode == "multi", добавляем preview.
-#     - Обычный пользователь:
-#         * single-режим — просто данные из БД;
-#         * multi-режим — добавляем preview (ничего в БД не пишем).
-#     """
 #     user = request.user
 
-#     # Prefetch с сортировкой для line_items
 #     line_items_prefetch = Prefetch(
-#         'line_items',
-#         queryset=LineItem.objects.order_by('id')
+#         "line_items",
+#         queryset=LineItem.objects.order_by("id")
 #     )
 
-#     # --- Суперюзер ---
+#     # --- Суперюзер: оставляем как есть (все поля) ---
 #     if user.is_superuser:
 #         doc = get_object_or_404(
 #             ScannedDocument.objects.prefetch_related(line_items_prefetch),
 #             pk=pk
 #         )
-#         ser = ScannedDocumentAdminDetailSerializer(doc, context={'request': request})
+#         ser = ScannedDocumentAdminDetailSerializer(doc, context={"request": request})
 #         data = ser.data
 
 #         if getattr(user, "view_mode", None) == "multi":
@@ -1873,16 +1883,18 @@ def get_document_detail(request, pk):
 
 #         return Response(data)
 
-#     # --- Обычный пользователь (только свои документы) ---
-#     doc = get_object_or_404(
-#         ScannedDocument.objects.prefetch_related(line_items_prefetch),
-#         pk=pk,
-#         user=user
+#     # --- Обычный пользователь: НЕ читаем большие поля ---
+#     qs = (
+#         ScannedDocument.objects
+#         .prefetch_related(line_items_prefetch)
+#         .defer(*BIG_FIELDS)
 #     )
-#     ser = ScannedDocumentDetailSerializer(doc, context={'request': request})
+
+#     doc = get_object_or_404(qs, pk=pk, user=user)
+
+#     ser = ScannedDocumentDetailSerializer(doc, context={"request": request})
 #     data = ser.data
 
-#     # preview только в multi-режиме
 #     if getattr(user, "view_mode", None) != "multi":
 #         return Response(data)
 
@@ -1898,6 +1910,114 @@ def get_document_detail(request, pk):
 #     data["preview"] = preview
 #     return Response(data)
 
+
+
+# @api_view(["GET"])
+# @permission_classes([IsAuthenticated])
+# def get_document_lineitems(request, pk):
+#     """Пагинированная загрузка line items для документа."""
+#     user = request.user
+    
+#     if user.is_superuser:
+#         doc = get_object_or_404(ScannedDocument, pk=pk)
+#     else:
+#         doc = get_object_or_404(ScannedDocument, pk=pk, user=user)
+    
+#     line_items_qs = doc.line_items.order_by("id")
+    
+#     paginator = LineItemPagination()
+#     page = paginator.paginate_queryset(line_items_qs, request)
+    
+#     serializer = LineItemSerializer(page, many=True)
+    
+#     return paginator.get_paginated_response(serializer.data)
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def get_document_lineitems(request, pk):
+    """Пагинированная загрузка line items для документа (+ PVM klasė по cp_key)."""
+    user = request.user
+
+    if user.is_superuser:
+        doc = get_object_or_404(ScannedDocument, pk=pk)
+    else:
+        doc = get_object_or_404(ScannedDocument, pk=pk, user=user)
+
+    # cp_key приходит из фронта так же, как на /documents/{id}/
+    cp_key = request.query_params.get("cp_key") or None
+    cp_selected = bool(cp_key)
+
+    # строим ctx ровно как в preview (multi)
+    ctx = ResolveContext(
+        user=user,
+        view_mode="multi",
+        purpose="preview",
+        overrides={},
+        cp_key=cp_key,
+    )
+    direction = resolve_direction(doc, ctx)
+
+    # базовые значения на случай, если в lineitem нет vat_percent / preke_paslauga
+    # (если у тебя эти поля называются иначе — поправь getattr)
+    base_vat_percent = getattr(doc, "vat_percent", None)
+    base_preke_paslauga = getattr(doc, "preke_paslauga", None)
+
+    line_items_qs = doc.line_items.order_by("id")
+
+    paginator = LineItemPagination()
+    page = paginator.paginate_queryset(line_items_qs, request)
+
+    serializer = LineItemSerializer(page, many=True)
+    data = list(serializer.data)  # <-- будем модифицировать
+
+    # Если cp не выбран — как раньше: “Pasirinkite kontrahentą”
+    if not cp_selected:
+        for row in data:
+            row["pvm_kodas"] = None
+            row["pvm_kodas_label"] = "Pasirinkite kontrahentą"
+        return paginator.get_paginated_response(data)
+
+    # cp выбран — считаем PVM kodą на каждую строку страницы
+    buyer_iso = _nz(doc.buyer_country_iso)
+    seller_iso = _nz(doc.seller_country_iso)
+    buyer_has_v = bool(_nz(doc.buyer_vat_code))
+    seller_has_v = bool(_nz(doc.seller_vat_code))
+
+    ps_doc = _normalize_ps(base_preke_paslauga)
+    separate_vat = bool(doc.separate_vat)
+    doc_96_str = bool(getattr(doc, "doc_96_str", False))
+
+    # page и serializer.data должны быть в одном порядке — zip безопасен
+    for li_obj, row in zip(page, data):
+        li_vat = _normalize_vat_percent(
+            li_obj.vat_percent if getattr(li_obj, "vat_percent", None) is not None else base_vat_percent
+        )
+
+        # если в модели есть preke_paslauga — используем её, иначе fallback на doc-level
+        li_ps_val = getattr(li_obj, "preke_paslauga", None)
+        li_ps = _normalize_ps(li_ps_val if li_ps_val is not None else ps_doc)
+        li_ps_bin = _ps_to_bin(li_ps)
+
+        if _need_geo(li_vat) and (direction is None or not (buyer_iso and seller_iso)):
+            li_code = None
+        else:
+            li_code = auto_select_pvm_code(
+                pirkimas_pardavimas=direction,
+                buyer_country_iso=buyer_iso,
+                seller_country_iso=seller_iso,
+                preke_paslauga=li_ps_bin,
+                vat_percent=li_vat,
+                separate_vat=separate_vat,
+                buyer_has_vat_code=buyer_has_v,
+                seller_has_vat_code=seller_has_v,
+                doc_96_str=doc_96_str,
+            )
+
+        row["pvm_kodas"] = li_code
+        row["pvm_kodas_label"] = _pvm_label(li_code, cp_selected=True)
+
+    return paginator.get_paginated_response(data)
 
 
 

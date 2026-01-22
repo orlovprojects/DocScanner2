@@ -15,6 +15,7 @@ from .utils.lineitem_rules import normalize_lineitem_rules
 
 
 class LineItemSerializer(serializers.ModelSerializer):
+    pvm_kodas_label = serializers.CharField(read_only=True, required=False)
     class Meta:
         model = LineItem
         fields = [
@@ -33,6 +34,7 @@ class LineItemSerializer(serializers.ModelSerializer):
             'total',
             'discount_wo_vat',
             'discount_with_vat',
+            "pvm_kodas_label",
 
             # product autocomplete fields
             'sandelio_kodas',
@@ -221,40 +223,62 @@ class ScannedDocumentListSerializer(serializers.ModelSerializer):
 #             "glued_raw_text": {"write_only": True},
 #         }
 
+# class ScannedDocumentDetailSerializer(serializers.ModelSerializer):
+#     line_items = serializers.SerializerMethodField()
+
+#     class Meta:
+#         model = ScannedDocument
+#         fields = "__all__"
+#         extra_kwargs = {
+#             "file": {"write_only": True},
+#             "gpt_raw_json": {"write_only": True},
+#             "raw_text": {"write_only": True},
+#             "structured_json": {"write_only": True},
+#             "glued_raw_text": {"write_only": True},
+#         }
+
+#     def get_line_items(self, obj):
+#         qs = obj.line_items.order_by("id")
+#         return LineItemSerializer(qs, many=True).data
+
+
+
+# class ScannedDocumentAdminDetailSerializer(serializers.ModelSerializer):
+#     line_items = LineItemSerializer(many=True, read_only=True)
+
+#     class Meta:
+#         model = ScannedDocument
+#         fields = "__all__"
+#         extra_kwargs = {
+#             "file": {"write_only": True},
+#             # "gpt_raw_json": {"write_only": True},
+#             "raw_text": {"write_only": True},
+#             # ВАЖНО: НЕ помечаем как write_only, чтобы суперюзер их видел:
+#             # "structured_json": {"write_only": True},   # ← не ставим
+#             # "glued_raw_text": {"write_only": True},    # ← не ставим
+#         }
+
+
 class ScannedDocumentDetailSerializer(serializers.ModelSerializer):
-    line_items = serializers.SerializerMethodField()
+    line_items_count = serializers.SerializerMethodField()
 
     class Meta:
         model = ScannedDocument
-        fields = "__all__"
-        extra_kwargs = {
-            "file": {"write_only": True},
-            "gpt_raw_json": {"write_only": True},
-            "raw_text": {"write_only": True},
-            "structured_json": {"write_only": True},
-            "glued_raw_text": {"write_only": True},
-        }
+        exclude = ("file", "gpt_raw_json", "raw_text", "structured_json", "glued_raw_text")
 
-    def get_line_items(self, obj):
-        qs = obj.line_items.order_by("id")
-        return LineItemSerializer(qs, many=True).data
-
+    def get_line_items_count(self, obj):
+        return obj.line_items.count()
 
 
 class ScannedDocumentAdminDetailSerializer(serializers.ModelSerializer):
-    line_items = LineItemSerializer(many=True, read_only=True)
+    line_items_count = serializers.SerializerMethodField()
 
     class Meta:
         model = ScannedDocument
-        fields = "__all__"
-        extra_kwargs = {
-            "file": {"write_only": True},
-            # "gpt_raw_json": {"write_only": True},
-            "raw_text": {"write_only": True},
-            # ВАЖНО: НЕ помечаем как write_only, чтобы суперюзер их видел:
-            # "structured_json": {"write_only": True},   # ← не ставим
-            # "glued_raw_text": {"write_only": True},    # ← не ставим
-        }
+        exclude = ("file", "raw_text")
+
+    def get_line_items_count(self, obj):
+        return obj.line_items.count()
 
 
 

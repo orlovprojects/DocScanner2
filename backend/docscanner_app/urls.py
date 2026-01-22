@@ -41,6 +41,7 @@ from .views import (
     payments_list,
     payment_invoice,
     get_user_counterparties,
+    get_document_lineitems,
 )
 from . import views
 from .views import TrackAdClickView
@@ -60,6 +61,7 @@ urlpatterns = [
 
     path('documents/', get_user_documents, name='get_user_documents'),
     path('documents/<int:pk>/', get_document_detail, name='get_document_detail'),
+    path('documents/<int:pk>/lineitems/', get_document_lineitems, name='get_document_lineitems'),
     path('documents/bulk-delete/', bulk_delete_documents, name='bulk_delete_documents'),
 
     path('download/apskaita5-adapter/', download_apskaita5_adapter, name='download_apskaita5_adapter'),
