@@ -2924,14 +2924,13 @@ def summarize_doc_issues(doc_struct):
         "issue_count": issue_count,
     }
 
-
-
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def admin_documents_with_errors(request):
     """
     Для superuser — документы всех пользователей с ошибками.
     Ошибка = math_validation_passed=False ИЛИ ready_for_export=False
+             ИЛИ structured_json._global_validation_log содержит "OVERALL STATUS: FAIL"
     Курсорная пагинация с infinite scroll.
     """
     user = request.user
@@ -2940,7 +2939,9 @@ def admin_documents_with_errors(request):
 
     # Только документы с ошибками
     qs = ScannedDocument.objects.select_related('user').filter(
-        Q(math_validation_passed=False) | Q(ready_for_export=False)
+        Q(math_validation_passed=False) | 
+        Q(ready_for_export=False) |
+        Q(structured_json___global_validation_log__icontains='OVERALL STATUS: FAIL')
     )
 
     # --- фильтры ---
@@ -2971,11 +2972,68 @@ def admin_documents_with_errors(request):
         if not obj.ready_for_export:
             badges.append("NOT_READY")
         
+        # Проверяем _global_validation_log в structured_json
+        structured = obj.structured_json or {}
+        validation_log = structured.get('_global_validation_log', '')
+        if validation_log and 'OVERALL STATUS: FAIL' in validation_log:
+            badges.append("VALIDATION✗")
+        
         r["issue_badges"] = " ".join(badges)
         r["issue_has"] = True
         data.append(r)
 
     return paginator.get_paginated_response(data)
+
+# @api_view(['GET'])
+# @permission_classes([IsAuthenticated])
+# def admin_documents_with_errors(request):
+#     """
+#     Для superuser — документы всех пользователей с ошибками.
+#     Ошибка = math_validation_passed=False ИЛИ ready_for_export=False
+#     Курсорная пагинация с infinite scroll.
+#     """
+#     user = request.user
+#     if not user.is_superuser:
+#         return Response({"detail": "Not authorized"}, status=status.HTTP_403_FORBIDDEN)
+
+#     # Только документы с ошибками
+#     qs = ScannedDocument.objects.select_related('user').filter(
+#         Q(math_validation_passed=False) | Q(ready_for_export=False)
+#     )
+
+#     # --- фильтры ---
+#     status_filter = request.GET.get('status')
+#     if status_filter:
+#         qs = qs.filter(status=status_filter)
+
+#     # Сортировка
+#     qs = qs.order_by('-uploaded_at', '-id')
+
+#     # --- курсорная пагинация ---
+#     paginator = DocumentsCursorPagination()
+#     page = paginator.paginate_queryset(qs, request)
+
+#     ser = ScannedDocumentListSerializer(page, many=True)
+
+#     # --- обогащение данных ---
+#     data = []
+#     for obj, row in zip(page, ser.data):
+#         r = dict(row)
+#         r["user_id"] = getattr(obj.user, "id", None)
+#         r["owner_email"] = getattr(obj.user, "email", None)
+        
+#         # Показываем какая именно ошибка
+#         badges = []
+#         if not obj.math_validation_passed:
+#             badges.append("MATH✗")
+#         if not obj.ready_for_export:
+#             badges.append("NOT_READY")
+        
+#         r["issue_badges"] = " ".join(badges)
+#         r["issue_has"] = True
+#         data.append(r)
+
+#     return paginator.get_paginated_response(data)
 
 
 
