@@ -16,6 +16,8 @@ from ..validators.vat_klas import auto_select_pvm_code  # новая сигна�
 from ..validators.currency_converter import to_iso_currency
 from ..validators.company_name_normalizer import normalize_company_name_v2
 from ..validators.vat_validator import validate_vat
+from ..validators.vat_code_sanitizer import sanitize_vat_code
+
 
 
 # Санитайзеры
@@ -146,7 +148,7 @@ def _apply_top_level_fields(
     # --- Основные поля ---
     db_doc.seller_id = doc_struct.get("seller_id")
     db_doc.seller_name = doc_struct.get("seller_name")
-    db_doc.seller_vat_code = doc_struct.get("seller_vat_code")
+    db_doc.seller_vat_code = sanitize_vat_code(doc_struct.get("seller_vat_code"))
     db_doc.seller_address = doc_struct.get("seller_address")
     db_doc.seller_country = doc_struct.get("seller_country")
     db_doc.seller_country_iso = doc_struct.get("seller_country_iso")
@@ -155,7 +157,7 @@ def _apply_top_level_fields(
 
     db_doc.buyer_id = doc_struct.get("buyer_id")
     db_doc.buyer_name = doc_struct.get("buyer_name")
-    db_doc.buyer_vat_code = doc_struct.get("buyer_vat_code")
+    db_doc.buyer_vat_code = sanitize_vat_code(doc_struct.get("buyer_vat_code"))
     db_doc.buyer_address = doc_struct.get("buyer_address")
     db_doc.buyer_country = doc_struct.get("buyer_country")
     db_doc.buyer_country_iso = doc_struct.get("buyer_country_iso")

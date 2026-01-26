@@ -165,6 +165,61 @@ def _get_extra_field_value(doc, user_extra_fields: dict, field_key: str) -> str:
 
 
 # =========================
+# PVM Kodas helpers
+# =========================
+
+def _get_pvm_kodas_for_item(doc, item, line_map=None, default="") -> str:
+    """
+    Получает PVM kodas для строки с учётом резолвера и separate_vat.
+    
+    Приоритет:
+    1. line_map[item.id] — от резолвера (если есть)
+    2. item.pvm_kodas — из БД
+    3. default — fallback
+    
+    ВАЖНО: "Keli skirtingi PVM" — это маркер, не реальный код -> возвращаем default
+    """
+    item_id = getattr(item, "id", None)
+    
+    # Пробуем взять из line_map (от резолвера)
+    if line_map is not None and item_id is not None and item_id in line_map:
+        pvm = _s(line_map.get(item_id, ""))
+        if pvm and pvm != "Keli skirtingi PVM":
+            return pvm
+    
+    # Fallback на item.pvm_kodas
+    pvm = _s(getattr(item, "pvm_kodas", ""))
+    if pvm and pvm != "Keli skirtingi PVM":
+        return pvm
+    
+    return default
+
+
+def _get_pvm_kodas_for_doc(doc, default="") -> str:
+    """
+    Получает PVM kodas для документа (sumiskai режим).
+    
+    ВАЖНО: 
+    - При separate_vat=True -> пустой (смешанные ставки)
+    - "Keli skirtingi PVM" -> пустой (это маркер, не код)
+    """
+    separate_vat = bool(getattr(doc, "separate_vat", False))
+    scan_type = _s(getattr(doc, "scan_type", "")).lower()
+    
+    # sumiskai + separate_vat=True -> пустой
+    if separate_vat and scan_type in ("sumiskai", "summary", "suminis"):
+        return default
+    
+    pvm = _s(getattr(doc, "pvm_kodas", ""))
+    
+    # Фильтруем маркер
+    if pvm == "Keli skirtingi PVM":
+        return default
+    
+    return pvm or default
+
+
+# =========================
 # XML helpers
 # =========================
 def _pretty_bytes(elem: ET.Element) -> bytes:
@@ -569,10 +624,12 @@ def _fill_line(
             pvm_proc_text = "0.00"
     ET.SubElement(eilute, "pvm_proc").text = pvm_proc_text
 
-    # pvm_kodas
-    if pvm_kodas_value is None:
-        pvm_kodas_value = getattr(line_obj, "pvm_kodas", None) if line_obj is not None else ""
-    ET.SubElement(eilute, "pvm_kodas").text = smart_str(_s(pvm_kodas_value))
+    # ====== ИСПРАВЛЕНИЕ: pvm_kodas с фильтрацией маркера ======
+    # Фильтруем "Keli skirtingi PVM" - это маркер, не реальный код
+    pvm_kodas_final = _s(pvm_kodas_value) if pvm_kodas_value else ""
+    if pvm_kodas_final == "Keli skirtingi PVM":
+        pvm_kodas_final = ""
+    ET.SubElement(eilute, "pvm_kodas").text = smart_str(pvm_kodas_final)
 
     # НОВОЕ: Цена за единицу (suma_vntv/suma_vntl) - опционально, но полезно для Finvalda
     # Это явно указывает себестоимость за единицу
@@ -715,7 +772,8 @@ def export_pirkimai_group_to_finvalda(documents):
                 # Реестр prekes/paslaugos
                 _ensure_catalog_entry_from_item(root, item=item, currency=currency)
 
-                code = (line_map or {}).get(getattr(item, "id", None)) if line_map is not None else getattr(item, "pvm_kodas", None)
+                # ====== ИСПРАВЛЕНИЕ: Используем helper для PVM кода ======
+                code = _get_pvm_kodas_for_item(doc, item, line_map, default="")
 
                 _fill_line(
                     det,
@@ -727,6 +785,9 @@ def export_pirkimai_group_to_finvalda(documents):
                 )
         else:
             # синтетическая строка
+            # ====== ИСПРАВЛЕНИЕ: Используем helper для PVM кода документа ======
+            pvm_kodas_doc = _get_pvm_kodas_for_doc(doc, default="")
+            
             _fill_line(
                 det,
                 is_purchase=False,
@@ -735,7 +796,7 @@ def export_pirkimai_group_to_finvalda(documents):
                 fallback_amount_wo_vat=getattr(doc, "amount_wo_vat", None),
                 fallback_vat_amount=getattr(doc, "vat_amount", None),
                 fallback_name=_s(getattr(doc, "prekes_pavadinimas", "")),
-                pvm_kodas_value=getattr(doc, "pvm_kodas", None),
+                pvm_kodas_value=pvm_kodas_doc,
                 fallback_tip_doc=getattr(doc, "preke_paslauga", None),
                 sandelio_kodas_value=default_sandelis,
                 summary_kodas=_get_or_persist_kodas_from_obj(doc),
@@ -871,7 +932,8 @@ def export_pardavimai_group_to_finvalda(documents):
                 # Реестр prekes/paslaugos
                 _ensure_catalog_entry_from_item(root, item=item, currency=currency)
 
-                code = (line_map or {}).get(getattr(item, "id", None)) if line_map is not None else getattr(item, "pvm_kodas", None)
+                # ====== ИСПРАВЛЕНИЕ: Используем helper для PVM кода ======
+                code = _get_pvm_kodas_for_item(doc, item, line_map, default="")
 
                 _fill_line(
                     det,
@@ -882,6 +944,9 @@ def export_pardavimai_group_to_finvalda(documents):
                     sandelio_kodas_value=default_sandelis,
                 )
         else:
+            # ====== ИСПРАВЛЕНИЕ: Используем helper для PVM кода документа ======
+            pvm_kodas_doc = _get_pvm_kodas_for_doc(doc, default="")
+            
             _fill_line(
                 det,
                 is_purchase=False,
@@ -890,7 +955,7 @@ def export_pardavimai_group_to_finvalda(documents):
                 fallback_amount_wo_vat=getattr(doc, "amount_wo_vat", None),
                 fallback_vat_amount=getattr(doc, "vat_amount", None),
                 fallback_name=_s(getattr(doc, "prekes_pavadinimas", "")),
-                pvm_kodas_value=getattr(doc, "pvm_kodas", None),
+                pvm_kodas_value=pvm_kodas_doc,
                 fallback_tip_doc=getattr(doc, "preke_paslauga", None),
                 sandelio_kodas_value=default_sandelis,
                 summary_kodas=_get_or_persist_kodas_from_obj(doc),
@@ -899,15 +964,6 @@ def export_pardavimai_group_to_finvalda(documents):
 
     xml_bytes = _pretty_bytes(root)
     return expand_empty_tags(xml_bytes)
-
-
-
-
-
-
-
-
-
 
 
 
@@ -1272,6 +1328,97 @@ def export_pardavimai_group_to_finvalda(documents):
 
 
 # # =========================
+# # Распределение скидок документа
+# # =========================
+
+# def _distribute_discount_to_finvalda_lines(doc, items_list: list) -> None:
+#     """
+#     Распределяет скидку документа (invoice_discount_wo_vat) на строки товаров.
+    
+#     Finvalda работает со строками, где указывается:
+#       - suma_v/suma_l (сумма без НДС)
+#       - suma_pvmv/suma_pvml (сумма НДС)
+#       - suma_vntv/suma_vntl (цена за единицу без НДС)
+    
+#     При наличии скидки документа:
+#       1. ВЫЧИТАЕМ долю скидки из subtotal каждой строки
+#       2. ПЕРЕСЧИТЫВАЕМ unit_price = new_subtotal / quantity
+#       3. ПЕРЕСЧИТЫВАЕМ vat = new_subtotal × vat_percent / 100
+    
+#     Args:
+#         doc: документ с полем invoice_discount_wo_vat
+#         items_list: список объектов LineItem (модифицируется in-place)
+    
+#     Модифицирует:
+#         Устанавливает атрибуты _finvalda_subtotal_after_discount, 
+#         _finvalda_vat_after_discount, _finvalda_unit_price_after_discount
+#     """
+#     if not items_list:
+#         return
+    
+#     # Безопасное получение скидки
+#     discount_raw = getattr(doc, "invoice_discount_wo_vat", None)
+#     if discount_raw in (None, "", 0, "0"):
+#         return  # Нет скидки
+    
+#     try:
+#         discount_wo = _d(discount_raw)
+#     except Exception:
+#         return
+    
+#     if discount_wo <= 0:
+#         return
+    
+#     # Сумма subtotal ДО скидки
+#     sum_subtotal_before = Decimal("0")
+#     for item in items_list:
+#         subtotal = _d(getattr(item, "subtotal", None))
+#         sum_subtotal_before += subtotal
+    
+#     if sum_subtotal_before <= 0:
+#         return
+    
+#     discount_distributed = Decimal("0")
+    
+#     for i, item in enumerate(items_list):
+#         qty = _d(getattr(item, "quantity", None), Decimal("1"))
+#         subtotal_before = _d(getattr(item, "subtotal", None))
+#         vat_percent = _d(getattr(item, "vat_percent", None))
+        
+#         # Последняя строка получает остаток (защита от округления)
+#         if i == len(items_list) - 1:
+#             line_discount = discount_wo - discount_distributed
+#         else:
+#             # Доля этой строки в общей сумме
+#             share = subtotal_before / sum_subtotal_before if sum_subtotal_before > 0 else Decimal("0")
+#             line_discount = (discount_wo * share).quantize(Decimal("0.01"))
+#             discount_distributed += line_discount
+        
+#         # Новый subtotal после скидки
+#         subtotal_after = subtotal_before - line_discount
+        
+#         # ПЕРЕСЧИТЫВАЕМ unit_price: price = subtotal_after / qty
+#         if qty > 0:
+#             unit_price_after = (subtotal_after / qty).quantize(Decimal("0.01"))
+#         else:
+#             unit_price_after = Decimal("0")
+        
+#         # ПЕРЕСЧИТЫВАЕМ VAT от НОВОГО subtotal
+#         if vat_percent > 0 and subtotal_after > 0:
+#             vat_after = (subtotal_after * vat_percent / Decimal("100")).quantize(Decimal("0.01"))
+#         else:
+#             vat_after = Decimal("0")
+        
+#         # Сохраняем финальные значения (после скидки)
+#         setattr(item, "_finvalda_subtotal_after_discount", subtotal_after)
+#         setattr(item, "_finvalda_vat_after_discount", vat_after)
+#         setattr(item, "_finvalda_unit_price_after_discount", unit_price_after)
+        
+#         # Также сохраняем для отладки
+#         setattr(item, "_finvalda_line_discount", line_discount)
+
+
+# # =========================
 # # Строки документов
 # # =========================
 
@@ -1337,13 +1484,30 @@ def export_pardavimai_group_to_finvalda(documents):
 #     name = getattr(line_obj, "prekes_pavadinimas", None) if line_obj is not None else None
 #     ET.SubElement(eilute, "pavadinimas").text = smart_str(_s(name) or _s(fallback_name))
 
-#     # суммы
+#     # суммы (ИСПОЛЬЗУЕМ ЗНАЧЕНИЯ ПОСЛЕ СКИДКИ, если есть)
 #     if line_obj is not None:
-#         subtotal = getattr(line_obj, "subtotal", None)
-#         vat_amount = getattr(line_obj, "vat", None)
+#         # Проверяем, есть ли значения после распределения скидки
+#         subtotal_after = getattr(line_obj, "_finvalda_subtotal_after_discount", None)
+#         vat_after = getattr(line_obj, "_finvalda_vat_after_discount", None)
+#         unit_price_after = getattr(line_obj, "_finvalda_unit_price_after_discount", None)
+        
+#         if subtotal_after is not None and vat_after is not None:
+#             # Используем пересчитанные значения (после скидки)
+#             subtotal = subtotal_after
+#             vat_amount = vat_after
+#             unit_price = unit_price_after if unit_price_after is not None else Decimal("0")
+#         else:
+#             # Используем оригинальные значения (без скидки или скидка уже учтена)
+#             subtotal = getattr(line_obj, "subtotal", None)
+#             vat_amount = getattr(line_obj, "vat", None)
+#             # Рассчитываем unit_price
+#             qty_for_price = _d(getattr(line_obj, "quantity", None), Decimal("1"))
+#             subtotal_d = _d(subtotal)
+#             unit_price = subtotal_d / qty_for_price if qty_for_price > 0 else Decimal("0")
 #     else:
 #         subtotal = fallback_amount_wo_vat
 #         vat_amount = fallback_vat_amount
+#         unit_price = Decimal("0")
 
 #     cur = (_s(currency) or "EUR").upper()
 #     if cur == "EUR":
@@ -1380,6 +1544,19 @@ def export_pardavimai_group_to_finvalda(documents):
 #     if pvm_kodas_value is None:
 #         pvm_kodas_value = getattr(line_obj, "pvm_kodas", None) if line_obj is not None else ""
 #     ET.SubElement(eilute, "pvm_kodas").text = smart_str(_s(pvm_kodas_value))
+
+#     # НОВОЕ: Цена за единицу (suma_vntv/suma_vntl) - опционально, но полезно для Finvalda
+#     # Это явно указывает себестоимость за единицу
+#     if line_obj is not None and tipas_val == "1":  # Только для товаров
+#         cur = (_s(currency) or "EUR").upper()
+#         if cur == "EUR":
+#             # EUR: заполняем и *_v, и *_l
+#             ET.SubElement(eilute, "suma_vntv").text = get_price_or_zero(unit_price)
+#             ET.SubElement(eilute, "suma_vntl").text = get_price_or_zero(unit_price)
+#         else:
+#             # Не EUR: только *_v
+#             ET.SubElement(eilute, "suma_vntv").text = get_price_or_zero(unit_price)
+#             ET.SubElement(eilute, "suma_vntl").text = "0"
 
 
 # # =========================================================
@@ -1499,7 +1676,13 @@ def export_pardavimai_group_to_finvalda(documents):
 
 #         line_items = getattr(doc, "line_items", None)
 #         if line_items and hasattr(line_items, "all") and line_items.exists():
-#             for item in line_items.all():
+#             # Получаем список всех строк
+#             all_items = list(line_items.all())
+            
+#             # КРИТИЧНО: Распределяем скидку документа на строки (если есть invoice_discount_wo_vat)
+#             _distribute_discount_to_finvalda_lines(doc, all_items)
+            
+#             for item in all_items:
 #                 # Реестр prekes/paslaugos
 #                 _ensure_catalog_entry_from_item(root, item=item, currency=currency)
 
@@ -1649,7 +1832,13 @@ def export_pardavimai_group_to_finvalda(documents):
 
 #         line_items = getattr(doc, "line_items", None)
 #         if line_items and hasattr(line_items, "all") and line_items.exists():
-#             for item in line_items.all():
+#             # Получаем список всех строк
+#             all_items = list(line_items.all())
+            
+#             # КРИТИЧНО: Распределяем скидку документа на строки (если есть invoice_discount_wo_vat)
+#             _distribute_discount_to_finvalda_lines(doc, all_items)
+            
+#             for item in all_items:
 #                 # Реестр prekes/paslaugos
 #                 _ensure_catalog_entry_from_item(root, item=item, currency=currency)
 
@@ -1681,4 +1870,3 @@ def export_pardavimai_group_to_finvalda(documents):
 
 #     xml_bytes = _pretty_bytes(root)
 #     return expand_empty_tags(xml_bytes)
-

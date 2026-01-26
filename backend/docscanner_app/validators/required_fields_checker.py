@@ -43,8 +43,12 @@ def check_required_fields_for_export(db_doc) -> bool:
         'currency': db_doc.currency,
         'document_number': db_doc.document_number,
         'vat_amount': db_doc.vat_amount,
-        'vat_percent': db_doc.vat_percent,
     }
+    
+    # vat_percent — обязателен только если separate_vat=False
+    separate_vat = bool(getattr(db_doc, "separate_vat", False))
+    if not separate_vat:
+        fields_can_be_zero['vat_percent'] = db_doc.vat_percent
     
     # Поля, которые НЕ могут быть 0
     fields_cannot_be_zero = {

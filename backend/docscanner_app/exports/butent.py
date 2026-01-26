@@ -396,6 +396,61 @@ def _distribute_discount_to_butent_lines(doc, items_list: list) -> None:
 
 
 # =========================
+# PVM Kodas helpers
+# =========================
+
+def _get_pvm_kodas_for_item(doc, item, line_map=None, default="") -> str:
+    """
+    Получает PVM kodas для строки с учётом резолвера и separate_vat.
+    
+    Приоритет:
+    1. line_map[item.id] — от резолвера (если есть)
+    2. item.pvm_kodas — из БД
+    3. default — fallback
+    
+    ВАЖНО: "Keli skirtingi PVM" — это маркер, не реальный код -> возвращаем default
+    """
+    item_id = getattr(item, "id", None)
+    
+    # Пробуем взять из line_map (от резолвера)
+    if line_map is not None and item_id is not None and item_id in line_map:
+        pvm = _s(line_map.get(item_id, ""))
+        if pvm and pvm != "Keli skirtingi PVM":
+            return pvm
+    
+    # Fallback на item.pvm_kodas
+    pvm = _s(getattr(item, "pvm_kodas", ""))
+    if pvm and pvm != "Keli skirtingi PVM":
+        return pvm
+    
+    return default
+
+
+def _get_pvm_kodas_for_doc(doc, default="") -> str:
+    """
+    Получает PVM kodas для документа (sumiskai режим).
+    
+    ВАЖНО: 
+    - При separate_vat=True -> пустой (смешанные ставки)
+    - "Keli skirtingi PVM" -> пустой (это маркер, не код)
+    """
+    separate_vat = bool(getattr(doc, "separate_vat", False))
+    scan_type = _s(getattr(doc, "scan_type", "")).lower()
+    
+    # sumiskai + separate_vat=True -> пустой
+    if separate_vat and scan_type in ("sumiskai", "summary", "suminis"):
+        return default
+    
+    pvm = _s(getattr(doc, "pvm_kodas", ""))
+    
+    # Фильтруем маркер
+    if pvm == "Keli skirtingi PVM":
+        return default
+    
+    return pvm or default
+
+
+# =========================
 # Основная функция экспорта
 # =========================
 
@@ -503,9 +558,12 @@ def _generate_butent_file(documents: List, mode: str, user=None) -> bytes:
     rows = []
 
     for doc in documents:
+        # ====== ИСПРАВЛЕНИЕ: Получаем line_map от резолвера ======
+        line_map = getattr(doc, "_pvm_line_map", None)
+        
         # Общие данные документа (колонки A-Q)
-        operacija = _get_operacija(doc, user)  # ✅ Передаём user
-        sandelis = _get_sandelis(doc, user)    # ✅ Передаём user
+        operacija = _get_operacija(doc, user)
+        sandelis = _get_sandelis(doc, user)
         isaf = _get_butent_isaf_flag(doc)
         client = _get_client_data_for_butent(doc)
 
@@ -537,6 +595,9 @@ def _generate_butent_file(documents: List, mode: str, user=None) -> bytes:
                 or "PREKE001"
             )
 
+            # ====== ИСПРАВЛЕНИЕ: Используем helper для PVM кода документа ======
+            pvm_kodas = _get_pvm_kodas_for_doc(doc, default="")
+
             row = doc_common + [
                 preke_kodas,                                                   # R: Prekės kodas
                 1,                                                             # S: Kiekis
@@ -544,7 +605,7 @@ def _generate_butent_file(documents: List, mode: str, user=None) -> bytes:
                 _s(getattr(doc, "currency", "EUR") or "EUR"),                 # U: Valiuta
                 _format_decimal(getattr(doc, "vat_amount", 0)),               # V: PVM suma
                 0,                                                             # W: Atv. PVM taikymas
-                _s(getattr(doc, "pvm_kodas", "")),                            # X: PVM kodas
+                pvm_kodas,                                                     # X: PVM kodas ← ИСПРАВЛЕНО
                 _s(getattr(doc, "prekes_barkodas", "")),                      # Y: Prekės barkodas
                 _s(getattr(doc, "prekes_pavadinimas", "")),                   # Z: Prekės pavadinimas
             ]
@@ -585,6 +646,9 @@ def _generate_butent_file(documents: List, mode: str, user=None) -> bytes:
                 if vat_to_use is None:
                     vat_to_use = getattr(item, "vat", 0)
 
+                # ====== ИСПРАВЛЕНИЕ: Используем helper для PVM кода ======
+                pvm_kodas = _get_pvm_kodas_for_item(doc, item, line_map, default="")
+
                 row = doc_common + [
                     preke_kodas,                                               # R: Prekės kodas
                     getattr(item, "quantity", 1),                              # S: Kiekis
@@ -592,7 +656,7 @@ def _generate_butent_file(documents: List, mode: str, user=None) -> bytes:
                     _s(getattr(doc, "currency", "EUR") or "EUR"),             # U: Valiuta
                     _format_decimal(vat_to_use),                              # V: PVM suma (после скидки)
                     0,                                                         # W: Atv. PVM taikymas
-                    _s(getattr(item, "pvm_kodas", "")),                       # X: PVM kodas
+                    pvm_kodas,                                                 # X: PVM kodas ← ИСПРАВЛЕНО
                     _s(getattr(item, "prekes_barkodas", "")),                 # Y: Prekės barkodas
                     _s(getattr(item, "prekes_pavadinimas", "")),              # Z: Prekės pavadinimas
                 ]
@@ -635,7 +699,7 @@ def _generate_butent_file(documents: List, mode: str, user=None) -> bytes:
             # Числовые столбцы: D, L, S, T, V, W
             # D=4 (iSAF), L=12 (fizinis), S=19 (Kiekis), T=20 (Kaina), V=22 (PVM suma), W=23 (Atv. PVM)
             if col_idx in [4, 12, 19, 20, 22, 23]:
-                # ✅ КРИТИЧНО: СНАЧАЛА устанавливаем data_type, ПОТОМ value
+                # КРИТИЧНО: СНАЧАЛА устанавливаем data_type, ПОТОМ value
                 if isinstance(value, (int, float)):
                     cell.data_type = 'n'  # Явно "число"
                     cell.value = value
@@ -767,14 +831,6 @@ def create_butent_template():
 
     logger.info("[BUTENT:TEMPLATE] Created template: %s", template_path)
     return template_path
-
-
-
-
-
-
-
-
 
 
 
@@ -976,13 +1032,36 @@ def create_butent_template():
 #     return ""
 
 
-# def _get_operacija(doc) -> str:
+# def _get_operacija(doc, user=None) -> str:
 #     """
 #     Определяет операцию для колонки H:
-#       - pirkimas -> "Pajamavimas"
-#       - pardavimas -> "Pardavimas"
+#       - pirkimas -> "Pajamavimas" (или из user.butent_extra_fields['pirkimas_operacija'])
+#       - pardavimas -> "Pardavimas" (или из user.butent_extra_fields['pardavimas_operacija'])
 #     """
 #     doc_type = _s(getattr(doc, "pirkimas_pardavimas", "")).lower()
+    
+#     # Пытаемся взять из user.butent_extra_fields
+#     if user and hasattr(user, "butent_extra_fields") and user.butent_extra_fields:
+#         extra_fields = user.butent_extra_fields
+        
+#         if doc_type == "pirkimas":
+#             custom_op = extra_fields.get("pirkimas_operacija", "").strip()
+#             if custom_op:
+#                 logger.info(
+#                     "[BUTENT:OPERACIJA] doc=%s using custom pirkimas_operacija=%r",
+#                     getattr(doc, "pk", None), custom_op
+#                 )
+#                 return custom_op
+#         elif doc_type == "pardavimas":
+#             custom_op = extra_fields.get("pardavimas_operacija", "").strip()
+#             if custom_op:
+#                 logger.info(
+#                     "[BUTENT:OPERACIJA] doc=%s using custom pardavimas_operacija=%r",
+#                     getattr(doc, "pk", None), custom_op
+#                 )
+#                 return custom_op
+    
+#     # Дефолтные значения
 #     if doc_type == "pirkimas":
 #         return "Pajamavimas"
 #     elif doc_type == "pardavimas":
@@ -992,14 +1071,42 @@ def create_butent_template():
 #         return "Pajamavimas"
 
 
-# def _get_sandelis(doc) -> str:
+# def _get_sandelis(doc, user=None) -> str:
 #     """
 #     Определяет склад для колонки I:
 #       - doc.sandelio_kodas если есть
+#       - иначе из user.butent_extra_fields (pirkimas_sandelis/pardavimas_sandelis)
 #       - иначе "S1"
 #     """
+#     # Приоритет 1: значение из документа
 #     sandelis = _s(getattr(doc, "sandelio_kodas", ""))
-#     return sandelis if sandelis else "S1"
+#     if sandelis:
+#         return sandelis
+    
+#     # Приоритет 2: значение из user.butent_extra_fields
+#     if user and hasattr(user, "butent_extra_fields") and user.butent_extra_fields:
+#         extra_fields = user.butent_extra_fields
+#         doc_type = _s(getattr(doc, "pirkimas_pardavimas", "")).lower()
+        
+#         if doc_type == "pirkimas":
+#             custom_sandelis = extra_fields.get("pirkimas_sandelis", "").strip()
+#             if custom_sandelis:
+#                 logger.info(
+#                     "[BUTENT:SANDELIS] doc=%s using custom pirkimas_sandelis=%r",
+#                     getattr(doc, "pk", None), custom_sandelis
+#                 )
+#                 return custom_sandelis
+#         elif doc_type == "pardavimas":
+#             custom_sandelis = extra_fields.get("pardavimas_sandelis", "").strip()
+#             if custom_sandelis:
+#                 logger.info(
+#                     "[BUTENT:SANDELIS] doc=%s using custom pardavimas_sandelis=%r",
+#                     getattr(doc, "pk", None), custom_sandelis
+#                 )
+#                 return custom_sandelis
+    
+#     # Приоритет 3: дефолтное значение
+#     return "S1"
 
 
 # def _format_decimal(value, decimals=2) -> float:
@@ -1143,7 +1250,7 @@ def create_butent_template():
 #               'auto' - автоматически разделяет документы на два файла
 #               'suminis' - принудительно все в один файл (suminis режим)
 #               'kiekinis' - принудительно все в один файл (kiekinis режим)
-#         user: пользователь (не используется, но оставлен для совместимости с Rivile)
+#         user: пользователь (для получения butent_extra_fields)
 
 #     Returns:
 #         Dict[str, bytes]: словарь вида {"suminis": bytes, "kiekinis": bytes}
@@ -1191,12 +1298,12 @@ def create_butent_template():
 #     # Экспортируем suminis, если есть документы
 #     if docs_suminis:
 #         logger.info("[BUTENT:EXPORT] Generating suminis file...")
-#         result["suminis"] = _generate_butent_file(docs_suminis, "suminis")
+#         result["suminis"] = _generate_butent_file(docs_suminis, "suminis", user)
     
 #     # Экспортируем kiekinis, если есть документы
 #     if docs_kiekinis:
 #         logger.info("[BUTENT:EXPORT] Generating kiekinis file...")
-#         result["kiekinis"] = _generate_butent_file(docs_kiekinis, "kiekinis")
+#         result["kiekinis"] = _generate_butent_file(docs_kiekinis, "kiekinis", user)
 
 #     if not result:
 #         logger.warning("[BUTENT:EXPORT] No files generated")
@@ -1206,13 +1313,14 @@ def create_butent_template():
 #     return result
 
 
-# def _generate_butent_file(documents: List, mode: str) -> bytes:
+# def _generate_butent_file(documents: List, mode: str, user=None) -> bytes:
 #     """
 #     Генерирует один Excel-файл для Būtent.
 
 #     Args:
 #         documents: список документов для экспорта
 #         mode: 'suminis' | 'kiekinis'
+#         user: пользователь (для получения butent_extra_fields)
 
 #     Returns:
 #         bytes: содержимое Excel-файла
@@ -1233,8 +1341,8 @@ def create_butent_template():
 
 #     for doc in documents:
 #         # Общие данные документа (колонки A-Q)
-#         operacija = _get_operacija(doc)
-#         sandelis = _get_sandelis(doc)
+#         operacija = _get_operacija(doc, user)  # ✅ Передаём user
+#         sandelis = _get_sandelis(doc, user)    # ✅ Передаём user
 #         isaf = _get_butent_isaf_flag(doc)
 #         client = _get_client_data_for_butent(doc)
 
@@ -1496,3 +1604,5 @@ def create_butent_template():
 
 #     logger.info("[BUTENT:TEMPLATE] Created template: %s", template_path)
 #     return template_path
+
+

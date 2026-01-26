@@ -535,6 +535,111 @@ def _infer_missing_sumiskai_anchors(doc: Dict[str, Any]) -> None:
     )
 
 
+def _detect_mixed_vat_sumiskai(doc: Dict[str, Any]) -> bool:
+    """
+    Fallback детекция смешанных ставок для sumiskai (без line_items).
+    
+    Логика:
+    - Если wo + vat = with ОК, но vat ≠ wo × vp% с дельтой > 0.20 — смешанные ставки.
+    - Пропускаем если есть активные документные скидки (они могут вызвать дельту).
+    
+    Returns: True если были изменения
+    """
+    items = doc.get("line_items") or []
+    if items:
+        return False  # Есть строки — используем _detect_mixed_vat_from_lines
+    
+    if bool(doc.get("separate_vat")):
+        return False  # Уже true — не трогаем
+    
+    wo = d(doc.get("amount_wo_vat"), 2)
+    vat = d(doc.get("vat_amount"), 2)
+    w = d(doc.get("amount_with_vat"), 2)
+    vp = d(doc.get("vat_percent"), 2)
+    
+    # Нужны все значения для проверки
+    if wo == 0 or vp == 0:
+        return False
+    
+    # Проверяем наличие активных документных скидок
+    inv_wo = d(doc.get("invoice_discount_wo_vat"), 2)
+    inv_w = d(doc.get("invoice_discount_with_vat"), 2)
+    
+    if inv_wo > Decimal("0.01") or inv_w > Decimal("0.01"):
+        # Есть скидки — дельта может быть из-за них, не из-за смешанных ставок
+        append_log(doc, f"mixed-vat-sumiskai: skipped (has discounts: inv_wo={inv_wo}, inv_w={inv_w})")
+        return False
+    
+    # Основное тождество должно сходиться
+    if not _approx(Q2(wo + vat), w, tol=Decimal("0.02")):
+        return False
+    
+    # Проверяем: vat ≈ wo × vp%?
+    vat_calc = Q2(wo * vp / Decimal("100"))
+    diff = (vat_calc - vat).copy_abs()
+    
+    # Порог: > 0.20 EUR
+    threshold = Decimal("0.20")
+    
+    if diff > threshold:
+        doc["separate_vat"] = True
+        doc["vat_percent"] = None
+        doc["_mixed_vat_auto_detected"] = True
+        append_log(doc, f"mixed-vat-sumiskai: vp={vp}% → vat_calc={vat_calc}, "
+                       f"actual_vat={vat}, Δ={diff} > {threshold} "
+                       f"→ separate_vat := True, vat_percent := None")
+        return True
+    
+    return False
+
+
+def _detect_mixed_vat_from_lines(doc: Dict[str, Any]) -> bool:
+    """
+    Fallback для detaliai (есть line_items):
+    Если 2+ разных vat_percent с subtotal > 0 — ставим separate_vat: true
+    
+    Returns: True если были изменения
+    """
+    items = doc.get("line_items") or []
+    if not items:
+        return False  # Нет строк — используем _detect_mixed_vat_sumiskai
+    
+    if bool(doc.get("separate_vat")):
+        return False  # Уже true — не трогаем
+    
+    # Собираем уникальные ставки с ненулевыми subtotal
+    rates_with_base = set()
+    for li in items:
+        subtotal = d(li.get("subtotal"), 2)
+        if subtotal > Decimal("0.01"):
+            vp = d(li.get("vat_percent"), 2)
+            rates_with_base.add(vp)
+    
+    if len(rates_with_base) >= 2:
+        doc["separate_vat"] = True
+        doc["vat_percent"] = None
+        doc["_mixed_vat_auto_detected"] = True
+        append_log(doc, f"mixed-vat-from-lines: found {len(rates_with_base)} different rates "
+                       f"with subtotal > 0: {sorted(float(r) for r in rates_with_base)} "
+                       f"→ separate_vat := True, vat_percent := None")
+        return True
+    
+    return False
+
+
+def _ensure_vat_percent_cleared_when_separate(doc: Dict[str, Any]) -> None:
+    """
+    Если separate_vat=true, vat_percent должен быть None.
+    Очищаем любое значение (включая 0) для консистентности.
+    """
+    if bool(doc.get("separate_vat")):
+        vp = doc.get("vat_percent")
+        if vp is not None:
+            doc["_orig_vat_percent_cleared"] = vp
+            doc["vat_percent"] = None
+            append_log(doc, f"separate_vat-cleanup: vat_percent was {vp}, cleared to None")
+
+
 def resolve_document_amounts(doc: Dict[str, Any]) -> Dict[str, Any]:
     """
     ЕДИНАЯ функция для документа (line_items НЕ трогаем):
@@ -544,6 +649,8 @@ def resolve_document_amounts(doc: Dict[str, Any]) -> Dict[str, Any]:
       • выполняет финальные консистент-проверки и пишет *_check_* флаги
     """
     _infer_doc_from_lines_when_missing(doc)
+    # ✅ НОВОЕ: Очистить vat_percent если separate_vat=true
+    _ensure_vat_percent_cleared_when_separate(doc)
     # --- 0) детект режима скидок (только лог/флаги) ---
     items = doc.get("line_items") or []
     inv_wo = d(doc.get("invoice_discount_wo_vat"), 2)    # ← 2 знака (денежная сумма)
@@ -667,6 +774,9 @@ def resolve_document_amounts(doc: Dict[str, Any]) -> Dict[str, Any]:
     
     # ✅ НОВОЕ: Для суммишкай-документов с недостающими данными
     _infer_missing_sumiskai_anchors(result)
+
+    # ✅ НОВОЕ: Fallback детекция смешанных ставок для sumiskai
+    _detect_mixed_vat_sumiskai(result)
     
     return result
 
@@ -707,8 +817,8 @@ def _calc_anchors_discount_aware(doc: Dict[str, Any], *, allow_discount_from_wit
         elif not has_disc and w != 0 and wo != 0:
             v = Q2(w - wo); log.append("vat from with & wo (no-disc)")
 
-    # 3) vp — при скидках НЕ выводим из (with & wo)
-    if vp == 0:
+    # 3) vp — при скидках НЕ выводим из (with & wo); при separate_vat НЕ считаем
+    if vp == 0 and not bool(doc.get("separate_vat")):
         if wo != 0 and v != 0:
             vp = Q2(v / wo * Decimal("100")); log.append("vat% from vat & wo")
         elif not has_disc and w != 0 and wo != 0:
@@ -747,14 +857,20 @@ def _final_checks(doc: Dict[str, Any]) -> Dict[str, Any]:
     w  = d(doc.get("amount_with_vat"), 2)    # ← 2 знака
 
     # Базовые ядра
-    core1 = (Q2(wo + v) == w)  # ← Q2 вместо Q4
-    vat_from_rate = Q2(wo * vp / Decimal("100"))  # ← Q2 вместо Q4
-    core2 = (wo == 0 and v == 0 and vp == 0) or _approx(vat_from_rate, v)  # tol=0.02 по умолчанию
-    append_log(doc, f"core: wo+vat==with -> {core1}; vat≈wo*vp -> {core2} (vat_from_rate={vat_from_rate}, v={v})")
+    separate_vat = bool(doc.get("separate_vat"))
+    core1 = (Q2(wo + v) == w)
+    
+    # core2: vat ≈ wo × vp% — ПРОПУСКАЕМ при separate_vat=true
+    if separate_vat:
+        core2 = True  # При смешанных ставках эта проверка не применима
+        append_log(doc, f"core: wo+vat==with -> {core1}; vat≈wo*vp -> SKIP (separate_vat=True)")
+    else:
+        vat_from_rate = Q2(wo * vp / Decimal("100"))
+        core2 = (wo == 0 and v == 0 and vp == 0) or _approx(vat_from_rate, v)
+        append_log(doc, f"core: wo+vat==with -> {core1}; vat≈wo*vp -> {core2} (vat_from_rate={vat_from_rate}, v={v})")
 
     doc["_check_core_wo_plus_vat_eq_with"] = bool(core1)
-    doc["_check_core_vat_eq_wo_times_vp"]  = bool(core2)
-    append_log(doc, f"core: wo+vat==with -> {core1}; vat==wo*vp -> {core2}")
+    doc["_check_core_vat_eq_wo_times_vp"]  = None if separate_vat else bool(core2)
 
     # Сценарии со скидками (A/B)
     scenA = None
@@ -904,13 +1020,16 @@ def _compute_pvm_detaliai_multi(
         if _need_geo(li_vat) and (direction is None or not (buyer_iso and seller_iso)):
             li_code = None
         else:
+            # ====== ИСПРАВЛЕНИЕ: separate_vat=False для отдельной строки! ======
+            # Каждая строка имеет свой vat_percent, поэтому для неё считаем
+            # конкретный PVM код, а не "Keli skirtingi PVM"
             li_code = auto_select_pvm_code(
                 pirkimas_pardavimas=direction,
                 buyer_country_iso=buyer_iso,
                 seller_country_iso=seller_iso,
                 preke_paslauga=li_ps_bin,
                 vat_percent=li_vat,
-                separate_vat=bool(doc.separate_vat),
+                separate_vat=False,  # <-- ИСПРАВЛЕНО! Было: bool(doc.separate_vat)
                 buyer_has_vat_code=buyer_has_v,
                 seller_has_vat_code=seller_has_v,
                 doc_96_str=bool(getattr(doc, "doc_96_str", False)),
@@ -927,6 +1046,7 @@ def _compute_pvm_detaliai_multi(
             "pvm_kodas_label": _pvm_label(li_code, cp_selected),
         })
 
+    # separate_vat влияет только на PVM код ДОКУМЕНТА, не строк
     if bool(doc.separate_vat):
         pvm_doc = "Keli skirtingi PVM"
     else:
@@ -2500,7 +2620,7 @@ def _final_math_validation(doc: Dict[str, Any]) -> Dict[str, Any]:
                 max_rounding_error = delta_sv.copy_abs()
         
         # CHECK 3: subtotal × vat_percent/100 = vat
-        if not separate_vat and subtotal != 0 and vp != 0:
+        if subtotal != 0 and vp != 0:
             vat_calc = Q2(subtotal * vp / Decimal("100"))
             delta_vp = Q2(vat_calc - vat)
             match_vp = _approx(vat_calc, vat, tol=TOLERANCE)
@@ -2811,6 +2931,98 @@ def _final_math_validation_sumiskai(doc: Dict[str, Any]) -> Dict[str, Any]:
 
 
 
+def _infer_line_vat_percent_from_doc_total(doc: Dict[str, Any]) -> bool:
+    """
+    Когда separate_vat=True и LLM не вернул vat_percent для строк,
+    пытаемся вычислить правильные ставки (0% или 21%) методом перебора.
+    
+    Алгоритм:
+    1. Начинаем с предположения что все строки 21%
+    2. Если VAT не сходится - пробуем 1 строку на 0%, остальные 21%
+    3. Если не сходится - пробуем 2 строки на 0%, и т.д.
+    4. Останавливаемся когда найдём комбинацию в пределах допуска ±0.05
+    
+    Returns: True если были изменения
+    """
+    if not bool(doc.get("separate_vat")):
+        return False
+    
+    items = doc.get("line_items") or []
+    if not items:
+        return False
+    
+    doc_vat = d(doc.get("vat_amount"), 2)
+    if doc_vat == 0:
+        return False
+    
+    # Собираем subtotal каждой строки
+    subtotals = []
+    for li in items:
+        subtotals.append(d(li.get("subtotal"), 2))
+    
+    n = len(subtotals)
+    tolerance = Decimal("0.05")
+    
+    # Проверяем текущую комбинацию (то что вернул LLM)
+    current_vat = Decimal("0.00")
+    for li in items:
+        sub = d(li.get("subtotal"), 2)
+        vp = d(li.get("vat_percent"), 2)
+        current_vat += Q2(sub * vp / Decimal("100"))
+    
+    if _approx(current_vat, doc_vat, tol=tolerance):
+        # LLM уже вернул правильные ставки
+        return False
+    
+    append_log(doc, f"vat-infer: LLM vat_percent incorrect (calc={current_vat}, doc={doc_vat}), trying to infer...")
+    
+    # Жадный перебор: сначала все 21%, потом 1 на 0%, потом 2 на 0%, и т.д.
+    from itertools import combinations
+    
+    for num_zeros in range(n + 1):
+        # Перебираем все комбинации num_zeros строк с 0%
+        for zero_indices in combinations(range(n), num_zeros):
+            zero_set = set(zero_indices)
+            
+            # Считаем VAT для этой комбинации
+            calc_vat = Decimal("0.00")
+            for i, sub in enumerate(subtotals):
+                if i in zero_set:
+                    # 0% VAT
+                    pass
+                else:
+                    # 21% VAT
+                    calc_vat += Q2(sub * Decimal("21") / Decimal("100"))
+            
+            if _approx(calc_vat, doc_vat, tol=tolerance):
+                # Нашли! Применяем ставки
+                for i, li in enumerate(items):
+                    if i in zero_set:
+                        li["vat_percent"] = Decimal("0.00")
+                        li["vat"] = Decimal("0.00")
+                    else:
+                        li["vat_percent"] = Decimal("21.00")
+                        sub = d(li.get("subtotal"), 2)
+                        li["vat"] = Q2(sub * Decimal("21") / Decimal("100"))
+                    
+                    # Пересчитать total
+                    li["total"] = Q2(d(li.get("subtotal"), 2) + d(li.get("vat"), 2))
+                    
+                    (li.setdefault("_li_calc_log", [])).append(
+                        f"vat-infer: assigned vat_percent={li['vat_percent']} (inferred from doc.vat_amount)"
+                    )
+                
+                append_log(
+                    doc, 
+                    f"vat-infer: found valid combination with {num_zeros} items at 0%, "
+                    f"calc_vat={calc_vat} ≈ doc_vat={doc_vat}"
+                )
+                return True
+    
+    # Не нашли подходящую комбинацию
+    append_log(doc, f"vat-infer: no valid combination found for doc_vat={doc_vat}")
+    return False
+
 
 def resolve_line_items(doc: Dict[str, Any]) -> Dict[str, Any]:
     """
@@ -2848,6 +3060,9 @@ def resolve_line_items(doc: Dict[str, Any]) -> Dict[str, Any]:
         total_in    = _coalesce_li_field(li, "total", "amount_with_vat", 2)
         if (price != 0 and qty != 0) or subtotal_in != 0 or total_in != 0:
             li["_calc_confidence"] = "medium" if (price == 0 or qty == 0) and subtotal_in == 0 and total_in != 0 else "high"
+
+    # 0.5) НОВОЕ: Вывести vat_percent для строк при separate_vat=True
+    _infer_line_vat_percent_from_doc_total(doc)
 
     # 2) Агрегация и первичная сверка
     sum_wo, sum_vat, sum_with = _aggregate_lines(doc)
@@ -2941,7 +3156,8 @@ def resolve_line_items(doc: Dict[str, Any]) -> Dict[str, Any]:
     # 3f) ========== ✨ НОВОЕ: Объединение негативных line items ==========
     _merge_negative_line_items(doc)
 
-
+    # ✅ НОВОЕ: Fallback детекция смешанных ставок по line_items
+    _detect_mixed_vat_from_lines(doc)
 
     # 4) Хинты
     items = doc.get("line_items") or []
@@ -2968,6 +3184,8 @@ def resolve_line_items(doc: Dict[str, Any]) -> Dict[str, Any]:
     if hints:
         doc["_lines_structured_hints"] = hints
         append_log(doc, f"hints: {len(hints)} issues noted")
+
+
 
 
     # ========== ФИНАЛЬНАЯ МАТЕМАТИЧЕСКАЯ ВАЛИДАЦИЯ ==========

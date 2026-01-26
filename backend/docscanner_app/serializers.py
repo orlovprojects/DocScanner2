@@ -197,6 +197,7 @@ class ScannedDocumentListSerializer(serializers.ModelSerializer):
             'buyer_id',
             'buyer_vat_code',
             'buyer_vat_val',
+            'separate_vat',
             # 'val_ar_sutapo',
             # 'val_subtotal_match',
             # 'val_vat_match',

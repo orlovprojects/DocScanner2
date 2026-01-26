@@ -2008,7 +2008,7 @@ def get_document_lineitems(request, pk):
                 seller_country_iso=seller_iso,
                 preke_paslauga=li_ps_bin,
                 vat_percent=li_vat,
-                separate_vat=separate_vat,
+                separate_vat=False,
                 buyer_has_vat_code=buyer_has_v,
                 seller_has_vat_code=seller_has_v,
                 doc_96_str=doc_96_str,

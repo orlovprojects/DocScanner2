@@ -27,6 +27,7 @@ import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 import MoreVertIcon from "@mui/icons-material/MoreVert";
 import SearchIcon from "@mui/icons-material/Search";
 import CloseIcon from "@mui/icons-material/Close";
+import PercentIcon from "@mui/icons-material/Percent";
 
 // Стилизованный контейнер поиска
 const SearchWrapper = styled(Box, {
@@ -250,6 +251,11 @@ export default function DocumentsTable({
     return dir.charAt(0).toUpperCase() + dir.slice(1);
   };
 
+  // Проверка: scan_type === "sumiskai" и separate_vat === true
+  const hasSeparateVatWarning = (d) => {
+    return d.scan_type === "sumiskai" && d.separate_vat === true;
+  };
+
   const baseColCount = 7;
   const extraOwnerCols = showOwnerColumns ? 2 : 0;
 
@@ -445,6 +451,19 @@ export default function DocumentsTable({
                                       verticalAlign: "middle",
                                       cursor: "pointer",
                                       color: "#f17e67",
+                                    }}
+                                  />
+                                </Tooltip>
+                              )}
+                              {hasSeparateVatWarning(d) && (
+                                <Tooltip title="Keli skirtingi PVM %. Skaitmenizuojant tokias sąskaitas sumiškai nenusistato PVM procentai bei PVM klasifikatoriai.">
+                                  <PercentIcon
+                                    fontSize="small"
+                                    sx={{
+                                      ml: 0.25,
+                                      verticalAlign: "middle",
+                                      cursor: "pointer",
+                                      color: "#ff9800",
                                     }}
                                   />
                                 </Tooltip>

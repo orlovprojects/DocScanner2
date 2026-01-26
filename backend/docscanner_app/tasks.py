@@ -33,6 +33,11 @@ from .utils.gemini import (
     repair_truncated_json_with_gemini_lite,
     request_full_json_with_gemini_lite,
 )
+from .utils.grok import (
+    ask_grok_with_retry,
+    repair_truncated_json_with_grok,
+    request_full_json_with_grok,
+)
 
 from .utils.similarity import calculate_max_similarity_percent
 from .utils.save_document import update_scanned_document, _apply_sumiskai_defaults_from_user
@@ -249,6 +254,80 @@ def _log_t(label: str, t0: float):
     logger.info(f"[TIME] {label}: {time.perf_counter() - t0:.2f}s")
 
 
+# Grok integration
+
+# def ask_llm_with_fallback(raw_text: str, scan_type: str, logger):
+#     """
+#     1) Grok (grok-4-1-fast-reasoning)
+#     2) если пусто/ошибка — Gemini 2.5 Flash-Lite
+#     3) если снова пусто/ошибка — GPT
+#     """
+#     # Берём промпты уже из grok.py (GROK_*), без GEMINI_*
+#     try:
+#         from .utils.grok import GROK_DEFAULT_PROMPT, GROK_DETAILED_PROMPT
+#         grok_prompt = GROK_DETAILED_PROMPT if scan_type == "detaliai" else GROK_DEFAULT_PROMPT
+#     except Exception:
+#         # fallback на старые (если вдруг grok.py не подхватился)
+#         grok_prompt = DETAILED_PROMPT if scan_type == "detaliai" else DEFAULT_PROMPT
+
+#     primary_model = "grok-4-1-fast-reasoning"
+#     secondary_model = "gemini-2.5-flash-lite"
+
+#     # 1) Grok
+#     try:
+#         t0 = _t()
+#         logger.info(f"[LLM] Try Grok primary model={primary_model}")
+#         resp = ask_grok_with_retry(
+#             text=raw_text,
+#             prompt=grok_prompt,
+#             model=primary_model,
+#             temperature=0.2 if scan_type == "detaliai" else 0.1,
+#             max_tokens=30000,
+#             timeout_seconds=300,
+#             logger=logger,
+#         )
+#         _log_t("LLM (Grok primary)", t0)
+#         logger.info(f"[LLM] Grok primary OK: len={len(resp or '')} preview={repr((resp or '')[:200])}")
+#         if resp and resp.strip():
+#             return resp, primary_model
+#         logger.warning("[LLM] Grok primary returned empty → try secondary")
+#     except Exception as e:
+#         logger.warning(f"[LLM] Grok primary failed: {e} → try secondary")
+
+#     # 2) Gemini Flash-Lite (запасной)
+#     try:
+#         t0 = _t()
+#         logger.info(f"[LLM] Try Gemini secondary model={secondary_model}")
+
+#         # Для Gemini используем твои GEMINI_* если они есть, иначе DEFAULT/DETAILED
+#         try:
+#             gemini_prompt = GEMINI_DETAILED_PROMPT if scan_type == "detaliai" else GEMINI_DEFAULT_PROMPT
+#         except NameError:
+#             gemini_prompt = DETAILED_PROMPT if scan_type == "detaliai" else DEFAULT_PROMPT
+
+#         resp2 = ask_gemini_with_retry(
+#             text=raw_text,
+#             prompt=gemini_prompt,
+#             model=secondary_model,
+#             logger=logger,
+#         )
+#         _log_t("LLM (Gemini secondary)", t0)
+#         logger.info(f"[LLM] Gemini secondary OK: len={len(resp2 or '')} preview={repr((resp2 or '')[:200])}")
+#         if resp2 and resp2.strip():
+#             return resp2, secondary_model
+#         logger.warning("[LLM] Gemini secondary returned empty → fallback to GPT")
+#     except Exception as e:
+#         logger.warning(f"[LLM] Gemini secondary failed: {e} → fallback to GPT")
+
+#     # 3) GPT
+#     gpt_prompt = DETAILED_PROMPT if scan_type == "detaliai" else DEFAULT_PROMPT
+#     t0 = _t()
+#     gpt_resp = ask_gpt_with_retry(raw_text, prompt=gpt_prompt)
+#     _log_t("LLM (GPT fallback)", t0)
+#     logger.info(f"[LLM] GPT fallback OK: len={len(gpt_resp or '')} preview={repr((gpt_resp or '')[:200])}")
+#     return gpt_resp, "gpt"
+
+
 def ask_llm_with_fallback(raw_text: str, scan_type: str, logger):
     """
     1) Gemini 2.5 Flash
@@ -307,39 +386,6 @@ def ask_llm_with_fallback(raw_text: str, scan_type: str, logger):
     _log_t("LLM (GPT fallback)", t0)
     logger.info(f"[LLM] GPT fallback OK: len={len(gpt_resp or '')} preview={repr((gpt_resp or '')[:200])}")
     return gpt_resp, "gpt"
-
-
-
-# def ask_llm_with_fallback(raw_text: str, scan_type: str, logger):
-#     """
-#     Сначала пробуем Gemini 2.5 Flash; если упал/пусто — откатываемся на GPT.
-#     Возвращает (resp_text_or_json, 'gemini'|'gpt').
-#     """
-#     try:
-#         try:
-#             gemini_prompt = GEMINI_DETAILED_PROMPT if scan_type == "detaliai" else GEMINI_DEFAULT_PROMPT
-#         except NameError:
-#             gemini_prompt = DETAILED_PROMPT if scan_type == "detaliai" else DEFAULT_PROMPT
-
-#         t0 = _t()
-#         resp = ask_gemini_with_retry(
-#             text=raw_text,
-#             prompt=gemini_prompt,
-#             model="gemini-flash-lite-latest",
-#             logger=logger,
-#         )
-#         _log_t("LLM (Gemini 2.5 Flash-lite)", t0)
-#         logger.info("[TASK] Gemini succeeded")
-#         return resp, "gemini"
-#     except Exception as e:
-#         logger.warning(f"[TASK] Gemini failed, falling back to GPT: {e}")
-
-#     gpt_prompt = DETAILED_PROMPT if scan_type == "detaliai" else DEFAULT_PROMPT
-#     t0 = _t()
-#     resp = ask_gpt_with_retry(raw_text, prompt=gpt_prompt)
-#     _log_t("LLM (GPT fallback)", t0)
-#     logger.info("[TASK] GPT used as fallback")
-#     return resp, "gpt"
 
 
 @shared_task
