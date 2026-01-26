@@ -71,14 +71,31 @@ def _normalize_vat_percent(v: Any) -> Optional[float]:
         return None
 
 
+_PS_MAP = {
+    "preke": 1,
+    "paslauga": 2,
+    "kodas-preke": 3,
+    "kodas-paslauga": 4,
+}
+
 def _normalize_ps(v: Any) -> Optional[int]:
-    """Expect one of {1,2,3,4}; return None if invalid."""
     if v is None:
         return None
+    
+    if isinstance(v, str):
+        v_clean = v.strip().lower()
+        if v_clean in _PS_MAP:
+            return _PS_MAP[v_clean]
+        try:
+            i = int(v_clean)
+            return i if i in (1, 2, 3, 4) else None
+        except ValueError:
+            return None
+    
     try:
-        i = int(str(v).strip())
+        i = int(v)
         return i if i in (1, 2, 3, 4) else None
-    except Exception:
+    except (ValueError, TypeError):
         return None
 
 
@@ -932,6 +949,7 @@ def resolve_direction(doc: ScannedDocument, ctx: ResolveContext) -> DirectionCod
     if ctx.cp_key:
         s_key = _mk_key(doc.seller_id, doc.seller_vat_code, doc.seller_name)
         b_key = _mk_key(doc.buyer_id,  doc.buyer_vat_code,  doc.buyer_name)
+        print(f"DEBUG: cp_key={ctx.cp_key!r}, s_key={s_key!r}, b_key={b_key!r}")
         if ctx.cp_key == s_key:
             return "pardavimas"
         if ctx.cp_key == b_key:
