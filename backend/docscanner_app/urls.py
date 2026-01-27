@@ -42,6 +42,7 @@ from .views import (
     payment_invoice,
     get_user_counterparties,
     get_document_lineitems,
+    swap_buyer_seller,
 )
 from . import views
 from .views import TrackAdClickView
@@ -128,6 +129,8 @@ urlpatterns = [
 
     path("scanned-documents/<int:doc_id>/inline/", InlineDocUpdateView.as_view()),
     path("scanned-documents/<int:doc_id>/lineitem/<int:line_id>/inline/", InlineLineUpdateView.as_view()),
+
+    path('documents/<int:pk>/swap-buyer-seller/', swap_buyer_seller, name='swap_buyer_seller'),
 
     path("api/contact/", contact_form, name="contact_form"),
 

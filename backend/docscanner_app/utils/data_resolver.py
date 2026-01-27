@@ -949,7 +949,6 @@ def resolve_direction(doc: ScannedDocument, ctx: ResolveContext) -> DirectionCod
     if ctx.cp_key:
         s_key = _mk_key(doc.seller_id, doc.seller_vat_code, doc.seller_name)
         b_key = _mk_key(doc.buyer_id,  doc.buyer_vat_code,  doc.buyer_name)
-        print(f"DEBUG: cp_key={ctx.cp_key!r}, s_key={s_key!r}, b_key={b_key!r}")
         if ctx.cp_key == s_key:
             return "pardavimas"
         if ctx.cp_key == b_key:

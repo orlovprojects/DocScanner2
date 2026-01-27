@@ -4541,33 +4541,6 @@ def finalize_session(request, session_id):
 
 
 
-# @api_view(["GET"])
-# @permission_classes([IsAuthenticated])
-# def active_sessions(request):
-#     """Получить все активные сессии пользователя"""
-#     sessions = UploadSession.objects.filter(
-#         user=request.user,
-#         stage__in=["processing", "queued", "credit_check"]
-#     ).order_by("created_at")
-    
-#     result = []
-#     for s in sessions:
-#         result.append({
-#             "id": str(s.id),
-#             "stage": s.stage,
-#             "scan_type": s.scan_type,
-#             "uploaded_files": s.uploaded_files,
-#             "expected_items": s.expected_items,
-#             "actual_items": s.actual_items,
-#             "processed_items": s.processed_items,
-#             "done_items": s.done_items,
-#             "failed_items": s.failed_items,
-#             "created_at": s.created_at.isoformat(),
-#         })
-    
-#     return Response({"sessions": result})
-
-
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 def active_sessions(request):
@@ -4607,4 +4580,53 @@ def active_sessions(request):
         })
     
     return Response({"sessions": result})
+
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def swap_buyer_seller(request, pk):
+    """
+    Меняет местами данные buyer и seller.
+    Доступно только для superuser.
+    """
+    if not request.user.is_superuser:
+        return Response(
+            {'error': 'Tik superuser gali keisti pirkėjo ir pardavėjo duomenis.'},
+            status=status.HTTP_403_FORBIDDEN
+        )
+    
+    try:
+        doc = ScannedDocument.objects.get(pk=pk)
+    except ScannedDocument.DoesNotExist:
+        return Response({'error': 'Dokumentas nerastas.'}, status=status.HTTP_404_NOT_FOUND)
+    
+    # Swap всех полей
+    swap_pairs = [
+        ('seller_id_programoje', 'buyer_id_programoje'),
+        ('seller_id', 'buyer_id'),
+        ('seller_name', 'buyer_name'),
+        ('seller_vat_code', 'buyer_vat_code'),
+        ('seller_address', 'buyer_address'),
+        ('seller_country', 'buyer_country'),
+        ('seller_country_iso', 'buyer_country_iso'),
+        ('seller_iban', 'buyer_iban'),
+        ('seller_is_person', 'buyer_is_person'),
+        ('seller_name_normalized', 'buyer_name_normalized'),
+        ('seller_vat_val', 'buyer_vat_val'),
+    ]
+    
+    for seller_field, buyer_field in swap_pairs:
+        seller_val = getattr(doc, seller_field)
+        buyer_val = getattr(doc, buyer_field)
+        setattr(doc, seller_field, buyer_val)
+        setattr(doc, buyer_field, seller_val)
+    
+    doc.save()
+    
+    return Response({
+        'success': True,
+        'seller_name': doc.seller_name,
+        'buyer_name': doc.buyer_name,
+    })
 

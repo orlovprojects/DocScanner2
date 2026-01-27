@@ -3,6 +3,7 @@ import { AdapterDayjs } from '@mui/x-date-pickers/AdapterDayjs';
 import dayjs from 'dayjs';
 import 'dayjs/locale/lt';
 import React from 'react';
+import SwapBuyerSellerButton from './SwapBuyerSellerButton';
 
 import {
   Dialog,
@@ -1066,6 +1067,23 @@ export default function PreviewDialog({
                 <Divider sx={{ my: 1 }} />
 
                 <Grid2 container spacing={2} sx={{ mb: 2 }}>
+                  {/* Swap button - только для superuser */}
+                  {user?.is_superuser && (
+                    <Grid2 size={12} sx={{ display: 'flex', justifyContent: 'center', mb: 1 }}>
+                      <SwapBuyerSellerButton 
+                        documentId={selected?.id}
+                        isSuperuser={user?.is_superuser}
+                        sellerName={selected?.seller_name}
+                        buyerName={selected?.buyer_name}
+                        onSwapComplete={async (data) => {
+                          setSelected(prev => ({...prev, seller_name: data.seller_name, buyer_name: data.buyer_name}));
+                          setDocs(prev => prev.map(d => String(d.id) === String(selected.id) 
+                            ? {...d, seller_name: data.seller_name, buyer_name: data.buyer_name} : d));
+                          await refreshDocument(selected.id);
+                        }}
+                      />
+                    </Grid2>
+                  )}
                   <Grid2 size={6}>
                     <Typography sx={{ mb: 1.5, fontWeight: 500, fontSize: "0.95rem" }}>
                       Pirkėjas
