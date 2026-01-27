@@ -88,6 +88,12 @@ Example (structure and field names; values may be empty strings, booleans must b
 {"docs":<number_of_documents>,"documents":[{"document_type":"","seller_id":"","seller_name":"","seller_vat_code":"","seller_address":"","seller_country":"","seller_country_iso":"","seller_iban":"","seller_is_person":false,"buyer_id":"","buyer_name":"","buyer_vat_code":"","buyer_address":"","buyer_country":"","buyer_country_iso":"","buyer_iban":"","buyer_is_person":false,"invoice_date":"","due_date":"","operation_date":"","document_series":"","document_number":"","order_number":"","amount_wo_vat":"","vat_amount":"","vat_percent":"","amount_with_vat":"","separate_vat":false,"currency":"","with_receipt":false,"paid_by_cash":false}]}
 
 Format dates as yyyy-mm-dd. Delete country from addresses. seller_country and buyer_country must be full country name in language of address provided. country_iso must be 2-letter code.
+When identifying buyer/seller:
+- Look for "pirkėjas" / "paslaugos pirkėjas" label → this is BUYER
+- Look for "pardavėjas" / "tiekėjas" label→ this is SELLER
+- "Savarankiškas sąskaitų išrašymas" (self-billing) and "Atvirkštinis PVM" (reverse charge) do NOT swap roles: pirkėjas is still buyer, pardavėjas/tiekėjas is still seller
+- Don't rely on position (left/right/top/bottom) when labels are available
+
 If due_date is not stated in the document, but invoice date and payment terms like number of days for payment are mentioned, calculate the due date by adding the payment period to the invoice date.
 Set "separate_vat": true ONLY when the document has 2 or more different VAT rates, AND each rate's taxable base > 0. A 0% VAT rate counts if its taxable base > 0, even though VAT amount = 0 (e.g., 21% on 100 EUR + 0% on 50 EUR = separate_vat: true).
 To decide this, you MUST check line items and VAT summary - if lines have different vat_percent (e.g., some 0%, some 21%) with subtotal > 0, set separate_vat: true.
@@ -227,8 +233,12 @@ Example (structure and field names; values may be empty strings, booleans must b
 {"docs":<number_of_documents>,"total_lines":<total_number_of_lines>,"ar_sutapo":<true_or_false>,"documents":[{"document_type":"","seller_id":"","seller_name":"","seller_vat_code":"","seller_address":"","seller_country":"","seller_country_iso":"","seller_iban":"","seller_is_person":false,"buyer_id":"","buyer_name":"","buyer_vat_code":"","buyer_address":"","buyer_country":"","buyer_country_iso":"","buyer_iban":"","buyer_is_person":false,"invoice_date":"","due_date":"","operation_date":"","document_series":"","document_number":"","order_number":"","invoice_discount_wo_vat":"","invoice_discount_with_vat":"","amount_wo_vat":"","vat_amount":"","vat_percent":"","amount_with_vat":"","separate_vat":false,"currency":"","with_receipt":false,"paid_by_cash":false,"doc_96_str":false,"line_items":[{"line_id":"","product_code":"","product_barcode":"","product_name":"","unit":"","quantity":"","price":"","subtotal":"","discount_wo_vat":"","vat":"","vat_percent":"","discount_with_vat":"","total":"","preke_paslauga":""}]}]}
 
 If any of values are empty, don't include them in JSON. For example, if "product_barcode" is empty, omit it from that lineitem in JSON.
-
 Format dates as yyyy-mm-dd. Delete country from addresses. seller_country and buyer_country must be full country name in language of address provided. country_iso must be 2-letter code.
+When identifying buyer/seller:
+- Look for "pirkėjas" / "paslaugos pirkėjas" label → this is BUYER
+- Look for "pardavėjas" / "tiekėjas" label→ this is SELLER
+- "Savarankiškas sąskaitų išrašymas" (self-billing) and "Atvirkštinis PVM" (reverse charge) do NOT swap roles: pirkėjas is still buyer, pardavėjas/tiekėjas is still seller
+- Don't rely on position (left/right/top/bottom) when labels are available
 If due_date is not stated in the document, but invoice date and payment terms like number of days for payment are mentioned, calculate the due date by adding the payment period to the invoice date.
 Set "separate_vat": true ONLY when the document has 2 or more different VAT rates, AND each rate's taxable base > 0. A 0% VAT rate counts if its taxable base > 0, even though VAT amount = 0 (e.g., 21% on 100 EUR + 0% on 50 EUR = separate_vat: true).
 To decide this, you MUST check line items and VAT summary - if lines have different vat_percent (e.g., some 0%, some 21%) with subtotal > 0, set separate_vat: true.
@@ -332,6 +342,11 @@ ADDITIONAL RULES
 - If any of values are empty, don't include them in JSON.
   For example, if "product_barcode" is empty, omit it from that lineitem in JSON.
 - Format dates as yyyy-mm-dd.
+- When identifying buyer/seller:
+  Look for "pirkėjas" / "paslaugos pirkėjas" label → this is BUYER
+  Look for "pardavėjas" / "tiekėjas" label→ this is SELLER
+  "Savarankiškas sąskaitų išrašymas" (self-billing) and "Atvirkštinis PVM" (reverse charge) do NOT swap roles: pirkėjas is still buyer, pardavėjas/tiekėjas is still seller
+  Don't rely on position (left/right/top/bottom) when labels are available
 - If due_date is not stated in the document, but invoice date and payment terms like number of days for payment are mentioned, calculate the due date by adding the payment period to the invoice date.
 - In line items, always always try to take price after discount (without VAT) if such price is provided in the document. Use up to 4 decimal places for prices if needed. Do not round numbers.
 - Delete country names from addresses.
