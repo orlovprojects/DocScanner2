@@ -28,6 +28,7 @@ PRICE_CREDITS_MAP = {
     "price_1SjdMMIaJDydaLBYAMXtAUra": 10000,
 }
 
+
 def _calc_credits_from_line_items(session) -> int:
     credits = 0
     line_items = (session.get("line_items") or {}).get("data") or []
@@ -38,7 +39,6 @@ def _calc_credits_from_line_items(session) -> int:
         if price_id in PRICE_CREDITS_MAP:
             credits += PRICE_CREDITS_MAP[price_id] * int(qty)
         else:
-            # Логируем неизвестный price_id
             logger.warning(
                 "[STRIPE] Unknown price_id=%s not in PRICE_CREDITS_MAP, qty=%s",
                 price_id, qty
@@ -153,7 +153,6 @@ def StripeWebhookView(request):
             )
 
     if not user:
-        # КРИТИЧНО: платёж потерян!
         amount_total = session.get("amount_total") or 0
         currency = session.get("currency") or "eur"
         buyer_email = (session.get("customer_details") or {}).get("email")
@@ -204,18 +203,14 @@ def StripeWebhookView(request):
     )
     
     if credits <= 0:
-        # Фолбэк на metadata.credits
         try:
             credits = int(metadata.get("credits") or 0)
             if credits > 0:
-                logger.info(
-                    "[STRIPE] Using fallback metadata.credits=%s", credits
-                )
+                logger.info("[STRIPE] Using fallback metadata.credits=%s", credits)
         except (TypeError, ValueError):
             credits = 0
     
     if credits <= 0:
-        # КРИТИЧНО: кредиты не определены!
         logger.error(
             "[STRIPE] ZERO CREDITS! session_id=%s, user_id=%s, "
             "amount=%s %s, line_items=%s, metadata=%s",
@@ -225,7 +220,31 @@ def StripeWebhookView(request):
             metadata
         )
 
-    # 9) Атомарно: начислить кредиты + создать Payments
+    # 9) Начисляем кредиты ОТДЕЛЬНОЙ транзакцией
+    credits_added = False
+    credits_before = 0
+    
+    if credits > 0:
+        try:
+            with transaction.atomic():
+                u = User.objects.select_for_update().get(pk=user.pk)
+                credits_before = u.credits or 0
+                u.credits = credits_before + credits
+                u.save(update_fields=["credits"])
+                credits_added = True
+                logger.info(
+                    "[STRIPE] Credits added: user_id=%s, before=%s, added=%s, after=%s",
+                    user.id, credits_before, credits, u.credits
+                )
+        except Exception as e:
+            logger.exception(
+                "[STRIPE] FAILED to add credits: user_id=%s, credits=%s, session_id=%s",
+                user.id, credits, session_id
+            )
+            # Критическая ошибка — возвращаем 500 чтобы Stripe повторил
+            return HttpResponse(status=500)
+
+    # 10) Создаём Payment запись ОТДЕЛЬНОЙ транзакцией
     paid_at_ts = session.get("created")
     paid_at = (
         datetime.fromtimestamp(paid_at_ts, tz=dt_timezone.utc)
@@ -234,24 +253,12 @@ def StripeWebhookView(request):
 
     try:
         with transaction.atomic():
-            # двойная защита от дублей
+            # Проверка дубля внутри транзакции
             if evt_id and Payments.objects.select_for_update().filter(stripe_event_id=evt_id).exists():
-                logger.info("[STRIPE] Event %s already exists (inside transaction), skipping", evt_id)
+                logger.info("[STRIPE] Event %s already exists (inside transaction), skipping payment record", evt_id)
                 return HttpResponse(status=200)
 
-            # начисляем кредиты
-            credits_before = 0
-            if credits > 0:
-                u = User.objects.select_for_update().get(pk=user.pk)
-                credits_before = u.credits or 0
-                u.credits = credits_before + credits
-                u.save(update_fields=["credits"])
-                logger.info(
-                    "[STRIPE] Credits added: user_id=%s, before=%s, added=%s, after=%s",
-                    user.id, credits_before, credits, u.credits
-                )
-
-            # берём первую позицию для хранения price_id/product_id
+            # Берём первую позицию для хранения price_id/product_id
             price_id = None
             product_id = None
             quantity = 1
@@ -293,25 +300,32 @@ def StripeWebhookView(request):
             )
             
             logger.info(
-                "[STRIPE] Payment created: payment_id=%s, dok_number=%s, "
+                "[STRIPE] Payment record created: payment_id=%s, dok_number=%s, "
                 "user_id=%s, credits=%s, amount=%s %s, session_id=%s",
                 payment.id, dok_number, user.id, credits, 
                 amount_total, currency, session_id
             )
 
     except IntegrityError as e:
-        logger.warning(
-            "[STRIPE] IntegrityError (likely duplicate): session_id=%s, event_id=%s, error=%s",
-            session_id, evt_id, e
+        # Кредиты УЖЕ начислены! Логируем проблему но возвращаем 200
+        logger.error(
+            "[STRIPE] Payment record FAILED but CREDITS WERE ADDED! "
+            "user_id=%s, credits=%s, credits_added=%s, session_id=%s, event_id=%s, error=%s. "
+            "ACTION REQUIRED: Fix sequence with SQL: "
+            "SELECT setval(pg_get_serial_sequence('docscanner_app_payments', 'id'), "
+            "(SELECT MAX(id) FROM docscanner_app_payments));",
+            user.id, credits, credits_added, session_id, evt_id, e
         )
         return HttpResponse(status=200)
+    
     except Exception as e:
         logger.exception(
-            "[STRIPE] FAILED to process payment: session_id=%s, user_id=%s, "
-            "amount=%s %s, error=%s",
-            session_id, user.id if user else None, amount_total, currency, e
+            "[STRIPE] Payment record failed: session_id=%s, user_id=%s, "
+            "credits_added=%s, error=%s",
+            session_id, user.id, credits_added, e
         )
-        return HttpResponse(status=500)
+        # Кредиты уже начислены, возвращаем 200 чтобы не было повторного начисления
+        return HttpResponse(status=200)
 
     logger.info("[STRIPE] Successfully processed session_id=%s", session_id)
     return HttpResponse(status=200)
