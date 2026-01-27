@@ -15,18 +15,12 @@ import { api } from "../api/endpoints";
 
 const SwapBuyerSellerButton = ({ 
   documentId, 
-  isSuperuser, 
   sellerName,
   buyerName,
   onSwapComplete,
 }) => {
   const [loading, setLoading] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
-
-  // Не показываем если не superuser
-  if (!isSuperuser) {
-    return null;
-  }
 
   const handleSwap = async () => {
     setLoading(true);
@@ -57,14 +51,19 @@ const SwapBuyerSellerButton = ({
           onClick={() => setConfirmOpen(true)} 
           disabled={loading}
           size="small"
-          color="warning"
+          sx={{ 
+            color: 'black',
+            '&:hover': { 
+              backgroundColor: 'rgba(0, 0, 0, 0.08)' 
+            }
+          }}
         >
-          {loading ? <CircularProgress size={18} /> : <SwapHoriz />}
+          {loading ? <CircularProgress size={18} color="inherit" /> : <SwapHoriz />}
         </IconButton>
       </Tooltip>
 
       <Dialog open={confirmOpen} onClose={() => setConfirmOpen(false)}>
-        <DialogTitle>Sukeisti duomenis?</DialogTitle>
+        <DialogTitle>Sukeisti pirkėją su pardavėju?</DialogTitle>
         <DialogContent>
           <DialogContentText>
             <strong>{sellerName || '—'}</strong> ↔ <strong>{buyerName || '—'}</strong>
@@ -72,7 +71,7 @@ const SwapBuyerSellerButton = ({
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setConfirmOpen(false)}>Atšaukti</Button>
-          <Button onClick={handleSwap} color="warning" variant="contained">
+          <Button onClick={handleSwap} variant="contained" color="primary">
             Sukeisti
           </Button>
         </DialogActions>

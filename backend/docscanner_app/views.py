@@ -4588,18 +4588,20 @@ def active_sessions(request):
 def swap_buyer_seller(request, pk):
     """
     Меняет местами данные buyer и seller.
-    Доступно только для superuser.
+    - Обычный юзер может менять только свои документы
+    - Superuser может менять документы любого юзера
     """
-    if not request.user.is_superuser:
-        return Response(
-            {'error': 'Tik superuser gali keisti pirkėjo ir pardavėjo duomenis.'},
-            status=status.HTTP_403_FORBIDDEN
-        )
-    
     try:
         doc = ScannedDocument.objects.get(pk=pk)
     except ScannedDocument.DoesNotExist:
         return Response({'error': 'Dokumentas nerastas.'}, status=status.HTTP_404_NOT_FOUND)
+    
+    # Проверка прав: либо владелец, либо superuser
+    if doc.user != request.user and not request.user.is_superuser:
+        return Response(
+            {'error': 'Neturite teisės keisti šio dokumento.'},
+            status=status.HTTP_403_FORBIDDEN
+        )
     
     # Swap всех полей
     swap_pairs = [
@@ -4629,4 +4631,3 @@ def swap_buyer_seller(request, pk):
         'seller_name': doc.seller_name,
         'buyer_name': doc.buyer_name,
     })
-
