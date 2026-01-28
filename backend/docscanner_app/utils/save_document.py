@@ -776,7 +776,9 @@ def update_scanned_document(
         pass
 
     # 1.8) Линии: канонизация строк + агрегаты + сверка с документом
-    doc_struct = resolve_line_items(doc_struct)
+    # doc_struct = resolve_line_items(doc_struct)
+    doc_struct = resolve_line_items(doc_struct, customer_user=user)
+
 
     # опционально подхватить итоговые флаги в поля модели (если есть такие поля)
     try:

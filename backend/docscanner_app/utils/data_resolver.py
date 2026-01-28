@@ -2327,6 +2327,11 @@ def _check_against_doc(doc: Dict[str, Any], sum_wo: Decimal, sum_vat: Decimal, s
 #     return doc
 
 
+# Добавить после _check_against_doc
+
+
+
+
 def _try_single_pass_reconciliation(doc: Dict[str, Any]) -> None:
     """
     Одношаговая попытка улучшить совпадение: для строк с единственной скидкой with/wo пробуем swap
@@ -2947,6 +2952,261 @@ def _final_math_validation_sumiskai(doc: Dict[str, Any]) -> Dict[str, Any]:
     return doc
 
 
+# ============================================================
+# FIX_DELTA: Подгонка сумм документа под строки (v2)
+# ============================================================
+
+FIX_DELTA_TOLERANCE = Decimal("0.20")  # максимальная дельта для подгонки
+FIX_DELTA_MIN = Decimal("0.02")        # минимальная дельта (меньше — не трогаем)
+
+
+def _is_fix_delta_enabled(customer_user) -> bool:
+    """
+    Проверяет, включена ли опция fix_delta в extra_settings пользователя.
+    """
+    if customer_user is None:
+        return False
+    
+    extra_settings = getattr(customer_user, "extra_settings", None)
+    if extra_settings is None:
+        return False
+    
+    if isinstance(extra_settings, dict):
+        return extra_settings.get("fix_delta") == 1
+    
+    return False
+
+
+def _fix_delta_adjust_lines_and_doc(doc: Dict[str, Any], customer_user=None) -> bool:
+    """
+    Подгоняет суммы документа под строки если:
+    - fix_delta=1 в extra_settings пользователя
+    - нет документных скидок
+    - дельты в диапазоне (0.02, 0.20]
+    
+    Если строки некосистентны — пытается исправить их.
+    
+    Возвращает True если были изменения.
+    """
+    # ===== ШАГ 0: Проверить условия запуска =====
+    
+    if not _is_fix_delta_enabled(customer_user):
+        return False
+    
+    items = doc.get("line_items") or []
+    if not items:
+        return False
+    
+    # Проверяем наличие документных скидок
+    inv_wo = d(doc.get("invoice_discount_wo_vat"), 2)
+    inv_with = d(doc.get("invoice_discount_with_vat"), 2)
+    
+    if inv_wo > Decimal("0.00") or inv_with > Decimal("0.00"):
+        append_log(doc, f"fix_delta: SKIP - document has discounts (wo={inv_wo}, with={inv_with})")
+        return False
+    
+    separate_vat = bool(doc.get("separate_vat"))
+    
+    # ===== ШАГ 1: Посчитать дельты =====
+    
+    sum_wo, sum_vat, sum_with = _aggregate_lines(doc)
+    
+    doc_wo = d(doc.get("amount_wo_vat"), 2)
+    doc_vat = d(doc.get("vat_amount"), 2)
+    doc_with = d(doc.get("amount_with_vat"), 2)
+    
+    diff_wo = (sum_wo - doc_wo).copy_abs()
+    diff_vat = (sum_vat - doc_vat).copy_abs() if not separate_vat else Decimal("0.00")
+    diff_with = (sum_with - doc_with).copy_abs()
+    
+    append_log(doc, f"fix_delta: checking deltas: wo={diff_wo}, vat={diff_vat}, with={diff_with}")
+    
+    # Все дельты маленькие — ничего не делаем
+    if diff_wo <= FIX_DELTA_MIN and diff_vat <= FIX_DELTA_MIN and diff_with <= FIX_DELTA_MIN:
+        append_log(doc, "fix_delta: all deltas within tolerance (≤0.02), skipping")
+        return False
+    
+    # Любая дельта слишком большая — не трогаем
+    if diff_wo > FIX_DELTA_TOLERANCE:
+        append_log(doc, f"fix_delta: SKIP - wo delta {diff_wo} exceeds {FIX_DELTA_TOLERANCE}")
+        return False
+    if not separate_vat and diff_vat > FIX_DELTA_TOLERANCE:
+        append_log(doc, f"fix_delta: SKIP - vat delta {diff_vat} exceeds {FIX_DELTA_TOLERANCE}")
+        return False
+    if diff_with > FIX_DELTA_TOLERANCE:
+        append_log(doc, f"fix_delta: SKIP - with delta {diff_with} exceeds {FIX_DELTA_TOLERANCE}")
+        return False
+    
+    # ===== ШАГ 2: Быстрый путь — строки консистентны? =====
+    
+    lines_sum_check = Q2(sum_wo + sum_vat)
+    lines_consistent = _approx(lines_sum_check, sum_with, tol=FIX_DELTA_MIN)
+    
+    if lines_consistent:
+        # Просто подгоняем документ
+        adjustments = []
+        
+        if diff_wo > Decimal("0.00"):
+            doc["_orig_amount_wo_vat"] = doc_wo
+            doc["amount_wo_vat"] = sum_wo
+            adjustments.append(f"wo {doc_wo}→{sum_wo}")
+        
+        if not separate_vat and diff_vat > Decimal("0.00"):
+            doc["_orig_vat_amount"] = doc_vat
+            doc["vat_amount"] = sum_vat
+            adjustments.append(f"vat {doc_vat}→{sum_vat}")
+        
+        if diff_with > Decimal("0.00"):
+            doc["_orig_amount_with_vat"] = doc_with
+            doc["amount_with_vat"] = sum_with
+            adjustments.append(f"with {doc_with}→{sum_with}")
+        
+        doc["ar_sutapo"] = True
+        doc["_doc_totals_adjusted_by_fix_delta"] = True
+        
+        append_log(doc, f"fix_delta: lines consistent, adjusted doc totals: {', '.join(adjustments)}")
+        return True
+    
+    # ===== ШАГ 3: Строки НЕконсистентны — пытаемся исправить =====
+    
+    append_log(doc, f"fix_delta: lines inconsistent (Σwo+Σvat={lines_sum_check} ≠ Σwith={sum_with}), attempting line fixes")
+    
+    # Сохраняем бэкап всех строк
+    lines_backup = []
+    for li in items:
+        lines_backup.append({
+            "vat": d(li.get("vat"), 2),
+            "total": d(li.get("total"), 2),
+            "_li_calc_log": list(li.get("_li_calc_log") or []),
+        })
+    
+    fixed_lines = 0
+    
+    for idx, li in enumerate(items):
+        subtotal = d(li.get("subtotal"), 2)
+        vat = d(li.get("vat"), 2)
+        vat_percent = d(li.get("vat_percent"), 2)
+        total = d(li.get("total"), 2)
+        
+        line_changed = False
+        line_id = li.get("line_id") or li.get("id") or f"#{idx+1}"
+        
+        # Проверка 1: vat = subtotal × vat%? (если separate_vat=false и есть ставка)
+        if not separate_vat and vat_percent > Decimal("0.00") and subtotal > Decimal("0.00"):
+            vat_calc = Q2(subtotal * vat_percent / Decimal("100"))
+            vat_diff = (vat - vat_calc).copy_abs()
+            
+            if vat_diff > FIX_DELTA_MIN:
+                if vat_diff > FIX_DELTA_TOLERANCE:
+                    (li.setdefault("_li_calc_log", [])).append(
+                        f"fix_delta: vat diff too large ({vat_diff}), skipped"
+                    )
+                    continue
+                
+                li["_orig_vat"] = vat
+                li["vat"] = vat_calc
+                vat = vat_calc  # обновляем для следующей проверки
+                line_changed = True
+                (li.setdefault("_li_calc_log", [])).append(
+                    f"fix_delta: vat adjusted {li['_orig_vat']}→{vat_calc} (Δ={vat_diff})"
+                )
+        
+        # Проверка 2: total = subtotal + vat?
+        total_calc = Q2(subtotal + vat)
+        total_diff = (total - total_calc).copy_abs()
+        
+        if total_diff > FIX_DELTA_MIN:
+            if total_diff > FIX_DELTA_TOLERANCE:
+                # Откатываем изменения этой строки
+                if line_changed:
+                    li["vat"] = lines_backup[idx]["vat"]
+                    if "_orig_vat" in li:
+                        del li["_orig_vat"]
+                (li.setdefault("_li_calc_log", [])).append(
+                    f"fix_delta: total diff too large ({total_diff}), skipped"
+                )
+                continue
+            
+            li["_orig_total"] = total
+            li["total"] = total_calc
+            line_changed = True
+            (li.setdefault("_li_calc_log", [])).append(
+                f"fix_delta: total adjusted {li['_orig_total']}→{total_calc} (Δ={total_diff})"
+            )
+        
+        if line_changed:
+            fixed_lines += 1
+    
+    append_log(doc, f"fix_delta: fixed {fixed_lines} line(s)")
+    
+    # ===== ШАГ 4: Пересчитать агрегаты и проверить =====
+    
+    new_sum_wo, new_sum_vat, new_sum_with = _aggregate_lines(doc)
+    
+    # Проверяем что строки теперь консистентны
+    new_lines_sum_check = Q2(new_sum_wo + new_sum_vat)
+    new_lines_consistent = _approx(new_lines_sum_check, new_sum_with, tol=FIX_DELTA_MIN)
+    
+    if not new_lines_consistent:
+        # ОТКАТ всех изменений
+        for idx, li in enumerate(items):
+            li["vat"] = lines_backup[idx]["vat"]
+            li["total"] = lines_backup[idx]["total"]
+            li["_li_calc_log"] = lines_backup[idx]["_li_calc_log"]
+            if "_orig_vat" in li:
+                del li["_orig_vat"]
+            if "_orig_total" in li:
+                del li["_orig_total"]
+        
+        append_log(doc, f"fix_delta: ROLLBACK - lines still inconsistent after fixes (Σwo+Σvat={new_lines_sum_check} ≠ Σwith={new_sum_with})")
+        return False
+    
+    # Проверяем новые дельты к документу
+    new_diff_wo = (new_sum_wo - doc_wo).copy_abs()
+    new_diff_vat = (new_sum_vat - doc_vat).copy_abs() if not separate_vat else Decimal("0.00")
+    new_diff_with = (new_sum_with - doc_with).copy_abs()
+    
+    if new_diff_wo > FIX_DELTA_TOLERANCE or new_diff_vat > FIX_DELTA_TOLERANCE or new_diff_with > FIX_DELTA_TOLERANCE:
+        # ОТКАТ всех изменений
+        for idx, li in enumerate(items):
+            li["vat"] = lines_backup[idx]["vat"]
+            li["total"] = lines_backup[idx]["total"]
+            li["_li_calc_log"] = lines_backup[idx]["_li_calc_log"]
+            if "_orig_vat" in li:
+                del li["_orig_vat"]
+            if "_orig_total" in li:
+                del li["_orig_total"]
+        
+        append_log(doc, f"fix_delta: ROLLBACK - new deltas exceed tolerance (wo={new_diff_wo}, vat={new_diff_vat}, with={new_diff_with})")
+        return False
+    
+    # ===== ШАГ 5: Подогнать документ =====
+    
+    adjustments = []
+    
+    if new_diff_wo > Decimal("0.00"):
+        doc["_orig_amount_wo_vat"] = doc_wo
+        doc["amount_wo_vat"] = new_sum_wo
+        adjustments.append(f"wo {doc_wo}→{new_sum_wo}")
+    
+    if not separate_vat and new_diff_vat > Decimal("0.00"):
+        doc["_orig_vat_amount"] = doc_vat
+        doc["vat_amount"] = new_sum_vat
+        adjustments.append(f"vat {doc_vat}→{new_sum_vat}")
+    
+    if new_diff_with > Decimal("0.00"):
+        doc["_orig_amount_with_vat"] = doc_with
+        doc["amount_with_vat"] = new_sum_with
+        adjustments.append(f"with {doc_with}→{new_sum_with}")
+    
+    doc["ar_sutapo"] = True
+    doc["_doc_totals_adjusted_by_fix_delta"] = True
+    
+    append_log(doc, f"fix_delta: SUCCESS - adjusted doc totals: {', '.join(adjustments)}; fixed {fixed_lines} line(s)")
+    
+    return True
+
+
 
 def _infer_line_vat_percent_from_doc_total(doc: Dict[str, Any]) -> bool:
     """
@@ -3041,7 +3301,8 @@ def _infer_line_vat_percent_from_doc_total(doc: Dict[str, Any]) -> bool:
     return False
 
 
-def resolve_line_items(doc: Dict[str, Any]) -> Dict[str, Any]:
+# def resolve_line_items(doc: Dict[str, Any]) -> Dict[str, Any]:
+def resolve_line_items(doc: Dict[str, Any], customer_user=None) -> Dict[str, Any]:
     """
     Основной этап для line items.
     Требование: документ уже прошёл resolve_document_amounts.
@@ -3176,6 +3437,7 @@ def resolve_line_items(doc: Dict[str, Any]) -> Dict[str, Any]:
     # ✅ НОВОЕ: Fallback детекция смешанных ставок по line_items
     _detect_mixed_vat_from_lines(doc)
 
+
     # 4) Хинты
     items = doc.get("line_items") or []
     hints: List[str] = []
@@ -3203,6 +3465,13 @@ def resolve_line_items(doc: Dict[str, Any]) -> Dict[str, Any]:
         append_log(doc, f"hints: {len(hints)} issues noted")
 
 
+    # ✅ FIX_DELTA: Подгонка сумм документа под строки
+    _fix_delta_adjust_lines_and_doc(doc, customer_user)
+    
+    # Пересчитать флаги после возможной подгонки
+    if doc.get("_doc_totals_adjusted_by_fix_delta"):
+        sum_wo, sum_vat, sum_with = _aggregate_lines(doc)
+        _check_against_doc(doc, sum_wo, sum_vat, sum_with)
 
 
     # ========== ФИНАЛЬНАЯ МАТЕМАТИЧЕСКАЯ ВАЛИДАЦИЯ ==========
