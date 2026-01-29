@@ -102,6 +102,12 @@ When identifying buyer/seller:
 - "Savarankiškas sąskaitų išrašymas" (self-billing) and "Atvirkštinis PVM" (reverse charge) do NOT swap roles: pirkėjas is still buyer, pardavėjas/tiekėjas is still seller
 - Don't rely on position (left/right/top/bottom) when labels are available
 
+When extracting company codes and VAT codes:
+- "Įm. kodas" or "Įmonės kodas" → this is company registration code → put in seller_id / buyer_id (usually 9-digit code)
+- "PVM kodas" or "PVM mokėtojo kodas" → this is VAT code → put in seller_vat_code / buyer_vat_code (usually starts with country prefix like "LT" + 9-12 digits)
+
+If the buyer/seller block contains indicators of Lithuanian “individuali veikla” (e.g., “individuali veikla”, “pagal individualios veiklos pažymą”, “IV/IDV”, “Individualios veiklos Nr.” / “IV pažymos Nr.”), then set buyer_is_person=true / seller_is_person=true.
+
 If due_date is not stated in the document, but invoice date and payment terms like number of days for payment are mentioned, calculate the due date by adding the payment period to the invoice date.
 Set "separate_vat": true ONLY when the document has 2 or more different VAT rates, AND each rate's taxable base > 0. A 0% VAT rate counts if its taxable base > 0, even though VAT amount = 0 (e.g., 21% on 100 EUR + 0% on 50 EUR = separate_vat: true).
 To decide this, you MUST check line items and VAT summary - if lines have different vat_percent (e.g., some 0%, some 21%) with subtotal > 0, set separate_vat: true.
@@ -251,6 +257,12 @@ When identifying buyer/seller:
 - "Savarankiškas sąskaitų išrašymas" (self-billing) and "Atvirkštinis PVM" (reverse charge) do NOT swap roles: pirkėjas is still buyer, pardavėjas/tiekėjas is still seller
 - Don't rely on position (left/right/top/bottom) when labels are available
 
+When extracting company codes and VAT codes:
+- "Įm. kodas" or "Įmonės kodas" → this is company registration code → put in seller_id / buyer_id (usually 9-digit code)
+- "PVM kodas" or "PVM mokėtojo kodas" → this is VAT code → put in seller_vat_code / buyer_vat_code (usually starts with country prefix like "LT" + 9-12 digits)
+
+If the buyer/seller block contains indicators of Lithuanian “individuali veikla” (e.g., “individuali veikla”, “pagal individualios veiklos pažymą”, “IV/IDV”, “Individualios veiklos Nr.” / “IV pažymos Nr.”), then set buyer_is_person=true / seller_is_person=true.
+
 If due_date is not stated in the document, but invoice date and payment terms like number of days for payment are mentioned, calculate the due date by adding the payment period to the invoice date.
 Set "separate_vat": true ONLY when the document has 2 or more different VAT rates, AND each rate's taxable base > 0. A 0% VAT rate counts if its taxable base > 0, even though VAT amount = 0 (e.g., 21% on 100 EUR + 0% on 50 EUR = separate_vat: true).
 To decide this, you MUST check line items and VAT summary - if lines have different vat_percent (e.g., some 0%, some 21%) with subtotal > 0, set separate_vat: true.
@@ -359,6 +371,12 @@ ADDITIONAL RULES
   Look for "pardavėjas" / "tiekėjas" label→ this is SELLER
   "Savarankiškas sąskaitų išrašymas" (self-billing) and "Atvirkštinis PVM" (reverse charge) do NOT swap roles: pirkėjas is still buyer, pardavėjas/tiekėjas is still seller
   Don't rely on position (left/right/top/bottom) when labels are available
+
+When extracting company codes and VAT codes:
+- "Įm. kodas" or "Įmonės kodas" → this is company registration code → put in seller_id / buyer_id (usually 9-digit code)
+- "PVM kodas" or "PVM mokėtojo kodas" → this is VAT code → put in seller_vat_code / buyer_vat_code (usually starts with country prefix like "LT" + 9-12 digits)
+
+If the buyer/seller block contains indicators of Lithuanian “individuali veikla” (e.g., “individuali veikla”, “pagal individualios veiklos pažymą”, “IV/IDV”, “Individualios veiklos Nr.” / “IV pažymos Nr.”), then set buyer_is_person=true / seller_is_person=true.
 
 - If due_date is not stated in the document, but invoice date and payment terms like number of days for payment are mentioned, calculate the due date by adding the payment period to the invoice date.
 - In line items, always always try to take price after discount (without VAT) if such price is provided in the document. Use up to 4 decimal places for prices if needed. Do not round numbers.

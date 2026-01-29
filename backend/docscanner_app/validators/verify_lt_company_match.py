@@ -132,6 +132,29 @@ def update_seller_buyer_info_from_companies(scanned_doc):
                 else:
                     logger.info(f"[COMP] {sideU} fuzzy skipped (short prefix)")
 
+            # 3.5) Cross-check: поля могли быть перепутаны
+            if not comp and time_left() > 0:
+                # Попробовать company_id как VAT код
+                if company_id:
+                    for v in _vat_variants(company_id, country_iso):
+                        c = Company.objects.filter(pvm_kodas__iexact=v).only("id","pavadinimas","im_kodas","pvm_kodas").first()
+                        if c:
+                            comp = c
+                            logger.info(f"[COMP] {sideU} matched by pvm_kodas (from _id field): {v}")
+                            break
+                
+                # Попробовать vat_code как įmonės kodas
+                if not comp and vat_code:
+                    clean = _clean_vat(vat_code)
+                    # убрать LT префикс если есть
+                    if clean.startswith("LT"):
+                        clean = clean[2:]
+                    if clean:
+                        c = Company.objects.filter(im_kodas__iexact=clean).only("id","pavadinimas","im_kodas","pvm_kodas").first()
+                        if c:
+                            comp = c
+                            logger.info(f"[COMP] {sideU} matched by im_kodas (from _vat_code field): {clean}")
+
             # 4) Применить
             if comp:
                 before = (
