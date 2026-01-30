@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useState } from "react";
 import { useAuth } from "../contexts/useAuth";
-import { Navigate } from "react-router-dom";
+import { Navigate, useLocation } from "react-router-dom";
 import { subscription_status } from "../api/endpoints";
 import { Typography, CircularProgress, Box } from "@mui/material";
 
@@ -11,11 +11,17 @@ const SubscriptionStatusContext = createContext(null);
 export const useSubscriptionStatus = () => useContext(SubscriptionStatusContext);
 
 const PrivateRoute = ({ children }) => {
-  const { isAuthenticated, loading } = useAuth();
+  const { isAuthenticated, loading, forceLogout, checkAuth } = useAuth();
+  const location = useLocation();
 
   const [subscriptionStatus, setSubscriptionStatus] = useState(null);
   const [checkingSubscription, setCheckingSubscription] = useState(false);
   const [error, setError] = useState(null);
+
+  // Проверяем auth при каждом переходе на защищённую страницу
+  useEffect(() => {
+    checkAuth();
+  }, [location.pathname, checkAuth]);
 
   // При смене isAuthenticated триггерим проверку подписки
   useEffect(() => {
@@ -26,11 +32,21 @@ const PrivateRoute = ({ children }) => {
         .then(res => setSubscriptionStatus(res.status || "unknown"))
         .catch(err => {
           console.error("Error fetching subscription status:", err);
-          setError("error");
+          // Если 401 после refresh — сессия мёртвая, logout
+          if (err.response?.status === 401) {
+            forceLogout();
+          } else {
+            setError("error");
+          }
         })
         .finally(() => setCheckingSubscription(false));
+    } else {
+      // Сбрасываем состояние если вышли из системы
+      setSubscriptionStatus(null);
+      setCheckingSubscription(false);
+      setError(null);
     }
-  }, [isAuthenticated]);
+  }, [isAuthenticated, forceLogout]);
 
   // 1) Пока проверяем сам факт логина — показываем спиннер
   if (loading) {
@@ -41,13 +57,13 @@ const PrivateRoute = ({ children }) => {
     );
   }
 
-  // 2) Если не залогинен — сразу переходим на логин
-  // if (!isAuthenticated) {
-  //   return <Navigate to="/login" />;
-  // }
+  // 2) Если не залогинен — редирект на логин
+  if (!isAuthenticated) {
+    return <Navigate to="/prisijungti" replace />;
+  }
 
   // 3) Залогинен, но ещё не получили статус подписки — показываем спиннер
-  if (checkingSubscription || !subscriptionStatus) {
+  if (checkingSubscription || (!subscriptionStatus && !error)) {
     return (
       <Box sx={{ display: "flex", justifyContent: "center", alignItems: "center", height: "100vh" }}>
         <CircularProgress sx={{ color: "#F5BE09" }} />
@@ -55,10 +71,8 @@ const PrivateRoute = ({ children }) => {
     );
   }
 
-  // 4) Если ошибка — показываем спиннер и перезапрашиваем через 2 сек (auto-retry), либо можно показать friendly-UI
+  // 4) Если ошибка — показываем сообщение
   if (error) {
-    // Можно автоматом перезапросить (необязательно)
-    // setTimeout(() => window.location.reload(), 2000);
     return (
       <Box sx={{ display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center", height: "100vh" }}>
         <CircularProgress sx={{ color: "#F5BE09" }} />
@@ -83,14 +97,14 @@ const PrivateRoute = ({ children }) => {
       return (
         <>
           <Typography>Your trial period has ended. Please subscribe to continue.</Typography>
-          <Navigate to="/papildyti" />
+          <Navigate to="/papildyti" replace />
         </>
       );
     case "expired":
       return (
         <>
           <Typography>Your subscription has expired. Please renew to regain access.</Typography>
-          <Navigate to="/papildyti" />
+          <Navigate to="/papildyti" replace />
         </>
       );
     case "canceled_expired":
@@ -99,23 +113,174 @@ const PrivateRoute = ({ children }) => {
           <Typography>
             Your canceled subscription period has ended. Please subscribe again to access features.
           </Typography>
-          <Navigate to="/papildyti" />
+          <Navigate to="/papildyti" replace />
         </>
       );
     case "unknown":
       return (
         <>
           <Typography>Subscription status unknown. Please contact support.</Typography>
-          <Navigate to="/papildyti" />
+          <Navigate to="/papildyti" replace />
         </>
       );
     default:
-      // fallback на всякий случай
-      return null;
+      // fallback — редирект на логин
+      return <Navigate to="/prisijungti" replace />;
   }
 };
 
 export default PrivateRoute;
+
+
+
+
+
+
+// import { createContext, useContext, useEffect, useState } from "react";
+// import { useAuth } from "../contexts/useAuth";
+// import { Navigate } from "react-router-dom";
+// import { subscription_status } from "../api/endpoints";
+// import { Typography, CircularProgress, Box } from "@mui/material";
+
+// // Создаем контекст
+// const SubscriptionStatusContext = createContext(null);
+
+// // Хук для использования контекста
+// export const useSubscriptionStatus = () => useContext(SubscriptionStatusContext);
+
+// const PrivateRoute = ({ children }) => {
+//   const { isAuthenticated, loading } = useAuth();
+
+//   const [subscriptionStatus, setSubscriptionStatus] = useState(null);
+//   const [checkingSubscription, setCheckingSubscription] = useState(false);
+//   const [error, setError] = useState(null);
+
+//   // При смене isAuthenticated триггерим проверку подписки
+//   useEffect(() => {
+//     if (isAuthenticated) {
+//       setCheckingSubscription(true);
+//       setError(null);
+//       subscription_status()
+//         .then(res => setSubscriptionStatus(res.status || "unknown"))
+//         .catch(err => {
+//           console.error("Error fetching subscription status:", err);
+//           setError("error");
+//         })
+//         .finally(() => setCheckingSubscription(false));
+//     }
+//   }, [isAuthenticated]);
+
+//   // 1) Пока проверяем сам факт логина — показываем спиннер
+//   if (loading) {
+//     return (
+//       <Box sx={{ display: "flex", justifyContent: "center", alignItems: "center", height: "100vh" }}>
+//         <CircularProgress sx={{ color: "#F5BE09" }} />
+//       </Box>
+//     );
+//   }
+
+//   // 2) Если не залогинен — сразу переходим на логин
+//   // if (!isAuthenticated) {
+//   //   return <Navigate to="/login" />;
+//   // }
+
+//   // 3) Залогинен, но ещё не получили статус подписки — показываем спиннер
+//   if (checkingSubscription || !subscriptionStatus) {
+//     return (
+//       <Box sx={{ display: "flex", justifyContent: "center", alignItems: "center", height: "100vh" }}>
+//         <CircularProgress sx={{ color: "#F5BE09" }} />
+//       </Box>
+//     );
+//   }
+
+//   // 4) Если ошибка — показываем спиннер и перезапрашиваем через 2 сек (auto-retry), либо можно показать friendly-UI
+//   if (error) {
+//     // Можно автоматом перезапросить (необязательно)
+//     // setTimeout(() => window.location.reload(), 2000);
+//     return (
+//       <Box sx={{ display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center", height: "100vh" }}>
+//         <CircularProgress sx={{ color: "#F5BE09" }} />
+//         <Typography color="error" sx={{ mt: 2 }}>
+//           Nepavyksta nustatyti prenumeratos būsenos. Bandom dar kartą…
+//         </Typography>
+//       </Box>
+//     );
+//   }
+
+//   // 5) Дальше уже смотрим на subscriptionStatus
+//   switch (subscriptionStatus) {
+//     case "active":
+//     case "canceled":
+//     case "trial":
+//       return (
+//         <SubscriptionStatusContext.Provider value={subscriptionStatus}>
+//           {children}
+//         </SubscriptionStatusContext.Provider>
+//       );
+//     case "trial_expired":
+//       return (
+//         <>
+//           <Typography>Your trial period has ended. Please subscribe to continue.</Typography>
+//           <Navigate to="/papildyti" />
+//         </>
+//       );
+//     case "expired":
+//       return (
+//         <>
+//           <Typography>Your subscription has expired. Please renew to regain access.</Typography>
+//           <Navigate to="/papildyti" />
+//         </>
+//       );
+//     case "canceled_expired":
+//       return (
+//         <>
+//           <Typography>
+//             Your canceled subscription period has ended. Please subscribe again to access features.
+//           </Typography>
+//           <Navigate to="/papildyti" />
+//         </>
+//       );
+//     case "unknown":
+//       return (
+//         <>
+//           <Typography>Subscription status unknown. Please contact support.</Typography>
+//           <Navigate to="/papildyti" />
+//         </>
+//       );
+//     default:
+//       // fallback на всякий случай
+//       return null;
+//   }
+// };
+
+// export default PrivateRoute;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

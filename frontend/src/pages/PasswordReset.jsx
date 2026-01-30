@@ -162,7 +162,7 @@ export default function PasswordReset() {
   const codeError = useMemo(() => {
     if (!touched.code) return "";
     if (!code) return "Įveskite kodą";
-    if (!/^\d{7}$/.test(code)) return "Kodas turi būti 7 skaitmenys";
+    if (!/^\d{7}$/.test(code)) return "Kodas turi būti 7 skaitmenų";
     return "";
   }, [code, touched.code]);
 

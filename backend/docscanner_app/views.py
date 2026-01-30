@@ -2658,21 +2658,48 @@ class CustomTokenObtainPairView(TokenObtainPairView):
         except:
             return Response({'success':False})
 
+# class CustomRefreshTokenView(TokenRefreshView):
+#     def post(self, request, *args, **kwargs):
+#         try:
+#             refresh_token = request.COOKIES.get('refresh_token')
+
+#             request.data['refresh'] = refresh_token
+
+#             response = super().post(request, *args, **kwargs)
+
+#             tokens = response.data
+#             access_token = tokens['access']
+
+#             res = Response()
+
+#             res.data = {'refreshed':True}
+
+#             res.set_cookie(
+#                 key='access_token',
+#                 value=access_token,
+#                 httponly=True,
+#                 secure=True,
+#                 samesite='Lax',
+#                 path='/'
+#             )
+
+#             return res
+
+#         except:
+#             return Response({'refreshed':False})
+
 class CustomRefreshTokenView(TokenRefreshView):
     def post(self, request, *args, **kwargs):
         try:
             refresh_token = request.COOKIES.get('refresh_token')
-
             request.data['refresh'] = refresh_token
 
             response = super().post(request, *args, **kwargs)
-
             tokens = response.data
             access_token = tokens['access']
 
             res = Response()
-
-            res.data = {'refreshed':True}
+            res.data = {'refreshed': True}
 
             res.set_cookie(
                 key='access_token',
@@ -2683,10 +2710,20 @@ class CustomRefreshTokenView(TokenRefreshView):
                 path='/'
             )
 
+            if 'refresh' in tokens:
+                res.set_cookie(
+                    key='refresh_token',
+                    value=tokens['refresh'],
+                    httponly=True,
+                    secure=True,
+                    samesite='Lax',
+                    path='/'
+                )
+
             return res
 
         except:
-            return Response({'refreshed':False})
+            return Response({'refreshed': False})
 
 
 @api_view(['POST'])

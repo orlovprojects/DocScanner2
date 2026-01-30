@@ -1,5 +1,5 @@
-import { createContext, useContext, useEffect, useState } from "react";
-import { useNavigate, useLocation } from "react-router-dom";
+import { createContext, useContext, useEffect, useState, useCallback } from "react";
+import { useNavigate } from "react-router-dom";
 import { is_authenticated, login, register, logout } from "../api/endpoints";
 
 const AuthContext = createContext();
@@ -8,11 +8,11 @@ const AuthProvider = ({ children }) => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
-  const location = useLocation();
 
   // Проверка аутентификации
-  const get_authenticated = async () => {
+  const checkAuth = useCallback(async () => {
     console.log("Checking authentication...");
+    setLoading(true);
     try {
       const data = await is_authenticated();
       console.log("Authentication check result:", data);
@@ -22,9 +22,8 @@ const AuthProvider = ({ children }) => {
       setIsAuthenticated(false);
     } finally {
       setLoading(false);
-      console.log("Authentication loading complete, isAuthenticated:", isAuthenticated);
     }
-  };
+  }, []);
 
   // Логин
   const login_user = async (email, password) => {
@@ -34,17 +33,13 @@ const AuthProvider = ({ children }) => {
       console.log("Login response:", success);
       if (success) {
         setIsAuthenticated(true);
-        console.log("Login successful, redirecting to dashboard...");
-        setTimeout(() => {
-          navigate('/suvestine');
-        }, 50);
+        navigate('/suvestine');
       } else {
-        console.log("Login failed, invalid credentials");
-        alert("Invalid email or password");
+        alert("Neteisingas el. paštas arba slaptažodis");
       }
     } catch (error) {
       console.log("Error during login:", error);
-      alert("Error during login");
+      alert("Prisijungimo klaida");
     }
   };
 
@@ -52,46 +47,52 @@ const AuthProvider = ({ children }) => {
   const logout_user = async () => {
     console.log("Starting logout process...");
     try {
-      const success = await logout();
-      console.log("Logout response:", success);
-      if (success) {
-        // Очистка состояния
-        setIsAuthenticated(false);
-        console.log("Logout successful, redirecting to login...");
-        navigate('/prisijungti');
-      } else {
-        console.log("Logout failed");
-      }
+      await logout();
     } catch (error) {
       console.log("Error during logout:", error);
+    } finally {
+      // Всегда выходим локально, даже если запрос упал
+      setIsAuthenticated(false);
+      navigate('/prisijungti');
     }
   };
 
   // Регистрация
   const register_user = async (email, password, Cpassword) => {
     console.log("Starting registration process...");
-    try {
-      if (password === Cpassword) {
-        console.log("Passwords match, proceeding with registration...");
-        await register(email, password);
-        await login(email, password); // <= вот это!
-        navigate('/suvestine');       // <= и это!
-      } else {
-        console.log("Passwords do not match.");
-        alert('Passwords do not match.');
-      }
-    } catch (error) {
-      console.log("Error during registration:", error);
-      alert('Error registering user');
+    if (password !== Cpassword) {
+      throw new Error('Slaptažodžiai nesutampa');
+    }
+    await register(email, password);
+    const success = await login(email, password);
+    if (success) {
+      setIsAuthenticated(true);
+      navigate('/suvestine');
     }
   };
 
-  // Проверка при загрузке страницы и каждом изменении пути
+  // Принудительный logout (вызывается когда refresh token не сработал)
+  const forceLogout = useCallback(() => {
+    console.log("Force logout - refresh token expired");
+    setIsAuthenticated(false);
+    setLoading(false);
+    navigate('/prisijungti');
+  }, [navigate]);
+
+  // Проверка при первой загрузке + когда вернулся на вкладку
   useEffect(() => {
-    console.log("Checking authentication on path change...", location.pathname);
-    get_authenticated();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [location.pathname]);
+    checkAuth();
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        console.log("Tab became visible, checking auth...");
+        checkAuth();
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [checkAuth]);
 
   return (
     <AuthContext.Provider
@@ -101,6 +102,8 @@ const AuthProvider = ({ children }) => {
         login_user,
         logout_user,
         register_user,
+        checkAuth,
+        forceLogout,
       }}
     >
       {children}
@@ -110,6 +113,141 @@ const AuthProvider = ({ children }) => {
 
 export const useAuth = () => useContext(AuthContext);
 export default AuthProvider;
+
+
+
+
+// import { createContext, useContext, useEffect, useState } from "react";
+// import { useNavigate, useLocation } from "react-router-dom";
+// import { is_authenticated, login, register, logout } from "../api/endpoints";
+
+// const AuthContext = createContext();
+
+// const AuthProvider = ({ children }) => {
+//   const [isAuthenticated, setIsAuthenticated] = useState(false);
+//   const [loading, setLoading] = useState(true);
+//   const navigate = useNavigate();
+//   const location = useLocation();
+
+//   // Проверка аутентификации
+//   const get_authenticated = async () => {
+//     console.log("Checking authentication...");
+//     try {
+//       const data = await is_authenticated();
+//       console.log("Authentication check result:", data);
+//       setIsAuthenticated(data.authenticated === true);
+//     } catch (error) {
+//       console.log("Error checking authentication:", error);
+//       setIsAuthenticated(false);
+//     } finally {
+//       setLoading(false);
+//       console.log("Authentication loading complete, isAuthenticated:", isAuthenticated);
+//     }
+//   };
+
+//   // Логин
+//   const login_user = async (email, password) => {
+//     console.log("Starting login process...");
+//     try {
+//       const success = await login(email, password);
+//       console.log("Login response:", success);
+//       if (success) {
+//         setIsAuthenticated(true);
+//         console.log("Login successful, redirecting to dashboard...");
+//         setTimeout(() => {
+//           navigate('/suvestine');
+//         }, 50);
+//       } else {
+//         console.log("Login failed, invalid credentials");
+//         alert("Invalid email or password");
+//       }
+//     } catch (error) {
+//       console.log("Error during login:", error);
+//       alert("Error during login");
+//     }
+//   };
+
+//   // Логаут
+//   const logout_user = async () => {
+//     console.log("Starting logout process...");
+//     try {
+//       const success = await logout();
+//       console.log("Logout response:", success);
+//       if (success) {
+//         // Очистка состояния
+//         setIsAuthenticated(false);
+//         console.log("Logout successful, redirecting to login...");
+//         navigate('/prisijungti');
+//       } else {
+//         console.log("Logout failed");
+//       }
+//     } catch (error) {
+//       console.log("Error during logout:", error);
+//     }
+//   };
+
+//   // Регистрация
+//   const register_user = async (email, password, Cpassword) => {
+//     console.log("Starting registration process...");
+//     try {
+//       if (password === Cpassword) {
+//         console.log("Passwords match, proceeding with registration...");
+//         await register(email, password);
+//         await login(email, password); // <= вот это!
+//         navigate('/suvestine');       // <= и это!
+//       } else {
+//         console.log("Passwords do not match.");
+//         alert('Passwords do not match.');
+//       }
+//     } catch (error) {
+//       console.log("Error during registration:", error);
+//       alert('Error registering user');
+//     }
+//   };
+
+//   // Проверка при загрузке страницы и каждом изменении пути
+//   useEffect(() => {
+//     console.log("Checking authentication on path change...", location.pathname);
+//     get_authenticated();
+//     // eslint-disable-next-line react-hooks/exhaustive-deps
+//   }, [location.pathname]);
+
+//   return (
+//     <AuthContext.Provider
+//       value={{
+//         isAuthenticated,
+//         loading,
+//         login_user,
+//         logout_user,
+//         register_user,
+//       }}
+//     >
+//       {children}
+//     </AuthContext.Provider>
+//   );
+// };
+
+// export const useAuth = () => useContext(AuthContext);
+// export default AuthProvider;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
