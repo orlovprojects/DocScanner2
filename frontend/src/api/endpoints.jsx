@@ -186,7 +186,26 @@ export const register = async (email, password) => {
   }
 };
 
+// === Password Reset ===
+export const requestPasswordReset = async (email) => {
+  const { data } = await publicApi.post('password-reset/request/', { email });
+  return data;
+};
 
+export const verifyResetCode = async (email, code) => {
+  const { data } = await publicApi.post('password-reset/verify/', { email, code });
+  return data;
+};
+
+export const confirmPasswordReset = async (email, code, password, password_confirm) => {
+  const { data } = await publicApi.post('password-reset/confirm/', { 
+    email, 
+    code, 
+    password, 
+    password_confirm 
+  });
+  return data;
+};
 
 
 // import axios from 'axios';

@@ -4,6 +4,7 @@ import { Route, Routes, useLocation, Navigate } from 'react-router-dom';
 import Login from './pages/login';
 import Subscribe from './pages/subscribe';
 import Register from './pages/register';
+import PasswordReset from './pages/PasswordReset';
 import Footer from './page_elements/Footer';
 import Contact from './pages/contact';
 import Terms from './pages/Terms';
@@ -146,6 +147,7 @@ function App() {
           }
         />
         {/* <Route path="/pl" element={<AtlyginimoSkaiciuoklePL2026 />} /> */}
+        <Route path="/priminti-slaptazodi" element={<PasswordReset />} />
         <Route path="/buhalterine-apskaita" element={<BuhalterinenApskaita />} />
         <Route path="/suma-zodziais" element={<SumaZodziais />} />
         <Route path="/privatumo-politika" element={<Privacy />} />

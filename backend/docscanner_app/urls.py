@@ -49,6 +49,11 @@ from .views import TrackAdClickView
 
 from rest_framework.routers import DefaultRouter
 from .views import GuideCategoryViewSet, GuideArticleViewSet
+from .utils.password_reset import (
+    password_reset_request,
+    password_reset_verify,
+    password_reset_confirm,
+)
 
 
 router = DefaultRouter()
@@ -166,7 +171,9 @@ urlpatterns = [
     # Proveriajet status subscriptionsa usera dlia content restictions
     path('subscription-status/', subscription_status, name='subscription_status'),
 
-
+    path('password-reset/request/', password_reset_request),
+    path('password-reset/verify/', password_reset_verify),
+    path('password-reset/confirm/', password_reset_confirm),
 
 
 
@@ -232,6 +239,8 @@ urlpatterns = [
     path("sessions/<uuid:session_id>/chunks/<uuid:upload_id>/complete/", views.chunk_complete, name="chunk_complete"),
 
     path("sessions/active/", views.active_sessions, name="sessions_active"),
+
+
 
 
 

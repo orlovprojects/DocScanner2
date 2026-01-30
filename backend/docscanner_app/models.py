@@ -506,6 +506,22 @@ class CustomUser(AbstractUser):
     username = None
     email = models.EmailField(unique=True)
 
+    pswd_reset_code = models.CharField(
+        max_length=7, 
+        blank=True, 
+        null=True,
+        verbose_name="Slaptažodžio atkūrimo kodas"
+    )
+    pswd_code_sent = models.DateTimeField(
+        blank=True, 
+        null=True,
+        verbose_name="Kodo išsiuntimo laikas"
+    )
+    pswd_reset_attempts = models.PositiveSmallIntegerField(
+        default=0,
+        verbose_name="Neteisingų bandymų skaičius"
+    )
+
     credits = models.DecimalField(max_digits=7, decimal_places=2, default=0)
     credits_reserved = models.DecimalField(
         max_digits=12, decimal_places=2, default=Decimal("0.00")
