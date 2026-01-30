@@ -1913,6 +1913,45 @@ def _zero_out_informational_doc_discounts_if_unused(doc: Dict[str, Any]) -> None
             append_log(doc, "doc-discount: zeroed as informational (no residual deltas)")
 
 
+def _fill_missing_line_fields(doc: Dict[str, Any]) -> None:
+    """
+    Заполнить недостающие поля строк значениями по умолчанию.
+    
+    - quantity: если нет или 0 → 1
+    - unit: если нет → "vnt"
+    - price: если нет но есть subtotal и quantity → subtotal/quantity
+    """
+    items = doc.get("line_items") or []
+    
+    for li in items:
+        changed = []
+        
+        # quantity: default = 1
+        qty = li.get("quantity")
+        if qty is None or qty == "" or qty == 0:
+            li["quantity"] = Decimal("1.0000")
+            changed.append("quantity := 1 (default)")
+        
+        # unit: default = "vnt"
+        unit = li.get("unit")
+        if not unit or str(unit).strip() == "":
+            li["unit"] = "vnt"
+            changed.append("unit := 'vnt' (default)")
+        
+        # price: вычислить из subtotal/quantity если есть subtotal
+        price = d(li.get("price"), 4)
+        subtotal = d(li.get("subtotal"), 2)
+        qty_val = d(li.get("quantity"), 4)
+        
+        if price == 0 and subtotal != 0 and qty_val != 0:
+            li["price"] = Q4(subtotal / qty_val)
+            changed.append(f"price := subtotal/qty = {li['price']}")
+        
+        if changed:
+            (li.setdefault("_li_calc_log", [])).append(
+                f"fill-defaults: {', '.join(changed)}"
+            )
+
 
 _ADJ_TOL = Decimal("0.02")  # денежный допуск
 
@@ -2103,6 +2142,146 @@ def _reconcile_doc_discounts_from_line_sums(doc: Dict[str, Any]) -> None:
 
     # Переустановим «информационный» режим: скидки считаем активными
     doc["_effective_discount_mode"] = "document"
+
+
+def _distribute_doc_discount_to_lines(doc: Dict[str, Any]) -> bool:
+    """
+    Распределить документную скидку пропорционально по строкам.
+    
+    Применяется когда:
+    - Есть invoice_discount_wo_vat > 0
+    - Σsubtotal - discount ≈ doc.amount_wo_vat (строки "до скидки")
+    
+    После распределения:
+    - Строки содержат суммы "после скидки"
+    - invoice_discount_wo_vat и invoice_discount_with_vat обнуляются
+    - ar_sutapo должен стать True
+    
+    Returns: True если скидка была распределена
+    """
+    items = doc.get("line_items") or []
+    if not items:
+        return False
+    
+    inv_wo = d(doc.get("invoice_discount_wo_vat"), 2)
+    inv_w = d(doc.get("invoice_discount_with_vat"), 2)
+    
+    # Нет скидки — выходим
+    if inv_wo == 0 and inv_w == 0:
+        return False
+    
+    separate_vat = bool(doc.get("separate_vat"))
+    
+    # Агрегаты строк
+    sum_wo, sum_vat, sum_with = _aggregate_lines(doc)
+    
+    # Якоря документа
+    doc_wo = d(doc.get("amount_wo_vat"), 2)
+    doc_vat = d(doc.get("vat_amount"), 2)
+    doc_with = d(doc.get("amount_with_vat"), 2)
+    
+    # Проверяем: это случай "строки до скидки"?
+    # Σwo - inv_wo ≈ doc_wo  И  Σwith - inv_w ≈ doc_with
+    
+    # Если inv_w не задан, но inv_wo есть — вычислим inv_w из VAT
+    if inv_wo != 0 and inv_w == 0:
+        # inv_w = inv_wo + VAT на скидку
+        # VAT на скидку = разница VAT строк и документа
+        vat_diff = Q2(sum_vat - doc_vat)
+        if vat_diff >= 0:
+            inv_w = Q2(inv_wo + vat_diff)
+            append_log(doc, f"distribute-discount: calculated inv_w={inv_w} from inv_wo={inv_wo} + vat_diff={vat_diff}")
+    
+    # Проверяем совпадение
+    check_wo = _approx(Q2(sum_wo - inv_wo), doc_wo, tol=Decimal("0.05"))
+    check_with = _approx(Q2(sum_with - inv_w), doc_with, tol=Decimal("0.05"))
+    check_vat = separate_vat or _approx(Q2(sum_vat - (inv_w - inv_wo)), doc_vat, tol=Decimal("0.05"))
+    
+    if not (check_wo and check_with and check_vat):
+        append_log(doc, f"distribute-discount: SKIP - lines don't match 'pre-discount' pattern "
+                       f"(check_wo={check_wo}, check_with={check_with}, check_vat={check_vat})")
+        return False
+    
+    append_log(doc, f"distribute-discount: detected lines are 'pre-discount', distributing inv_wo={inv_wo}, inv_w={inv_w}")
+    
+    # Распределяем пропорционально subtotal
+    if sum_wo == 0:
+        # Fallback: равномерно
+        n = len(items)
+        for li in items:
+            li_disc_wo = Q2(inv_wo / Decimal(str(n)))
+            li_disc_w = Q2(inv_w / Decimal(str(n)))
+            _apply_discount_to_line(li, li_disc_wo, li_disc_w, doc)
+    else:
+        # Пропорционально subtotal
+        distributed_wo = Decimal("0.00")
+        distributed_w = Decimal("0.00")
+        
+        for idx, li in enumerate(items):
+            sub = d(li.get("subtotal"), 2)
+            ratio = sub / sum_wo
+            
+            # Последняя строка получает остаток (избегаем ошибок округления)
+            if idx == len(items) - 1:
+                li_disc_wo = Q2(inv_wo - distributed_wo)
+                li_disc_w = Q2(inv_w - distributed_w)
+            else:
+                li_disc_wo = Q2(inv_wo * ratio)
+                li_disc_w = Q2(inv_w * ratio)
+                distributed_wo += li_disc_wo
+                distributed_w += li_disc_w
+            
+            _apply_discount_to_line(li, li_disc_wo, li_disc_w, doc)
+    
+    # Обнуляем документные скидки (уже распределены по строкам)
+    doc["_orig_invoice_discount_wo_vat"] = inv_wo
+    doc["_orig_invoice_discount_with_vat"] = inv_w
+    doc["invoice_discount_wo_vat"] = Decimal("0.00")
+    doc["invoice_discount_with_vat"] = Decimal("0.00")
+    
+    # Обновляем режим скидок
+    doc["_effective_discount_mode"] = "none"
+    doc["_discount_distributed_to_lines"] = True
+    
+    append_log(doc, f"distribute-discount: SUCCESS - distributed to {len(items)} line(s), doc discounts zeroed")
+    
+    return True
+
+
+def _apply_discount_to_line(li: Dict[str, Any], disc_wo: Decimal, disc_w: Decimal, doc: Dict[str, Any]) -> None:
+    """
+    Применить скидку к одной строке.
+    
+    li.subtotal := li.subtotal - disc_wo
+    li.vat := li.vat - (disc_w - disc_wo)
+    li.total := li.total - disc_w
+    li.price := li.subtotal / li.quantity
+    """
+    old_sub = d(li.get("subtotal"), 2)
+    old_vat = d(li.get("vat"), 2)
+    old_tot = d(li.get("total"), 2)
+    qty = d(li.get("quantity"), 4)
+    
+    disc_vat = Q2(disc_w - disc_wo)
+    
+    new_sub = Q2(old_sub - disc_wo)
+    new_vat = Q2(old_vat - disc_vat)
+    new_tot = Q2(old_tot - disc_w)
+    
+    li["subtotal"] = new_sub
+    li["vat"] = new_vat
+    li["total"] = new_tot
+    
+    # Пересчитать price
+    if qty != 0:
+        li["_orig_price"] = float(d(li.get("price"), 4))
+        li["price"] = Q4(new_sub / qty)
+    
+    (li.setdefault("_li_calc_log", [])).append(
+        f"distributed doc discount: sub {old_sub}→{new_sub} (-{disc_wo}), "
+        f"vat {old_vat}→{new_vat} (-{disc_vat}), "
+        f"tot {old_tot}→{new_tot} (-{disc_w})"
+    )
 
 
 def _is_empty_line_strict(li: Dict[str, Any]) -> bool:
@@ -3317,6 +3496,9 @@ def resolve_line_items(doc: Dict[str, Any], customer_user=None) -> Dict[str, Any
         _final_math_validation_sumiskai(doc)
         return doc
     
+    # Заполнить недостающие поля строк (quantity, unit, price)
+    _fill_missing_line_fields(doc)
+    
     # 0) Пред-пасс: восстановить net/price из total при vp>0 и price≈total
     _prepass_fix_price_from_total(doc)
 
@@ -3411,7 +3593,13 @@ def resolve_line_items(doc: Dict[str, Any], customer_user=None) -> Dict[str, Any
         sum_wo, sum_vat, sum_with = _aggregate_lines(doc)
         _check_against_doc(doc, sum_wo, sum_vat, sum_with)
         # обновить финальные core/identity после смены скидок
-        _final_checks(doc)    
+        _final_checks(doc)  
+
+    # 3b2) НОВОЕ: Распределить документную скидку по строкам
+    if not doc.get("ar_sutapo", False):
+        if _distribute_doc_discount_to_lines(doc):
+            sum_wo, sum_vat, sum_with = _aggregate_lines(doc)
+            _check_against_doc(doc, sum_wo, sum_vat, sum_with)  
 
     # 3c) удалить пустые строки (как раньше)
     _purge_zero_lines(doc)
