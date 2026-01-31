@@ -44,6 +44,8 @@ import GpmSkaiciuokle from './pages/GPMskaiciuokle';
 import { initMetaPixel } from './metaPixel';
 import MokejimuIstorija from './pages/MokejimuIstorija';
 
+import B1 from './LPs/b1';
+
 function App() {
   const location = useLocation();
 
@@ -96,6 +98,9 @@ function App() {
         <Route path="/naudojimo-gidas" element={<NaudojimoGidas />} />
         <Route path="/kategorija/:slug" element={<GidoCategories />} />
         <Route path="/straipsnis/:slug" element={<GidoArticle />} />
+
+        <Route path="/b1" element={<B1 />} />
+
         <Route
           path="/suvestine"
           element={

@@ -831,7 +831,8 @@ const Dokskenas = () => {
             { label: 'Pragma 3.2 (.txt)', hasLink: false },
             { label: 'Pragma 4 (.xml)', hasLink: false },
             { label: 'Būtent (.xlsx)', hasLink: false },
-            { label: 'Site.pro (B1) (.xlsx)', hasLink: false },
+            { label: 'B1', url: 'https://atlyginimoskaiciuokle.com/b1', hasLink: true },
+            { label: 'Site.pro', hasLink: false },
             { label: 'Debetas (.csv)', hasLink: false },
             { label: 'Excel (.csv/.xlsx)', hasLink: false },
           ].map((item, idx) => (
