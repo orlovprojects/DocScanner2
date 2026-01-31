@@ -79,9 +79,6 @@ const Footer = () => {
                   spacing={1.25} 
                   alignItems={{ xs: 'center', md: 'center' }}
                 >
-                  <Link href="/buhalterine-apskaita" underline="none" color="inherit" sx={linkSx}>
-                    Buhalterinė apskaita
-                  </Link>
                   <Link
                     component={RouterLink}
                     to="/saskaitu-skaitmenizavimas-dokskenas#kaip-veikia"
@@ -90,15 +87,6 @@ const Footer = () => {
                     sx={linkSx}
                   >
                     Kaip veikia?
-                  </Link>
-                  <Link
-                    component={RouterLink}
-                    to="/saskaitu-skaitmenizavimas-dokskenas#ka-moka"
-                    underline="none"
-                    color="inherit"
-                    sx={linkSx}
-                  >
-                    Ką moka?
                   </Link>
                   <Link
                     component={RouterLink}
@@ -112,6 +100,12 @@ const Footer = () => {
                   <Link href="/apie-mus" underline="none" color="inherit" sx={linkSx}>
                     Apie mus
                   </Link>
+                  <Link href="/naudojimo-gidas" underline="none" color="inherit" sx={linkSx}>
+                    Naudojimo gidas
+                  </Link>
+                  <Link href="/susisiekti" underline="none" color="inherit" sx={linkSx}>
+                    Susisiekti
+                  </Link>
                 </Stack>
               </Box>
             </Grid2>
@@ -120,18 +114,15 @@ const Footer = () => {
             <Grid2 size={{ xs: 12, md: 4 }}>
               <Box sx={{ textAlign: { xs: 'center', md: 'center' } }}>
                 <Typography variant="subtitle1" sx={headingSx}>
-                  Pagalba
+                  Importas į:
                 </Typography>
                 <Stack 
                   spacing={1.25} 
                   alignItems={{ xs: 'center', md: 'center' }}
                 >
-                  <Link href="/naudojimo-gidas" underline="none" color="inherit" sx={linkSx}>
-                    Naudojimo gidas
-                  </Link>
-                  <Link href="/susisiekti" underline="none" color="inherit" sx={linkSx}>
-                    Susisiekti
-                  </Link>
+                  <Link href="/b1" underline="none" color="inherit" sx={linkSx}>
+                    B1
+                  </Link>                  
                 </Stack>
               </Box>
             </Grid2>
@@ -163,6 +154,9 @@ const Footer = () => {
                   </Link>
                   <Link href="/pvm-skaiciuokle" underline="none" color="inherit" sx={linkSx}>
                     PVM skaičiuoklė
+                  </Link>
+                  <Link href="/buhalterine-apskaita" underline="none" color="inherit" sx={linkSx}>
+                    Buhalterinė apskaita
                   </Link>
                 </Stack>
               </Box>
