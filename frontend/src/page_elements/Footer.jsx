@@ -122,7 +122,10 @@ const Footer = () => {
                 >
                   <Link href="/b1" underline="none" color="inherit" sx={linkSx}>
                     B1
-                  </Link>                  
+                  </Link> 
+                  <Link href="/rivile" underline="none" color="inherit" sx={linkSx}>
+                    Rivilė
+                  </Link>                   
                 </Stack>
               </Box>
             </Grid2>
