@@ -10,9 +10,27 @@ const AuthProvider = ({ children }) => {
   const navigate = useNavigate();
 
   // Проверка аутентификации
-  const checkAuth = useCallback(async () => {
-    console.log("Checking authentication...");
-    setLoading(true);
+  // const checkAuth = useCallback(async () => {
+  //   console.log("Checking authentication...");
+  //   setLoading(true);
+  //   try {
+  //     const data = await is_authenticated();
+  //     console.log("Authentication check result:", data);
+  //     setIsAuthenticated(data.authenticated === true);
+  //   } catch (error) {
+  //     console.log("Error checking authentication:", error);
+  //     setIsAuthenticated(false);
+  //   } finally {
+  //     setLoading(false);
+  //   }
+  // }, []);
+  const checkAuth = useCallback(async (silent = false) => {
+    console.log("Checking authentication...", silent ? "(silent)" : "");
+    
+    if (!silent) {
+      setLoading(true);
+    }
+    
     try {
       const data = await is_authenticated();
       console.log("Authentication check result:", data);
@@ -21,9 +39,26 @@ const AuthProvider = ({ children }) => {
       console.log("Error checking authentication:", error);
       setIsAuthenticated(false);
     } finally {
-      setLoading(false);
+      if (!silent) {
+        setLoading(false);
+      }
     }
   }, []);
+
+  // Проверка при первой загрузке + когда вернулся на вкладку
+  useEffect(() => {
+    checkAuth(false); // первая загрузка - с loading
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        console.log("Tab became visible, silent check...");
+        checkAuth(true); // вернулся на таб - тихая проверка
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [checkAuth]);
 
   // Логин
   const login_user = async (email, password) => {
@@ -80,19 +115,19 @@ const AuthProvider = ({ children }) => {
   }, [navigate]);
 
   // Проверка при первой загрузке + когда вернулся на вкладку
-  useEffect(() => {
-    checkAuth();
+  // useEffect(() => {
+  //   checkAuth();
 
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible') {
-        console.log("Tab became visible, checking auth...");
-        checkAuth();
-      }
-    };
+  //   const handleVisibilityChange = () => {
+  //     if (document.visibilityState === 'visible') {
+  //       console.log("Tab became visible, checking auth...");
+  //       checkAuth();
+  //     }
+  //   };
 
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
-  }, [checkAuth]);
+  //   document.addEventListener('visibilitychange', handleVisibilityChange);
+  //   return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  // }, [checkAuth]);
 
   return (
     <AuthContext.Provider

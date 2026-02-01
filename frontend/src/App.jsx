@@ -43,6 +43,7 @@ import GpmSkaiciuokle from './pages/GPMskaiciuokle';
 
 import { initMetaPixel } from './metaPixel';
 import MokejimuIstorija from './pages/MokejimuIstorija';
+import NotFound from './pages/NotFound';
 
 import B1 from './LPs/b1';
 
@@ -162,6 +163,8 @@ function App() {
         <Route path="/admin-visi-failai" element={<RequireSuperuser loginPath="/prisijungti" forbiddenPath="/403"><AdminVisiFailai /></RequireSuperuser>} />
         <Route path="/admin-suvestine" element={<RequireSuperuser loginPath="/prisijungti" forbiddenPath="/403"><AdminSuvestine /></RequireSuperuser>} />
         <Route path="/admin-klientai" element={<RequireSuperuser loginPath="/prisijungti" forbiddenPath="/403"><AdminKlientai /></RequireSuperuser>} />
+
+        <Route path="*" element={<NotFound />} />
       </Routes>
       <Footer />
     </AuthProvider>

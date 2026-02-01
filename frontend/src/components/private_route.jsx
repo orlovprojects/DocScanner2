@@ -19,20 +19,44 @@ const PrivateRoute = ({ children }) => {
   const [error, setError] = useState(null);
 
   // Проверяем auth при каждом переходе на защищённую страницу
-  useEffect(() => {
-    checkAuth();
-  }, [location.pathname, checkAuth]);
+  // useEffect(() => {
+  //   checkAuth(true);
+  // }, [location.pathname, checkAuth]);
 
   // При смене isAuthenticated триггерим проверку подписки
+  // useEffect(() => {
+  //   if (isAuthenticated) {
+  //     setCheckingSubscription(true);
+  //     setError(null);
+  //     subscription_status()
+  //       .then(res => setSubscriptionStatus(res.status || "unknown"))
+  //       .catch(err => {
+  //         console.error("Error fetching subscription status:", err);
+  //         // Если 401 после refresh — сессия мёртвая, logout
+  //         if (err.response?.status === 401) {
+  //           forceLogout();
+  //         } else {
+  //           setError("error");
+  //         }
+  //       })
+  //       .finally(() => setCheckingSubscription(false));
+  //   } else {
+  //     // Сбрасываем состояние если вышли из системы
+  //     setSubscriptionStatus(null);
+  //     setCheckingSubscription(false);
+  //     setError(null);
+  //   }
+  // }, [isAuthenticated, forceLogout]);
+
   useEffect(() => {
-    if (isAuthenticated) {
+    // Если уже есть статус подписки — не проверяем заново
+    if (isAuthenticated && !subscriptionStatus) {
       setCheckingSubscription(true);
       setError(null);
       subscription_status()
         .then(res => setSubscriptionStatus(res.status || "unknown"))
         .catch(err => {
           console.error("Error fetching subscription status:", err);
-          // Если 401 после refresh — сессия мёртвая, logout
           if (err.response?.status === 401) {
             forceLogout();
           } else {
@@ -40,13 +64,12 @@ const PrivateRoute = ({ children }) => {
           }
         })
         .finally(() => setCheckingSubscription(false));
-    } else {
-      // Сбрасываем состояние если вышли из системы
+    } else if (!isAuthenticated) {
       setSubscriptionStatus(null);
       setCheckingSubscription(false);
       setError(null);
     }
-  }, [isAuthenticated, forceLogout]);
+  }, [isAuthenticated, forceLogout, subscriptionStatus]);
 
   // 1) Пока проверяем сам факт логина — показываем спиннер
   if (loading) {
