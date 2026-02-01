@@ -46,6 +46,7 @@ import MokejimuIstorija from './pages/MokejimuIstorija';
 import NotFound from './pages/NotFound';
 
 import B1 from './LPs/b1';
+import Rivile from './LPs/rivile';
 
 function App() {
   const location = useLocation();
@@ -101,6 +102,7 @@ function App() {
         <Route path="/straipsnis/:slug" element={<GidoArticle />} />
 
         <Route path="/b1" element={<B1 />} />
+        <Route path="/rivile" element={<Rivile />} />
 
         <Route
           path="/suvestine"

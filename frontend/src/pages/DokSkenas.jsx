@@ -822,9 +822,9 @@ const Dokskenas = () => {
           }}
         >
           {[
-            { label: 'Finvalda (.xml)', url: 'https://finvalda.lt/', hasLink: true },
-            { label: 'Rivilė GAMA (.eip)', hasLink: false },
-            { label: 'Rivilė ERP (.xlsx)', hasLink: false },
+            { label: 'Finvalda', url: 'https://finvalda.lt/', hasLink: true },
+            { label: 'Rivilė GAMA', url: 'https://atlyginimoskaiciuokle.com/rivile', hasLink: true },
+            { label: 'Rivilė ERP', url: 'https://atlyginimoskaiciuokle.com/rivile', hasLink: true },
             { label: 'Agnum (.xml)', url: 'https://www.agnum.lt/', hasLink: true },
             { label: 'Centas (.xml)', hasLink: false },
             { label: 'Apskaita5 (.xml)', hasLink: false },

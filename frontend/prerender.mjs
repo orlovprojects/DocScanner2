@@ -22,6 +22,7 @@ const routesToPrerender = [
   '/privatumo-politika',
   '/naudojimo-taisykles',
   '/b1',
+  '/rivile',
 ];
 
 const distDir = path.resolve(__dirname, 'dist');
