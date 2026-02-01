@@ -293,7 +293,7 @@ const AtlyginimoSkaiciuokle2026 = () => {
               </Table>
             </TableContainer>
 
-            <Box sx={{ mt: 1, color: '#777', fontSize: '12px' }}>
+            <Box sx={{ mt: 1, color: '#777', fontSize: '12px', fontFamily: "Helvetica" }}>
               <div>Žemiau esanti detalizacija parodo, kokia suma apmokestinta 20% / 25% / 32%.</div>
             </Box>
           </Grid2>

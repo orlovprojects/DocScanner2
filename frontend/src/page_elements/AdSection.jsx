@@ -17,11 +17,6 @@ function getYoutubeId(url) {
 
 /**
  * Рекламный блок c CTA и кнопкой просмотра видео.
- * Props:
- * - onOpenVideo: () => void — открыть внешний модал/диалог на странице
- * - videoUrl: string — YouTube URL (embed или обычный)
- * - videoTitle: string — имя для события ViewContent
- * - onLearnMoreClick?: () => void — опциональный обработчик клика "Sužinoti daugiau"
  */
 export default function AdSection({
   onOpenVideo,
@@ -40,9 +35,7 @@ export default function AdSection({
   };
 
   const handleVideoClick = () => {
-    // 1) событие в Meta Pixel
     sendViewContent();
-    // 2) открыть внешний модал на странице
     if (onOpenVideo) onOpenVideo();
   };
 
@@ -50,26 +43,60 @@ export default function AdSection({
     <Box
       sx={{
         mt: 4,
-        p: 3,
         borderRadius: 2,
         backgroundColor: "#f2f2f2",
         border: "1px solid #3a3a3a",
+        overflow: "hidden",
       }}
     >
-      <Stack direction="row" spacing={3} alignItems="center">
-        {/* Левая часть: текст + список + кнопки */}
-        <Box sx={{ flex: 1 }}>
+      <Box
+        sx={{
+          display: "flex",
+          flexDirection: { xs: "column", md: "row" },
+        }}
+      >
+        {/* Левая часть: весь контент */}
+        <Box
+          sx={{
+            flex: 1,
+            p: 3,
+            display: "flex",
+            flexDirection: "column",
+            order: { xs: 1, md: 1 },
+          }}
+        >
+          {/* Title */}
           <Typography
             sx={{
               color: "#404040",
-              fontSize: { xs: "22px", sm: "26px" },
+              fontSize: { xs: "20px", sm: "24px" },
               fontWeight: 700,
               mb: 1,
+              order: 1,
             }}
           >
-            Gaištate krūvą laiko apskaitai? Automatizuokite apskaitą su DI!
+            Skęstate apskaitoje? Skaitmenizuokite sąskaitas su DokSkenu!
           </Typography>
 
+          {/* Картинка на мобильном - между title и списком */}
+          <Box
+            component="img"
+            src="/doskenas_apskaita.jpg"
+            alt="DokSkenas - sąskaitų skaitmenizavimas"
+            onClick={() => (window.location.href = "/saskaitu-skaitmenizavimas-dokskenas")}
+            sx={{
+              display: { xs: "block", md: "none" },
+              width: "calc(100% + 48px)", // растягиваем на всю ширину, компенсируя padding родителя
+              maxWidth: "none",
+              height: "auto",
+              my: 2,
+              mx: -3, // отрицательный margin чтобы убрать padding по краям
+              cursor: "pointer",
+              order: 2,
+            }}
+          />
+
+          {/* Список */}
           <Box
             component="ol"
             sx={{
@@ -79,6 +106,7 @@ export default function AdSection({
               fontFamily: "Helvetica",
               listStyleType: "decimal",
               "& > li": { mb: "6px" },
+              order: 3,
             }}
           >
             <li>Įkelkite sąskaitas į DokSkeną</li>
@@ -86,7 +114,12 @@ export default function AdSection({
             <li>Įkelkite failus į savo buhalterinę programą (Rivilę, Finvaldą, Centą...)</li>
           </Box>
 
-          <Stack direction={{ xs: "column", sm: "row" }} spacing={2} sx={{ mt: 2 }}>
+          {/* Кнопки */}
+          <Stack
+            direction={{ xs: "column", sm: "row" }}
+            spacing={2}
+            sx={{ mt: 2, order: 4 }}
+          >
             <Button
               variant="contained"
               href="/saskaitu-skaitmenizavimas-dokskenas"
@@ -115,32 +148,50 @@ export default function AdSection({
             </Button>
           </Stack>
 
-          <Stack direction="row" alignItems="center" spacing={1} sx={{ mt: 2 }}>
+          {/* Звёзды и текст */}
+          <Stack
+            direction="row"
+            alignItems="center"
+            spacing={1}
+            sx={{ mt: 2, order: 5 }}
+          >
             <Stack direction="row" spacing={0.01} justifyContent="center">
               {[...Array(5)].map((_, i) => (
                 <StarIcon key={i} sx={{ color: "#f5cf54" }} />
               ))}
             </Stack>
-            <Typography variant="body2">Daugiau nei 100 įmonių naudojasi DokSkenu kasdien</Typography>
+            <Typography variant="body2">
+              Daugiau nei 250 įmonių naudojasi DokSkenu kasdien
+            </Typography>
           </Stack>
         </Box>
 
-        {/* Правая часть: картинка (desktop) */}
+        {/* Правая часть: картинка на десктопе - на всю высоту без padding */}
         <Box
-          component="img"
-          src="/DokSkenas_square.jpg"
-          alt="DokSkenas"
           sx={{
             display: { xs: "none", md: "block" },
-            width: 180,
-            height: "auto",
-            borderRadius: 2,
-            cursor: "pointer",
-            "&:hover": { opacity: 0.9 },
+            width: { md: "45%" },
+            maxWidth: 450,
+            flexShrink: 0,
+            order: { xs: 2, md: 2 },
           }}
-          onClick={() => (window.location.href = "/saskaitu-skaitmenizavimas-dokskenas")}
-        />
-      </Stack>
+        >
+          <Box
+            component="img"
+            src="/doskenas_apskaita.jpg"
+            alt="DokSkenas - sąskaitų skaitmenizavimas"
+            onClick={() => (window.location.href = "/saskaitu-skaitmenizavimas-dokskenas")}
+            sx={{
+              width: "100%",
+              height: "100%",
+              objectFit: "cover",
+              objectPosition: "center",
+              cursor: "pointer",
+              "&:hover": { opacity: 0.95 },
+            }}
+          />
+        </Box>
+      </Box>
     </Box>
   );
 }

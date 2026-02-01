@@ -416,7 +416,7 @@ const Dokskenas = () => {
                 <StarIcon key={index} sx={{ color: '#f5cf54' }} />
               ))}
             </Stack>
-            <Typography variant="body2">Daugiau nei 100 įmonių naudojasi DokSkenu kasdien</Typography>
+            <Typography variant="body2">Daugiau nei 250 įmonių naudojasi DokSkenu kasdien</Typography>
           </Stack>
         </Box>
       </Stack>
