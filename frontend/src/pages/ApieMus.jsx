@@ -1,4 +1,5 @@
 import { Box, Typography, Button } from '@mui/material';
+import { Helmet } from 'react-helmet';
 
 const AboutUs = () => {
   return (
@@ -10,6 +11,10 @@ const AboutUs = () => {
         paddingX: { xs: 3, sm: 6, md: 10, lg: 14 },
       }}
     >
+      <Helmet>
+        <title>Apie DokSkeną | Dokumentų skaitmenizavimo sistema</title>
+        <meta name="description" content="Šiek tiek istorijos apie DokSkeno misiją ir produktą." />
+      </Helmet>
       <Box
         sx={{
           maxWidth: '1400px',
@@ -148,7 +153,10 @@ const AboutUs = () => {
               }}
             >
               <Typography sx={{ fontSize: '17px', fontFamily: 'Helvetica', color: '#1b1b1b', lineHeight: 1.8, fontWeight: 600, textAlign: 'justify' }}>
-                Mūsų didelė misija: apdoroti 10 000 000 klientų dokumentų ir sutaupyti jiems 750 000 valandų darbo per metus.
+                Mūsų GRAND misija: apdoroti 10 000 000 klientų dokumentų ir sutaupyti jiems
+              </Typography>
+              <Typography sx={{ fontSize: '17px', fontFamily: 'Helvetica', color: '#1b1b1b', lineHeight: 1.8, fontWeight: 600, textAlign: 'justify' }}>
+                750 000 valandų darbo per metus.
               </Typography>
             </Box>
           </Box>
@@ -165,7 +173,7 @@ const AboutUs = () => {
               fontWeight: 500,
               padding: '16px 40px',
               fontSize: '15px',
-              borderRadius: 0,
+              borderRadius: 1.5,
               textTransform: 'none',
               '&:hover': {
                 backgroundColor: '#333',
@@ -189,7 +197,7 @@ const AboutUs = () => {
           <Box
             component="img"
             src="/apie_dokskena.jpg"
-            alt="Apie DokSkeną"
+            alt="DokSkenas dokumentų skaitmenizavimas"
             loading="lazy"
             sx={{
               width: '100%',
