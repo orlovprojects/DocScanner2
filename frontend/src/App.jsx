@@ -14,6 +14,7 @@ import AtlyginimoSkaiciuokle2026 from './pages/AtlyginimoSkaiciuokle2026';
 import InvoiceGenerator from './pages/InvoiceGenerator';
 import BuhalterinenApskaita from './pages/BuhalterineApskaita';
 import SumaZodziais from './pages/SumaZodziais';
+import AboutUs from './pages/ApieMus';
 
 import AdminDashboard from "./pages/AdminDashboard";
 import AdminSuvestine from "./pages/AdminSuvestine";
@@ -92,6 +93,7 @@ function App() {
       <Header />
       <Routes>
         <Route path="/" element={<AtlyginimoSkaiciuokle2026 />} />
+        <Route path="/apie-mus" element={<AboutUs />} />
         <Route path="/2025" element={<AtlyginimoSkaiciuokle2025 />} />
         <Route path="/2026" element={<Navigate to="/" replace />} />
         <Route path="/saskaitu-skaitmenizavimas-dokskenas" element={<Dokskenas />} />
