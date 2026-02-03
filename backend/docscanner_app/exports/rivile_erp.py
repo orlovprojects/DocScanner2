@@ -253,6 +253,64 @@ def build_ref_id(series: str, number: str) -> str:
 
 
 # =========================
+# Уникальный REF_ID с дедупликацией
+# =========================
+def build_unique_ref_id(
+    series: str,
+    number: str,
+    seen_refs: set[str],
+    doc_pk: Any = None
+) -> str:
+    """
+    Строит уникальный ref_id.
+    
+    Алгоритм:
+    1. Строим базовый ref_id (series + number)
+    2. Если НЕ в seen_refs → возвращаем как есть
+    3. Если УЖЕ в seen_refs (дубликат):
+       a) Пробуем "{base}_{doc_pk}" (например SF001_12345)
+       b) Если и это занято → "{base}_2", "{base}_3"...
+    
+    Добавляет результат в seen_refs.
+    """
+    base_ref = build_ref_id(series, number)
+    
+    # Если уникальный — сразу возвращаем
+    if base_ref not in seen_refs:
+        seen_refs.add(base_ref)
+        return base_ref
+    
+    # Дубликат! Пробуем с doc_pk
+    if doc_pk is not None:
+        ref_with_pk = f"{base_ref}_{doc_pk}"
+        if ref_with_pk not in seen_refs:
+            seen_refs.add(ref_with_pk)
+            logger.debug(
+                "[RIVILE_ERP:REF_ID] Дубликат '%s' -> '%s' (добавлен pk)",
+                base_ref, ref_with_pk
+            )
+            return ref_with_pk
+    
+    # doc_pk нет или тоже занят — добавляем порядковый суффикс
+    counter = 2
+    while True:
+        candidate = f"{base_ref}_{counter}"
+        if candidate not in seen_refs:
+            seen_refs.add(candidate)
+            logger.debug(
+                "[RIVILE_ERP:REF_ID] Дубликат '%s' -> '%s' (добавлен суффикс)",
+                base_ref, candidate
+            )
+            return candidate
+        counter += 1
+        # Защита от бесконечного цикла (маловероятно, но на всякий случай)
+        if counter > 9999:
+            candidate = f"{base_ref}_{random.randint(10000, 99999)}"
+            seen_refs.add(candidate)
+            return candidate
+
+
+# =========================
 # Код контрагента
 # =========================
 def get_party_code(doc: Any, *, id_field: str, vat_field: str, id_programoje_field: str) -> str:
@@ -462,20 +520,29 @@ def export_prekes_and_paslaugos_to_rivile_erp_xlsx(documents: Iterable[Any], out
 
 
 # =========================================================
-# 2) KLIENTAI
+# 2) KLIENTAI (с дедупликацией)
 # =========================================================
 def export_clients_to_rivile_erp_xlsx(clients: Iterable[dict], output_path: str | Path) -> Path:
     wb = _load_template(CLIENTS_TEMPLATE_FILE)
     ws = wb.active
 
     start_row = 6
-    for i, client in enumerate(clients or []):
-        row = start_row + i
+    row_idx = 0
+    seen_clients: set[str] = set()  # Для дедупликации
+
+    for client in clients or []:
+        cid = normalize_code(client.get("id"))
+        
+        # Пропускаем пустые или дублирующиеся id
+        if not cid or cid in seen_clients:
+            continue
+        seen_clients.add(cid)
+
+        row = start_row + row_idx
 
         doc_type = (_s(client.get("type")) or "pirkimas").lower()
         is_person = bool(client.get("is_person", False))
 
-        cid = normalize_code(client.get("id"))
         code = cid
         name = safe_excel_text(client.get("name"))
         vat = normalize_code(client.get("vat"))
@@ -492,12 +559,14 @@ def export_clients_to_rivile_erp_xlsx(clients: Iterable[dict], output_path: str 
         ws.cell(row=row, column=ClientCols.IS_CUSTOMER, value=1 if doc_type == "pardavimas" else "")
         ws.cell(row=row, column=ClientCols.IS_SUPPLIER, value=1 if doc_type == "pirkimas" else "")
 
+        row_idx += 1
+
     wb.save(output_path)
     return Path(output_path)
 
 
 # =========================================================
-# 3) PIRKIMAI/PARDAVIMAI (Headers/Lines)
+# 3) PIRKIMAI/PARDAVIMAI (Headers/Lines) с уникальными ref_id
 # =========================================================
 def export_documents_to_rivile_erp_xlsx(
     documents: Iterable[Any],
@@ -544,10 +613,16 @@ def export_documents_to_rivile_erp_xlsx(
     header_idx = 6
     line_idx = 3
 
+    # ====== НОВОЕ: отслеживание уникальности ref_id ======
+    seen_refs: set[str] = set()
+
     for doc in documents or []:
         dok_nr = _s(getattr(doc, "document_number", "") or "")
         series = _s(getattr(doc, "document_series", "") or "")
-        ref_id = build_ref_id(series, dok_nr)
+        doc_pk = getattr(doc, "pk", None) or getattr(doc, "id", None)
+
+        # ====== ИЗМЕНЕНИЕ: используем build_unique_ref_id ======
+        ref_id = build_unique_ref_id(series, dok_nr, seen_refs, doc_pk)
 
         client_code = get_party_code(
             doc,
@@ -726,6 +801,14 @@ def export_documents_to_rivile_erp_xlsx(
 
 
 
+
+
+
+
+
+
+
+
 # from __future__ import annotations
 
 # import os
@@ -759,9 +842,9 @@ def export_documents_to_rivile_erp_xlsx(
 # # Константы/форматы Excel
 # # =========================
 # DATE_FMT = "yyyy-mm-dd"
-# MONEY_FMT = "0.00"       # для сумм VAT (2 знака)
-# PRICE_FMT = "0.00##"     # для цены (2-4 знака)
-# QTY_FMT = "0.#####"      # для количества (до 5 знаков)
+# MONEY_FMT = "0.00"
+# PRICE_FMT = "0.00##"
+# QTY_FMT = "0.#####"
 
 # EXCEL_BAD_PREFIXES = ("=", "+", "-", "@", "\t")
 # DEFAULT_UNIT = "VNT"
@@ -781,55 +864,53 @@ def export_documents_to_rivile_erp_xlsx(
 
 
 # class ClientCols:
-#     REF_ID = 1        # A - ##refId##
-#     NAME = 2          # B - Name
-#     CODE = 3          # C - Code
-#     TYPE_ID = 4       # D - 1=физ лицо, 0=юр лицо
-#     REG_CODE = 7      # G - RegCode
-#     VAT = 8           # H - VatNumber
-#     ADDRESS = 9       # I - Address
-#     IS_CUSTOMER = 21  # U
-#     IS_SUPPLIER = 27  # AA
+#     REF_ID = 1
+#     NAME = 2
+#     CODE = 3
+#     TYPE_ID = 4
+#     REG_CODE = 7
+#     VAT = 8
+#     ADDRESS = 9
+#     IS_CUSTOMER = 21
+#     IS_SUPPLIER = 27
 
 
 # class HeaderCols:
-#     REF_ID = 1        # A - ##refId##
-#     CLIENT_CODE = 2   # B - ClientCode
-#     OP_DATE = 3       # C - OpDate
-#     INV_DATE = 4      # D - DocDate
-#     DOC_NO = 5        # E - DocumentNo
-#     DOC_TYPE = 6      # F - IsTaxIncluded
-#     JOURNAL = 7       # G - JournalCode
-#     CURRENCY = 9      # I - CurrencyCode
-#     DEPARTMENT = 20   # T - DepartmentCode (Padalinio kodas)
-#     OBJECT = 21       # U - ObjectCode (Objekto kodas)
+#     REF_ID = 1
+#     CLIENT_CODE = 2
+#     OP_DATE = 3
+#     INV_DATE = 4
+#     DOC_NO = 5
+#     DOC_TYPE = 6
+#     JOURNAL = 7
+#     CURRENCY = 9
+#     DEPARTMENT = 20
+#     OBJECT = 21
 
 
 # class LineCols:
-#     REF_ID = 1        # A - ##refId##
-#     ITEM_CODE = 2     # B - ItemCode
-#     UOM = 3           # C - UOM
-#     BARCODE = 4       # D - Barcode
-#     DEPT = 5          # E - DepartmentCode (Padalinio kodas)
-#     QTY = 6           # F - Quantity
-#     PRICE = 7         # G - Price
-#     DISCOUNT_PCT = 8  # H - DiscountPerc (Nuolaidos procentas)
-#     VAT_CODE = 9      # I - TaxCode
-#     VAT_AMOUNT = 10   # J - TaxAmount
-#     NAME = 11         # K - ItemName
-#     OBJECT_CODE = 12  # L - ObjectCode (Objekto kodas)
+#     REF_ID = 1
+#     ITEM_CODE = 2
+#     UOM = 3
+#     BARCODE = 4
+#     DEPT = 5
+#     QTY = 6
+#     PRICE = 7
+#     DISCOUNT_PCT = 8
+#     VAT_CODE = 9
+#     VAT_AMOUNT = 10
+#     NAME = 11
+#     OBJECT_CODE = 12
 
 
 # # =========================
 # # Хелперы нормализации/форматирования
 # # =========================
 # def _s(v: Any) -> str:
-#     """Строка без None, с strip()."""
 #     return str(v).strip() if v is not None else ""
 
 
 # def _safe_D(x: Any) -> Decimal:
-#     """Безопасное преобразование в Decimal."""
 #     try:
 #         return Decimal(str(x))
 #     except Exception:
@@ -837,7 +918,6 @@ def export_documents_to_rivile_erp_xlsx(
 
 
 # def safe_excel_text(value: Optional[str]) -> str:
-#     """Строка, безопасная для Excel (отключает формулы)."""
 #     s = _s(value)
 #     if not s:
 #         return ""
@@ -847,12 +927,10 @@ def export_documents_to_rivile_erp_xlsx(
 
 
 # def normalize_code(code: Optional[str]) -> str:
-#     """Нормализация кодов: trim + upper + Excel-safe."""
 #     return safe_excel_text(_s(code).upper())
 
 
 # def to_decimal(x: Any, q: str = "0.01") -> Decimal:
-#     """Decimal с округлением до 2 знаков по умолчанию."""
 #     if x is None or x == "":
 #         d = Decimal("0")
 #     elif isinstance(x, Decimal):
@@ -872,41 +950,27 @@ def export_documents_to_rivile_erp_xlsx(
 #     c.number_format = PRICE_FMT
 
 
-# # def set_cell_qty(ws: Worksheet, row: int, col: int, qty: Any):
-# #     try:
-# #         val = float(qty if qty is not None and qty != "" else 0)
-# #     except Exception:
-# #         val = 0.0
-# #     c = ws.cell(row=row, column=col, value=val)
-# #     c.number_format = QTY_FMT
-
 # def set_cell_qty(ws: Worksheet, row: int, col: int, qty: Any):
-#     # 1) нормализуем вход
 #     s = _s(qty)
 #     if s:
 #         s = s.strip()
-#         # убираем хвостовой разделитель если есть: "1," -> "1"
 #         if s.endswith((",", ".")):
 #             s = s[:-1]
-#         # литовский/русский разделитель в точку
 #         s = s.replace(",", ".")
 #     try:
 #         d = Decimal(s) if s else Decimal("0")
 #     except Exception:
 #         d = Decimal("0")
 
-#     # 2) ограничиваем до 5 знаков после запятой
 #     d = d.quantize(Decimal("0.00001"), rounding=ROUND_HALF_UP)
 
-#     # 3) выбираем формат: целые без запятой
 #     if d == d.to_integral_value():
 #         fmt = "0"
 #     else:
-#         fmt = QTY_FMT  # "0.#####"
+#         fmt = QTY_FMT
 
 #     c = ws.cell(row=row, column=col, value=float(d))
 #     c.number_format = fmt
-
 
 
 # def to_excel_date(d: Any) -> Optional[date]:
@@ -935,10 +999,6 @@ def export_documents_to_rivile_erp_xlsx(
 # # Расчёт процента скидки документа
 # # =========================
 # def compute_global_invoice_discount_pct(doc: Any) -> Optional[Decimal]:
-#     """
-#     Процент скидки: invoice_discount_wo_vat / сумма_нетто_по_строкам * 100.
-#     Возвращает Decimal (0..99.99) или None если скидки нет.
-#     """
 #     disc = _safe_D(getattr(doc, "invoice_discount_wo_vat", 0) or 0)
 #     if disc <= 0:
 #         return None
@@ -968,49 +1028,23 @@ def export_documents_to_rivile_erp_xlsx(
 # # Документ: номер/рефы
 # # =========================
 # def build_dok_nr(series: str, number: str) -> str:
-#     """
-#     Формирует DOK_NR как конкатенацию 'series' + 'number' (БЕЗ дефиса).
-#     Правила:
-#     - Если series пустая -> вернуть number.
-#     - Если number пустой -> вернуть series.
-#     - Если number начинается с series (с дефисом/пробелом/слэшем или без) -> убираем повтор и разделитель.
-#       Примеры:
-#         series='AB', number='AB-123'  -> 'AB123'
-#         series='AB', number='AB123'   -> 'AB123'
-#         series='AB', number='123'     -> 'AB123'
-#         series=''  , number='123'     -> '123'
-#     """
 #     s = (series or "").strip()
 #     n = (number or "").strip()
 
 #     if not s:
-#         res = n
-#         logger.info("[ERP:DOK_NR] s='', n=%r -> %r", n, res)
-#         return res
+#         return n
 #     if not n:
-#         logger.info("[ERP:DOK_NR] n='', s=%r -> %r", s, s)
 #         return s
 
 #     if n.startswith(s):
 #         tail = n[len(s):]
 #         tail = tail.lstrip("-/ .")
-#         res = f"{s}{tail}"
-#         logger.info("[ERP:DOK_NR] n startswith s: s=%r n=%r -> %r", s, n, res)
-#         return res
+#         return f"{s}{tail}"
 
-#     res = f"{s}{n}"
-#     logger.info("[ERP:DOK_NR] s=%r n=%r -> %r", s, n, res)
-#     return res
+#     return f"{s}{n}"
 
 
 # def _fallback_doc_num(series: str, number: str) -> str:
-#     """
-#     Номер документа (fallback):
-#       - оба пустые  -> NERANUMERIO + 5 случайных цифр
-#       - только number -> number
-#       - только series -> series
-#       - оба есть      -> series + number (если number не начинается с series)
-#     """
 #     s = _s(series)
 #     n = _s(number)
 #     if not s and not n:
@@ -1023,28 +1057,16 @@ def export_documents_to_rivile_erp_xlsx(
 
 
 # def build_ref_id(series: str, number: str) -> str:
-#     """
-#     REF_ID для связки Headers/Lines.
-#     Пытаемся сделать аккуратный 'series+number'. Если в итоге пусто — используем fallback.
-#     """
 #     ref = build_dok_nr(series, number)
 #     if not _s(ref):
 #         ref = _fallback_doc_num(series, number)
-#         logger.info("[ERP:REF_ID] using fallback -> %r", ref)
 #     return ref
 
 
 # # =========================
-# # Код контрагента (без заглушек)
+# # Код контрагента
 # # =========================
 # def get_party_code(doc: Any, *, id_field: str, vat_field: str, id_programoje_field: str) -> str:
-#     """
-#     Код стороны по приоритету:
-#       1) *_id
-#       2) *_vat_code
-#       3) *_id_programoje
-#     НИКАКИХ '111111111' — если пусто, значит пусто.
-#     """
 #     sid = _s(getattr(doc, id_field, None))
 #     if sid:
 #         return sid
@@ -1061,21 +1083,10 @@ def export_documents_to_rivile_erp_xlsx(
 # # Нормализация типа позиции
 # # =========================
 # def normalize_tip_lineitem(value: Any) -> str:
-#     """
-#     Для line item в Rivile ERP: возвращает '1' (preke) или '2' (paslauga).
-#     Поддерживает: 1/2/3/4, 'preke/prekė', 'paslauga/paslaugos'.
-    
-#     Маппинг:
-#     - 1 → '1' (prekė = товар)
-#     - 2 → '2' (paslauga = услуга)
-#     - 3 → '1' (kodas обрабатывается как товар)
-#     - 4 → '2' (обрабатывается как услуга)
-#     """
 #     s = str(value).strip() if value is not None else ""
 #     if not s:
 #         return "1"
     
-#     # Пробуем числовое значение
 #     try:
 #         n = int(float(s.replace(",", ".")))
 #         if n == 1:
@@ -1083,29 +1094,23 @@ def export_documents_to_rivile_erp_xlsx(
 #         elif n == 2:
 #             return "2"
 #         elif n == 3:
-#             return "1"  # kodas -> товар
+#             return "1"
 #         elif n == 4:
-#             return "2"  # -> услуга
-#         return "1"  # fallback
+#             return "2"
+#         return "1"
 #     except Exception:
 #         pass
     
-#     # Текстовые синонимы
 #     low = s.lower()
 #     if low in ("preke", "prekė", "prekes", "prekės"):
 #         return "1"
 #     if low in ("paslauga", "paslaugos"):
 #         return "2"
     
-#     return "1"  # fallback
+#     return "1"
 
 
 # def normalize_tip_doc(value: Any) -> str:
-#     """
-#     Для документа (если нет line items):
-#       1 -> '1', 2 -> '2', 3 -> '1', 4 -> '2'.
-#       Строковые цифры тоже поддерживаются.
-#     """
 #     s = _s(value)
 #     if not s:
 #         return "1"
@@ -1130,7 +1135,7 @@ def export_documents_to_rivile_erp_xlsx(
 
 
 # # =========================
-# # Загрузка шаблона с проверкой
+# # Загрузка шаблона
 # # =========================
 # def _load_template(filename: str):
 #     path = TEMPLATES_DIR / filename
@@ -1138,6 +1143,80 @@ def export_documents_to_rivile_erp_xlsx(
 #         raise FileNotFoundError(f"Не найден шаблон: {path}")
 #     wb = load_workbook(path)
 #     return wb
+
+
+# # =========================
+# # PVM Kodas helpers
+# # =========================
+# def _get_pvm_kodas_for_export(doc, item=None, line_map=None) -> str:
+#     """
+#     Получает PVM kodas для экспорта с учётом separate_vat.
+    
+#     ПРАВИЛО:
+#     - Если separate_vat=True и нет line items (sumiskai) -> пустой
+#     - Если есть line_map и item -> берём из line_map
+#     - Иначе -> из item.pvm_kodas или doc.pvm_kodas
+    
+#     ВАЖНО: "Keli skirtingi PVM" — это маркер, не реальный код -> возвращаем пустой
+#     """
+#     separate_vat = bool(getattr(doc, "separate_vat", False))
+#     scan_type = _s(getattr(doc, "scan_type", "")).lower()
+    
+#     # Случай: sumiskai + separate_vat=True -> пустой PVM код
+#     if separate_vat and scan_type == "sumiskai":
+#         logger.debug(
+#             "[RIVILE_ERP:PVM] doc=%s sumiskai+separate_vat=True -> empty pvm_kodas",
+#             getattr(doc, "pk", None)
+#         )
+#         return ""
+    
+#     # Случай: есть item и line_map (detaliai режим)
+#     if item is not None and line_map is not None:
+#         item_id = getattr(item, "id", None)
+#         if item_id is not None and item_id in line_map:
+#             pvm = _s(line_map.get(item_id, ""))
+#             # Фильтруем маркер
+#             if pvm == "Keli skirtingi PVM":
+#                 return ""
+#             return pvm
+    
+#     # Случай: есть item, но нет line_map -> берём из item
+#     if item is not None:
+#         pvm = _s(getattr(item, "pvm_kodas", ""))
+#         if pvm == "Keli skirtingi PVM":
+#             return ""
+#         return pvm
+    
+#     # Случай: нет item (sumiskai) -> берём из документа
+#     pvm = _s(getattr(doc, "pvm_kodas", ""))
+#     if pvm == "Keli skirtingi PVM":
+#         return ""
+#     return pvm
+
+
+# def _get_vat_percent_for_export(doc, item=None) -> Any:
+#     """
+#     Получает vat_percent для экспорта.
+    
+#     ПРАВИЛО:
+#     - Если separate_vat=True и нет line items (sumiskai) -> None (пустой)
+#     - Иначе -> из item.vat_percent или doc.vat_percent
+#     """
+#     separate_vat = bool(getattr(doc, "separate_vat", False))
+#     scan_type = _s(getattr(doc, "scan_type", "")).lower()
+    
+#     # Случай: sumiskai + separate_vat=True -> пустой
+#     if separate_vat and scan_type == "sumiskai":
+#         logger.debug(
+#             "[RIVILE_ERP:VAT] doc=%s sumiskai+separate_vat=True -> empty vat_percent",
+#             getattr(doc, "pk", None)
+#         )
+#         return None
+    
+#     # Иначе возвращаем реальное значение
+#     if item is not None:
+#         return getattr(item, "vat_percent", None)
+#     return getattr(doc, "vat_percent", None)
 
 
 # # =========================================================
@@ -1261,7 +1340,6 @@ def export_documents_to_rivile_erp_xlsx(
 #     if "Headers" not in wb.sheetnames or "Lines" not in wb.sheetnames:
 #         raise ValueError("Шаблон должен содержать листы 'Headers' и 'Lines'")
 
-#     # 🔹 Дефолты из rivile_erp_extra_fields
 #     extra = rivile_erp_extra_fields or {}
 #     journal_key = f"{prefix}_zurnalo_kodas"
 #     dept_key    = f"{prefix}_padalinio_kodas"
@@ -1292,7 +1370,7 @@ def export_documents_to_rivile_erp_xlsx(
 #         discount_pct = compute_global_invoice_discount_pct(doc)
 
 #         # === Headers ===
-#         header_row = header_idx  # одна строка хедера на документ
+#         header_row = header_idx
 
 #         ws_headers.cell(row=header_row, column=HeaderCols.REF_ID, value=safe_excel_text(ref_id))
 #         ws_headers.cell(row=header_row, column=HeaderCols.CLIENT_CODE, value=safe_excel_text(client_code))
@@ -1306,7 +1384,6 @@ def export_documents_to_rivile_erp_xlsx(
 #         ws_headers.cell(row=header_row, column=HeaderCols.DOC_NO, value=safe_excel_text(ref_id))
 #         ws_headers.cell(row=header_row, column=HeaderCols.DOC_TYPE, value=0)
 
-#         # 🔹 Journal: сначала дефолт из rivile_erp_extra_fields, потом doc, потом global default
 #         if user_journal:
 #             zurnalo_kodas = user_journal
 #         else:
@@ -1317,7 +1394,6 @@ def export_documents_to_rivile_erp_xlsx(
 #         currency = _s(getattr(doc, "currency", "") or DEFAULT_CURRENCY) or DEFAULT_CURRENCY
 #         ws_headers.cell(row=header_row, column=HeaderCols.CURRENCY, value=currency)
 
-#         # DEPARTMENT / OBJECT в header заполняем только если нет line items (ниже)
 #         header_idx += 1
 
 #         # === Lines ===
@@ -1326,6 +1402,7 @@ def export_documents_to_rivile_erp_xlsx(
 #         has_items = bool(line_items and hasattr(line_items, "all") and line_items.exists())
 
 #         if has_items:
+#             # ========== DETALIAI режим ==========
 #             for item in line_items.all():
 #                 ws_lines.cell(row=line_idx, column=LineCols.REF_ID, value=safe_excel_text(ref_id))
 #                 ws_lines.cell(
@@ -1344,7 +1421,6 @@ def export_documents_to_rivile_erp_xlsx(
 #                     value=normalize_code(getattr(item, "prekes_barkodas", None) or ""),
 #                 )
 
-#                 # 🔹 Padalinio kodas: item → user_default → DEFAULT_DEPT
 #                 item_dept = _s(getattr(item, "padalinio_kodas", None) or "")
 #                 padalinio_kodas = item_dept or user_dept or DEFAULT_DEPT
 #                 ws_lines.cell(
@@ -1361,20 +1437,17 @@ def export_documents_to_rivile_erp_xlsx(
 #                 else:
 #                     set_cell_money(ws_lines, line_idx, LineCols.VAT_AMOUNT, getattr(item, "vat", None) or 0)
 
-#                 if line_map is not None:
-#                     pvm_code = (line_map or {}).get(getattr(item, "id", None))
-#                 else:
-#                     pvm_code = getattr(item, "pvm_kodas", None)
+#                 # ====== ИСПРАВЛЕНИЕ: Используем helper для PVM кода ======
+#                 pvm_code = _get_pvm_kodas_for_export(doc, item=item, line_map=line_map)
 #                 ws_lines.cell(
 #                     row=line_idx,
 #                     column=LineCols.VAT_CODE,
-#                     value=safe_excel_text(_s(pvm_code)),
+#                     value=safe_excel_text(pvm_code),
 #                 )
 
 #                 name = safe_excel_text(getattr(item, "prekes_pavadinimas", None) or "")
 #                 ws_lines.cell(row=line_idx, column=LineCols.NAME, value=name)
 
-#                 # 🔹 Objekto kodas: item → user_default
 #                 item_obj = _s(getattr(item, "objekto_kodas", None) or "")
 #                 objekto_kodas = item_obj or user_obj
 #                 if objekto_kodas:
@@ -1386,6 +1459,7 @@ def export_documents_to_rivile_erp_xlsx(
 
 #                 line_idx += 1
 #         else:
+#             # ========== SUMISKAI режим ==========
 #             ws_lines.cell(row=line_idx, column=LineCols.REF_ID, value=safe_excel_text(ref_id))
 #             ws_lines.cell(
 #                 row=line_idx,
@@ -1403,7 +1477,6 @@ def export_documents_to_rivile_erp_xlsx(
 #                 value=normalize_code(getattr(doc, "prekes_barkodas", None) or ""),
 #             )
 
-#             # 🔹 Padalinio kodas: doc → user_default → DEFAULT_DEPT
 #             doc_dept = _s(getattr(doc, "padalinio_kodas", None) or "")
 #             padalinio_kodas = doc_dept or user_dept or DEFAULT_DEPT
 #             ws_lines.cell(
@@ -1423,17 +1496,18 @@ def export_documents_to_rivile_erp_xlsx(
 #                 vat_amount = getattr(doc, "vat_amount", None)
 #                 set_cell_money(ws_lines, line_idx, LineCols.VAT_AMOUNT, vat_amount if vat_amount is not None else 0)
 
-#             pvm = getattr(doc, "pvm_kodas", None)
+#             # ====== ИСПРАВЛЕНИЕ: Используем helper для PVM кода ======
+#             # При sumiskai + separate_vat=True -> пустой
+#             pvm_code = _get_pvm_kodas_for_export(doc, item=None, line_map=None)
 #             ws_lines.cell(
 #                 row=line_idx,
 #                 column=LineCols.VAT_CODE,
-#                 value=safe_excel_text(_s(pvm)),
+#                 value=safe_excel_text(pvm_code),
 #             )
 
 #             name = safe_excel_text(getattr(doc, "prekes_pavadinimas", None) or "")
 #             ws_lines.cell(row=line_idx, column=LineCols.NAME, value=name)
 
-#             # 🔹 Objekto kodas: doc → user_default
 #             doc_obj = _s(getattr(doc, "objekto_kodas", None) or "")
 #             objekto_kodas = doc_obj or user_obj
 #             if objekto_kodas:
@@ -1443,7 +1517,6 @@ def export_documents_to_rivile_erp_xlsx(
 #                     value=safe_excel_text(objekto_kodas),
 #                 )
 
-#             # 🔹 ТЕ ЖЕ ЗНАЧЕНИЯ — В HEADER T/U (doc-level)
 #             ws_headers.cell(
 #                 row=header_row,
 #                 column=HeaderCols.DEPARTMENT,
@@ -1460,3 +1533,4 @@ def export_documents_to_rivile_erp_xlsx(
 
 #     wb.save(output_path)
 #     return Path(output_path)
+
