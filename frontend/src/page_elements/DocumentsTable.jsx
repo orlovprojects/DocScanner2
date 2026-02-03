@@ -29,6 +29,7 @@ import PersonOffIcon from "@mui/icons-material/PersonOff";
 import FeedIcon from "@mui/icons-material/Feed";
 import HelpOutlineIcon from "@mui/icons-material/HelpOutline";
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
+import CheckCircleOutlineIcon from "@mui/icons-material/CheckCircleOutline";
 import MoreVertIcon from "@mui/icons-material/MoreVert";
 import SearchIcon from "@mui/icons-material/Search";
 import CloseIcon from "@mui/icons-material/Close";
@@ -231,6 +232,7 @@ export default function DocumentsTable({
     exportableIds.some((id) => selectedRows.includes(id)) && !allExportableSelected;
 
   const statusLabel = (d) => {
+    // Для mobile - короткие названия
     if (d.status === "exported") return "Eksportuotas";
     if (d.status === "completed") return "Atliktas";
     if (d.status === "processing" || d.status === "pending") return "Vykdomas";
@@ -240,7 +242,11 @@ export default function DocumentsTable({
   };
 
   const statusLabelFull = (d) => {
+    // Для desktop - полные названия
     if (d.status === "exported") return "Atliktas (Eksportuotas)";
+    if (d.status === "completed") return "Atliktas (Neeksportuotas)";
+    if (d.status === "processing" || d.status === "pending") return "Vykdomas";
+    if (d.status === "rejected") return "Atmestas";
     if (typeof d.statusLabel === "function") return d.statusLabel(d);
     return d.status || "";
   };
@@ -249,8 +255,13 @@ export default function DocumentsTable({
     // На десктопе - дефолтный размер (24px), на мобильном - 18px
     const sxProps = isMobile ? { fontSize: 18, verticalAlign: 'middle' } : { verticalAlign: 'middle' };
     
-    if (d.status === "exported" || d.status === "completed") {
+    // Exported - заполненная иконка
+    if (d.status === "exported") {
       return <CheckCircleIcon color="success" sx={sxProps} />;
+    }
+    // Completed (не exported) - outlined иконка
+    if (d.status === "completed") {
+      return <CheckCircleOutlineIcon color="success" sx={sxProps} />;
     }
     if (d.status === "processing" || d.status === "pending") {
       return <HourglassEmptyIcon color="warning" sx={sxProps} />;
