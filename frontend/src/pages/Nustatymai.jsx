@@ -1742,6 +1742,27 @@ export default function NustatymaiPage() {
     }
   };
 
+  const exportMergeVatKey = "merge_vat";
+  const isExportMergeVat = Boolean(
+    extraSettings && Object.prototype.hasOwnProperty.call(extraSettings, exportMergeVatKey)
+  );
+  const toggleExportMergeVat = async (e) => {
+    const checked = e.target.checked;
+    const prev = extraSettings || {};
+    const next = { ...prev };
+
+    if (checked) next[exportMergeVatKey] = 1;
+    else if (exportMergeVatKey in next) delete next[exportMergeVatKey];
+
+    setExtraSettings(next);
+    try {
+      await api.patch("/profile/", { extra_settings: next }, { withCredentials: true });
+    } catch {
+      setExtraSettings(prev);
+      alert("Nepavyko išsaugoti papildomų nustatymų.");
+    }
+  };
+
   const handlePrekesAssemblyPirkimasChange = (e) => {
     setPrekesAssemblyPirkimas(Number(e.target.value));
   };
@@ -2351,6 +2372,22 @@ export default function NustatymaiPage() {
                   enterTouchDelay={0}
                   leaveTouchDelay={4000}
                   title="Sistema pataisys dokumento sumas, kai jos skiriasi nuo eilučių sumų iki 0,20. Pvz. dėl apvalinimų eilučių ir dokumento sumos gali skirtis ir apskaitos programos tokius dokumentus atmes."
+                >
+                  <HelpOutlineIcon fontSize="small" sx={{ color: "text.secondary" }} />
+                </Tooltip>
+              </Box>
+            }
+          />
+          <FormControlLabel
+            control={<Switch checked={isExportMergeVat} onChange={toggleExportMergeVat} />}
+            label={
+              <Box sx={{ display: "inline-flex", alignItems: "center", gap: 0.5 }}>
+                <span>Neišskirti PVM eksportuojant</span>
+                <Tooltip
+                  arrow
+                  enterTouchDelay={0}
+                  leaveTouchDelay={4000}
+                  title="Eksportuojant duomenis nebus išskiriami PVM suma ir PVM klasifikatorius. Tinka ne PVM mokėtojų apskaitai, kai reikalingos tik bendros sumos."
                 >
                   <HelpOutlineIcon fontSize="small" sx={{ color: "text.secondary" }} />
                 </Tooltip>

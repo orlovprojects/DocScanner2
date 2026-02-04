@@ -1208,6 +1208,10 @@ def export_documents(request):
         logger.info("[EXP] RIVILE_ERP export started")
         assign_random_prekes_kodai(documents)
         rivile_defaults = getattr(request.user, "rivile_erp_extra_fields", None) or {}
+        rivile_defaults = getattr(request.user, "rivile_erp_extra_fields", None) or {}
+        user_extra_settings = getattr(request.user, "extra_settings", None)
+        if not isinstance(user_extra_settings, dict):
+            user_extra_settings = {}
 
         klientai = []
         seen = set()
@@ -1282,7 +1286,10 @@ def export_documents(request):
                     pirkimai_docs,
                     tmp.name,
                     doc_type="pirkimai",
-                    rivile_erp_extra_fields=rivile_defaults,  # 🔹 вот здесь
+                    rivile_erp_extra_fields={
+                        **rivile_defaults,
+                        "user": {"extra_settings": user_extra_settings},
+                    }
                 )
                 tmp.seek(0)
                 pirkimai_xlsx_bytes = tmp.read()
@@ -1294,7 +1301,10 @@ def export_documents(request):
                     pardavimai_docs,
                     tmp.name,
                     doc_type="pardavimai",
-                    rivile_erp_extra_fields=rivile_defaults,  # 🔹 и здесь
+                    rivile_erp_extra_fields={
+                        **rivile_defaults,
+                        "user": {"extra_settings": user_extra_settings},
+                    },  
                 )
                 tmp.seek(0)
                 pardavimai_xlsx_bytes = tmp.read()
