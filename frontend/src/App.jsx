@@ -43,7 +43,7 @@ import PvmCalculator from './pages/PVMskaiciuokle';
 import GpmSkaiciuokle from './pages/GPMskaiciuokle';
 
 import { initMetaPixel } from './metaPixel';
-import { initGTM } from './gtm';
+import { initGTM } from "./gtm";
 
 import MokejimuIstorija from './pages/MokejimuIstorija';
 import NotFound from './pages/NotFound';

@@ -3,7 +3,6 @@ let gtmInited = false;
 export function initGTM(containerId) {
   if (typeof window === "undefined") return;
 
-  // VSEGDА vidno v konsoli, dazhe v production:
   if (!window.__gtm_debug_logged) {
     console.log("[GTM] initGTM called, id =", containerId);
     window.__gtm_debug_logged = true;
@@ -15,11 +14,15 @@ export function initGTM(containerId) {
   window.dataLayer = window.dataLayer || [];
   window.dataLayer.push({ "gtm.start": Date.now(), event: "gtm.js" });
 
-  const src = `https://www.googletagmanager.com/gtm.js?id=${encodeURIComponent(containerId)}`;
+  const src = `https://www.googletagmanager.com/gtm.js?id=${encodeURIComponent(
+    containerId
+  )}`;
 
   const already =
     document.querySelector(`script[src="${src}"]`) ||
-    document.querySelector('script[src^="https://www.googletagmanager.com/gtm.js?id="]');
+    document.querySelector(
+      'script[src^="https://www.googletagmanager.com/gtm.js?id="]'
+    );
 
   if (!already) {
     const s = document.createElement("script");
@@ -36,4 +39,10 @@ export function initGTM(containerId) {
   }
 
   gtmInited = true;
+}
+
+export function gtmPush(event, params = {}) {
+  if (typeof window === "undefined") return;
+  window.dataLayer = window.dataLayer || [];
+  window.dataLayer.push({ event, ...params });
 }
