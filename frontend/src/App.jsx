@@ -43,6 +43,8 @@ import PvmCalculator from './pages/PVMskaiciuokle';
 import GpmSkaiciuokle from './pages/GPMskaiciuokle';
 
 import { initMetaPixel } from './metaPixel';
+import { initGTM } from './gtm';
+
 import MokejimuIstorija from './pages/MokejimuIstorija';
 import NotFound from './pages/NotFound';
 
@@ -60,6 +62,10 @@ function App() {
   // Meta Pixel — init once
   useEffect(() => {
     initMetaPixel(import.meta.env.VITE_META_PIXEL_ID);
+  }, []);
+
+  useEffect(() => {
+    initGTM(import.meta.env.VITE_GTM_ID);
   }, []);
 
   // GA: log page view on route change
