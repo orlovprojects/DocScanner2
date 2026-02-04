@@ -13,6 +13,8 @@ const routesToPrerender = [
   '/2025',                      
   '/saskaitu-skaitmenizavimas-dokskenas',
   '/apie-mus',
+  '/registruotis',
+  '/prisijungti',
   '/pvm-skaiciuokle',
   '/gpm-skaiciuokle',
   '/buhalterine-apskaita',

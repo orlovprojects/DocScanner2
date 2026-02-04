@@ -13,6 +13,7 @@ import {
 } from "@mui/material";
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 import CancelIcon from "@mui/icons-material/Cancel";
+import { gtmPush } from "../gtm";
 
 // Meta Pixel
 import { track, ensureFbqReady } from "../metaPixel";
@@ -106,6 +107,10 @@ export default function Register() {
 
         track("CompleteRegistration", {
           status: true,
+          method: "email",
+        });
+
+        gtmPush("sign_up", {
           method: "email",
         });
 
