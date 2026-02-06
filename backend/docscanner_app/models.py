@@ -478,6 +478,8 @@ ACCOUNTING_PROGRAM_CHOICES = [
     ('optimum', 'Optimum'),
     ('debetas', 'Debetas'),
     ('site_pro', 'Site.Pro (B1)'),
+    ('apsa', 'APSA'),
+    ('isaf', 'iSAF'),
     # добавь нужные программы
 ]
 

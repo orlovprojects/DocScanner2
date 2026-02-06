@@ -5,6 +5,7 @@ import logging
 import logging.config
 import os
 import uuid
+import re
 import tempfile
 import zipfile, tarfile
 import json
@@ -75,6 +76,7 @@ from .exports.rivile_erp import (
     export_prekes_and_paslaugos_to_rivile_erp_xlsx,
     export_documents_to_rivile_erp_xlsx,
 )
+from .exports.apsa import export_to_apsa
 from .exports.dineta import send_dineta_bundle, DinetaError
 # from .exports.optimum import optimum_hello, OptimumError
 from .exports.pragma4 import export_to_pragma40_xml
@@ -1201,6 +1203,136 @@ def export_documents(request):
         else:
             logger.warning("[EXP] DEBETAS nothing to export (empty result dict)")
             response = Response({"error": "No documents to export"}, status=400)
+
+
+# ========================= APSA (i.SAF XML) =========================
+    elif export_type in ('apsa', 'isaf'):
+        logger.info("[EXP] APSA export started")
+        
+        # Собираем документы с direction
+        all_docs = []
+        all_packs = []  # сохраняем pack для доступа к line_items
+        
+        for pack in prepared.get("pirkimai", []):
+            doc = pack["doc"]
+            doc.direction = "pirkimas"
+            all_docs.append(doc)
+            all_packs.append(pack)
+        
+        for pack in prepared.get("pardavimai", []):
+            doc = pack["doc"]
+            doc.direction = "pardavimas"
+            all_docs.append(doc)
+            all_packs.append(pack)
+        
+        if not all_docs:
+            logger.warning("[EXP] APSA nothing to export")
+            return Response({"error": "No documents to export"}, status=400)
+        
+        # RegistrationNumber = код выбранного контрагента из cp_key
+        registration_number = ""
+        cp_name = ""
+        if cp_key:
+            cp = cp_key.strip()
+            if cp.lower().startswith("id:"):
+                cp = cp.split(":", 1)[1].strip()
+
+            # Если похоже на код/ПВМ (например LT123456789 или просто цифры)
+            if re.match(r"^[A-Za-z]{0,2}\d{4,}$", cp):
+                registration_number = cp
+            else:
+                cp_name = cp
+
+        # Если cp_key был именем - ищем совпадение по имени и берём id_programoje
+        if not registration_number and cp_name and all_docs:
+            target = cp_name.strip().lower()
+            for doc in all_docs:
+                buyer_name = (getattr(doc, "buyer_name", "") or "").strip().lower()
+                if buyer_name and buyer_name == target:
+                    reg_from_name = (getattr(doc, "buyer_id_programoje", "") or "").strip()
+                    if reg_from_name:
+                        registration_number = reg_from_name
+                        break
+
+                seller_name = (getattr(doc, "seller_name", "") or "").strip().lower()
+                if seller_name and seller_name == target:
+                    reg_from_name = (getattr(doc, "seller_id_programoje", "") or "").strip()
+                    if reg_from_name:
+                        registration_number = reg_from_name
+                        break
+
+        
+        # Fallback: берём из первого документа
+        if not registration_number and all_docs:
+            first_doc = all_docs[0]
+            if first_doc.direction == "pirkimas":
+                registration_number = (
+                    getattr(first_doc, "buyer_id", "") or 
+                    getattr(first_doc, "buyer_vat_code", "") or ""
+                )
+            else:
+                registration_number = (
+                    getattr(first_doc, "seller_id", "") or 
+                    getattr(first_doc, "seller_vat_code", "") or ""
+                )
+        
+        if not registration_number:
+            logger.error("[EXP] APSA no registration number")
+            return Response({
+                "error": "Company registration number is required. Select counterparty or ensure documents have company data."
+            }, status=400)
+        
+        # pvm_resolver из pack["line_items"] (CP данные с vat_percent и pvm_kodas)
+        # Структура: {doc_id: {item_id: {"vat_percent": ..., "pvm_kodas": ...}}}
+        pvm_resolver = {}
+        for pack in all_packs:
+            doc = pack["doc"]
+            line_items_data = pack.get("line_items", [])
+            
+            if line_items_data:
+                # DETALIAI - есть line_items
+                item_map = {}
+                for li in line_items_data:
+                    item_id = li.get("id")
+                    if item_id is not None:
+                        item_map[item_id] = {
+                            "vat_percent": li.get("vat_percent"),
+                            "pvm_kodas": li.get("pvm_kodas"),
+                        }
+                if item_map:
+                    pvm_resolver[doc.id] = item_map
+            else:
+                # SUMISKAI - нет line_items, берём из pack напрямую
+                pvm_resolver[doc.id] = {
+                    "pvm_kodas": pack.get("pvm_kodas"),
+                    "vat_percent": pack.get("vat_percent"),
+                }
+        
+        logger.info("[EXP] APSA docs=%d reg_num=%s pvm_resolver_docs=%d", 
+                    len(all_docs), registration_number, len(pvm_resolver))
+        
+        try:
+            result = export_to_apsa(
+                documents=all_docs,
+                registration_number=registration_number,
+                pvm_resolver=pvm_resolver,
+            )
+            
+            xml_bytes = result["isaf"]
+            
+            response = HttpResponse(xml_bytes, content_type='application/xml')
+            response['Content-Disposition'] = f'attachment; filename=isaf_{today_str}.xml'
+            export_success = True
+            
+            logger.info("[EXP] APSA export completed, size=%d", len(xml_bytes))
+            
+        except ValueError as e:
+            logger.error("[EXP] APSA export error: %s", str(e))
+            return Response({"error": str(e)}, status=400)
+        except Exception as e:
+            logger.exception("[EXP] APSA export failed")
+            return Response({"error": f"Export failed: {str(e)}"}, status=500)
+
 
 
     # ========================= RIVILĖ ERP (XLSX) =========================

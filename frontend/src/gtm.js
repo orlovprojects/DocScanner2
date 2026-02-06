@@ -2,12 +2,6 @@ let gtmInited = false;
 
 export function initGTM(containerId) {
   if (typeof window === "undefined") return;
-
-  if (!window.__gtm_debug_logged) {
-    console.log("[GTM] initGTM called, id =", containerId);
-    window.__gtm_debug_logged = true;
-  }
-
   if (!containerId) return;
   if (gtmInited) return;
 
@@ -28,14 +22,7 @@ export function initGTM(containerId) {
     const s = document.createElement("script");
     s.async = true;
     s.src = src;
-
-    s.onload = () => console.log("[GTM] loaded", s.src);
-    s.onerror = () => console.log("[GTM] failed", s.src);
-
     document.head.appendChild(s);
-    console.log("[GTM] appended", s.src);
-  } else {
-    console.log("[GTM] script already present");
   }
 
   gtmInited = true;

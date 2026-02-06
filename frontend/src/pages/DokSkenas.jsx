@@ -49,6 +49,8 @@ const faqList = [
       "Būtent",
       "Site.pro (B1)",
       "Debetas",
+      "APSA",
+      "iSAF"
     ],
     answerOutro: "Po skaitmenizavimo galėsite eksportuoti duomenis į pasirinktą programą. Atsisiųstus failus iš DokSkeno tereikės importuoti į buhalterinę programą."
   },
@@ -834,6 +836,8 @@ const Dokskenas = () => {
             { label: 'B1', url: 'https://atlyginimoskaiciuokle.com/b1', hasLink: true },
             { label: 'Site.pro', hasLink: false },
             { label: 'Debetas (.csv)', hasLink: false },
+            { label: 'APSA', hasLink: false },
+            { label: 'iSAF', hasLink: false },
             { label: 'Excel (.csv/.xlsx)', hasLink: false },
           ].map((item, idx) => (
             <Box key={idx} sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
