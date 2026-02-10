@@ -703,7 +703,6 @@ def export_to_apsa(
     # XML
     root = ET.Element("iSAFFile")
     root.set("xmlns", ISAF_NAMESPACE)
-    root.set("xmlns:xsi", "http://www.w3.org/2001/XMLSchema-instance")
 
     _build_header(root, reg_num, start_date, end_date, data_type)
 
