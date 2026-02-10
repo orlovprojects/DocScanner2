@@ -292,7 +292,7 @@ def _create_nillable_element(parent: ET.Element, tag: str, value) -> ET.Element:
     if v:
         elem.text = v
     else:
-        elem.set("{http://www.w3.org/2001/XMLSchema-instance}nil", "true")
+        elem.set("xsi:nil", "true")
     return elem
 
 
@@ -624,7 +624,6 @@ def _serialize_xml(root: ET.Element) -> str:
     _indent(root)
     
     ET.register_namespace("", ISAF_NAMESPACE)
-    ET.register_namespace("xsi", "http://www.w3.org/2001/XMLSchema-instance")
     
     xml_str = ET.tostring(root, encoding="unicode")
     return '<?xml version="1.0" encoding="UTF-8"?>\n' + xml_str
@@ -703,6 +702,7 @@ def export_to_apsa(
     # XML
     root = ET.Element("iSAFFile")
     root.set("xmlns", ISAF_NAMESPACE)
+    root.set("xmlns:xsi", "http://www.w3.org/2001/XMLSchema-instance")
 
     _build_header(root, reg_num, start_date, end_date, data_type)
 
