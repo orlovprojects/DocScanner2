@@ -456,10 +456,9 @@ export default function NustatymaiPage() {
   const [successCompany, setSuccessCompany] = useState(false);
   const [companyError, setCompanyError] = useState("");
   const [dinetaSettings, setDinetaSettings] = useState({
-    server: "",
-    client: "",
-    username: "",
-    password: "",
+      url: "",
+      username: "",
+      password: "",
   });
   const [dinetaLoading, setDinetaLoading] = useState(false);
   const [dinetaSaving, setDinetaSaving] = useState(false);
@@ -474,11 +473,16 @@ export default function NustatymaiPage() {
 
   // meta iš backend (key niekada nelaikom)
   const [optimumMeta, setOptimumMeta] = useState({
+    has_key: false,
+    key_suffix: "",
     verified_at: null,
     last_ok: null,
     last_error_at: null,
     last_error: "",
   });
+  const [optimumTesting, setOptimumTesting] = useState(false);
+  const [optimumDeleting, setOptimumDeleting] = useState(false);
+  const [showOptimumKeyInput, setShowOptimumKeyInput] = useState(false);
 
   // ---- DokSkenas mobile keys ----
   const [mobileKeys, setMobileKeys] = useState([]); // sąrašas visų kvietimų / raktų
@@ -635,6 +639,37 @@ export default function NustatymaiPage() {
   const [successCentas, setSuccessCentas] = useState(false);
   const [errorCentas, setErrorCentas] = useState("");
 
+
+  // --- Dineta ---
+  const [dinetaFields, setDinetaFields] = useState({
+    pirk_sandelio_kodas: "",
+    pard_sandelio_kodas: "",
+  });
+  const [savingDineta, setSavingDineta] = useState(false);
+  const [successDineta, setSuccessDineta] = useState(false);
+  const [errorDineta, setErrorDineta] = useState("");
+
+
+  // --- Optimum ---
+  const [optimumFields, setOptimumFields] = useState({
+    pirk_prekes_tipas: "",
+    pirk_prekes_grupe: "",
+    pirk_sandelio_kodas: "",
+    pirk_skyriaus_kodas: "",
+    pirk_projekto_kodas: "",
+    pirk_atsakingo_darb_kodas: "",
+    tiekejo_grupe: "",
+    pard_prekes_tipas: "",
+    pard_prekes_grupe: "",
+    pard_sandelio_kodas: "",
+    pard_skyriaus_kodas: "",
+    pard_projekto_kodas: "",
+    pard_atsakingo_darb_kodas: "",
+    pirkejo_grupe: "",
+  });
+  const [savingOptimum, setSavingOptimum] = useState(false);
+  const [successOptimum, setSuccessOptimum] = useState(false);
+  const [errorOptimum, setErrorOptimum] = useState("");  
 
   // --- Pragma 3 ---
   const [pragma3Fields, setPragma3Fields] = useState({
@@ -829,6 +864,30 @@ export default function NustatymaiPage() {
         pardavimas_kastu_centras: cent.pardavimas_kastu_centras || "",
       });
 
+      const dineta = data.dineta_extra_fields || {};
+      setDinetaFields({
+        pirk_sandelio_kodas: dineta.pirk_sandelio_kodas || "",
+        pard_sandelio_kodas: dineta.pard_sandelio_kodas || "",
+      });
+
+      const optimum = data.optimum_extra_fields || {};
+      setOptimumFields({
+        pirk_prekes_tipas: optimum.pirk_prekes_tipas || "",
+        pirk_prekes_grupe: optimum.pirk_prekes_grupe || "",
+        pirk_sandelio_kodas: optimum.pirk_sandelio_kodas || "",
+        pirk_skyriaus_kodas: optimum.pirk_skyriaus_kodas || "",
+        pirk_projekto_kodas: optimum.pirk_projekto_kodas || "",
+        pirk_atsakingo_darb_kodas: optimum.pirk_atsakingo_darb_kodas || "",
+        tiekejo_grupe: optimum.tiekejo_grupe || "",
+        pard_prekes_tipas: optimum.pard_prekes_tipas || "",
+        pard_prekes_grupe: optimum.pard_prekes_grupe || "",
+        pard_sandelio_kodas: optimum.pard_sandelio_kodas || "",
+        pard_skyriaus_kodas: optimum.pard_skyriaus_kodas || "",
+        pard_projekto_kodas: optimum.pard_projekto_kodas || "",
+        pard_atsakingo_darb_kodas: optimum.pard_atsakingo_darb_kodas || "",
+        pirkejo_grupe: optimum.pirkejo_grupe || "",
+      });
+
       const debetas = data.debetas_extra_fields || {};
       setDebetasFields({
         pirkimas_filialas: debetas.pirkimas_filialas || "",
@@ -928,20 +987,24 @@ export default function NustatymaiPage() {
     api
       .get("/settings/dineta/", { withCredentials: true })
       .then(({ data }) => {
-        // сервер пароль не возвращает — поле оставляем пустым
-        setDinetaSettings((prev) => ({
-          ...prev,
-          server:  data?.server  || "",
-          client:  data?.client  || "",
-          username:data?.username|| "",
-          password: "", // всегда пустое для безопасности
-        }));
+          setDinetaSettings((prev) => ({
+            ...prev,
+            url:     data?.url     || "",
+            username:data?.username || "",
+            password: "",
+          }));
       })
       .catch((err) => {
         console.error("Failed to load Dineta settings:", err);
         // при желании можно показать ошибку
       })
       .finally(() => setDinetaLoading(false));
+  }, [program]);
+
+
+  useEffect(() => {
+    if (program !== "optimum") return;
+    refreshOptimumMeta();
   }, [program]);
 
 
@@ -1113,22 +1176,20 @@ export default function NustatymaiPage() {
     setDinetaError("");
     setDinetaSuccess(false);
 
-    const { server, client, username, password } = dinetaSettings;
+  const { url, username, password } = dinetaSettings;
 
-    if (!server.trim() || !client.trim() || !username.trim() || !password.trim()) {
+  if (!url.trim() || !username.trim() || !password.trim()) {
       setDinetaError("Visi API laukai yra privalomi.");
       setDinetaSaving(false);
       return;
-    }
+  }
 
-    try {
+  try {
       await api.put(
         "/settings/dineta/",
-        { server, client, username, password },
+        { url, username, password },
         { withCredentials: true }
       );
-
-      // пароль в стейте чистим, чтобы его не хранить в явном виде
       setDinetaSettings((prev) => ({ ...prev, password: "" }));
 
       setDinetaSuccess(true);
@@ -1155,28 +1216,27 @@ export default function NustatymaiPage() {
 
 
   const refreshOptimumMeta = async () => {
-    try {
-      const { data } = await api.get("/settings/optimum/", { withCredentials: true });
-      // data bus be key (serializer to_representation)
-      setOptimumMeta({
-        verified_at: data?.verified_at ?? null,
-        last_ok: data?.last_ok ?? null,
-        last_error_at: data?.last_error_at ?? null,
-        last_error: data?.last_error ?? "",
-      });
-    } catch (err) {
-      // čia tyčia tyliai — meta nėra kritiška
-      console.warn("Failed to refresh optimum meta:", err);
-    }
-  };
+      try {
+        const { data } = await api.get("/settings/optimum/", { withCredentials: true });
+        setOptimumMeta({
+          has_key: !!data?.has_key,
+          key_suffix: data?.key_suffix ?? "",
+          verified_at: data?.verified_at ?? null,
+          last_ok: data?.last_ok ?? null,
+          last_error_at: data?.last_error_at ?? null,
+          last_error: data?.last_error ?? "",
+        });
+      } catch (err) {
+        console.warn("Failed to refresh optimum meta:", err);
+      }
+    };
 
-  const saveOptimumSettings = async () => {
+const saveOptimumSettings = async () => {
     setOptimumSaving(true);
     setOptimumError("");
     setOptimumSuccess(false);
 
     const key = (optimumSettings.key || "").trim();
-
     if (!key) {
       setOptimumError("API Key yra privalomas.");
       setOptimumSaving(false);
@@ -1184,49 +1244,86 @@ export default function NustatymaiPage() {
     }
 
     try {
-      const { data } = await api.put(
-        "/settings/optimum/",
-        { key },
-        { withCredentials: true }
-      );
+      const { data } = await api.put("/settings/optimum/", { key }, { withCredentials: true });
 
-      // key nepaliekam state
-      setOptimumSettings((prev) => ({ ...prev, key: "" }));
-
-      // meta kaip grąžino backend (NE default true)
+      setOptimumSettings({ key: "" });
       setOptimumMeta({
+        has_key: !!data?.has_key,
+        key_suffix: data?.key_suffix ?? "",
         verified_at: data?.verified_at ?? null,
         last_ok: data?.last_ok ?? null,
         last_error_at: data?.last_error_at ?? null,
         last_error: data?.last_error ?? "",
       });
-
-      // JEI raktas blogas, backend dažnai grąžina 200 su last_ok=false
-      if (data?.last_ok === false) {
-        setOptimumError(data?.last_error || "Netinkamas API raktas.");
-        setOptimumSuccess(false);
-        return;
-      }
-
+      setShowOptimumKeyInput(false);
       setOptimumSuccess(true);
       setTimeout(() => setOptimumSuccess(false), 2500);
     } catch (e) {
       const data = e?.response?.data;
-      let msg =
-        data?.last_error ||
-        data?.detail ||
-        data?.non_field_errors ||
-        data?.error ||
-        "Nepavyko patikrinti Optimum API Key.";
-
+      let msg = data?.detail || data?.last_error || "Nepavyko patikrinti Optimum API Key.";
       if (typeof msg === "object") {
         try { msg = JSON.stringify(msg); } catch { msg = "Nepavyko patikrinti Optimum API Key."; }
       }
-
       setOptimumError(String(msg));
       await refreshOptimumMeta();
     } finally {
       setOptimumSaving(false);
+    }
+  };
+
+  const testOptimumKey = async () => {
+    setOptimumTesting(true);
+    setOptimumError("");
+    setOptimumSuccess(false);
+
+    try {
+      const { data } = await api.post("/settings/optimum/", {}, { withCredentials: true });
+      setOptimumMeta({
+        has_key: !!data?.has_key,
+        key_suffix: data?.key_suffix ?? "",
+        verified_at: data?.verified_at ?? null,
+        last_ok: data?.last_ok ?? null,
+        last_error_at: data?.last_error_at ?? null,
+        last_error: data?.last_error ?? "",
+      });
+      setOptimumSuccess(true);
+      setTimeout(() => setOptimumSuccess(false), 2500);
+    } catch (e) {
+      const data = e?.response?.data;
+      let msg = data?.detail || data?.last_error || "Nepavyko patikrinti Optimum API Key.";
+      if (typeof msg === "object") {
+        try { msg = JSON.stringify(msg); } catch { msg = "Nepavyko patikrinti."; }
+      }
+      setOptimumError(String(msg));
+      await refreshOptimumMeta();
+    } finally {
+      setOptimumTesting(false);
+    }
+  };
+
+  const deleteOptimumKey = async () => {
+    if (!window.confirm("Ar tikrai norite ištrinti Optimum API raktą?")) return;
+    setOptimumDeleting(true);
+    setOptimumError("");
+    setOptimumSuccess(false);
+
+    try {
+      await api.delete("/settings/optimum/", { withCredentials: true });
+      setOptimumMeta({
+        has_key: false,
+        key_suffix: "",
+        verified_at: null,
+        last_ok: null,
+        last_error_at: null,
+        last_error: "",
+      });
+      setShowOptimumKeyInput(false);
+      setOptimumSettings({ key: "" });
+    } catch (e) {
+      const data = e?.response?.data;
+      setOptimumError(data?.detail || "Nepavyko ištrinti rakto.");
+    } finally {
+      setOptimumDeleting(false);
     }
   };
 
@@ -1403,6 +1500,72 @@ export default function NustatymaiPage() {
       setErrorCentas(msg);
     } finally {
       setSavingCentas(false);
+    }
+  };
+
+
+  const saveDinetaFields = async () => {
+    setSavingDineta(true);
+    setErrorDineta("");
+    setSuccessDineta(false);
+
+    try {
+      await api.patch(
+        "/profile/",
+        { dineta_extra_fields: dinetaFields },
+        { withCredentials: true }
+      );
+      setSuccessDineta(true);
+      setTimeout(() => setSuccessDineta(false), 2000);
+    } catch (e) {
+      const data = e?.response?.data;
+      let msg =
+        data?.dineta_extra_fields ||
+        data?.detail ||
+        "Nepavyko išsaugoti Dineta nustatymų.";
+      if (typeof msg === "object") {
+        try {
+          msg = JSON.stringify(msg);
+        } catch {
+          msg = "Nepavyko išsaugoti Dineta nustatymų.";
+        }
+      }
+      setErrorDineta(msg);
+    } finally {
+      setSavingDineta(false);
+    }
+  };
+
+
+  const saveOptimumFields = async () => {
+    setSavingOptimum(true);
+    setErrorOptimum("");
+    setSuccessOptimum(false);
+
+    try {
+      await api.patch(
+        "/profile/",
+        { optimum_extra_fields: optimumFields },
+        { withCredentials: true }
+      );
+      setSuccessOptimum(true);
+      setTimeout(() => setSuccessOptimum(false), 2000);
+    } catch (e) {
+      const data = e?.response?.data;
+      let msg =
+        data?.optimum_extra_fields ||
+        data?.detail ||
+        "Nepavyko išsaugoti Optimum nustatymų.";
+      if (typeof msg === "object") {
+        try {
+          msg = JSON.stringify(msg);
+        } catch {
+          msg = "Nepavyko išsaugoti Optimum nustatymų.";
+        }
+      }
+      setErrorOptimum(msg);
+    } finally {
+      setSavingOptimum(false);
     }
   };
 
@@ -2109,28 +2272,18 @@ export default function NustatymaiPage() {
           </Box>
 
           <Grid2 container spacing={2}>
-            <Grid2 size={{ xs: 12, md: 6 }}>
+            <Grid2 size={{ xs: 12 }}>
               <TextField
-                label="Serveris (pvz. lt4)"
-                value={dinetaSettings.server}
+                label="Dineta nuoroda (pvz. https://lt4.dineta.eu/dokskenas/login.php)"
+                value={dinetaSettings.url}
                 onChange={(e) =>
-                  setDinetaSettings((prev) => ({ ...prev, server: e.target.value }))
+                  setDinetaSettings((prev) => ({ ...prev, url: e.target.value }))
                 }
                 fullWidth
                 required
                 disabled={dinetaLoading || dinetaSaving}
-              />
-            </Grid2>
-            <Grid2 size={{ xs: 12, md: 6 }}>
-              <TextField
-                label="Klientas (pvz. demo)"
-                value={dinetaSettings.client}
-                onChange={(e) =>
-                  setDinetaSettings((prev) => ({ ...prev, client: e.target.value }))
-                }
-                fullWidth
-                required
-                disabled={dinetaLoading || dinetaSaving}
+                placeholder="https://lt4.dineta.eu/dokskenas/"
+                helperText="Nukopijuokite nuorodą iš savo Dineta.web naršyklės adreso juostos"
               />
             </Grid2>
 
@@ -2197,79 +2350,149 @@ export default function NustatymaiPage() {
               Optimum API sąsajos nustatymai
             </Typography>
             <Tooltip
-              arrow
-              enterTouchDelay={0}
-              leaveTouchDelay={4000}
-              title="Įveskite Optimum API Key. Jis bus naudojamas autentifikacijai su jūsų Optimum duomenų baze."
+              arrow enterTouchDelay={0} leaveTouchDelay={4000}
+              title="Įveskite Optimum API Key, kurį rasite savo Optimum programoje (Pagalba -> API raktas). API raktas bus naudojamas autentifikacijai su jūsų Optimum duomenų baze."
             >
               <HelpOutlineIcon fontSize="small" sx={{ color: "text.secondary" }} />
             </Tooltip>
           </Box>
 
-          <Grid2 container spacing={2}>
-            <Grid2 size={{ xs: 12, md: 6 }}>
-              <TextField
-                label="API Key"
-                type="password"
-                value={optimumSettings.key}
-                onChange={(e) => {
-                  setOptimumSettings((prev) => ({ ...prev, key: e.target.value }));
-                  setOptimumSuccess(false);
-                  setOptimumError("");
-                }}
-                fullWidth
-                required
-                disabled={optimumSaving}
-                helperText="Saugumo sumetimais raktas nerodomas — įveskite jį iš naujo, kai norite pakeisti."
-              />
-            </Grid2>
-          </Grid2>
+          {/* Raktas jau išsaugotas — rodyti maskuotą raktą + veiksmus */}
+          {optimumMeta.has_key && !showOptimumKeyInput ? (
+            <Box>
+              <Box sx={{ display: "flex", alignItems: "center", gap: 2, mb: 2, flexWrap: "wrap" }}>
+                <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                  <Typography variant="body2" sx={{ color: "text.secondary" }}>API raktas:</Typography>
+                  <Typography variant="body1" sx={{ fontFamily: "monospace", fontWeight: 600 }}>
+                    {"••••••••" + (optimumMeta.key_suffix || "****")}
+                  </Typography>
+                </Box>
 
-          <Box sx={{ mt: 2, display: "flex", alignItems: "center", gap: 2 }}>
-            <Button
-              variant="contained"
-              onClick={saveOptimumSettings}
-              disabled={optimumSaving}
-            >
-              Išsaugoti API nustatymus
-            </Button>
+                <Chip
+                  size="small"
+                  label={
+                    optimumMeta.last_ok === true
+                      ? "Patikrintas ✓"
+                      : optimumMeta.last_ok === false
+                      ? "Klaida ✗"
+                      : "Nepatikrintas"
+                  }
+                  sx={{
+                    fontWeight: 600,
+                    backgroundColor:
+                      optimumMeta.last_ok === true
+                        ? alpha("#4caf50", 0.1)
+                        : optimumMeta.last_ok === false
+                        ? alpha("#f44336", 0.1)
+                        : alpha("#ff9800", 0.1),
+                    color:
+                      optimumMeta.last_ok === true
+                        ? "success.dark"
+                        : optimumMeta.last_ok === false
+                        ? "error.dark"
+                        : "warning.dark",
+                    border: "1px solid",
+                    borderColor:
+                      optimumMeta.last_ok === true
+                        ? "success.main"
+                        : optimumMeta.last_ok === false
+                        ? "error.main"
+                        : "warning.main",
+                  }}
+                />
+              </Box>
 
-            {optimumSaving && (
-              <Typography variant="body2" sx={{ color: "text.secondary" }}>
-                Tikrinama...
-              </Typography>
-            )}
-          </Box>
+              {optimumMeta.verified_at && (
+                <Typography variant="caption" sx={{ color: "text.secondary", display: "block", mb: 2 }}>
+                  Paskutinis patikrinimas: {new Date(optimumMeta.verified_at).toLocaleString("lt-LT")}
+                </Typography>
+              )}
 
-          {optimumError && (
-            <Alert severity="error" sx={{ mt: 2 }}>
-              {optimumError}
-            </Alert>
+              {optimumMeta.last_ok === false && optimumMeta.last_error && (
+                <Alert severity="error" sx={{ mb: 2 }}>{optimumMeta.last_error}</Alert>
+              )}
+
+              <Stack direction="row" spacing={2} sx={{ flexWrap: "wrap" }}>
+                <Button
+                  variant="outlined"
+                  onClick={testOptimumKey}
+                  disabled={optimumTesting || optimumDeleting}
+                >
+                  {optimumTesting ? "Tikrinama..." : "Patikrinti API"}
+                </Button>
+                <Button
+                  variant="outlined"
+                  onClick={() => {
+                    setShowOptimumKeyInput(true);
+                    setOptimumError("");
+                    setOptimumSuccess(false);
+                  }}
+                  disabled={optimumTesting || optimumDeleting}
+                >
+                  Pakeisti raktą
+                </Button>
+                <Button
+                  variant="outlined"
+                  color="error"
+                  onClick={deleteOptimumKey}
+                  disabled={optimumTesting || optimumDeleting}
+                  startIcon={<DeleteOutlineIcon />}
+                >
+                  {optimumDeleting ? "Trinama..." : "Ištrinti"}
+                </Button>
+              </Stack>
+            </Box>
+          ) : (
+            /* Rakto nėra arba keičiamas — rodyti įvedimo lauką */
+            <Box>
+              <Grid2 container spacing={2}>
+                <Grid2 size={{ xs: 12, md: 8 }}>
+                  <TextField
+                    label="API Key"
+                    value={optimumSettings.key}
+                    onChange={(e) => {
+                      setOptimumSettings((prev) => ({ ...prev, key: e.target.value }));
+                      setOptimumSuccess(false);
+                      setOptimumError("");
+                    }}
+                    fullWidth
+                    required
+                    disabled={optimumSaving}
+                    placeholder="Įveskite Optimum API raktą"
+                  />
+                </Grid2>
+              </Grid2>
+
+              <Stack direction="row" spacing={2} sx={{ mt: 2 }}>
+                <Button
+                  variant="contained"
+                  onClick={saveOptimumSettings}
+                  disabled={optimumSaving}
+                >
+                  {optimumSaving ? "Tikrinama..." : "Išsaugoti ir patikrinti"}
+                </Button>
+                {showOptimumKeyInput && optimumMeta.has_key && (
+                  <Button
+                    variant="outlined"
+                    onClick={() => {
+                      setShowOptimumKeyInput(false);
+                      setOptimumSettings({ key: "" });
+                      setOptimumError("");
+                    }}
+                  >
+                    Atšaukti
+                  </Button>
+                )}
+              </Stack>
+            </Box>
           )}
+
+          {optimumError && <Alert severity="error" sx={{ mt: 2 }}>{optimumError}</Alert>}
           {optimumSuccess && (
             <Alert severity="success" sx={{ mt: 2 }}>
-              Optimum nustatymai išsaugoti!
+              Optimum API raktas patikrintas sėkmingai!
             </Alert>
           )}
-
-          {/* Meta info (optional, bet labai naudinga) */}
-          <Box sx={{ mt: 2 }}>
-            {optimumMeta?.last_ok === true && optimumMeta?.verified_at && (
-              <Alert severity="info" sx={{ mb: 1 }}>
-                Paskutinis patikrinimas: {optimumMeta.verified_at}
-              </Alert>
-            )}
-
-            {optimumMeta?.last_ok === false &&
-              (optimumMeta?.last_error || optimumMeta?.last_error_at) && (
-                <Alert severity="warning" sx={{ mb: 1 }}>
-                  {optimumMeta?.last_error
-                    ? `Klaida: ${optimumMeta.last_error}`
-                    : "Klaida tikrinant raktą."}
-                  {optimumMeta?.last_error_at ? ` (${optimumMeta.last_error_at})` : ""}
-                </Alert>
-              )}
-          </Box>
         </Paper>
       )}
 
@@ -2323,6 +2546,20 @@ export default function NustatymaiPage() {
         successCentas={successCentas}
         errorCentas={errorCentas}
         onSaveCentas={saveCentasFields}
+        // Dineta
+        dinetaFields={dinetaFields}
+        setDinetaFields={setDinetaFields}
+        savingDineta={savingDineta}
+        successDineta={successDineta}
+        errorDineta={errorDineta}
+        onSaveDineta={saveDinetaFields}
+        // Optimum
+        optimumFields={optimumFields}
+        setOptimumFields={setOptimumFields}
+        savingOptimum={savingOptimum}
+        successOptimum={successOptimum}
+        errorOptimum={errorOptimum}
+        onSaveOptimum={saveOptimumFields}
         // Debetas
         debetasFields={debetasFields}
         setDebetasFields={setDebetasFields}

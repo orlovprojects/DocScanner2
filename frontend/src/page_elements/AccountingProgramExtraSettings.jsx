@@ -81,6 +81,22 @@ export function AccountingProgramExtraSettings(props) {
     errorCentas,
     onSaveCentas,
 
+    // Dineta
+    dinetaFields,
+    setDinetaFields,
+    savingDineta,
+    successDineta,
+    errorDineta,
+    onSaveDineta,
+
+    // Optimum
+    optimumFields,
+    setOptimumFields,
+    savingOptimum,
+    successOptimum,
+    errorOptimum,
+    onSaveOptimum,
+
     // Pragma 3
     pragma3Fields,
     setPragma3Fields,
@@ -904,6 +920,8 @@ export function AccountingProgramExtraSettings(props) {
     );
   }
 
+
+
   // ---------- Centas ----------
   if (program === "centas") {
     return (
@@ -1006,6 +1024,314 @@ export function AccountingProgramExtraSettings(props) {
       </Paper>
     );
   }
+
+
+  // ---------- Dineta ----------
+  if (program === "dineta") {
+    return (
+      <Paper sx={{ p: 3, mb: 3 }}>
+        <Typography variant="h6" sx={{ mb: 2, fontWeight: 600 }}>
+          Dineta papildomi laukai
+        </Typography>
+
+        <Typography variant="body2" sx={{ mb: 2, color: "text.secondary" }}>
+          Nurodykite numatytuosius sandėlio laukus pirkimams ir pardavimams.
+        </Typography>
+
+        <Grid2 container spacing={3}>
+          {/* Pirkimas */}
+          <Grid2 size={{ xs: 12, md: 6 }}>
+            <Typography variant="subtitle1" sx={{ mb: 1, fontWeight: 500 }}>
+              Pirkimas
+            </Typography>
+            <Stack spacing={1.5}>
+              <TextField
+                label="Sandėlio kodas"
+                size="small"
+                value={dinetaFields.pirk_sandelio_kodas}
+                onChange={(e) =>
+                  setDinetaFields((prev) => ({
+                    ...prev,
+                    pirk_sandelio_kodas: e.target.value,
+                  }))
+                }
+                fullWidth
+              />
+            </Stack>
+          </Grid2>
+
+          {/* Pardavimas */}
+          <Grid2 size={{ xs: 12, md: 6 }}>
+            <Typography variant="subtitle1" sx={{ mb: 1, fontWeight: 500 }}>
+              Pardavimas
+            </Typography>
+            <Stack spacing={1.5}>
+              <TextField
+                label="Sandėlio kodas"
+                size="small"
+                value={dinetaFields.pard_sandelio_kodas}
+                onChange={(e) =>
+                  setDinetaFields((prev) => ({
+                    ...prev,
+                    pard_sandelio_kodas: e.target.value,
+                  }))
+                }
+                fullWidth
+              />
+            </Stack>
+          </Grid2>
+        </Grid2>
+
+        <Stack direction="row" spacing={2} sx={{ mt: 3 }} alignItems="center">
+          <Button
+            variant="contained"
+            onClick={onSaveDineta}
+            disabled={savingDineta}
+          >
+            Išsaugoti Dineta laukus
+          </Button>
+          {successDineta && (
+            <Alert severity="success" sx={{ py: 0.5 }}>
+              Išsaugota!
+            </Alert>
+          )}
+          {errorDineta && (
+            <Alert severity="error" sx={{ py: 0.5 }}>
+              {errorDineta}
+            </Alert>
+          )}
+        </Stack>
+      </Paper>
+    );
+  }
+
+
+  // ---------- Optimum ----------
+  if (program === "optimum") {
+    return (
+      <Paper sx={{ p: 3, mb: 3 }}>
+        <Typography variant="h6" sx={{ mb: 2, fontWeight: 600 }}>
+          Optimum papildomi laukai
+        </Typography>
+
+        <Typography variant="body2" sx={{ mb: 2, color: "text.secondary" }}>
+          Nurodykite numatytuosius laukus pirkimams ir pardavimams.
+        </Typography>
+
+        <Grid2 container spacing={3}>
+          {/* Pirkimas */}
+          <Grid2 size={{ xs: 12, md: 6 }}>
+            <Typography variant="subtitle1" sx={{ mb: 1, fontWeight: 500 }}>
+              Pirkimas
+            </Typography>
+            <Stack spacing={1.5}>
+              <TextField
+                label="Prekės tipas"
+                size="small"
+                value={optimumFields.pirk_prekes_tipas}
+                onChange={(e) =>
+                  setOptimumFields((prev) => ({
+                    ...prev,
+                    pirk_prekes_tipas: e.target.value,
+                  }))
+                }
+                fullWidth
+              />
+              <TextField
+                label="Prekės grupė"
+                size="small"
+                value={optimumFields.pirk_prekes_grupe}
+                onChange={(e) =>
+                  setOptimumFields((prev) => ({
+                    ...prev,
+                    pirk_prekes_grupe: e.target.value,
+                  }))
+                }
+                fullWidth
+              />
+              <TextField
+                label="Sandėlio kodas"
+                size="small"
+                value={optimumFields.pirk_sandelio_kodas}
+                onChange={(e) =>
+                  setOptimumFields((prev) => ({
+                    ...prev,
+                    pirk_sandelio_kodas: e.target.value,
+                  }))
+                }
+                fullWidth
+              />
+              <TextField
+                label="Tiekėjo grupė"
+                size="small"
+                value={optimumFields.tiekejo_grupe}
+                onChange={(e) =>
+                  setOptimumFields((prev) => ({
+                    ...prev,
+                    tiekejo_grupe: e.target.value,
+                  }))
+                }
+                fullWidth
+              />
+              <TextField
+                label="Skyriaus kodas"
+                size="small"
+                value={optimumFields.pirk_skyriaus_kodas}
+                onChange={(e) =>
+                  setOptimumFields((prev) => ({
+                    ...prev,
+                    pirk_skyriaus_kodas: e.target.value,
+                  }))
+                }
+                fullWidth
+              />
+              <TextField
+                label="Projekto kodas"
+                size="small"
+                value={optimumFields.pirk_projekto_kodas}
+                onChange={(e) =>
+                  setOptimumFields((prev) => ({
+                    ...prev,
+                    pirk_projekto_kodas: e.target.value,
+                  }))
+                }
+                fullWidth
+              />
+              <TextField
+                label="Atsakingo darbuotojo kodas"
+                size="small"
+                value={optimumFields.pirk_atsakingo_darb_kodas}
+                onChange={(e) =>
+                  setOptimumFields((prev) => ({
+                    ...prev,
+                    pirk_atsakingo_darb_kodas: e.target.value,
+                  }))
+                }
+                fullWidth
+              />
+            </Stack>
+          </Grid2>
+
+          {/* Pardavimas */}
+          <Grid2 size={{ xs: 12, md: 6 }}>
+            <Typography variant="subtitle1" sx={{ mb: 1, fontWeight: 500 }}>
+              Pardavimas
+            </Typography>
+            <Stack spacing={1.5}>
+              <TextField
+                label="Prekės tipas"
+                size="small"
+                value={optimumFields.pard_prekes_tipas}
+                onChange={(e) =>
+                  setOptimumFields((prev) => ({
+                    ...prev,
+                    pard_prekes_tipas: e.target.value,
+                  }))
+                }
+                fullWidth
+              />
+              <TextField
+                label="Prekės grupė"
+                size="small"
+                value={optimumFields.pard_prekes_grupe}
+                onChange={(e) =>
+                  setOptimumFields((prev) => ({
+                    ...prev,
+                    pard_prekes_grupe: e.target.value,
+                  }))
+                }
+                fullWidth
+              />
+              <TextField
+                label="Sandėlio kodas"
+                size="small"
+                value={optimumFields.pard_sandelio_kodas}
+                onChange={(e) =>
+                  setOptimumFields((prev) => ({
+                    ...prev,
+                    pard_sandelio_kodas: e.target.value,
+                  }))
+                }
+                fullWidth
+              />
+              <TextField
+                label="Pirkėjo grupė"
+                size="small"
+                value={optimumFields.pirkejo_grupe}
+                onChange={(e) =>
+                  setOptimumFields((prev) => ({
+                    ...prev,
+                    pirkejo_grupe: e.target.value,
+                  }))
+                }
+                fullWidth
+              />
+              <TextField
+                label="Skyriaus kodas"
+                size="small"
+                value={optimumFields.pard_skyriaus_kodas}
+                onChange={(e) =>
+                  setOptimumFields((prev) => ({
+                    ...prev,
+                    pard_skyriaus_kodas: e.target.value,
+                  }))
+                }
+                fullWidth
+              />
+              <TextField
+                label="Projekto kodas"
+                size="small"
+                value={optimumFields.pard_projekto_kodas}
+                onChange={(e) =>
+                  setOptimumFields((prev) => ({
+                    ...prev,
+                    pard_projekto_kodas: e.target.value,
+                  }))
+                }
+                fullWidth
+              />
+              <TextField
+                label="Atsakingo darbuotojo kodas"
+                size="small"
+                value={optimumFields.pard_atsakingo_darb_kodas}
+                onChange={(e) =>
+                  setOptimumFields((prev) => ({
+                    ...prev,
+                    pard_atsakingo_darb_kodas: e.target.value,
+                  }))
+                }
+                fullWidth
+              />
+            </Stack>
+          </Grid2>
+        </Grid2>
+
+        <Stack direction="row" spacing={2} sx={{ mt: 3 }} alignItems="center">
+          <Button
+            variant="contained"
+            onClick={onSaveOptimum}
+            disabled={savingOptimum}
+          >
+            Išsaugoti Optimum laukus
+          </Button>
+
+          {successOptimum && (
+            <Alert severity="success" sx={{ py: 0.5 }}>
+              Išsaugota!
+            </Alert>
+          )}
+
+          {errorOptimum && (
+            <Alert severity="error" sx={{ py: 0.5 }}>
+              {errorOptimum}
+            </Alert>
+          )}
+        </Stack>
+      </Paper>
+    );
+  }
+
+
 
   // ---------- Agnum ----------
   if (program === "agnum") {

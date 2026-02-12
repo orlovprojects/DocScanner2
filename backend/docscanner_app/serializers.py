@@ -206,6 +206,8 @@ class ScannedDocumentListSerializer(serializers.ModelSerializer):
             'scan_type',
             'ready_for_export',
             'math_validation_passed',
+            'optimum_api_status',
+            'optimum_last_try_date',
             # ...и т.п., без тяжелых полей и line_items
         ]
 
@@ -460,6 +462,8 @@ class CustomUserSerializer(serializers.ModelSerializer):
     finvalda_extra_fields    = serializers.JSONField(required=False, allow_null=True)
     centas_extra_fields      = serializers.JSONField(required=False, allow_null=True)
     agnum_extra_fields       = serializers.JSONField(required=False, allow_null=True)
+    optimum_extra_fields       = serializers.JSONField(required=False, allow_null=True)
+    dineta_extra_fields       = serializers.JSONField(required=False, allow_null=True)
     debetas_extra_fields       = serializers.JSONField(required=False, allow_null=True)
     site_pro_extra_fields       = serializers.JSONField(required=False, allow_null=True)
     pragma3_extra_fields       = serializers.JSONField(required=False, allow_null=True)
@@ -477,7 +481,7 @@ class CustomUserSerializer(serializers.ModelSerializer):
             'extra_settings', 'is_superuser','is_staff', 'lineitem_rules',
             'rivile_erp_extra_fields', 'rivile_gama_extra_fields', 'butent_extra_fields','finvalda_extra_fields',
             'centas_extra_fields','agnum_extra_fields','debetas_extra_fields','site_pro_extra_fields',
-            'pragma3_extra_fields',
+            'pragma3_extra_fields', 'optimum_extra_fields', 'dineta_extra_fields'
         ]
         read_only_fields = ('credits',)
         extra_kwargs = {
@@ -537,6 +541,12 @@ class CustomUserSerializer(serializers.ModelSerializer):
 
     def validate_agnum_extra_fields(self, value):
         return self._validate_extra_dict(value, "agnum_extra_fields")
+    
+    def validate_optimum_extra_fields(self, value):
+        return self._validate_extra_dict(value, "optimum_extra_fields")
+    
+    def validate_dineta_extra_fields(self, value):
+        return self._validate_extra_dict(value, "dineta_extra_fields")
     
     def validate_debetas_extra_fields(self, value):
         return self._validate_extra_dict(value, "debetas_extra_fields")
@@ -651,6 +661,8 @@ class CustomUserSerializer(serializers.ModelSerializer):
         finvalda_extra = validated_data.pop('finvalda_extra_fields', None)
         centas_extra   = validated_data.pop('centas_extra_fields', None)
         agnum_extra    = validated_data.pop('agnum_extra_fields', None)
+        optimum_extra    = validated_data.pop('optimum_extra_fields', None)
+        dineta_extra    = validated_data.pop('dineta_extra_fields', None)
         debetas_extra    = validated_data.pop('debetas_extra_fields', None)
         site_pro_extra    = validated_data.pop('site_pro_extra_fields', None)
         pragma3_extra    = validated_data.pop('pragma3_extra_fields', None)
@@ -701,6 +713,12 @@ class CustomUserSerializer(serializers.ModelSerializer):
         if agnum_extra is not None:
             user.agnum_extra_fields = agnum_extra
 
+        if optimum_extra is not None:
+            user.optimum_extra_fields = optimum_extra
+
+        if dineta_extra is not None:
+            user.agnum_dineta_fields = dineta_extra
+
         if debetas_extra is not None:
             user.debetas_extra_fields = debetas_extra
 
@@ -716,7 +734,7 @@ class CustomUserSerializer(serializers.ModelSerializer):
             'rivile_erp_extra_fields', 'rivile_gama_extra_fields',
             'butent_extra_fields','finvalda_extra_fields',
             'centas_extra_fields','agnum_extra_fields', 'debetas_extra_fields',
-            'site_pro_extra_fields', 'pragma3_extra_fields',
+            'site_pro_extra_fields', 'pragma3_extra_fields', 'optimum_extra_fields', 'dineta_extra_fields',
         ])
         return user
     
@@ -785,6 +803,12 @@ class CustomUserSerializer(serializers.ModelSerializer):
 
         if 'agnum_extra_fields' in validated_data:
             instance.agnum_extra_fields = validated_data.pop('agnum_extra_fields')
+
+        if 'optimum_extra_fields' in validated_data:
+            instance.optimum_extra_fields = validated_data.pop('optimum_extra_fields')
+
+        if 'dineta_extra_fields' in validated_data:
+            instance.dineta_extra_fields = validated_data.pop('dineta_extra_fields')
 
         if 'debetas_extra_fields' in validated_data:
             instance.debetas_extra_fields = validated_data.pop('debetas_extra_fields')
@@ -1055,46 +1079,106 @@ class GuideArticleDetailSerializer(serializers.ModelSerializer):
 
 
 class DinetaSettingsSerializer(serializers.Serializer):
-    server = serializers.CharField(max_length=50)
-    client = serializers.CharField(max_length=50)
-    username = serializers.CharField(max_length=100)
-    password = serializers.CharField(write_only=True, style={"input_type": "password"})
-
-    brandid = serializers.CharField(
-        max_length=20, required=False, allow_blank=True, allow_null=True
+    # --- Фронт отправляет url, мы парсим в server + client ---
+    url = serializers.CharField(
+        max_length=200,
+        required=False,        # не требуется при GET (to_representation)
+        allow_blank=True,
+        help_text="Dineta URL, pvz.: https://lt4.dineta.eu/dokskenas/login.php",
     )
+    username = serializers.CharField(max_length=100)
+    password = serializers.CharField(
+        write_only=True,
+        required=False,        # при повторном PUT можно не менять пароль
+        allow_blank=True,
+        style={"input_type": "password"},
+    )
+
     storeid = serializers.CharField(
-        max_length=20, required=False, allow_blank=True, allow_null=True
+        max_length=20, required=False, allow_blank=True, allow_null=True,
     )
     posid = serializers.CharField(
-        max_length=20, required=False, allow_blank=True, allow_null=True
+        max_length=20, required=False, allow_blank=True, allow_null=True,
     )
+
+    def validate_url(self, value):
+        """Проверяем что URL содержит .dineta.eu и из него можно извлечь server/client."""
+        if not value:
+            return value
+        from docscanner_app.exports.dineta import parse_dineta_url, DinetaError
+        try:
+            server, client = parse_dineta_url(value)
+        except DinetaError as e:
+            raise serializers.ValidationError(str(e))
+        # Сохраняем разобранные значения для build_settings_dict
+        self._parsed_server = server
+        self._parsed_client = client
+        return value
 
     def to_representation(self, instance):
         """
         instance — это dict из user.dineta_settings.
-        Пароль наружу не отдаем.
+        Пароль наружу не отдаём.
+        Вместо server/client собираем url для фронта.
         """
         if instance is None:
-            return None
+            return {}
         data = dict(instance)
         data.pop("password", None)
+
+        # Собираем url из server + client для отображения
+        server = data.pop("server", "")
+        client = data.pop("client", "")
+        if server and client:
+            data["url"] = f"https://{server}.dineta.eu/{client}/"
+        else:
+            data["url"] = ""
+
         return data
 
     def build_settings_dict(self):
         """
         Вызываем после is_valid().
-        Возвращает dict, который можно положить в CustomUser.dineta_settings.
+        Возвращает dict для CustomUser.dineta_settings:
+        {
+            "server": "lt4",
+            "client": "ivesklt",
+            "username": "...",
+            "password": "<encrypted>",
+            "storeid": "",
+            "posid": "",
+        }
         """
         data = dict(self.validated_data)
-        raw_password = data.pop("password", None)
 
+        # URL → server + client
+        url = data.pop("url", "")
+        if url:
+            data["server"] = getattr(self, "_parsed_server", "")
+            data["client"] = getattr(self, "_parsed_client", "")
+        else:
+            # Если url не передан (повторный PUT без смены URL) —
+            # сохраняем старые server/client из текущих настроек
+            raise serializers.ValidationError(
+                {"url": "Dineta URL yra privalomas"}
+            )
+
+        # Пароль
+        raw_password = data.pop("password", None)
         if raw_password:
             data["password"] = encrypt_password(raw_password)
         else:
-            raise serializers.ValidationError({"password": "Password is required"})
+            # Пароль не передан — оставляем старый из текущих настроек
+            current = getattr(self, "instance", None)
+            if isinstance(current, dict) and current.get("password"):
+                data["password"] = current["password"]
+            else:
+                raise serializers.ValidationError(
+                    {"password": "Slaptažodis yra privalomas"}
+                )
 
         return data
+
     
 
 

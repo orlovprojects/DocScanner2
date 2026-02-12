@@ -43,6 +43,8 @@ from .views import (
     get_user_counterparties,
     get_document_lineitems,
     swap_buyer_seller,
+    export_sessions_active,
+    export_log_detail,
 )
 from . import views
 from .views import TrackAdClickView
@@ -130,7 +132,7 @@ urlpatterns = [
     path("view-mode/", update_view_mode, name="user-view-mode"),
 
     path("settings/dineta/", DinetaSettingsView.as_view(), name="dineta-settings"),
-    path("settings/optimum/", OptimumSettingsView.as_view(), name="optimum-settings"),
+    path('settings/optimum/', views.OptimumSettingsView.as_view(), name='optimum_settings'),
 
     path("scanned-documents/<int:doc_id>/inline/", InlineDocUpdateView.as_view()),
     path("scanned-documents/<int:doc_id>/lineitem/<int:line_id>/inline/", InlineLineUpdateView.as_view()),
@@ -239,6 +241,10 @@ urlpatterns = [
     path("sessions/<uuid:session_id>/chunks/<uuid:upload_id>/complete/", views.chunk_complete, name="chunk_complete"),
 
     path("sessions/active/", views.active_sessions, name="sessions_active"),
+
+
+    path('export-sessions/active/', views.export_sessions_active, name='export_sessions_active'),
+    path('documents/<int:document_id>/export-log/', views.export_log_detail, name='export_log_detail'),
 
 
 

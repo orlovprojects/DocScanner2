@@ -333,6 +333,12 @@ class ScannedDocument(models.Model):
 
     uploaded_size_bytes = models.BigIntegerField(default=0)
 
+    optimum_api_status = models.CharField(max_length=20, blank=True, default='')
+    optimum_last_try_date = models.DateTimeField(null=True, blank=True)
+
+    dineta_api_status = models.CharField(max_length=20, blank=True, default='')
+    dineta_last_try_date = models.DateTimeField(null=True, blank=True)
+
     class Meta:
         indexes = [
             models.Index(fields=["user", "-uploaded_at"], name="idx_user_uploaded_desc"),
@@ -561,6 +567,8 @@ class CustomUser(AbstractUser):
     debetas_extra_fields       = models.JSONField(default=dict, blank=True)
     site_pro_extra_fields       = models.JSONField(default=dict, blank=True)
     pragma3_extra_fields       = models.JSONField(default=dict, blank=True)
+    optimum_extra_fields       = models.JSONField(default=dict, blank=True)
+    dineta_extra_fields       = models.JSONField(default=dict, blank=True)
 
     # mobile_key = models.CharField(max_length=64, unique=True, null=True, blank=True)
 
@@ -1110,3 +1118,136 @@ class MobileInboxDocument(models.Model):
 
     def __str__(self):
         return f"MobileInboxDocument(id={self.id}, user={self.user_id}, filename={self.original_filename})"
+
+
+
+
+
+
+
+class APIExportLog(models.Model):
+    class ExportStatus(models.TextChoices):
+        SUCCESS = 'success', 'Success'
+        PARTIAL_SUCCESS = 'partial_success', 'Partial Success'
+        ERROR = 'error', 'Error'
+
+    class ExportProgram(models.TextChoices):
+        OPTIMUM = 'optimum', 'Optimum'
+        DINETA = 'dineta', 'Dineta'
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='api_export_logs'
+    )
+    document = models.ForeignKey(
+        'ScannedDocument',
+        on_delete=models.CASCADE,
+        related_name='api_export_logs'
+    )
+    program = models.CharField(max_length=50, choices=ExportProgram.choices)
+    status = models.CharField(max_length=20, choices=ExportStatus.choices)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    invoice_type = models.CharField(max_length=30)
+    invoice_status = models.CharField(max_length=10)
+    invoice_result = models.IntegerField(null=True, blank=True)
+    invoice_error = models.TextField(blank=True, default='')
+
+    full_response = models.TextField(blank=True, default='')
+    partner_status = models.CharField(max_length=10, blank=True, default='')
+    partner_error = models.TextField(blank=True, default='')
+
+    session = models.ForeignKey(
+        'ExportSession',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='export_logs'
+    )
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['document', 'program', '-created_at']),
+            models.Index(fields=['user', 'program', '-created_at']),
+        ]
+
+    def __str__(self):
+        return f"{self.document} → {self.program} [{self.status}]"
+
+
+class APIExportArticleLog(models.Model):
+    export_log = models.ForeignKey(
+        APIExportLog,
+        on_delete=models.CASCADE,
+        related_name='article_logs'
+    )
+    article_name = models.CharField(max_length=255)
+    article_code = models.CharField(max_length=100, blank=True, default='')
+    status = models.CharField(max_length=10)
+    result = models.IntegerField(null=True, blank=True)
+    error = models.TextField(blank=True, default='')
+
+    full_response = models.TextField(blank=True, default='')
+
+    def __str__(self):
+        return f"{self.article_name} ({self.article_code}) [{self.status}]"
+    
+
+class ExportSession(models.Model):
+    class Stage(models.TextChoices):
+        QUEUED = 'queued', 'Queued'
+        PROCESSING = 'processing', 'Processing'
+        DONE = 'done', 'Done'
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='export_sessions'
+    )
+    program = models.CharField(
+        max_length=50,
+        choices=APIExportLog.ExportProgram.choices
+    )
+    stage = models.CharField(
+        max_length=20,
+        choices=Stage.choices,
+        default=Stage.QUEUED
+    )
+
+    # Документы для экспорта
+    documents = models.ManyToManyField(
+        'ScannedDocument',
+        related_name='export_sessions'
+    )
+
+    # Счётчики
+    total_documents = models.IntegerField(default=0)
+    processed_documents = models.IntegerField(default=0)
+    success_count = models.IntegerField(default=0)
+    partial_count = models.IntegerField(default=0)
+    error_count = models.IntegerField(default=0)
+
+    # Время
+    created_at = models.DateTimeField(auto_now_add=True)
+    started_at = models.DateTimeField(null=True, blank=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+
+    # Celery task id — для возможной отмены
+    task_id = models.CharField(max_length=255, blank=True, default='')
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['user', 'stage', '-created_at']),
+        ]
+
+    def __str__(self):
+        return f"ExportSession #{self.pk} {self.program} [{self.stage}]"
+
+    @property
+    def total_time_seconds(self):
+        if self.started_at and self.finished_at:
+            return (self.finished_at - self.started_at).total_seconds()
+        return None

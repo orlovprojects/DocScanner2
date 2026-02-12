@@ -202,9 +202,11 @@ If there are any signs of cash payment, for example, 'gryni', 'grąža' or simil
 
 - Firstly, properly identify how many lineitems (products/services/fees/shipping, etc) exist in the document. Don't count document's subtotal, vat, total lines as lineitems. If product/service is mentioned with zero subtotal, vat and total for example free shipping, don't include it as lineitem. But shipping fee if it's > 0, it must be added as lineitem and counted towards total_lines.
 
-- Do NOT include more than 20 line items in JSON (for large documents, stop after the 20th and set `"truncated_json": true"` at the root level).
-
-- Even if you returned trunctated_json with 20 lineitems, make sure you count all lineitems in the document and add number to "total_lines", it must mention number of line items in document, not number of line items you returned.
+LINE ITEMS RULE (STRICT):
+- First COUNT the real total number of billable line items in the document and return it as integer "total_lines" at ROOT level.
+- Then OUTPUT only the FIRST 20 line items in "line_items". Never output more than 20.
+- If total_lines > 20: set root "truncated_json": true and line_items must contain exactly 20 items.
+- If total_lines <= 20: omit "truncated_json" (or set false) and line_items must contain exactly total_lines items.
 
 - If a discount (“nuolaida”) is present for any line item, first determine whether the discount amount is stated with VAT (“su PVM”) or without VAT (“be PVM”).
     Extract the discount amount and assign it to the corresponding line item.
@@ -265,22 +267,41 @@ Make sure you don't consider receipt or payment confirmation as a separate docum
 #Dlia dlinyx dokumentax s scan_type=detaliai kogda pervyj otvet imel 20 lineitems no v dokumente lineitems >20
 
 GROK_TRUNCATED_TO_FULL_PROMPT = """
-You previously returned a JSON with \"truncated_json\": true because of a 20 line items cap. Now produce the COMPLETE JSON for the same document.
+You previously returned a JSON with "truncated_json": true because of a 20 line items cap. Now produce the COMPLETE JSON for the same document.
 
-CONTEXT
-You are extracting structured data from OCR text of a financial document (invoice, receipt, etc.). You will receive:
+ABSOLUTE OUTPUT REQUIREMENT (START/END)
+- Your output MUST begin with the very first character "{" and MUST end with the very last character "}".
+- Do NOT output anything before the opening "{" (no BOM, no whitespace, no quotes, no backticks, no commentary).
+- Do NOT output anything after the closing "}" (no whitespace, no trailing text).
+- If you are about to output anything that does not start with "{", STOP and output the JSON again from the beginning.
+
+INPUTS YOU WILL RECEIVE
 - GLUED_RAW_TEXT: the full OCR text of the document.
 - PREVIOUS_PARTIAL_JSON: your earlier partial JSON (already contains valid extracted values).
 
-GOAL
-Return the full, final JSON for the same input, including ALL line items (products/services/fees) without any 20-item limit.
-Ensure that the number of returned line items EXACTLY MATCHES the value of "total_lines" from PREVIOUS_PARTIAL_JSON (do not recompute it).
-Omit "truncated_json".
+GOAL (MERGE — CRITICAL)
+- Treat PREVIOUS_PARTIAL_JSON as the AUTHORITATIVE PREFIX of the final answer. You MUST reuse it.
+- Your final output MUST be PREVIOUS_PARTIAL_JSON with ONLY additional missing content appended/filled in.
+- Do NOT create a new JSON from scratch. Do NOT drop any keys/objects already present in PREVIOUS_PARTIAL_JSON.
+- The final JSON MUST contain everything that is already present in PREVIOUS_PARTIAL_JSON, exactly unchanged, plus the missing tail.
 
-INVARIANTS — DO NOT CHANGE WHAT IS ALREADY EXTRACTED
-- Do NOT modify, rewrite, normalize, translate, or delete any existing values present in PREVIOUS_PARTIAL_JSON.
-- Keep all existing keys, values, data types, numeric precision, strings, booleans, and order as-is.
-- You may only ADD missing objects/fields/items to complete the JSON, based on GLUED_RAW_TEXT.
+LINE ITEMS COMPLETION (CRITICAL)
+- Preserve the entire PREVIOUS_PARTIAL_JSON line_items array EXACTLY as-is (same objects, same order, same values, same line_id).
+- Only APPEND the missing line items after the last existing item until the total number of line_items equals "total_lines" from PREVIOUS_PARTIAL_JSON.
+- Do NOT renumber or rewrite existing line_id values. Continue line_id numbering only for newly appended items.
+
+COUNT LOCK (CRITICAL)
+- Read "total_lines" from PREVIOUS_PARTIAL_JSON.
+- You MUST return exactly that many line items in the final JSON.
+- Copy "total_lines" from PREVIOUS_PARTIAL_JSON into the final JSON without change.
+- Do NOT recompute or change "total_lines".
+
+OTHER FIELDS
+- Keep all existing keys/values/data types/precision/booleans/strings and ORDER from PREVIOUS_PARTIAL_JSON exactly unchanged.
+- You may only ADD missing per-document fields if clearly present in GLUED_RAW_TEXT.
+- If a value is unclear, OMIT that field (do not guess).
+
+Omit "truncated_json" in the final JSON.
 
 LINE ITEMS COUNT LOCK (CRITICAL)
 - Read "total_lines" from PREVIOUS_PARTIAL_JSON.
@@ -658,15 +679,15 @@ def repair_truncated_json_with_grok(
 # =========================
 
 def build_truncated_followup_prompt(glued_raw_text: str, previous_json: str) -> Tuple[str, str]:
-    prompt = GROK_TRUNCATED_TO_FULL_PROMPT or (
-        "You previously returned a JSON with \"truncated_json\": true because of a 20 line items cap. "
-        "Now produce the COMPLETE JSON for the same document.\n\n"
-        "You will receive:\n"
-        "- GLUED_RAW_TEXT: full OCR text\n"
-        "- PREVIOUS_PARTIAL_JSON: earlier JSON (must be preserved as-is)\n\n"
-        "Return ONLY one-line valid JSON. Do not include truncated_json. "
-        "Do not change existing extracted values. Only append missing line items until the count matches total_lines."
-    )
+    prompt = (GROK_TRUNCATED_TO_FULL_PROMPT or "").strip()
+    if not prompt:
+        prompt = (
+            'You previously returned a JSON with "truncated_json": true. '
+            'Now return the COMPLETE one-line JSON for the same document. '
+            'Preserve PREVIOUS_PARTIAL_JSON exactly and only append missing line_items until count==total_lines. '
+            'Return ONLY JSON, starting with { and ending with }.'
+        )
+
     text = (
         "GLUED_RAW_TEXT:\n"
         f"{glued_raw_text}\n\n"
@@ -684,11 +705,16 @@ def request_full_json_with_grok(
     logger: Optional[logging.Logger] = None,
 ) -> str:
     prompt, text = build_truncated_followup_prompt(glued_raw_text, previous_json)
+
+    if logger:
+        logger.info("[Grok][FULL] prompt_len=%s text_len=%s prompt_head=%r",
+                    len(prompt or ""), len(text or ""), (prompt or "")[:120])
+
     return ask_grok_with_retry(
         text=text,
         prompt=prompt,
         model=model,
-        temperature=0.2,
+        temperature=0.0,
         max_tokens=30000,
         timeout_seconds=300,
         logger=logger,

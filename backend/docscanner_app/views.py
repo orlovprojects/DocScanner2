@@ -18,7 +18,7 @@ from django.contrib.auth import get_user_model
 from django.core.files.base import ContentFile
 from .tasks import process_uploaded_file_task 
 
-from .tasks import start_session_processing
+from .tasks import start_session_processing, export_to_optimum_task, export_to_dineta_task
 
 
 from rest_framework.parsers import MultiPartParser, FormParser
@@ -77,8 +77,11 @@ from .exports.rivile_erp import (
     export_documents_to_rivile_erp_xlsx,
 )
 from .exports.apsa import export_to_apsa
-from .exports.dineta import send_dineta_bundle, DinetaError
-# from .exports.optimum import optimum_hello, OptimumError
+from .exports.optimum import optimum_hello, OptimumError
+from .utils.password_encryption import decrypt_password
+from .utils.password_encryption import encrypt_password
+
+
 from .exports.pragma4 import export_to_pragma40_xml
 from .exports.pragma3 import export_to_pragma_full, save_pragma_export_to_files
 from .exports.butent import export_to_butent
@@ -884,50 +887,6 @@ def export_documents(request):
             export_success = True
 
 
-    # ========================= DINETA =========================
-    elif export_type == 'dineta':
-        logger.info("[EXP] DINETA export started")
-
-        # Для Dineta нам логичнее отправлять только уже классифицированные покупки/продажи
-        all_docs = (pirkimai_docs or []) + (pardavimai_docs or [])
-
-        if not all_docs:
-            logger.warning("[EXP] DINETA no documents to export (no pirkimai/pardavimai)")
-            return Response({"error": "No documents to send to Dineta"}, status=400)
-
-        try:
-            dineta_result = send_dineta_bundle(request.user, all_docs)
-        except DinetaError as e:
-            logger.exception("[EXP] DINETA export failed (DinetaError): %s", e)
-            return Response(
-                {
-                    "error": "Dineta export failed",
-                    "detail": str(e),
-                },
-                status=502,  # bad gateway / внешняя система
-            )
-        except Exception as e:
-            logger.exception("[EXP] DINETA export failed (unexpected): %s", e)
-            return Response(
-                {
-                    "error": "Dineta export failed (unexpected)",
-                    "detail": str(e),
-                },
-                status=500,
-            )
-
-        # Если сюда дошли – считаем экспорт успешным
-        export_success = True
-        # response — обычный JSON с тем, что вернула Dineta
-        response = Response(
-            {
-                "status": "ok",
-                "dineta": dineta_result,
-            },
-            status=200,
-        )
-
-
 
     # ========================= Butent =========================
     elif export_type == 'butent':
@@ -1205,7 +1164,7 @@ def export_documents(request):
             response = Response({"error": "No documents to export"}, status=400)
 
 
-# ========================= APSA (i.SAF XML) =========================
+    # ========================= APSA (i.SAF XML) =========================
     elif export_type in ('apsa', 'isaf'):
         logger.info("[EXP] APSA export started")
         
@@ -1466,6 +1425,108 @@ def export_documents(request):
             response = Response({"error": "No clients or products to export"}, status=400)
 
 
+    # ========================= OPTIMUM (API) =========================
+    elif export_type == 'optimum':
+        logger.info("[EXP] OPTIMUM API export started")
+        assign_random_prekes_kodai(documents)
+
+        # Проверяем ключ
+        opt_settings = getattr(request.user, "optimum_settings", {}) or {}
+        enc_key = opt_settings.get("key") or ""
+        if not enc_key:
+            logger.warning("[EXP] OPTIMUM key missing")
+            return Response({"error": "Optimum key is missing"}, status=400)
+
+        all_docs = (pirkimai_docs or []) + (pardavimai_docs or [])
+        if not all_docs:
+            logger.warning("[EXP] OPTIMUM no documents to export")
+            return Response({"error": "No documents to export"}, status=400)
+
+        doc_ids = [d.pk for d in all_docs]
+
+        # Создаём ExportSession
+        from docscanner_app.models import ExportSession
+        session = ExportSession.objects.create(
+            user=request.user,
+            program='optimum',
+            stage=ExportSession.Stage.QUEUED,
+            total_documents=len(doc_ids),
+        )
+        session.documents.set(doc_ids)
+
+        # Запускаем Celery task
+        task = export_to_optimum_task.delay(session.id)
+        session.task_id = task.id
+        session.save(update_fields=["task_id"])
+
+        logger.info(
+            "[EXP] OPTIMUM session=%s task=%s docs=%d",
+            session.pk, task.id, len(doc_ids),
+        )
+
+        # Не помечаем как exported здесь — это сделает task после успешной отправки
+        # Не ставим export_success = True чтобы universal finalize не менял статусы
+        return Response({
+            "status": "ok",
+            "session_id": session.pk,
+            "total_documents": len(doc_ids),
+            "message": "Export started",
+        }, status=202)
+    
+
+    # ========================= DINETA (API) =========================
+    elif export_type == 'dineta':
+        logger.info("[EXP] DINETA API export started")
+        assign_random_prekes_kodai(documents)
+
+        # Проверяем настройки
+        dineta_settings = getattr(request.user, "dineta_settings", {}) or {}
+        if not all([
+            dineta_settings.get("server"),
+            dineta_settings.get("client"),
+            dineta_settings.get("username"),
+            dineta_settings.get("password"),
+        ]):
+            logger.warning("[EXP] DINETA settings incomplete")
+            return Response(
+                {"error": "Dineta nustatymai neužpildyti"},
+                status=400,
+            )
+
+        all_docs = (pirkimai_docs or []) + (pardavimai_docs or [])
+        if not all_docs:
+            logger.warning("[EXP] DINETA no documents to export")
+            return Response({"error": "No documents to export"}, status=400)
+
+        doc_ids = [d.pk for d in all_docs]
+
+        # Создаём ExportSession
+        from docscanner_app.models import ExportSession
+        session = ExportSession.objects.create(
+            user=request.user,
+            program='dineta',
+            stage=ExportSession.Stage.QUEUED,
+            total_documents=len(doc_ids),
+        )
+        session.documents.set(doc_ids)
+
+        # Запускаем Celery task
+        task = export_to_dineta_task.delay(session.id)
+        session.task_id = task.id
+        session.save(update_fields=["task_id"])
+
+        logger.info(
+            "[EXP] DINETA session=%s task=%s docs=%d",
+            session.pk, task.id, len(doc_ids),
+        )
+
+        return Response({
+            "status": "ok",
+            "session_id": session.pk,
+            "total_documents": len(doc_ids),
+            "message": "Export started",
+        }, status=202)
+
 
 
     else:
@@ -1495,6 +1556,7 @@ class DinetaSettingsView(APIView):
         """
         Вернуть текущие настройки Dineta этого пользователя.
         Пароль НЕ возвращается.
+        Вместо server/client отдаём склеенный url для отображения на фронте.
         """
         user = request.user
         settings_dict = user.dineta_settings or {}
@@ -1505,7 +1567,8 @@ class DinetaSettingsView(APIView):
     def put(self, request):
         """
         Обновить настройки Dineta.
-        Фронт шлёт server/client/username/password (+ опции).
+        Фронт шлёт url/username/password (+ опции).
+        url парсится → server + client сохраняются в JSONField.
         """
         user = request.user
 
@@ -1517,9 +1580,10 @@ class DinetaSettingsView(APIView):
         user.dineta_settings = settings_to_store
         user.save(update_fields=["dineta_settings"])
 
-        # в ответ отдаём без пароля (serializer.instance → dict)
+        # в ответ отдаём без пароля
         response_serializer = DinetaSettingsSerializer(instance=settings_to_store)
         return Response(response_serializer.data, status=status.HTTP_200_OK)
+
 
 
 
@@ -1527,51 +1591,146 @@ class DinetaSettingsView(APIView):
 class OptimumSettingsView(APIView):
     permission_classes = [IsAuthenticated]
 
+    def get(self, request):
+        """Grąžina meta informaciją (be rakto) + užmaskuotą rakto galą."""
+        settings = request.user.optimum_settings or {}
+        raw_key = settings.get("key", "")
+        return Response({
+            "has_key": bool(raw_key),
+            "key_suffix": settings.get("key_suffix", ""),
+            "verified_at": settings.get("verified_at"),
+            "last_ok": settings.get("last_ok"),
+            "last_error_at": settings.get("last_error_at"),
+            "last_error": settings.get("last_error", ""),
+        })
+
     def put(self, request):
-        """
-        Вариант A:
-        - user вводит key -> backend делает Hello
-        - если Success: сохраняем key + verified_at + last_ok=true, чистим last_error*
-        - если Error: key НЕ сохраняем, но сохраняем last_ok=false + last_error_at + last_error
-        """
+        """Išsaugoti naują raktą: Hello testas → jei OK saugom, jei klaida — nesaugom rakto."""
         user = request.user
+        raw_key = (request.data.get("key") or "").strip()
 
-        serializer = OptimumSettingsSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
+        if not raw_key:
+            return Response({"detail": "API Key yra privalomas."}, status=status.HTTP_400_BAD_REQUEST)
 
-        raw_key = (serializer.validated_data.get("key") or "").strip()
         now_iso = timezone.now().isoformat()
 
         try:
             optimum_hello(raw_key)
         except OptimumError as exc:
-            # --- сохраняем метаданные ошибки (key не трогаем) ---
-            patch = OptimumSettingsSerializer.build_error_patch(
-                error_at=now_iso,
-                error_msg=str(exc) or "Optimum: klaida",
-            )
-
+            # Rakto nesaugom, saugom klaidos metaduomenis
             current = user.optimum_settings or {}
-            current.update(patch)
+            current["last_ok"] = False
+            current["last_error_at"] = now_iso
+            current["last_error"] = str(exc) or "Optimum: klaida"
             user.optimum_settings = current
             user.save(update_fields=["optimum_settings"])
 
-            # фронту отдаём понятную ошибку
-            return Response(
-                {"detail": patch["last_error"] or "Nepavyko patikrinti Optimum API Key."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+            return Response({
+                "detail": str(exc) or "Nepavyko patikrinti Optimum API Key.",
+                "last_ok": False,
+                "last_error": str(exc),
+                "last_error_at": now_iso,
+            }, status=status.HTTP_400_BAD_REQUEST)
 
-        # --- SUCCESS: сохраняем новый key + метаданные ---
-        settings_to_store = serializer.build_success_settings_dict(verified_at=now_iso)
-
-        user.optimum_settings = settings_to_store
+        # Sėkmė: saugom raktą + metaduomenis
+        user.optimum_settings = {
+            "key": raw_key,
+            "key_suffix": raw_key[-4:] if len(raw_key) >= 4 else raw_key,
+            "verified_at": now_iso,
+            "last_ok": True,
+            "last_error": "",
+            "last_error_at": None,
+        }
         user.save(update_fields=["optimum_settings"])
 
-        response_serializer = OptimumSettingsSerializer(instance=settings_to_store)
-        return Response(response_serializer.data, status=status.HTTP_200_OK)
+        return Response({
+            "has_key": True,
+            "key_suffix": raw_key[-4:] if len(raw_key) >= 4 else "",
+            "verified_at": now_iso,
+            "last_ok": True,
+            "last_error": "",
+            "last_error_at": None,
+        })
 
+    def post(self, request):
+        """Patikrinti jau išsaugotą raktą (Patikrinti API mygtukas)."""
+        user = request.user
+        settings = user.optimum_settings or {}
+        raw_key = settings.get("key", "")
 
+        if not raw_key:
+            return Response({"detail": "API raktas nerastas. Pirmiausia išsaugokite raktą."}, status=status.HTTP_400_BAD_REQUEST)
+
+        now_iso = timezone.now().isoformat()
+
+        try:
+            optimum_hello(raw_key)
+        except OptimumError as exc:
+            settings["last_ok"] = False
+            settings["last_error_at"] = now_iso
+            settings["last_error"] = str(exc) or "Optimum: klaida"
+            user.optimum_settings = settings
+            user.save(update_fields=["optimum_settings"])
+
+            return Response({
+                "detail": str(exc) or "Nepavyko patikrinti Optimum API Key.",
+                "has_key": True,
+                "key_suffix": raw_key[-4:] if len(raw_key) >= 4 else "",
+                "verified_at": settings.get("verified_at"),
+                "last_ok": False,
+                "last_error": str(exc),
+                "last_error_at": now_iso,
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        settings["verified_at"] = now_iso
+        settings["last_ok"] = True
+        settings["last_error"] = ""
+        settings["last_error_at"] = None
+        user.optimum_settings = settings
+        user.save(update_fields=["optimum_settings"])
+
+        return Response({
+            "has_key": True,
+            "key_suffix": raw_key[-4:] if len(raw_key) >= 4 else "",
+            "verified_at": now_iso,
+            "last_ok": True,
+            "last_error": "",
+            "last_error_at": None,
+        })
+
+    def delete(self, request):
+        """Ištrinti raktą ir visus metaduomenis."""
+        user = request.user
+        user.optimum_settings = {}
+        user.save(update_fields=["optimum_settings"])
+        return Response({"detail": "Optimum API raktas ištrintas."})
+
+    # def put(self, request):
+    #     """
+    #     Временно: сохраняем любой key без проверки.
+    #     """
+    #     user = request.user
+
+    #     serializer = OptimumSettingsSerializer(data=request.data)
+    #     serializer.is_valid(raise_exception=True)
+
+    #     raw_key = (serializer.validated_data.get("key") or "").strip()
+    #     now_iso = timezone.now().isoformat()
+
+    #     # сохраняем key без проверки
+    #     settings_to_store = {
+    #         "key": encrypt_password(raw_key),
+    #         "verified_at": now_iso,
+    #         "last_ok": True,
+    #         "last_error_at": None,
+    #         "last_error": "",
+    #     }
+
+    #     user.optimum_settings = settings_to_store
+    #     user.save(update_fields=["optimum_settings"])
+
+    #     response_serializer = OptimumSettingsSerializer(instance=settings_to_store)
+    #     return Response(response_serializer.data, status=status.HTTP_200_OK)
 
 
 
@@ -4907,6 +5066,20 @@ def reserve_and_queue(session_id, user_id):
         s.error_message = f"Nepakanka kreditų. Turite: {available:.0f} | Reikia: {needed:.0f}"
         s.reserved_credits = Decimal("0.00")
         s.save(update_fields=["stage","error_message","expected_items","reserved_items","reserved_credits","updated_at"])
+
+        # Reject all pending documents in this session
+        blocked_count = ScannedDocument.objects.filter(
+            upload_session=s,
+            status="pending",
+        ).update(
+            status="rejected",
+            error_message="Nepakanka kreditų",
+        )
+        logger.info(
+            "[SESSION] Blocked session %s: rejected %d pending docs (available=%.0f, needed=%.0f)",
+            s.id, blocked_count, available, needed,
+        )
+
         return s
 
     # reserve
@@ -5052,3 +5225,109 @@ def swap_buyer_seller(request, pk):
         'seller_name': doc.seller_name,
         'buyer_name': doc.buyer_name,
     })
+
+
+#proveriajet status zadachi exporta cerez API
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def export_sessions_active(request):
+    """
+    Возвращает активные и недавно завершённые ExportSession для текущего юзера.
+    Фронт поллит каждые 2 секунды для progress bar.
+    """
+    from docscanner_app.models import ExportSession
+    from django.utils import timezone
+    from datetime import timedelta
+
+    # Активные сессии (queued + processing)
+    active = ExportSession.objects.filter(
+        user=request.user,
+        stage__in=[ExportSession.Stage.QUEUED, ExportSession.Stage.PROCESSING],
+    )
+
+    # Недавно завершённые (за последние 10 секунд) — чтобы фронт увидел финальное состояние
+    recent_done = ExportSession.objects.filter(
+        user=request.user,
+        stage=ExportSession.Stage.DONE,
+        finished_at__gte=timezone.now() - timedelta(seconds=10),
+    )
+
+    sessions = list(active) + list(recent_done)
+
+    data = {
+        "sessions": [
+            {
+                "id": s.pk,
+                "program": s.program,
+                "stage": s.stage,
+                "total_documents": s.total_documents,
+                "processed_documents": s.processed_documents,
+                "success_count": s.success_count,
+                "partial_count": s.partial_count,
+                "error_count": s.error_count,
+                "created_at": s.created_at.isoformat() if s.created_at else None,
+                "started_at": s.started_at.isoformat() if s.started_at else None,
+                "finished_at": s.finished_at.isoformat() if s.finished_at else None,
+                "total_time_seconds": s.total_time_seconds,
+            }
+            for s in sessions
+        ]
+    }
+
+    return Response(data, status=200)
+
+
+# Proverka errors exportirovanyx dokumentov cerez API (dlai documentstable)
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def export_log_detail(request, document_id):
+    """
+    Возвращает последний APIExportLog для документа + вложенные article_logs.
+    Для popup при клике на статус в DocumentsTable.
+    Query params:
+      ?program=optimum (по умолчанию optimum)
+    """
+    from docscanner_app.models import APIExportLog
+
+    program = request.query_params.get("program", "optimum")
+
+    export_log = (
+        APIExportLog.objects
+        .filter(
+            document_id=document_id,
+            user=request.user,
+            program=program,
+        )
+        .prefetch_related("article_logs")
+        .order_by("-created_at")
+        .first()
+    )
+
+    if not export_log:
+        return Response({"error": "No export log found"}, status=404)
+
+    data = {
+        "id": export_log.pk,
+        "status": export_log.status,
+        "created_at": export_log.created_at.isoformat(),
+        "invoice_type": export_log.invoice_type,
+        "invoice_status": export_log.invoice_status,
+        "invoice_result": export_log.invoice_result,
+        "invoice_error": export_log.invoice_error,
+        "articles": [
+            {
+                "article_name": a.article_name,
+                "article_code": a.article_code,
+                "status": a.status,
+                "result": a.result,
+                "error": a.error,
+            }
+            for a in export_log.article_logs.all()
+        ],
+    }
+
+    return Response(data, status=200)
+
+
