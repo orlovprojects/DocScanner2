@@ -208,6 +208,8 @@ class ScannedDocumentListSerializer(serializers.ModelSerializer):
             'math_validation_passed',
             'optimum_api_status',
             'optimum_last_try_date',
+            'dineta_api_status',
+            'dineta_last_try_date',
             # ...и т.п., без тяжелых полей и line_items
         ]
 
@@ -1116,21 +1118,19 @@ class DinetaSettingsSerializer(serializers.Serializer):
         return value
 
     def to_representation(self, instance):
-        """
-        instance — это dict из user.dineta_settings.
-        Пароль наружу не отдаём.
-        Вместо server/client собираем url для фронта.
-        """
         if instance is None:
             return {}
         data = dict(instance)
         data.pop("password", None)
 
-        # Собираем url из server + client для отображения
         server = data.pop("server", "")
         client = data.pop("client", "")
         if server and client:
-            data["url"] = f"https://{server}.dineta.eu/{client}/"
+            if server.startswith("http"):
+                # localhost
+                data["url"] = f"{server}/{client}/"
+            else:
+                data["url"] = f"https://{server}.dineta.eu/{client}/"
         else:
             data["url"] = ""
 

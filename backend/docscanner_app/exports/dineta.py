@@ -127,20 +127,14 @@ def parse_dineta_url(url: str) -> tuple[str, str]:
     """
     Парсит URL вида  https://lt4.dineta.eu/dokskenas/login.php
     Возвращает (server, client) → ("lt4", "dokskenas").
+    
+    Для тестирования: http://localhost:8878/mock_client/login.php
+    → ("http://localhost:8878", "mock_client")
     """
     parsed = urlparse(url.strip())
     hostname = parsed.hostname or ""
 
-    # server = поддомен перед .dineta.eu
-    host_parts = hostname.split(".")
-    if len(host_parts) < 3 or "dineta" not in host_parts:
-        raise DinetaError(
-            f"Netinkamas Dineta URL: {url}. "
-            f"Tikimasi formato: https://XXX.dineta.eu/CLIENT/..."
-        )
-    server = host_parts[0]
-
-    # client = первый сегмент пути
+    # client = первый сегмент пути (одинаково для обоих случаев)
     path_parts = [p for p in parsed.path.strip("/").split("/") if p]
     if not path_parts:
         raise DinetaError(
@@ -149,11 +143,30 @@ def parse_dineta_url(url: str) -> tuple[str, str]:
         )
     client = path_parts[0]
 
+    # localhost / 127.0.0.1 → server = полный origin
+    if hostname in ("localhost", "127.0.0.1"):
+        port = parsed.port
+        server = f"{parsed.scheme}://{hostname}"
+        if port:
+            server += f":{port}"
+        return server, client
+
+    # Обычный Dineta URL
+    host_parts = hostname.split(".")
+    if len(host_parts) < 3 or "dineta" not in host_parts:
+        raise DinetaError(
+            f"Netinkamas Dineta URL: {url}. "
+            f"Tikimasi formato: https://XXX.dineta.eu/CLIENT/..."
+        )
+    server = host_parts[0]
+
     return server, client
 
 
 def build_api_base_url(server: str, client: str) -> str:
-    """https://lt4.dineta.eu/ivesklt/ws/dineta_api/v1"""
+    if server.startswith("http"):
+        # localhost или полный URL
+        return f"{server}/{client}/ws/dineta_api/v1"
     return f"https://{server}.dineta.eu/{client}/ws/dineta_api/v1"
 
 

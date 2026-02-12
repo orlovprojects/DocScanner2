@@ -184,8 +184,10 @@ export default function ExportStatusBar({ onExportComplete }) {
 
   // Expose triggerPoll via ref-like pattern
   useEffect(() => {
-    if (ExportStatusBar._triggerPoll !== triggerPoll) {
-      ExportStatusBar._triggerPoll = triggerPoll;
+    if (ExportStatusBar._triggerPoll) {
+        ExportStatusBar._triggerPoll();
+        setTimeout(() => ExportStatusBar._triggerPoll?.(), 500);
+        setTimeout(() => ExportStatusBar._triggerPoll?.(), 1200);
     }
   }, [triggerPoll]);
 
