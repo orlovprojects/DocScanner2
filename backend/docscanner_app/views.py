@@ -5312,6 +5312,8 @@ def export_log_detail(request, document_id):
         "id": export_log.pk,
         "status": export_log.status,
         "created_at": export_log.created_at.isoformat(),
+        "partner_status": getattr(export_log, "partner_status", None),
+        "partner_error": getattr(export_log, "partner_error", None),
         "invoice_type": export_log.invoice_type,
         "invoice_status": export_log.invoice_status,
         "invoice_result": export_log.invoice_result,
