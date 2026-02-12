@@ -20,7 +20,7 @@ const faqList = [
   },
   {
     question: "Ar sistema tinka mano apskaitos programai?",
-    answer: "DokSkenas integruotas su dauguma populiariausių Lietuvos apskaitos programų: Rivilė GAMA, Rivilė ERP, Centas, Finvalda, Agnum, Apskaita5, Būtent, Pragma 3.2 ir 4. Jei jūsų programa nepalaiko tiesioginės integracijos, galite eksportuoti duomenis Excel formatu arba susisiekite su mumis, kad integruotume ir jūsų apskaitos programą.",
+    answer: "DokSkenas integruotas su dauguma populiariausių Lietuvos apskaitos programų: Rivilė GAMA, Rivilė ERP, Centas, Finvalda, Agnum, Apskaita5, Būtenta, Pragma 3.2 ir 4, Optimum, Dineta, Debetas, Site.Pro(B1), APSA, Paulita ar tiesiog iSAF formatu. Jei jūsų programa nepalaiko tiesioginės integracijos, galite eksportuoti duomenis Excel formatu arba susisiekite su mumis, kad integruotume ir jūsų apskaitos programą.",
   },
   {
     question: "Ar sistema aptinka klaidas dokumentuose?",
@@ -976,20 +976,24 @@ const BuhalterinenApskaita = () => {
           }}
         >
           {[
-            { label: 'Finvalda (.xml)', url: 'https://finvalda.lt/', hasLink: true },
-            { label: 'Rivilė GAMA (.eip)', hasLink: false },
-            { label: 'Rivilė ERP (.xlsx)', hasLink: false },
-            { label: 'Agnum (.xml)', url: 'https://www.agnum.lt/', hasLink: true },
-            { label: 'Centas (.xml)', hasLink: false },
-            { label: 'Apskaita5 (.xml)', hasLink: false },
-            { label: 'Pragma 3.2 (.txt)', hasLink: false },
-            { label: 'Pragma 4 (.xml)', hasLink: false },
-            { label: 'Būtent (.xlsx)', hasLink: false },
-            { label: 'Site.pro (B1) (.xlsx)', hasLink: false },
-            { label: 'Debetas (.csv)', hasLink: false },
+            { label: 'Finvalda', url: 'https://finvalda.lt/', hasLink: true },
+            { label: 'Rivilė GAMA', url: 'https://atlyginimoskaiciuokle.com/rivile', hasLink: true },
+            { label: 'Rivilė ERP', url: 'https://atlyginimoskaiciuokle.com/rivile', hasLink: true },
+            { label: 'Agnum', url: 'https://www.agnum.lt/', hasLink: true },
+            { label: 'Centas', hasLink: false },
+            { label: 'Apskaita5', hasLink: false },
+            { label: 'Pragma 3.2', hasLink: false },
+            { label: 'Pragma 4', hasLink: false },
+            { label: 'Būtenta', hasLink: false },
+            { label: 'B1', url: 'https://atlyginimoskaiciuokle.com/b1', hasLink: true },
+            { label: 'Site.pro', hasLink: false },
+            { label: 'Debetas', hasLink: false },
             { label: 'APSA', hasLink: false },
+            { label: 'Paulita', hasLink: false },
+            { label: 'Optimum', hasLink: false },
+            { label: 'Dineta', hasLink: false },
             { label: 'iSAF', hasLink: false },
-            { label: 'Excel (.xlsx)', hasLink: false },
+            { label: 'Excel', hasLink: false },
           ].map((item, idx) => (
             <Box key={idx} sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
               <Box

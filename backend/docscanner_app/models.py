@@ -486,6 +486,7 @@ ACCOUNTING_PROGRAM_CHOICES = [
     ('site_pro', 'Site.Pro (B1)'),
     ('apsa', 'APSA'),
     ('isaf', 'iSAF'),
+    ('paulita', 'Paulita'),
     # добавь нужные программы
 ]
 

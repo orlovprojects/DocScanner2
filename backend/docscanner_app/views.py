@@ -1164,8 +1164,8 @@ def export_documents(request):
             response = Response({"error": "No documents to export"}, status=400)
 
 
-    # ========================= APSA (i.SAF XML) =========================
-    elif export_type in ('apsa', 'isaf'):
+    # ========================= APSA (i.SAF, Paulita XML) =========================
+    elif export_type in ('apsa', 'isaf', 'paulita'):
         logger.info("[EXP] APSA export started")
         
         # Собираем документы с direction
