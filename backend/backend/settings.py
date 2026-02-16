@@ -221,6 +221,12 @@ CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND", "redis://localhost:63
 CELERY_ACCEPT_CONTENT = ["json"]
 CELERY_TASK_SERIALIZER = "json"
 
+TASKS = {
+    "default": {
+        "BACKEND": "django_tasks.backends.dummy.DummyBackend"
+    }
+}
+
 
 # Логирование
 LOGGING = {
