@@ -454,6 +454,90 @@ const GpmSkaiciuokle = () => {
         </Typography>
       </Paper>
 
+      {/* DokSkenas section */}
+      <Container maxWidth="md" sx={{ mt: 8 }}>
+        <Typography
+          variant="h2"
+          sx={{
+            fontSize: { xs: '20px', sm: '26px' },
+            fontFamily: 'Helvetica',
+            fontWeight: 'bold',
+            color: '#000',
+            mb: 2,
+          }}
+        >
+          Apskaita be nuobodaus darbo
+        </Typography>
+
+        <Typography sx={{ fontSize: '16px', fontFamily: 'Helvetica', color: '#000', mb: 2, lineHeight: 1.7 }}>
+          Jei kasdien susiduriate su sąskaitomis, kurias reikia suvesti į apskaitos programą,
+          <b> DokSkenas</b> gali tai padaryti už jus. Sistema per kelias sekundes nuskaito dokumentą,
+          atpažįsta visas sumas, PVM tarifus ir nuolaidas, patikrina kontrahentų duomenis
+          ir paruošia failą, kurį galite tiesiogiai importuoti į savo apskaitą.
+        </Typography>
+
+        <Typography sx={{ fontSize: '16px', fontFamily: 'Helvetica', color: '#000', mb: 3, lineHeight: 1.7 }}>
+          Jokio rankinio duomenų suvedimo, nuobodaus darbo ir jokių klaidų.
+        </Typography>
+
+        <Typography sx={{ fontSize: '16px', fontFamily: 'Helvetica', color: '#000', mb: 2 }}>
+          Integracijos su šiomis apskaitos programomis:
+        </Typography>
+
+        <Box
+          sx={{
+            display: 'grid',
+            gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' },
+            gap: 0.5,
+            maxWidth: 500,
+          }}
+        >
+          {[
+            { name: "Finvalda", href: null },
+            { name: "Rivilė GAMA", href: 'https://atlyginimoskaiciuokle.com/rivile' },
+            { name: "Rivilė ERP", href: 'https://atlyginimoskaiciuokle.com/rivile' },
+            { name: "Agnum", href: null },
+            { name: "Centas", href: null },
+            { name: "Apskaita5", href: null },
+            { name: "Pragma 3.2", href: null },
+            { name: "Pragma 4", href: null },
+            { name: "Būtenta", href: null },
+            { name: "B1", href: 'https://atlyginimoskaiciuokle.com/b1' },
+            { name: "Site.pro", href: null },
+            { name: "Debetas", href: null },
+            { name: "APSA", href: null },
+            { name: "Paulita", href: null },
+            { name: "Optimum", href: null },
+            { name: "Dineta", href: null },
+            { name: "iSAF", href: null },
+          ].map((item) => (
+            <Box key={item.name} sx={{ display: 'flex', alignItems: 'center', gap: 1, py: 0.3 }}>
+              <Box sx={{ width: 6, height: 6, borderRadius: '50%', backgroundColor: '#333', flexShrink: 0 }} />
+              {item.href ? (
+                <a
+                  href={item.href}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{
+                    color: '#003366',
+                    fontSize: '15px',
+                    fontFamily: 'Helvetica',
+                    fontWeight: 600,
+                    textDecoration: 'none',
+                  }}
+                >
+                  {item.name}
+                </a>
+              ) : (
+                <Typography sx={{ color: '#000', fontSize: '15px', fontFamily: 'Helvetica' }}>
+                  {item.name}
+                </Typography>
+              )}
+            </Box>
+          ))}
+        </Box>
+      </Container>
+
       {/* Dialog with video */}
       <Dialog open={videoOpen} onClose={() => setVideoOpen(false)} maxWidth="md" fullWidth>
         <DialogContent sx={{ p: 0 }}>

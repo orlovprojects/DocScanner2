@@ -966,88 +966,90 @@ const BuhalterinenApskaita = () => {
         <Box
           sx={{
             display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            gap: 2,
-            maxWidth: 400,
+            justifyContent: 'center',
             width: '100%',
-            margin: '0 auto',
             marginBottom: 2,
           }}
         >
-          {[
-            { label: 'Finvalda', url: 'https://finvalda.lt/', hasLink: true },
-            { label: 'Rivilė GAMA', url: 'https://atlyginimoskaiciuokle.com/rivile', hasLink: true },
-            { label: 'Rivilė ERP', url: 'https://atlyginimoskaiciuokle.com/rivile', hasLink: true },
-            { label: 'Agnum', url: 'https://www.agnum.lt/', hasLink: true },
-            { label: 'Centas', hasLink: false },
-            { label: 'Apskaita5', hasLink: false },
-            { label: 'Pragma 3.2', hasLink: false },
-            { label: 'Pragma 4', hasLink: false },
-            { label: 'Būtenta', hasLink: false },
-            { label: 'B1', url: 'https://atlyginimoskaiciuokle.com/b1', hasLink: true },
-            { label: 'Site.pro', hasLink: false },
-            { label: 'Debetas', hasLink: false },
-            { label: 'APSA', hasLink: false },
-            { label: 'Paulita', hasLink: false },
-            { label: 'Optimum', hasLink: false },
-            { label: 'Dineta', hasLink: false },
-            { label: 'iSAF', hasLink: false },
-            { label: 'Excel', hasLink: false },
-          ].map((item, idx) => (
-            <Box key={idx} sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-              <Box
-                sx={{
-                  width: 28,
-                  height: 28,
-                  background: '#f5cf54',
-                  borderRadius: '50%',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  fontWeight: 700,
-                  fontSize: '19px',
-                  fontFamily: 'Helvetica',
-                  color: '#1b1b1b',
-                  boxShadow: 1,
-                }}
-              >
-                <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
-                  <circle cx="9" cy="9" r="9" fill="#f5cf54"/>
-                  <path d="M5 9.5L8 12L13 7" stroke="#1b1b1b" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                </svg>
-              </Box>
-              {item.hasLink ? (
-                <a 
-                  href={item.url} 
-                  target="_blank" 
-                  rel="dofollow noopener"
-                  style={{
-                    textDecoration: 'none',
-                    color: '#1b1b1b',
-                    fontSize: '18px',
-                    fontFamily: 'Helvetica',
-                    borderBottom: '1px solid #f5cf54',
-                    transition: 'all 0.2s ease'
-                  }}
-                  onMouseEnter={(e) => {
-                    e.target.style.color = '#f5be0d';
-                    e.target.style.borderBottomColor = '#f5be0d';
-                  }}
-                  onMouseLeave={(e) => {
-                    e.target.style.color = '#1b1b1b';
-                    e.target.style.borderBottomColor = '#f5cf54';
+          <Box
+            sx={{
+              display: 'grid',
+              gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' },
+              gap: 2,
+            }}
+          >
+            {[
+              { label: 'Finvalda', url: 'https://finvalda.lt/', hasLink: true },
+              { label: 'Rivilė GAMA', url: 'https://atlyginimoskaiciuokle.com/rivile', hasLink: true },
+              { label: 'Rivilė ERP', url: 'https://atlyginimoskaiciuokle.com/rivile', hasLink: true },
+              { label: 'Agnum', url: 'https://www.agnum.lt/', hasLink: true },
+              { label: 'Centas', hasLink: false },
+              { label: 'Apskaita5', hasLink: false },
+              { label: 'Pragma 3.2', hasLink: false },
+              { label: 'Pragma 4', hasLink: false },
+              { label: 'Būtenta', hasLink: false },
+              { label: 'B1', url: 'https://atlyginimoskaiciuokle.com/b1', hasLink: true },
+              { label: 'Site.pro', hasLink: false },
+              { label: 'Debetas', hasLink: false },
+              { label: 'APSA', hasLink: false },
+              { label: 'Paulita', hasLink: false },
+              { label: 'Optimum', hasLink: false },
+              { label: 'Dineta', hasLink: false },
+              { label: 'iSAF', hasLink: false },
+              { label: 'Excel', hasLink: false },
+            ].map((item, idx) => (
+              <Box key={idx} sx={{ display: 'flex', alignItems: 'center', gap: 2, minWidth: 200 }}>
+                <Box
+                  sx={{
+                    minWidth: 28,
+                    width: 28,
+                    height: 28,
+                    background: '#f5cf54',
+                    borderRadius: '50%',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    boxShadow: 1,
+                    flexShrink: 0,
                   }}
                 >
-                  {item.label}
-                </a>
-              ) : (
-                <Typography sx={{ fontSize: '18px', fontFamily: 'Helvetica', color: '#1b1b1b' }}>
-                  {item.label}
-                </Typography>
-              )}
-            </Box>
-          ))}
+                  <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+                    <circle cx="9" cy="9" r="9" fill="#f5cf54"/>
+                    <path d="M5 9.5L8 12L13 7" stroke="#1b1b1b" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                  </svg>
+                </Box>
+                {item.hasLink ? (
+                  <a
+                    href={item.url}
+                    target="_blank"
+                    rel="dofollow noopener"
+                    style={{
+                      textDecoration: 'none',
+                      color: '#1b1b1b',
+                      fontSize: '18px',
+                      fontFamily: 'Helvetica',
+                      borderBottom: '1px solid #f5cf54',
+                      transition: 'all 0.2s ease',
+                    }}
+                    onMouseEnter={(e) => {
+                      e.target.style.color = '#f5be0d';
+                      e.target.style.borderBottomColor = '#f5be0d';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.target.style.color = '#1b1b1b';
+                      e.target.style.borderBottomColor = '#f5cf54';
+                    }}
+                  >
+                    {item.label}
+                  </a>
+                ) : (
+                  <Typography sx={{ fontSize: '18px', fontFamily: 'Helvetica', color: '#1b1b1b' }}>
+                    {item.label}
+                  </Typography>
+                )}
+              </Box>
+            ))}
+          </Box>
         </Box>
       </Box>
 

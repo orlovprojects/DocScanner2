@@ -18,7 +18,7 @@ const B1 = () => {
   return (
     <Box sx={{ bgcolor: '#F9F9FA', minHeight: '100vh', padding: { xs: 2, sm: 5 }, paddingTop: { xs: '50px', sm: '70px' }, width: '100%' }}>
       <Helmet>
-        <title>Sąskaitų skaitmenizavimas ir importas į B1</title>
+        <title>Sąskaitų importas į B1</title>
         <meta name="description" content="Automatizuokite sąskaitų faktūrų įvedimą į B1 buhalterinę programą. DokSkenas atpažįsta dokumentus ir eksportuoja .xlsx failą, paruoštą B1 importui." />
       </Helmet>
 
@@ -43,7 +43,7 @@ const B1 = () => {
             maxWidth: '1000px',
           }}
         >
-          Sąskaitų skaitmenizavimas ir importas į B1
+          Sąskaitų importas į B1
         </Typography>
         <Typography
           variant="body1"

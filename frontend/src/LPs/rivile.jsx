@@ -20,7 +20,7 @@ const Rivile = () => {
   return (
     <Box sx={{ bgcolor: '#F9F9FA', minHeight: '100vh', padding: { xs: 2, sm: 5 }, paddingTop: { xs: '50px', sm: '70px' }, width: '100%' }}>
       <Helmet>
-        <title>Sąskaitų skaitmenizavimas ir importas į Rivilę</title>
+        <title>Sąskaitų importas į Rivilę</title>
         <meta name="description" content="Automatizuokite sąskaitų faktūrų įvedimą į Rivilę Gama ir ERP. DokSkenas atpažįsta dokumentus ir eksportuoja failus, paruoštus Rivilės importui." />
       </Helmet>
 
@@ -45,7 +45,7 @@ const Rivile = () => {
             maxWidth: '1000px',
           }}
         >
-          Sąskaitų skaitmenizavimas ir importas į Rivilę
+          Sąskaitų importas į Rivilę
         </Typography>
         <Typography
           variant="body1"

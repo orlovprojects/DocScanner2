@@ -478,6 +478,94 @@ const PvmSkaiciuokle = () => {
           Lietuva su <strong>21 %</strong> yra netoli ES vidurkio.
         </Box>
       </Paper>
+
+      {/* DokSkenas section */}
+      <Container maxWidth="md" sx={{ mt: 8 }}>
+        <Typography
+          variant="h2"
+          sx={{
+            fontSize: { xs: '20px', sm: '26px' },
+            fontFamily: 'Helvetica',
+            fontWeight: 'bold',
+            color: '#000',
+            mb: 2,
+          }}
+        >
+          Vis dar vedate apskaitą kaip akmens amžiuje?
+        </Typography>
+
+        <Typography sx={{ fontSize: '16px', fontFamily: 'Helvetica', color: '#000', mb: 2, lineHeight: 1.7 }}>
+          Jei kasdien apdorojate daug sąskaitų ir viską vedate ranka,
+          <b> DokSkenas</b> tai padarys automatiškai.
+        </Typography>
+
+        <Typography sx={{ fontSize: '16px', fontFamily: 'Helvetica', color: '#000', mb: 2, lineHeight: 1.7 }}>
+          Sistema nuskaito dokumentą, atpažįsta PVM tarifus ir sumas, patikrina PVM kodų galiojimą, priskiria klasifikatorius iš jūsų apskaitos programos
+          ir paruošia duomenų failą, paruoštą importuoti į jūsų apskaitos programą.
+        </Typography>
+
+        <Typography sx={{ fontSize: '16px', fontFamily: 'Helvetica', color: '#000', mb: 3, lineHeight: 1.7 }}>
+          Vidutiniškai sutaupoma po keturias minutes vienam dokumentui.
+        </Typography>
+
+        <Typography sx={{ fontSize: '16px', fontFamily: 'Helvetica', color: '#000', mb: 2 }}>
+          Integruojasi su šiomis apskaitos programomis:
+        </Typography>
+
+        <Box
+          sx={{
+            display: 'grid',
+            gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' },
+            gap: 0.5,
+            maxWidth: 500,
+          }}
+        >
+          {[
+            { name: "Finvalda", href: null },
+            { name: "Rivilė GAMA", href: 'https://atlyginimoskaiciuokle.com/rivile' },
+            { name: "Rivilė ERP", href: 'https://atlyginimoskaiciuokle.com/rivile' },
+            { name: "Agnum", href: null },
+            { name: "Centas", href: null },
+            { name: "Apskaita5", href: null },
+            { name: "Pragma 3.2", href: null },
+            { name: "Pragma 4", href: null },
+            { name: "Būtenta", href: null },
+            { name: "B1", href: 'https://atlyginimoskaiciuokle.com/b1' },
+            { name: "Site.pro", href: null },
+            { name: "Debetas", href: null },
+            { name: "APSA", href: null },
+            { name: "Paulita", href: null },
+            { name: "Optimum", href: null },
+            { name: "Dineta", href: null },
+            { name: "iSAF", href: null },
+          ].map((item) => (
+            <Box key={item.name} sx={{ display: 'flex', alignItems: 'center', gap: 1, py: 0.3 }}>
+              <Box sx={{ width: 6, height: 6, borderRadius: '50%', backgroundColor: '#333', flexShrink: 0 }} />
+              {item.href ? (
+                <a
+                  href={item.href}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{
+                    color: '#003366',
+                    fontSize: '15px',
+                    fontFamily: 'Helvetica',
+                    fontWeight: 600,
+                    textDecoration: 'none',
+                  }}
+                >
+                  {item.name}
+                </a>
+              ) : (
+                <Typography sx={{ color: '#000', fontSize: '15px', fontFamily: 'Helvetica' }}>
+                  {item.name}
+                </Typography>
+              )}
+            </Box>
+          ))}
+        </Box>
+      </Container>
+
     </Container>
   );
 };

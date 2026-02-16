@@ -1203,9 +1203,64 @@ function InvoiceGeneratorInfo() {
       <Box sx={{ lineHeight: 1.7, fontSize: '16px', fontFamily: 'Helvetica', color: '#000', mb: 4 }}>
         <Typography sx={{ mb: 2 }}>
           Jei pavargote sąskaitas į apskaitos programą vesti ranka, išbandykite DokSkeną. Skaitmenizuoja sumiškai ir
-          detaliai su eilutėmis. Nuskaitytus duomenis galėsite importuoti į savo apskaitos programą (Rivilę, Centą,
-          Finvaldą ir kitas).
+          detaliai su eilutėmis. Nuskaitytus duomenis galėsite importuoti į savo apskaitos programą.
         </Typography>
+        <Typography sx={{ mb: 2 }}>
+          Integruojamos apskaitos programos:
+        </Typography>
+        <Box
+          sx={{
+            display: 'grid',
+            gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' },
+            gap: 0.5,
+            maxWidth: 500,
+            mb: 2,
+          }}
+        >
+          {[
+            { name: "Finvalda", href: null },
+            { name: "Rivilė GAMA", href: 'https://atlyginimoskaiciuokle.com/rivile' },
+            { name: "Rivilė ERP", href: 'https://atlyginimoskaiciuokle.com/rivile' },
+            { name: "Agnum", href: null },
+            { name: "Centas", href: null },
+            { name: "Apskaita5", href: null },
+            { name: "Pragma 3.2", href: null },
+            { name: "Pragma 4", href: null },
+            { name: "Būtenta", href: null },
+            { name: "B1", href: 'https://atlyginimoskaiciuokle.com/b1' },
+            { name: "Site.pro", href: null },
+            { name: "Debetas", href: null },
+            { name: "APSA", href: null },
+            { name: "Paulita", href: null },
+            { name: "Optimum", href: null },
+            { name: "Dineta", href: null },
+            { name: "iSAF", href: null },
+          ].map((item) => (
+            <Box key={item.name} sx={{ display: 'flex', alignItems: 'center', gap: 1, py: 0.3 }}>
+              <Box sx={{ width: 6, height: 6, borderRadius: '50%', backgroundColor: '#333', flexShrink: 0 }} />
+              {item.href ? (
+                <a
+                  href={item.href}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{
+                    color: '#003366',
+                    fontSize: '15px',
+                    fontFamily: 'Helvetica',
+                    fontWeight: 600,
+                    textDecoration: 'none',
+                  }}
+                >
+                  {item.name}
+                </a>
+              ) : (
+                <Typography sx={{ color: '#000', fontSize: '15px', fontFamily: 'Helvetica' }}>
+                  {item.name}
+                </Typography>
+              )}
+            </Box>
+          ))}
+        </Box>
       </Box>
 
       {/* CTA Button */}

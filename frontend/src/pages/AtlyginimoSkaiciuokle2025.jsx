@@ -301,8 +301,8 @@ const AtlyginimoSkaiciuokle2025 = () => {
           <li style={{ marginBottom: '20px' }}><Box component="span" sx={{ fontWeight: "bold" }}>Neapmokestinamą pajamų dydį (NPD)</Box> –  tai suma, nuo kurios neskaičiuojamas gyventojų pajamų mokestis. NPD dydis priklauso nuo jūsų atlyginimo dydžio - kuo mažesnis atlyginimas, tuo didesnis NPD. Turint ribotą darbingumą arba uždirbant minimalų atlyginimą, taikomi fiksuoti NPD.</li>
           <li style={{ marginBottom: '20px' }}><Box component="span" sx={{ fontWeight: "bold" }}>Gyventojų pajamų mokestį (GPM)</Box> – tai mokestis, kuris yra atskaitomas nuo jūsų atlyginimo atėmus priklausomą NPD. Šiuo metu standartinis GPM tarifas yra 20%.</li>
           <li style={{ marginBottom: '20px' }}><Box component="span" sx={{ fontWeight: "bold" }}>Socialinio draudimo ir pensijos įmokas</Box> – tai jūsų, kaip darbuotojo, mokamos įmokos "Sodrai", kurios yra skirtos jūsų socialiniam draudimui (ligos, motinystės/tėvystės išmokoms) ir būsimai pensijai. Jeigu kaupiate pensijai papildomus 3%, pasirinkite 3% dydį papildomos pensijos nustatymuose.</li>
-          <li style={{ marginBottom: '20px' }}><Box component="span" sx={{ fontWeight: "bold" }}>Darbdavio socialinio draudimo įmoka</Box> – tai papildома suma, kurią už jus сумока darbdavys į "Sodrą". Šios įmokos darbuotojas nemато savo atlyginimo lapelyje.</li>
-          <li><Box component="span" sx={{ fontWeight: "bold" }}>Bendrą darbo vietos kainą</Box> – tai visa suma, kurią darbdавys išleidžia jūsų darbo vietai, įskaitant atlyginimą "ant popieriaus" ir visas darbdavio mokamas įmokas. Kitaip tariant, tai pilна jūsų įдарбинimo kaina darbdaviui.</li>
+          <li style={{ marginBottom: '20px' }}><Box component="span" sx={{ fontWeight: "bold" }}>Darbdavio socialinio draudimo įmoka</Box> – papildoma suma, kurią už jus sumoka darbdavys į "Sodrą". Šios įmokos darbuotojas nemato savo atlyginimo lapelyje.</li>
+          <li><Box component="span" sx={{ fontWeight: "bold" }}>Bendrą darbo vietos kainą</Box> – tai visa suma, kurią darbdavys išleidžia jūsų darbo vietai, įskaitant atlyginimą "ant popieriaus" ir visas darbdavio mokamas įmokas. Kitaip tariant, tai pilna jūsų įdarbinimo kaina darbdaviui.</li>
         </Typography>
 
         <Typography variant="h2" sx={{ marginTop: 5, marginBottom: 2, fontSize: { xs: '20px', sm: '26px' }, fontFamily: 'Helvetica', fontWeight: "bold" }}>
@@ -323,12 +323,14 @@ const AtlyginimoSkaiciuokle2025 = () => {
         <Typography component="ul" sx={{ lineHeight: 1.5, fontSize: "16px", letterSpacing: "0.1px", marginTop: 3, marginBottom: 3, paddingLeft: 5, fontFamily: 'Helvetica' }}>
           <li style={{ marginBottom: '20px' }}>Gyventojų pajamų mokestis – <Box component="span" sx={{ fontWeight: "bold" }}>20%</Box></li>
           <li style={{ marginBottom: '20px' }}>Darbuotojo socialinis draudimas bei pensija – <Box component="span" sx={{ fontWeight: "bold" }}>19,5%</Box></li>
-          <li>Darbdavio socialinio draudimo įмока – <Box component="span" sx={{ fontWeight: "bold" }}>1,77%</Box></li>
+          <li>Darbdavio socialinio draudimo įmoka – <Box component="span" sx={{ fontWeight: "bold" }}>1,77%</Box></li>
         </Typography>
         <Typography sx={{ lineHeight: 1.5, fontSize: "16px", letterSpacing: "0.1px", marginBottom: 1, fontFamily: 'Helvetica' }}>
-          Nuo kiekvienо uždirbto 1000 eurų, jūs sumokate 412,7 eurus valstybei.
+          Nuo kiekvieno uždirbto 1000 eurų, jūs sumokate 412,7 eurus valstybei.
         </Typography>
       </Container>
+
+      <DokSkenasSection />
 
       {/* Video dialog */}
       <Dialog open={videoOpen} onClose={() => setVideoOpen(false)} maxWidth="md" fullWidth>
@@ -348,5 +350,103 @@ const AtlyginimoSkaiciuokle2025 = () => {
     </Container>
   );
 };
+
+  function DokSkenasSection() {
+    const integrations = [
+      { name: "Finvalda", href: null },
+      { name: "Rivilė GAMA", href: 'https://atlyginimoskaiciuokle.com/rivile' },
+      { name: "Rivilė ERP", href: 'https://atlyginimoskaiciuokle.com/rivile' },
+      { name: "Agnum", href: null },
+      { name: "Centas", href: null },
+      { name: "Apskaita5", href: null },
+      { name: "Pragma 3.2", href: null },
+      { name: "Pragma 4", href: null },
+      { name: "Būtenta", href: null },
+      { name: "B1", href: 'https://atlyginimoskaiciuokle.com/b1' },
+      { name: "Site.pro", href: null },
+      { name: "Debetas", href: null },
+      { name: "APSA", href: null },
+      { name: "Paulita", href: null },
+      { name: "Optimum", href: null },
+      { name: "Dineta", href: null },
+      { name: "iSAF", href: null },
+    ];
+
+    return (
+      <Container maxWidth="md" sx={{ mt: 8 }}>
+        <Typography
+          variant="h2"
+          sx={{
+            fontSize: { xs: '20px', sm: '26px' },
+            fontFamily: 'Helvetica',
+            fontWeight: 'bold',
+            color: '#000',
+            mb: 2,
+          }}
+        >
+          Apskaita be rankinio sąskaitų įvedimo
+        </Typography>
+
+        <Typography sx={{ fontSize: '16px', fontFamily: 'Helvetica', color: '#000', mb: 2, lineHeight: 1.7 }}>
+          Rankinis sąskaitų suvedimas į apskaitos programą atima daug laiko ir didina klaidų tikimybę.
+          Kuo daugiau dokumentų - tuo daugiau rutininio darbo, kurio tikrai galima išvengti.
+        </Typography>
+
+        <Typography sx={{ fontSize: '16px', fontFamily: 'Helvetica', color: '#000', mb: 2, lineHeight: 1.7 }}>
+          <b>DokSkenas</b> per 30 sekundžių nuskenuos jūsų buhalterinius dokumentus (sąskaitas, čekius...) 
+          ir paruoš duomenis eksportui į jūsų apskaitos programą. 
+        </Typography>
+
+        <Typography sx={{ fontSize: '16px', fontFamily: 'Helvetica', color: '#000', mb: 2, lineHeight: 1.7 }}>
+          Sistema automatiškai atpažįsta sumas, PVM tarifus ir nuolaidas,
+          patikrina PVM kodų galiojimą, priskiria prekių ir paslaugų kodus pagal jūsų apskaitos programą,
+          sutikrina kontrahentų duomenis su Registrų centru ir pritaiko valiutų kursus pagal Lietuvos banką.
+        </Typography>
+
+        <Typography sx={{ fontSize: '16px', fontFamily: 'Helvetica', color: '#000', mb: 3, lineHeight: 1.7 }}>
+          Jums tereikia atsisiųsti paruoštą failą ir importuoti jį į savo apskaitos programą.
+        </Typography>
+
+        <Typography sx={{ fontSize: '16px', fontFamily: 'Helvetica', color: '#000', mb: 2 }}>
+          Palaikomos apskaitos programos:
+        </Typography>
+
+        <Box
+          sx={{
+            display: 'grid',
+            gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' },
+            gap: 0.5,
+            maxWidth: 500,
+          }}
+        >
+          {integrations.map((item) => (
+            <Box key={item.name} sx={{ display: 'flex', alignItems: 'center', gap: 1, py: 0.3 }}>
+              <Box sx={{ width: 6, height: 6, borderRadius: '50%', backgroundColor: '#333', flexShrink: 0 }} />
+              {item.href ? (
+                <a
+                  href={item.href}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{
+                    color: '#003366',
+                    fontSize: '15px',
+                    fontFamily: 'Helvetica',
+                    fontWeight: 600,
+                    textDecoration: 'none',
+                  }}
+                >
+                  {item.name}
+                </a>
+              ) : (
+                <Typography sx={{ color: '#000', fontSize: '15px', fontFamily: 'Helvetica' }}>
+                  {item.name}
+                </Typography>
+              )}
+            </Box>
+          ))}
+        </Box>
+      </Container>
+    );
+  }
 
 export default AtlyginimoSkaiciuokle2025;
