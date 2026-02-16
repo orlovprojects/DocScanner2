@@ -639,6 +639,20 @@ export default function NustatymaiPage() {
   const [successCentas, setSuccessCentas] = useState(false);
   const [errorCentas, setErrorCentas] = useState("");
 
+  // --- Pragma4 ---
+  const [pragma4Fields, setPragma4Fields] = useState({
+    pirk_sandelio_kodas: "",
+    pirk_projekto_kodas: "",
+    pirk_centro_kodas: "",
+    pirk_dk_schemos_kodas: "",
+    pard_sandelio_kodas: "",
+    pard_projekto_kodas: "",
+    pard_centro_kodas: "",
+    pard_dk_schemos_kodas: "",
+  });
+  const [savingPragma4, setSavingPragma4] = useState(false);
+  const [successPragma4, setSuccessPragma4] = useState(false);
+  const [errorPragma4, setErrorPragma4] = useState("");
 
   // --- Dineta ---
   const [dinetaFields, setDinetaFields] = useState({
@@ -864,6 +878,18 @@ export default function NustatymaiPage() {
         pardavimas_kastu_centras: cent.pardavimas_kastu_centras || "",
       });
 
+      const pragma4 = data.pragma4_extra_fields || {};
+      setPragma4Fields({
+        pirk_sandelio_kodas: pragma4.pirk_sandelio_kodas || "",
+        pirk_projekto_kodas: pragma4.pirk_projekto_kodas || "",
+        pirk_centro_kodas: pragma4.pirk_centro_kodas || "",
+        pirk_dk_schemos_kodas: pragma4.pirk_dk_schemos_kodas || "",
+        pard_sandelio_kodas: pragma4.pard_sandelio_kodas || "",
+        pard_projekto_kodas: pragma4.pard_projekto_kodas || "",
+        pard_centro_kodas: pragma4.pard_centro_kodas || "",
+        pard_dk_schemos_kodas: pragma4.pard_dk_schemos_kodas || "",
+      });
+
       const dineta = data.dineta_extra_fields || {};
       setDinetaFields({
         pirk_sandelio_kodas: dineta.pirk_sandelio_kodas || "",
@@ -991,7 +1017,7 @@ export default function NustatymaiPage() {
             ...prev,
             url:     data?.url     || "",
             username:data?.username || "",
-            password: "",
+            password: data?.password || "",
           }));
       })
       .catch((err) => {
@@ -1178,22 +1204,34 @@ export default function NustatymaiPage() {
 
   const { url, username, password } = dinetaSettings;
 
-  if (!url.trim() || !username.trim() || !password.trim()) {
+  if (!url.trim() || !username.trim() || !password) {
       setDinetaError("Visi API laukai yra privalomi.");
       setDinetaSaving(false);
       return;
   }
 
   try {
-      await api.put(
+      const { data: resData } = await api.put(
         "/settings/dineta/",
         { url, username, password },
         { withCredentials: true }
       );
-      setDinetaSettings((prev) => ({ ...prev, password: "" }));
+
+      // Обновляем поля из ответа (password придёт как "••••••••")
+      setDinetaSettings((prev) => ({
+        ...prev,
+        url: resData?.url || prev.url,
+        username: resData?.username || prev.username,
+        password: resData?.password || "••••••••",
+      }));
+
+      // Проверка подключения
+      if (resData?.connection_status === "warning") {
+        setDinetaError(resData.connection_message || "Prisijungimo patikrinimas nepavyko.");
+      }
 
       setDinetaSuccess(true);
-      setTimeout(() => setDinetaSuccess(false), 2000);
+      setTimeout(() => setDinetaSuccess(false), 3000);
     } catch (e) {
       const data = e?.response?.data;
       let msg =
@@ -1500,6 +1538,39 @@ const saveOptimumSettings = async () => {
       setErrorCentas(msg);
     } finally {
       setSavingCentas(false);
+    }
+  };
+
+
+  const savePragma4Fields = async () => {
+    setSavingPragma4(true);
+    setErrorPragma4("");
+    setSuccessPragma4(false);
+
+    try {
+      await api.patch(
+        "/profile/",
+        { pragma4_extra_fields: pragma4Fields },
+        { withCredentials: true }
+      );
+      setSuccessPragma4(true);
+      setTimeout(() => setSuccessPragma4(false), 2000);
+    } catch (e) {
+      const data = e?.response?.data;
+      let msg =
+        data?.pragma4_extra_fields ||
+        data?.detail ||
+        "Nepavyko išsaugoti Pragma4 nustatymų.";
+      if (typeof msg === "object") {
+        try {
+          msg = JSON.stringify(msg);
+        } catch {
+          msg = "Nepavyko išsaugoti Pragma4 nustatymų.";
+        }
+      }
+      setErrorPragma4(msg);
+    } finally {
+      setSavingPragma4(false);
     }
   };
 
@@ -2307,10 +2378,19 @@ const saveOptimumSettings = async () => {
                 onChange={(e) =>
                   setDinetaSettings((prev) => ({ ...prev, password: e.target.value }))
                 }
+                onFocus={(e) => {
+                  if (e.target.value === "••••••••") {
+                    setDinetaSettings((prev) => ({ ...prev, password: "" }));
+                  }
+                }}
+                onBlur={(e) => {
+                  if (!e.target.value) {
+                    setDinetaSettings((prev) => ({ ...prev, password: "••••••••" }));
+                  }
+                }}
                 fullWidth
                 required
                 disabled={dinetaLoading || dinetaSaving}
-                helperText="Saugumo sumetimais slaptažodis nerodomas — įveskite jį iš naujo, kai norite pakeisti."
               />
             </Grid2>
           </Grid2>
@@ -2331,7 +2411,7 @@ const saveOptimumSettings = async () => {
           </Box>
 
           {dinetaError && (
-            <Alert severity="error" sx={{ mt: 2 }}>
+            <Alert severity={dinetaSuccess ? "warning" : "error"} sx={{ mt: 2 }}>
               {dinetaError}
             </Alert>
           )}
@@ -2546,6 +2626,13 @@ const saveOptimumSettings = async () => {
         successCentas={successCentas}
         errorCentas={errorCentas}
         onSaveCentas={saveCentasFields}
+        // Pragma4
+        pragma4Fields={pragma4Fields}
+        setPragma4Fields={setPragma4Fields}
+        savingPragma4={savingPragma4}
+        successPragma4={successPragma4}
+        errorPragma4={errorPragma4}
+        onSavePragma4={savePragma4Fields}
         // Dineta
         dinetaFields={dinetaFields}
         setDinetaFields={setDinetaFields}

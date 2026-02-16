@@ -77,6 +77,7 @@ from .exports.rivile_erp import (
     export_documents_to_rivile_erp_xlsx,
 )
 from .exports.apsa import export_to_apsa
+from .exports.dineta import dineta_hello, DinetaError
 from .exports.optimum import optimum_hello, OptimumError
 from .utils.password_encryption import decrypt_password
 from .utils.password_encryption import encrypt_password
@@ -853,37 +854,111 @@ def export_documents(request):
         logger.info("[EXP] PRAGMA40 export started")
         assign_random_prekes_kodai(documents)
 
-        # Твой универсальный экспортёр: сам решает, XML или ZIP
+        from types import SimpleNamespace
+
+        if not cp_key:
+            return Response(
+                {"error": "Counterparty (CP) is required for Pragma 4.0 export. Select a counterparty."},
+                status=400,
+            )
+
+        # --- Парсим cp_key и ищем CP в документах ---
+        all_docs = (pirkimai_docs or []) + (pardavimai_docs or [])
+        if not all_docs:
+            all_docs = list(documents)
+
+        cp_raw = cp_key.strip()
+        counterparty = None
+
+        def _build_cp(doc, prefix):
+            """Собираем SimpleNamespace из полей документа с указанным prefix."""
+            return SimpleNamespace(
+                company_code=getattr(doc, f'{prefix}id', '') or '',
+                name=getattr(doc, f'{prefix}name', '') or '',
+                vat_code=getattr(doc, f'{prefix}vat_code', '') or '',
+                email=getattr(doc, f'{prefix}email', '') or '',
+                address=getattr(doc, f'{prefix}address', '') or '',
+                city=getattr(doc, f'{prefix}city', '') or '',
+                country=getattr(doc, f'{prefix}country', '') or '',
+                country_iso=getattr(doc, f'{prefix}country_iso', '') or '',
+                post_code=getattr(doc, f'{prefix}post_code', '') or '',
+                iban=getattr(doc, f'{prefix}iban', '') or '',
+            )
+
+        if cp_raw.lower().startswith("id:"):
+            # Формат 1: "id:304401940" → ищем по seller_id / buyer_id
+            code = cp_raw.split(":", 1)[1].strip()
+            for doc in all_docs:
+                if str(getattr(doc, 'seller_id', '') or '') == code:
+                    counterparty = _build_cp(doc, 'seller_')
+                    break
+                if str(getattr(doc, 'buyer_id', '') or '') == code:
+                    counterparty = _build_cp(doc, 'buyer_')
+                    break
+        else:
+            # Формат 2 или 3: VAT code или имя (lowercase)
+            cp_lower = cp_raw.lower()
+            for doc in all_docs:
+                for prefix in ('seller_', 'buyer_'):
+                    vat = (str(getattr(doc, f'{prefix}vat_code', '') or '')).strip().lower()
+                    name = (str(getattr(doc, f'{prefix}name', '') or '')).strip().lower()
+                    if vat and vat == cp_lower:
+                        counterparty = _build_cp(doc, prefix)
+                        break
+                    if name and name == cp_lower:
+                        counterparty = _build_cp(doc, prefix)
+                        break
+                if counterparty:
+                    break
+
+        if counterparty is None:
+            # Последний fallback — минимальный CP
+            if cp_raw.lower().startswith("id:"):
+                counterparty = SimpleNamespace(
+                    company_code=cp_raw.split(":", 1)[1].strip(),
+                    name='', vat_code='', email='', address='',
+                    city='', country='', country_iso='', post_code='', iban='',
+                )
+            else:
+                counterparty = SimpleNamespace(
+                    company_code='', name=cp_raw, vat_code=cp_raw if cp_raw[:2].isalpha() else '',
+                    email='', address='', city='', country='', country_iso='',
+                    post_code='', iban='',
+                )
+            logger.warning("[EXP] PRAGMA40 CP not found in docs, fallback cp_key=%s", cp_key)
+
+        logger.info("[EXP] PRAGMA40 CP: code=%s name=%s vat=%s",
+                     counterparty.company_code, counterparty.name, counterparty.vat_code)
+
         try:
-            content = export_to_pragma40_xml(
-                pirkimai_documents=pirkimai_docs,
-                pardavimai_documents=pardavimai_docs
+            result = export_to_pragma40_xml(
+                documents=all_docs,
+                counterparty=counterparty,
+                user=request.user,
             )
         except Exception as e:
             logger.exception("[EXP] PRAGMA40 export failed: %s", e)
             return Response({"error": "Pragma 4.0 export failed", "detail": str(e)}, status=500)
 
-        if not content:
+        if not result:
             logger.warning("[EXP] PRAGMA40 nothing to export")
-            response = Response({"error": "No documents to export"}, status=400)
-        else:
-            # Определяем, ZIP это или XML по сигнатуре ZIP ("PK")
-            if content[:2] == b'PK':
-                filename = f"{today_str}_pragma40.zip"
-                content_type = "application/zip"
-            else:
-                # Если экспортировались только покупки/продажи – более говорящие имена
-                if pirkimai_docs and not pardavimai_docs:
-                    filename = f"{today_str}_pragma40_pirkimai.xml"
-                elif pardavimai_docs and not pirkimai_docs:
-                    filename = f"{today_str}_pragma40_pardavimai.xml"
-                else:
-                    filename = f"{today_str}_pragma40.xml"
+            return Response({"error": "No documents to export"}, status=400)
 
-                content_type = "application/xml; charset=utf-8"
-
-            response = HttpResponse(content, content_type=content_type)
+        if len(result) == 1:
+            doc_type_key, xml_bytes = list(result.items())[0]
+            filename = f"{today_str}_pragma40_{doc_type_key}.xml"
+            response = HttpResponse(xml_bytes, content_type="application/xml; charset=utf-8")
             response['Content-Disposition'] = f'attachment; filename="{filename}"'
+            export_success = True
+        else:
+            zip_buffer = io.BytesIO()
+            with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+                for doc_type_key, xml_bytes in result.items():
+                    fname = f"{today_str}_pragma40_{doc_type_key}.xml"
+                    zip_file.writestr(fname, xml_bytes)
+            zip_buffer.seek(0)
+            response = HttpResponse(zip_buffer.read(), content_type='application/zip')
+            response['Content-Disposition'] = f'attachment; filename="{today_str}_pragma40.zip"'
             export_success = True
 
 
@@ -1565,14 +1640,13 @@ class DinetaSettingsView(APIView):
         return Response(serializer.data, status=status.HTTP_200_OK)
 
     def put(self, request):
-        """
-        Обновить настройки Dineta.
-        Фронт шлёт url/username/password (+ опции).
-        url парсится → server + client сохраняются в JSONField.
-        """
+
         user = request.user
 
-        serializer = DinetaSettingsSerializer(data=request.data)
+        serializer = DinetaSettingsSerializer(
+            data=request.data,
+            instance=user.dineta_settings,
+        )
         serializer.is_valid(raise_exception=True)
 
         settings_to_store = serializer.build_settings_dict()
@@ -1580,9 +1654,26 @@ class DinetaSettingsView(APIView):
         user.dineta_settings = settings_to_store
         user.save(update_fields=["dineta_settings"])
 
-        # в ответ отдаём без пароля
         response_serializer = DinetaSettingsSerializer(instance=settings_to_store)
-        return Response(response_serializer.data, status=status.HTTP_200_OK)
+        response_data = response_serializer.data
+
+        try:
+            dineta_hello(
+                server=settings_to_store.get("server", ""),
+                client=settings_to_store.get("client", ""),
+                username=settings_to_store.get("username", ""),
+                password=decrypt_password(settings_to_store.get("password", "")),
+            )
+            response_data["connection_status"] = "ok"
+            response_data["connection_message"] = "Prisijungimas sėkmingas."
+        except DinetaError as e:
+            response_data["connection_status"] = "warning"
+            response_data["connection_message"] = str(e)
+        except Exception:
+            response_data["connection_status"] = "warning"
+            response_data["connection_message"] = "Prisijungimo patikrinimą nepavyko atlikti."
+
+        return Response(response_data, status=status.HTTP_200_OK)
 
 
 

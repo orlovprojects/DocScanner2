@@ -568,6 +568,7 @@ class CustomUser(AbstractUser):
     debetas_extra_fields       = models.JSONField(default=dict, blank=True)
     site_pro_extra_fields       = models.JSONField(default=dict, blank=True)
     pragma3_extra_fields       = models.JSONField(default=dict, blank=True)
+    pragma4_extra_fields       = models.JSONField(default=dict, blank=True)
     optimum_extra_fields       = models.JSONField(default=dict, blank=True)
     dineta_extra_fields       = models.JSONField(default=dict, blank=True)
 

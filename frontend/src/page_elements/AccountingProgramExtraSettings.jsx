@@ -81,6 +81,14 @@ export function AccountingProgramExtraSettings(props) {
     errorCentas,
     onSaveCentas,
 
+    // Pragma4
+    pragma4Fields,
+    setPragma4Fields,
+    savingPragma4,
+    successPragma4,
+    errorPragma4,
+    onSavePragma4,
+
     // Dineta
     dinetaFields,
     setDinetaFields,
@@ -1025,6 +1033,157 @@ export function AccountingProgramExtraSettings(props) {
     );
   }
 
+
+  // ---------- Pragma 4 ----------
+  if (program === "pragma4") {
+    return (
+      <Paper sx={{ p: 3, mb: 3 }}>
+        <Typography variant="h6" sx={{ mb: 2, fontWeight: 600 }}>
+          Pragma4 papildomi laukai
+        </Typography>
+
+        <Typography variant="body2" sx={{ mb: 2, color: "text.secondary" }}>
+          Nurodykite numatytuosius sandėlio ir kitus laukus pirkimams ir pardavimams.
+        </Typography>
+
+        <Grid2 container spacing={3}>
+          {/* Pirkimas */}
+          <Grid2 size={{ xs: 12, md: 6 }}>
+            <Typography variant="subtitle1" sx={{ mb: 1, fontWeight: 500 }}>
+              Pirkimas
+            </Typography>
+            <Stack spacing={1.5}>
+              <TextField
+                label="Sandėlio kodas"
+                size="small"
+                value={pragma4Fields.pirk_sandelio_kodas}
+                onChange={(e) =>
+                  setPragma4Fields((prev) => ({
+                    ...prev,
+                    pirk_sandelio_kodas: e.target.value,
+                  }))
+                }
+                fullWidth
+              />
+              <TextField
+                label="Projekto kodas"
+                size="small"
+                value={pragma4Fields.pirk_projekto_kodas}
+                onChange={(e) =>
+                  setPragma4Fields((prev) => ({
+                    ...prev,
+                    pirk_projekto_kodas: e.target.value,
+                  }))
+                }
+                fullWidth
+              />
+              <TextField
+                label="Centro kodas"
+                size="small"
+                value={pragma4Fields.pirk_centro_kodas}
+                onChange={(e) =>
+                  setPragma4Fields((prev) => ({
+                    ...prev,
+                    pirk_centro_kodas: e.target.value,
+                  }))
+                }
+                fullWidth
+              />
+              <TextField
+                label="DK schemos kodas"
+                size="small"
+                value={pragma4Fields.pirk_dk_schemos_kodas}
+                onChange={(e) =>
+                  setPragma4Fields((prev) => ({
+                    ...prev,
+                    pirk_dk_schemos_kodas: e.target.value,
+                  }))
+                }
+                fullWidth
+              />
+            </Stack>
+          </Grid2>
+
+          {/* Pardavimas */}
+          <Grid2 size={{ xs: 12, md: 6 }}>
+            <Typography variant="subtitle1" sx={{ mb: 1, fontWeight: 500 }}>
+              Pardavimas
+            </Typography>
+            <Stack spacing={1.5}>
+              <TextField
+                label="Sandėlio kodas"
+                size="small"
+                value={pragma4Fields.pard_sandelio_kodas}
+                onChange={(e) =>
+                  setPragma4Fields((prev) => ({
+                    ...prev,
+                    pard_sandelio_kodas: e.target.value,
+                  }))
+                }
+                fullWidth
+              />
+              <TextField
+                label="Projekto kodas"
+                size="small"
+                value={pragma4Fields.pard_projekto_kodas}
+                onChange={(e) =>
+                  setPragma4Fields((prev) => ({
+                    ...prev,
+                    pard_projekto_kodas: e.target.value,
+                  }))
+                }
+                fullWidth
+              />
+              <TextField
+                label="Centro kodas"
+                size="small"
+                value={pragma4Fields.pard_centro_kodas}
+                onChange={(e) =>
+                  setPragma4Fields((prev) => ({
+                    ...prev,
+                    pard_centro_kodas: e.target.value,
+                  }))
+                }
+                fullWidth
+              />
+              <TextField
+                label="DK schemos kodas"
+                size="small"
+                value={pragma4Fields.pard_dk_schemos_kodas}
+                onChange={(e) =>
+                  setPragma4Fields((prev) => ({
+                    ...prev,
+                    pard_dk_schemos_kodas: e.target.value,
+                  }))
+                }
+                fullWidth
+              />
+            </Stack>
+          </Grid2>
+        </Grid2>
+
+        <Stack direction="row" spacing={2} sx={{ mt: 3 }} alignItems="center">
+          <Button
+            variant="contained"
+            onClick={onSavePragma4}
+            disabled={savingPragma4}
+          >
+            Išsaugoti Pragma4 laukus
+          </Button>
+          {successPragma4 && (
+            <Alert severity="success" sx={{ py: 0.5 }}>
+              Išsaugota!
+            </Alert>
+          )}
+          {errorPragma4 && (
+            <Alert severity="error" sx={{ py: 0.5 }}>
+              {errorPragma4}
+            </Alert>
+          )}
+        </Stack>
+      </Paper>
+    );
+  }
 
   // ---------- Dineta ----------
   if (program === "dineta") {

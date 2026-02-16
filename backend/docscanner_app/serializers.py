@@ -469,6 +469,7 @@ class CustomUserSerializer(serializers.ModelSerializer):
     debetas_extra_fields       = serializers.JSONField(required=False, allow_null=True)
     site_pro_extra_fields       = serializers.JSONField(required=False, allow_null=True)
     pragma3_extra_fields       = serializers.JSONField(required=False, allow_null=True)
+    pragma4_extra_fields       = serializers.JSONField(required=False, allow_null=True)
 
     class Meta:
         model = CustomUser
@@ -483,7 +484,7 @@ class CustomUserSerializer(serializers.ModelSerializer):
             'extra_settings', 'is_superuser','is_staff', 'lineitem_rules',
             'rivile_erp_extra_fields', 'rivile_gama_extra_fields', 'butent_extra_fields','finvalda_extra_fields',
             'centas_extra_fields','agnum_extra_fields','debetas_extra_fields','site_pro_extra_fields',
-            'pragma3_extra_fields', 'optimum_extra_fields', 'dineta_extra_fields'
+            'pragma3_extra_fields', 'pragma4_extra_fields', 'optimum_extra_fields', 'dineta_extra_fields'
         ]
         read_only_fields = ('credits',)
         extra_kwargs = {
@@ -558,6 +559,9 @@ class CustomUserSerializer(serializers.ModelSerializer):
     
     def validate_pragma3_extra_fields(self, value):
         return self._validate_extra_dict(value, "pragma3_extra_fields")
+    
+    def validate_pragma4_extra_fields(self, value):
+        return self._validate_extra_dict(value, "pragma4_extra_fields")
 
 
 
@@ -668,6 +672,7 @@ class CustomUserSerializer(serializers.ModelSerializer):
         debetas_extra    = validated_data.pop('debetas_extra_fields', None)
         site_pro_extra    = validated_data.pop('site_pro_extra_fields', None)
         pragma3_extra    = validated_data.pop('pragma3_extra_fields', None)
+        pragma4_extra    = validated_data.pop('pragma4_extra_fields', None)
 
         user = CustomUser.objects.create_user(password=password, **validated_data)
         user.credits = 50
@@ -730,13 +735,16 @@ class CustomUserSerializer(serializers.ModelSerializer):
         if pragma3_extra is not None:
             user.pragma3_extra_fields = pragma3_extra
 
+        if pragma4_extra is not None:
+            user.pragma4_extra_fields = pragma4_extra
+
         user.save(update_fields=[
             'credits','purchase_defaults','sales_defaults',
             'extra_settings','lineitem_rules',
             'rivile_erp_extra_fields', 'rivile_gama_extra_fields',
             'butent_extra_fields','finvalda_extra_fields',
             'centas_extra_fields','agnum_extra_fields', 'debetas_extra_fields',
-            'site_pro_extra_fields', 'pragma3_extra_fields', 'optimum_extra_fields', 'dineta_extra_fields',
+            'site_pro_extra_fields', 'pragma3_extra_fields', 'pragma4_extra_fields', 'optimum_extra_fields', 'dineta_extra_fields',
         ])
         return user
     
@@ -820,6 +828,9 @@ class CustomUserSerializer(serializers.ModelSerializer):
 
         if 'pragma3_extra_fields' in validated_data:
             instance.pragma3_extra_fields = validated_data.pop('pragma3_extra_fields')
+
+        if 'pragma4_extra_fields' in validated_data:
+            instance.pragma4_extra_fields = validated_data.pop('pragma4_extra_fields')
 
         # 🔹 lineitem_rules — ПОЛНАЯ ЗАМЕНА СПИСКА
         # фронт всегда шлёт текущий список (с нужным правилом удалённым/изменённым)
@@ -1121,13 +1132,17 @@ class DinetaSettingsSerializer(serializers.Serializer):
         if instance is None:
             return {}
         data = dict(instance)
-        data.pop("password", None)
+
+        # Password masking
+        if data.get("password"):
+            data["password"] = "••••••••"
+        else:
+            data["password"] = ""
 
         server = data.pop("server", "")
         client = data.pop("client", "")
         if server and client:
             if server.startswith("http"):
-                # localhost
                 data["url"] = f"{server}/{client}/"
             else:
                 data["url"] = f"https://{server}.dineta.eu/{client}/"
@@ -1165,7 +1180,7 @@ class DinetaSettingsSerializer(serializers.Serializer):
 
         # Пароль
         raw_password = data.pop("password", None)
-        if raw_password:
+        if raw_password and raw_password != "••••••••":
             data["password"] = encrypt_password(raw_password)
         else:
             # Пароль не передан — оставляем старый из текущих настроек
@@ -1199,7 +1214,10 @@ class OptimumSettingsSerializer(serializers.Serializer):
         if instance is None:
             return None
         data = dict(instance)
-        data.pop("key", None)
+        if data.get("password"):
+            data["password"] = "••••••••"
+        else:
+            data["password"] = ""
         return data
 
     def build_success_settings_dict(self, *, verified_at: str):
