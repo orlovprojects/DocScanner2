@@ -828,6 +828,15 @@ export default function DocumentsTable({
                     </IconButton>
                   </Box>
 
+                  {/* Owner email (admin only) */}
+                  {showOwnerColumns && d.owner_email && (
+                    <Box sx={{ pl: 4, mb: 0.5 }}>
+                      <Typography variant="caption" color="text.secondary">
+                        {d.owner_email}
+                      </Typography>
+                    </Box>
+                  )}
+
                   {/* Row 2: Scan type + Direction */}
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 0.5, pl: 4 }}>
                     <Typography variant="caption" color="text.secondary">

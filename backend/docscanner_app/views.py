@@ -3730,6 +3730,10 @@ def admin_all_documents(request):
     if owner:
         qs = qs.filter(user__email__icontains=owner)
 
+    search = request.GET.get('search')
+    if search:
+        qs = qs.filter(document_number__icontains=search)
+
     from django.utils.dateparse import parse_date
     from datetime import timedelta
 

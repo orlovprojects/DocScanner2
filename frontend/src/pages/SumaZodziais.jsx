@@ -1101,7 +1101,6 @@ function SumaZodziasiInfo() {
             { name: "Pragma 3.2", href: null },
             { name: "Pragma 4", href: null },
             { name: "Būtenta", href: null },
-            { name: "B1", href: 'https://atlyginimoskaiciuokle.com/b1' },
             { name: "Site.pro", href: null },
             { name: "Debetas", href: null },
             { name: "APSA", href: null },

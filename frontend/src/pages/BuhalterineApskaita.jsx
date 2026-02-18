@@ -988,7 +988,6 @@ const BuhalterinenApskaita = () => {
               { label: 'Pragma 3.2', hasLink: false },
               { label: 'Pragma 4', hasLink: false },
               { label: 'Būtenta', hasLink: false },
-              { label: 'B1', url: 'https://atlyginimoskaiciuokle.com/b1', hasLink: true },
               { label: 'Site.pro', hasLink: false },
               { label: 'Debetas', hasLink: false },
               { label: 'APSA', hasLink: false },

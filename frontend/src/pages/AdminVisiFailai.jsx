@@ -13,7 +13,7 @@ import { HourglassEmpty, Cancel, CheckCircleOutline } from "@mui/icons-material"
 
 export default function AdminVisiFailai() {
   const [docs, setDocs] = useState([]);
-  const [filters, setFilters] = useState({ status: "", dateFrom: "", dateTo: "" });
+  const [filters, setFilters] = useState({ status: "", dateFrom: "", dateTo: "", search: "" });
   const [dialogOpen, setDialogOpen] = useState(false);
   const [selected, setSelected] = useState(null);
   const [user, setUser] = useState(null);
@@ -62,6 +62,7 @@ export default function AdminVisiFailai() {
     if (filters.status) params.set("status", filters.status);
     if (filters.dateFrom) params.set("date_from", filters.dateFrom);
     if (filters.dateTo) params.set("date_to", filters.dateTo);
+    if (filters.search) params.set("search", filters.search);  // ← добавить
     if (cursor) params.set("cursor", cursor);
     return `/admin/visi-failai/?${params.toString()}`;
   }, [filters]);
@@ -117,7 +118,7 @@ export default function AdminVisiFailai() {
   // Перезагрузка при изменении фильтров
   useEffect(() => {
     if (userLoaded && user?.is_superuser) fetchDocs();
-  }, [filters.status, filters.dateFrom, filters.dateTo]);
+  }, [filters.status, filters.dateFrom, filters.dateTo, filters.search]);
 
   // IntersectionObserver для infinite scroll
   useEffect(() => {
@@ -197,6 +198,7 @@ export default function AdminVisiFailai() {
           reloadDocuments={fetchDocs}
           onDeleteDoc={(id) => setDocs(prev => prev.filter(d => d.id !== id))}
           showOwnerColumns
+          onSearchChange={(q) => setFilters(p => ({ ...p, search: q }))}
         />
         
         {/* Sentinel для infinite scroll */}
