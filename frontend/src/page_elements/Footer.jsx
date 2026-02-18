@@ -3,6 +3,7 @@ import Grid2 from '@mui/material/Grid2';
 import FacebookIcon from '@mui/icons-material/Facebook';
 import YouTubeIcon from '@mui/icons-material/YouTube';
 import InstagramIcon from '@mui/icons-material/Instagram';
+import { AiFillTikTok } from "react-icons/ai";
 import { Link as RouterLink } from 'react-router-dom';
 
 const Footer = () => {
@@ -56,6 +57,16 @@ const Footer = () => {
           sx={{ color: 'inherit' }}
         >
           <InstagramIcon sx={{ fontSize: { xs: 28, md: 30 } }} />
+        </IconButton>
+        <IconButton 
+          component="a" 
+          href="https://www.tiktok.com/@dokskenas" 
+          target="_blank" 
+          rel="noopener noreferrer" 
+          aria-label="TikTok" 
+          sx={{ color: 'inherit' }}
+        >
+          <AiFillTikTok style={{ fontSize: 30 }} />
         </IconButton>
       </Box>
 
