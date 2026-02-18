@@ -3,7 +3,7 @@ import { Helmet } from 'react-helmet';
 import { Box, Typography, Button, Stack, TextField } from '@mui/material';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 
-const B1 = () => {
+const SitePro = () => {
   const [docCount, setDocCount] = useState(200);
 
   // Калькулятор экономии
@@ -18,8 +18,8 @@ const B1 = () => {
   return (
     <Box sx={{ bgcolor: '#F9F9FA', minHeight: '100vh', padding: { xs: 2, sm: 5 }, paddingTop: { xs: '50px', sm: '70px' }, width: '100%' }}>
       <Helmet>
-        <title>Sąskaitų importas į B1</title>
-        <meta name="description" content="Automatizuokite sąskaitų faktūrų įvedimą į B1 buhalterinę programą. DokSkenas atpažįsta dokumentus ir eksportuoja .xlsx failą, paruoštą B1 importui." />
+        <title>Sąskaitų importas į Site.pro</title>
+        <meta name="description" content="Automatizuokite sąskaitų faktūrų įvedimą į Site.pro buhalterinę programą. DokSkenas atpažįsta dokumentus ir eksportuoja .xlsx failą, paruoštą Site.pro importui." />
       </Helmet>
 
       {/* Hero Section */}
@@ -43,7 +43,7 @@ const B1 = () => {
             maxWidth: '1000px',
           }}
         >
-          Sąskaitų importas į B1
+          Sąskaitų importas į Site.pro
         </Typography>
         <Typography
           variant="body1"
@@ -55,7 +55,7 @@ const B1 = () => {
             color: '#333',
           }}
         >
-          Automatizuokite sąskaitų faktūrų nuskaitymą ir įvedimą į B1 buhalterinę programą bei išvenkite nuobodaus darbo ir klaidų apskaitoje.
+          Automatizuokite sąskaitų faktūrų nuskaitymą ir įvedimą į Site.pro buhalterinę programą bei išvenkite nuobodaus darbo ir klaidų apskaitoje.
         </Typography>
         <Typography
           variant="body1"
@@ -85,7 +85,7 @@ const B1 = () => {
         </Button>
       </Box>
 
-      {/* Ką galite importuoti į B1? */}
+      {/* Ką galite importuoti į Site.pro? */}
       <Box
         sx={{
           width: '100%',
@@ -106,7 +106,7 @@ const B1 = () => {
             textAlign: 'center',
           }}
         >
-          Ką galite importuoti į B1?
+          Ką galite importuoti į Site.pro?
         </Typography>
         <Stack spacing={2.5} sx={{ maxWidth: '500px', width: '100%' }}>
           {[
@@ -134,7 +134,7 @@ const B1 = () => {
             textAlign: 'center',
           }}
         >
-          Importavus duomenis prekių, paslaugų bei kontrahentų kortelės automatiškai susikurs B1 programoje.
+          Importavus duomenis prekių, paslaugų bei kontrahentų kortelės automatiškai susikurs Site.pro programoje.
         </Typography>
       </Box>
 
@@ -325,7 +325,7 @@ const B1 = () => {
         </Typography>
       </Box>
 
-      {/* Importas į B1 */}
+      {/* Importas į Site.pro */}
       <Box
         sx={{
           width: '100%',
@@ -346,7 +346,7 @@ const B1 = () => {
             textAlign: 'center',
           }}
         >
-          Importas į B1
+          Importas į Site.pro
         </Typography>
         <Typography
           variant="body1"
@@ -359,7 +359,7 @@ const B1 = () => {
             textAlign: 'center',
           }}
         >
-          Šiame video parodome pilną procesą nuo sąskaitų įkėlimo skaitmenizuoti iki duomenų importo į B1.
+          Šiame video parodome pilną procesą nuo sąskaitų įkėlimo skaitmenizuoti iki duomenų importo į Site.pro.
         </Typography>
         {/* Placeholder для видео */}
         <Box
@@ -399,8 +399,8 @@ const B1 = () => {
             { step: 1, bold: 'Įkelkite dokumentus:', text: ' tinka beveik visi dokumentų, nuotraukų bei archyvų formatai' },
             { step: 2, bold: 'Palaukite kol nusiskaitys duomenys:', text: ' vidutiniškai užtrunka ~30 sekundžių dokumentui' },
             { step: 3, bold: 'Peržiūrėkite rezultatus:', text: ' klaidos pažymimos dokumentų lentelėje. Pakoreguokite, jei reikia' },
-            { step: 4, bold: 'Eksportuokite į B1:', text: ' pasirinkite "B1" kaip savo apskaitos programą nustatymuose' },
-            { step: 5, bold: 'Importuokite į B1:', text: ' atidarykite failą B1 programoje ir patvirtinkite' },
+            { step: 4, bold: 'Eksportuokite į Site.pro:', text: ' pasirinkite "Site.pro" kaip savo apskaitos programą nustatymuose' },
+            { step: 5, bold: 'Importuokite į Site.pro:', text: ' atidarykite failą Site.pro programoje ir patvirtinkite' },
           ].map((item, idx) => (
             <Stack key={idx} direction="row" alignItems="flex-start" spacing={2}>
               <Box
@@ -458,7 +458,7 @@ const B1 = () => {
           {[
             'Skaitmenizuoja sumiškai ir kiekybiškai',
             'Atmeta dublikatus bei netinkamus dokumentus',
-            'Priskiria prekių/paslaugų kodus iš B1 apskaitos programos',
+            'Priskiria prekių/paslaugų kodus iš Site.pro apskaitos programos',
             'Nuskaito ir kuro čekius',
             'Patikrina ar galioja PVM kodai',
             'Atpažįsta nuolaidas',
@@ -524,7 +524,7 @@ const B1 = () => {
             maxWidth: '900px',
           }}
         >
-          Automatinis prekių ir paslaugų kodų iš B1 priskyrimas
+          Automatinis prekių ir paslaugų kodų iš Site.pro priskyrimas
         </Typography>
         <Typography
           variant="body1"
@@ -537,7 +537,7 @@ const B1 = () => {
             textAlign: 'center',
           }}
         >
-          Šiame video parodome kaip nusistatyti, kad prekių ir paslaugų kodai iš B1 automatiškai prisiskirtų jūsų dokumentams, pagal jūsų nustatytas sąlygas.
+          Šiame video parodome kaip nusistatyti, kad prekių ir paslaugų kodai iš Site.pro automatiškai prisiskirtų jūsų dokumentams, pagal jūsų nustatytas sąlygas.
         </Typography>
         {/* Embedded YouTube Video */}
         <Box
@@ -819,4 +819,4 @@ const B1 = () => {
   );
 };
 
-export default B1;
+export default SitePro;
