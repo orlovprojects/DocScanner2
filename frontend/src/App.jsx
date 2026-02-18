@@ -48,8 +48,9 @@ import { initGTM } from "./gtm";
 import MokejimuIstorija from './pages/MokejimuIstorija';
 import NotFound from './pages/NotFound';
 
-import B1 from './LPs/b1';
+import SitePro from './LPs/site_pro';
 import Rivile from './LPs/rivile';
+import Agnum from './LPs/agnum';
 
 function App() {
   const location = useLocation();
@@ -109,8 +110,9 @@ function App() {
         <Route path="/kategorija/:slug" element={<GidoCategories />} />
         <Route path="/straipsnis/:slug" element={<GidoArticle />} />
 
-        <Route path="/b1" element={<B1 />} />
+        <Route path="/site-pro" element={<SitePro />} />
         <Route path="/rivile" element={<Rivile />} />
+        <Route path="/agnum" element={<Agnum />} />
 
         <Route
           path="/suvestine"

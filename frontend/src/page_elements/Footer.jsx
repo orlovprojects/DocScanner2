@@ -120,12 +120,15 @@ const Footer = () => {
                   spacing={1.25} 
                   alignItems={{ xs: 'center', md: 'center' }}
                 >
-                  <Link href="/b1" underline="none" color="inherit" sx={linkSx}>
-                    B1
+                  <Link href="/site-pro" underline="none" color="inherit" sx={linkSx}>
+                    Site pro
                   </Link> 
                   <Link href="/rivile" underline="none" color="inherit" sx={linkSx}>
                     Rivilė
-                  </Link>                   
+                  </Link>
+                  <Link href="/agnum" underline="none" color="inherit" sx={linkSx}>
+                    Agnum
+                  </Link>                     
                 </Stack>
               </Box>
             </Grid2>
