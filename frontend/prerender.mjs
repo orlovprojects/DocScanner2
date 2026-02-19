@@ -27,6 +27,9 @@ const routesToPrerender = [
   '/site-pro',
   '/rivile',
   '/agnum',
+  '/apsa',
+  '/centas',
+  '/apskaita5',
 ];
 
 const distDir = path.resolve(__dirname, 'dist');

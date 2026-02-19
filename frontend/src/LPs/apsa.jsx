@@ -3,7 +3,7 @@ import { Helmet } from 'react-helmet';
 import { Box, Typography, Button, Stack, TextField } from '@mui/material';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 
-const Agnum = () => {
+const Apsa = () => {
   const [docCount, setDocCount] = useState(200);
 
   // Калькулятор экономии
@@ -12,14 +12,11 @@ const Agnum = () => {
   const savings = traditionalCost - dokskenasCost;
   const savingsPercent = Math.round((savings / traditionalCost) * 100);
 
-  // Видео для автоматического присвоения кодов
-  const CODES_VIDEO_URL = "https://www.youtube.com/embed/MftJl0_4jOE";
-
   return (
     <Box sx={{ bgcolor: '#F9F9FA', minHeight: '100vh', padding: { xs: 2, sm: 5 }, paddingTop: { xs: '50px', sm: '70px' }, width: '100%' }}>
       <Helmet>
-        <title>Sąskaitų importas į Agnum</title>
-        <meta name="description" content="Automatizuokite sąskaitų faktūrų įvedimą į Agnum buhalterinę programą. DokSkenas atpažįsta dokumentus ir eksportuoja .xml failą, paruoštą Agnum importui." />
+        <title>Sąskaitų importas į APSA</title>
+        <meta name="description" content="Automatizuokite sąskaitų faktūrų įvedimą į APSA buhalterinę programą. DokSkenas atpažįsta dokumentus ir eksportuoja .xml failą iSAF formatu, paruoštą APSA importui." />
       </Helmet>
 
       {/* Hero Section */}
@@ -43,7 +40,7 @@ const Agnum = () => {
             maxWidth: '1000px',
           }}
         >
-          Sąskaitų importas į Agnum
+          Sąskaitų importas į APSA
         </Typography>
         <Typography
           variant="body1"
@@ -55,7 +52,7 @@ const Agnum = () => {
             color: '#333',
           }}
         >
-          Automatizuokite sąskaitų faktūrų nuskaitymą ir įvedimą į Agnum buhalterinę programą bei išvenkite nuobodaus darbo ir klaidų apskaitoje.
+          Automatizuokite sąskaitų faktūrų nuskaitymą ir įvedimą į APSA buhalterinę programą bei išvenkite nuobodaus rankinio darbo ir klaidų apskaitoje.
         </Typography>
         <Typography
           variant="body1"
@@ -67,7 +64,7 @@ const Agnum = () => {
             color: '#333',
           }}
         >
-          DokSkenas atpažįsta dokumentus ir paruošia .xml failus, paruoštus importui.
+          DokSkenas atpažįsta dokumentus ir paruošia .xml failus iSAF formatu, paruoštus importui į APSA.
         </Typography>
         <Button
           variant="contained"
@@ -85,7 +82,7 @@ const Agnum = () => {
         </Button>
       </Box>
 
-      {/* Ką galite importuoti į Agnum? */}
+      {/* Ką galite importuoti į APSA? */}
       <Box
         sx={{
           width: '100%',
@@ -106,13 +103,12 @@ const Agnum = () => {
             textAlign: 'center',
           }}
         >
-          Ką galite importuoti į Agnum?
+          Ką galite importuoti į APSA?
         </Typography>
         <Stack spacing={2.5} sx={{ maxWidth: '500px', width: '100%' }}>
           {[
             'Pirkimus',
             'Pardavimus',
-            'Prekes / paslaugas',
             'Kontrahentus (įmones ir fizinius asmenis)',
           ].map((item, idx) => (
             <Stack key={idx} direction="row" alignItems="center" spacing={2}>
@@ -134,7 +130,7 @@ const Agnum = () => {
             textAlign: 'center',
           }}
         >
-          Importavus duomenis prekių, paslaugų bei kontrahentų kortelės automatiškai susikurs Agnum programoje.
+          APSA apskaitos programa yra labiau tinkama suminei apskaitai, nes iSAF importo formatas neturi prekių ir paslaugų eilučių. Importavus duomenis APSA programoje automatiškai susikurs pirkimai, pardavimai bei kontrahentų kortelės.
         </Typography>
       </Box>
 
@@ -323,9 +319,22 @@ const Agnum = () => {
         >
           Taip pat sistema automatiškai priskiria PVM klasifikatorius.
         </Typography>
+        <Typography
+          variant="body1"
+          sx={{
+            maxWidth: '800px',
+            marginTop: 1.5,
+            fontSize: '18px',
+            fontFamily: 'Helvetica',
+            color: '#333',
+            textAlign: 'center',
+          }}
+        >
+          Atkreipkit dėmesį, kad net jei skaitmenizuosite detaliai su eilutėmis, duomenys į APSA importuosis tik suminei apskaitai dėl programos importo apribojimų.
+        </Typography>
       </Box>
 
-      {/* Importas į Agnum */}
+      {/* Importas į APSA */}
       <Box
         sx={{
           width: '100%',
@@ -346,135 +355,64 @@ const Agnum = () => {
             textAlign: 'center',
           }}
         >
-          Importas į Agnum
+          Importas į APSA
         </Typography>
         <Typography
           variant="body1"
           sx={{
             maxWidth: '800px',
-            marginBottom: 5,
+            marginBottom: 4,
             fontSize: '18px',
             fontFamily: 'Helvetica',
             color: '#333',
             textAlign: 'center',
           }}
         >
-          Pirkimai ir pardavimai į Agnum apskaitos programą importuojami atskirai.
+          Šiame video parodome pilną procesą nuo sąskaitų įkėlimo skaitmenizuoti iki duomenų importo į APSA.
         </Typography>
-
-        {/* Pirkimų ir Pardavimų importas - tekstas su bullet points */}
-        <Box sx={{ maxWidth: '800px', width: '100%', marginBottom: 5 }}>
-          {/* Pirkimų importas */}
-          <Typography
-            variant="h4"
-            sx={{
-              fontWeight: 700,
-              marginBottom: 2,
-              fontSize: { xs: '18px', sm: '22px' },
-              fontFamily: 'Helvetica',
-              color: '#1b1b1b',
-            }}
-          >
-            Pirkimų importas:
-          </Typography>
-          <Box component="ul" sx={{ paddingLeft: 3, marginBottom: 5 }}>
-            {[
-              <>Eikite į <Box component="span" sx={{ fontWeight: 700 }}>"Dokumentai -&gt; Pajamavimai -&gt; Atidėjimai -&gt; Importavimas iš .XML"</Box></>,
-              'Pasirinkite pirkimų failą, parsisiųstą iš DokSkeno',
-              <>Spauskite <Box component="span" sx={{ fontWeight: 700 }}>"Nuskaityti failą"</Box> -&gt; <Box component="span" sx={{ fontWeight: 700 }}>"Patikrinti"</Box> -&gt; <Box component="span" sx={{ fontWeight: 700 }}>"Importuoti"</Box></>,
-            ].map((item, idx) => (
-              <Box component="li" key={idx} sx={{ marginBottom: 1 }}>
-                <Typography sx={{ fontSize: { xs: '16px', sm: '18px' }, fontFamily: 'Helvetica', color: '#1b1b1b' }}>
-                  {item}
-                </Typography>
-              </Box>
-            ))}
-          </Box>
-
-          {/* Pardavimų importas */}
-          <Typography
-            variant="h4"
-            sx={{
-              fontWeight: 700,
-              marginBottom: 2,
-              fontSize: { xs: '18px', sm: '22px' },
-              fontFamily: 'Helvetica',
-              color: '#1b1b1b',
-            }}
-          >
-            Pardavimų importas:
-          </Typography>
-          <Box component="ul" sx={{ paddingLeft: 3 }}>
-            {[
-              <>Eikite į <Box component="span" sx={{ fontWeight: 700 }}>"Dokumentai -&gt; Pardavimai -&gt; Išankstinės sąskaitos -&gt; Importas iš XML"</Box></>,
-              'Pasirinkite pardavimų failą, parsisiųstą iš DokSkeno',
-              <>Spauskite <Box component="span" sx={{ fontWeight: 700 }}>"Nuskaityti failą"</Box> -&gt; <Box component="span" sx={{ fontWeight: 700 }}>"Patikrinti"</Box> -&gt; <Box component="span" sx={{ fontWeight: 700 }}>"Importuoti"</Box></>,
-            ].map((item, idx) => (
-              <Box component="li" key={idx} sx={{ marginBottom: 1 }}>
-                <Typography sx={{ fontSize: { xs: '16px', sm: '18px' }, fontFamily: 'Helvetica', color: '#1b1b1b' }}>
-                  {item}
-                </Typography>
-              </Box>
-            ))}
-          </Box>
-        </Box>
-
-        {/* Papildomi laukai su paveikslėliu */}
+        {/* Placeholder для видео */}
         <Box
           sx={{
             width: '100%',
             maxWidth: '900px',
+            height: { xs: '300px', sm: '500px' },
+            backgroundColor: '#e0e0e0',
+            borderRadius: 3,
             display: 'flex',
-            flexDirection: 'column',
             alignItems: 'center',
+            justifyContent: 'center',
             marginBottom: 5,
+          }}
+        >
+          <Typography sx={{ color: '#666', fontFamily: 'Helvetica', fontSize: '18px' }}>
+            Video bus pridėtas vėliau
+          </Typography>
+        </Box>
+
+        {/* Importo instrukcija */}
+        <Box
+          sx={{
+            maxWidth: '800px',
+            width: '100%',
+            marginBottom: 5,
+            padding: { xs: 2, sm: 0 },
           }}
         >
           <Typography
             variant="body1"
             sx={{
-              maxWidth: '800px',
-              marginBottom: 3,
               fontSize: '18px',
               fontFamily: 'Helvetica',
-              color: '#333',
+              color: '#1b1b1b',
               textAlign: 'center',
             }}
           >
-            Taip pat DokSkeno nustatymuose galite nusistatyti numatytąsias reikšmes šių laukų, kurie automatiškai prisiskirs jūsų skaitmenizuotiems dokumentams:
+            Iš DokSkeno atsisiųstus duomenų failus į APSA kelkite per{' '}
+            <Box component="span" sx={{ fontWeight: 700 }}>
+              „Dokumentai -&gt; Sąskaitų importas"
+            </Box>
+            .
           </Typography>
-          {/* Placeholder для картинки agnum_papildomi_laukai.jpg */}
-          <Box
-            component="img"
-            src="agnum_papildomi_laukai.jpg"
-            alt="Agnum papildomi laukai nustatymai"
-            sx={{
-              width: '100%',
-              maxWidth: '800px',
-              borderRadius: 3,
-              boxShadow: '0px 2px 16px rgba(0,0,0,0.08)',
-            }}
-            onError={(e) => {
-              e.target.style.display = 'none';
-              e.target.nextSibling.style.display = 'flex';
-            }}
-          />
-          <Box
-            sx={{
-              display: 'none',
-              width: '100%',
-              maxWidth: '800px',
-              height: '300px',
-              backgroundColor: '#e0e0e0',
-              borderRadius: 3,
-              alignItems: 'center',
-              justifyContent: 'center',
-            }}
-          >
-            <Typography sx={{ color: '#666', fontFamily: 'Helvetica', fontSize: '16px' }}>
-              Paveikslėlis: agnum_papildomi_laukai.jpeg
-            </Typography>
-          </Box>
         </Box>
 
         {/* Kaip tai veikia? */}
@@ -496,8 +434,8 @@ const Agnum = () => {
             { step: 1, bold: 'Įkelkite dokumentus:', text: ' tinka beveik visi dokumentų, nuotraukų bei archyvų formatai' },
             { step: 2, bold: 'Palaukite kol nusiskaitys duomenys:', text: ' vidutiniškai užtrunka ~30 sekundžių dokumentui' },
             { step: 3, bold: 'Peržiūrėkite rezultatus:', text: ' klaidos pažymimos dokumentų lentelėje. Pakoreguokite, jei reikia' },
-            { step: 4, bold: 'Eksportuokite į Agnum:', text: ' pasirinkite "Agnum" kaip savo apskaitos programą nustatymuose' },
-            { step: 5, bold: 'Importuokite į Agnum:', text: ' atidarykite .xml failą Agnum programoje ir patvirtinkite' },
+            { step: 4, bold: 'Eksportuokite į APSA:', text: ' pasirinkite "APSA" kaip savo apskaitos programą nustatymuose' },
+            { step: 5, bold: 'Importuokite į APSA:', text: ' atidarykite failą APSA programoje ir patvirtinkite' },
           ].map((item, idx) => (
             <Stack key={idx} direction="row" alignItems="flex-start" spacing={2}>
               <Box
@@ -555,7 +493,6 @@ const Agnum = () => {
           {[
             'Skaitmenizuoja sumiškai ir kiekybiškai',
             'Atmeta dublikatus bei netinkamus dokumentus',
-            'Priskiria prekių/paslaugų kodus iš Agnum apskaitos programos',
             'Nuskaito ir kuro čekius',
             'Patikrina ar galioja PVM kodai',
             'Atpažįsta nuolaidas',
@@ -596,67 +533,6 @@ const Agnum = () => {
           >
             Vidutiniškai sutaupo 4,5 minutės darbo ir 93% finansinių kaštų vienam dokumentui
           </Typography>
-        </Box>
-      </Box>
-
-      {/* Automatinis prekių ir paslaugų kodų priskyrimas */}
-      <Box
-        sx={{
-          width: '100%',
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          marginTop: '80px',
-          marginBottom: '80px',
-        }}
-      >
-        <Typography
-          variant="h2"
-          sx={{
-            fontSize: '36px',
-            fontFamily: 'Helvetica',
-            fontWeight: 600,
-            marginBottom: 2,
-            textAlign: 'center',
-            maxWidth: '900px',
-          }}
-        >
-          Automatinis prekių ir paslaugų kodų iš Agnum priskyrimas
-        </Typography>
-        <Typography
-          variant="body1"
-          sx={{
-            maxWidth: '800px',
-            marginBottom: 4,
-            fontSize: '18px',
-            fontFamily: 'Helvetica',
-            color: '#333',
-            textAlign: 'center',
-          }}
-        >
-          Šiame video parodome kaip nusistatyti, kad prekių ir paslaugų kodai iš Agnum automatiškai prisiskirtų jūsų dokumentams, pagal jūsų nustatytas sąlygas.
-        </Typography>
-        {/* Embedded YouTube Video */}
-        <Box
-          sx={{
-            width: '100%',
-            maxWidth: '900px',
-            aspectRatio: '16/9',
-            borderRadius: 3,
-            overflow: 'hidden',
-            boxShadow: 3,
-          }}
-        >
-          <Box
-            component="iframe"
-            src={CODES_VIDEO_URL}
-            title="Automatinis prekių ir paslaugų kodų priskyrimas"
-            width="100%"
-            height="100%"
-            sx={{ border: 'none' }}
-            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-            allowFullScreen
-          />
         </Box>
       </Box>
 
@@ -916,4 +792,4 @@ const Agnum = () => {
   );
 };
 
-export default Agnum;
+export default Apsa;

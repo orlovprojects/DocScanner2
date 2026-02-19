@@ -553,14 +553,18 @@ def export_clients_to_rivile_erp_xlsx(clients: Iterable[dict], output_path: str 
     wb = _load_template(CLIENTS_TEMPLATE_FILE)
     ws = wb.active
 
+    # Проверяем наличие дополнительных листов
+    ws_addresses = wb["ClientAddresses"] if "ClientAddresses" in wb.sheetnames else None
+    ws_banks = wb["ClientBankAccounts"] if "ClientBankAccounts" in wb.sheetnames else None
+
     start_row = 6
     row_idx = 0
-    seen_clients: set[str] = set()  # Для дедупликации
+    addr_row = 3   # стартовая строка для ClientAddresses
+    bank_row = 3   # стартовая строка для ClientBankAccounts
+    seen_clients: set[str] = set()
 
     for client in clients or []:
         cid = normalize_code(client.get("id"))
-        
-        # Пропускаем пустые или дублирующиеся id
         if not cid or cid in seen_clients:
             continue
         seen_clients.add(cid)
@@ -574,7 +578,10 @@ def export_clients_to_rivile_erp_xlsx(clients: Iterable[dict], output_path: str 
         name = safe_excel_text(client.get("name"))
         vat = normalize_code(client.get("vat"))
         adr = safe_excel_text(client.get("address"))
+        country_iso = safe_excel_text(client.get("country_iso"))
+        iban = safe_excel_text(client.get("iban"))
 
+        # === Первый таб (основной) ===
         ws.cell(row=row, column=ClientCols.REF_ID, value=cid)
         ws.cell(row=row, column=ClientCols.NAME, value=name)
         ws.cell(row=row, column=ClientCols.CODE, value=code)
@@ -586,10 +593,72 @@ def export_clients_to_rivile_erp_xlsx(clients: Iterable[dict], output_path: str 
         ws.cell(row=row, column=ClientCols.IS_CUSTOMER, value=1 if doc_type == "pardavimas" else "")
         ws.cell(row=row, column=ClientCols.IS_SUPPLIER, value=1 if doc_type == "pirkimas" else "")
 
+        # === ClientAddresses (если есть address или country_iso) ===
+        if ws_addresses is not None and (adr or country_iso):
+            ws_addresses.cell(row=addr_row, column=1, value=cid)          # A: RefID
+            ws_addresses.cell(row=addr_row, column=2, value=0)            # B: всегда 0
+            ws_addresses.cell(row=addr_row, column=3, value=name)         # C: Name
+            ws_addresses.cell(row=addr_row, column=4, value=adr)          # D: Address
+            ws_addresses.cell(row=addr_row, column=7, value=country_iso)  # G: Country ISO
+            addr_row += 1
+
+        # === ClientBankAccounts (если есть iban) ===
+        if ws_banks is not None and iban:
+            ws_banks.cell(row=bank_row, column=1, value=cid)   # A: RefID
+            ws_banks.cell(row=bank_row, column=2, value=name)  # B: Name
+            ws_banks.cell(row=bank_row, column=3, value=iban)  # C: IBAN
+            bank_row += 1
+
         row_idx += 1
 
     wb.save(output_path)
     return Path(output_path)
+
+
+
+
+
+# def export_clients_to_rivile_erp_xlsx(clients: Iterable[dict], output_path: str | Path) -> Path:
+#     wb = _load_template(CLIENTS_TEMPLATE_FILE)
+#     ws = wb.active
+
+#     start_row = 6
+#     row_idx = 0
+#     seen_clients: set[str] = set()  # Для дедупликации
+
+#     for client in clients or []:
+#         cid = normalize_code(client.get("id"))
+        
+#         # Пропускаем пустые или дублирующиеся id
+#         if not cid or cid in seen_clients:
+#             continue
+#         seen_clients.add(cid)
+
+#         row = start_row + row_idx
+
+#         doc_type = (_s(client.get("type")) or "pirkimas").lower()
+#         is_person = bool(client.get("is_person", False))
+
+#         code = cid
+#         name = safe_excel_text(client.get("name"))
+#         vat = normalize_code(client.get("vat"))
+#         adr = safe_excel_text(client.get("address"))
+
+#         ws.cell(row=row, column=ClientCols.REF_ID, value=cid)
+#         ws.cell(row=row, column=ClientCols.NAME, value=name)
+#         ws.cell(row=row, column=ClientCols.CODE, value=code)
+#         ws.cell(row=row, column=ClientCols.TYPE_ID, value=1 if is_person else 0)
+#         ws.cell(row=row, column=ClientCols.REG_CODE, value=cid)
+#         ws.cell(row=row, column=ClientCols.VAT, value=vat)
+#         ws.cell(row=row, column=ClientCols.ADDRESS, value=adr)
+
+#         ws.cell(row=row, column=ClientCols.IS_CUSTOMER, value=1 if doc_type == "pardavimas" else "")
+#         ws.cell(row=row, column=ClientCols.IS_SUPPLIER, value=1 if doc_type == "pirkimas" else "")
+
+#         row_idx += 1
+
+#     wb.save(output_path)
+#     return Path(output_path)
 
 
 # =========================================================

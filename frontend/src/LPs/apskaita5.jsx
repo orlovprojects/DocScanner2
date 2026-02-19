@@ -3,7 +3,7 @@ import { Helmet } from 'react-helmet';
 import { Box, Typography, Button, Stack, TextField } from '@mui/material';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 
-const Agnum = () => {
+const Apskaita5 = () => {
   const [docCount, setDocCount] = useState(200);
 
   // Калькулятор экономии
@@ -12,14 +12,14 @@ const Agnum = () => {
   const savings = traditionalCost - dokskenasCost;
   const savingsPercent = Math.round((savings / traditionalCost) * 100);
 
-  // Видео для автоматического присвоения кодов
-  const CODES_VIDEO_URL = "https://www.youtube.com/embed/MftJl0_4jOE";
+  // Video
+  const VIDEO_URL = "https://www.youtube.com/embed/_HeD_TKUsl0";
 
   return (
     <Box sx={{ bgcolor: '#F9F9FA', minHeight: '100vh', padding: { xs: 2, sm: 5 }, paddingTop: { xs: '50px', sm: '70px' }, width: '100%' }}>
       <Helmet>
-        <title>Sąskaitų importas į Agnum</title>
-        <meta name="description" content="Automatizuokite sąskaitų faktūrų įvedimą į Agnum buhalterinę programą. DokSkenas atpažįsta dokumentus ir eksportuoja .xml failą, paruoštą Agnum importui." />
+        <title>Sąskaitų importas į Apskaita5</title>
+        <meta name="description" content="Automatizuokite sąskaitų faktūrų įvedimą į Apskaita5 buhalterinę programą. DokSkenas atpažįsta dokumentus ir eksportuoja .xml failą, paruoštą Apskaita5 importui." />
       </Helmet>
 
       {/* Hero Section */}
@@ -43,7 +43,7 @@ const Agnum = () => {
             maxWidth: '1000px',
           }}
         >
-          Sąskaitų importas į Agnum
+          Sąskaitų importas į Apskaita5
         </Typography>
         <Typography
           variant="body1"
@@ -55,7 +55,7 @@ const Agnum = () => {
             color: '#333',
           }}
         >
-          Automatizuokite sąskaitų faktūrų nuskaitymą ir įvedimą į Agnum buhalterinę programą bei išvenkite nuobodaus darbo ir klaidų apskaitoje.
+          Automatizuokite sąskaitų faktūrų nuskaitymą ir įvedimą į Apskaita5 buhalterinę programą bei išvenkite nuobodaus rankinio darbo ir klaidų apskaitoje.
         </Typography>
         <Typography
           variant="body1"
@@ -67,7 +67,7 @@ const Agnum = () => {
             color: '#333',
           }}
         >
-          DokSkenas atpažįsta dokumentus ir paruošia .xml failus, paruoštus importui.
+          DokSkenas atpažįsta dokumentus ir paruošia .xml failus, paruoštus importui į Apskaita5.
         </Typography>
         <Button
           variant="contained"
@@ -85,7 +85,7 @@ const Agnum = () => {
         </Button>
       </Box>
 
-      {/* Ką galite importuoti į Agnum? */}
+      {/* Ką galite importuoti į Apskaita5? */}
       <Box
         sx={{
           width: '100%',
@@ -106,7 +106,7 @@ const Agnum = () => {
             textAlign: 'center',
           }}
         >
-          Ką galite importuoti į Agnum?
+          Ką galite importuoti į Apskaita5?
         </Typography>
         <Stack spacing={2.5} sx={{ maxWidth: '500px', width: '100%' }}>
           {[
@@ -134,7 +134,7 @@ const Agnum = () => {
             textAlign: 'center',
           }}
         >
-          Importavus duomenis prekių, paslaugų bei kontrahentų kortelės automatiškai susikurs Agnum programoje.
+          Importavus duomenis prekių, paslaugų bei kontrahentų kortelės automatiškai susikurs Apskaita5 programoje, jei tokių įrašų dar nėra duomenų bazėje.
         </Typography>
       </Box>
 
@@ -325,7 +325,7 @@ const Agnum = () => {
         </Typography>
       </Box>
 
-      {/* Importas į Agnum */}
+      {/* Importas į Apskaita5 */}
       <Box
         sx={{
           width: '100%',
@@ -346,135 +346,236 @@ const Agnum = () => {
             textAlign: 'center',
           }}
         >
-          Importas į Agnum
+          Importas į Apskaita5
         </Typography>
         <Typography
           variant="body1"
           sx={{
             maxWidth: '800px',
-            marginBottom: 5,
+            marginBottom: 4,
             fontSize: '18px',
             fontFamily: 'Helvetica',
             color: '#333',
             textAlign: 'center',
           }}
         >
-          Pirkimai ir pardavimai į Agnum apskaitos programą importuojami atskirai.
+          Šiame video parodome pilną procesą nuo sąskaitų įkėlimo skaitmenizuoti iki duomenų importo į Apskaita5. Taip pat paaiškiname, kaip įdiegti adapterį (per kurį kelsite duomenis į Apskaita5) bei kaip nusistatyti PVM schemas, kad jos prisiskirtų importuotiems dokumentams.
         </Typography>
-
-        {/* Pirkimų ir Pardavimų importas - tekstas su bullet points */}
-        <Box sx={{ maxWidth: '800px', width: '100%', marginBottom: 5 }}>
-          {/* Pirkimų importas */}
-          <Typography
-            variant="h4"
-            sx={{
-              fontWeight: 700,
-              marginBottom: 2,
-              fontSize: { xs: '18px', sm: '22px' },
-              fontFamily: 'Helvetica',
-              color: '#1b1b1b',
-            }}
-          >
-            Pirkimų importas:
-          </Typography>
-          <Box component="ul" sx={{ paddingLeft: 3, marginBottom: 5 }}>
-            {[
-              <>Eikite į <Box component="span" sx={{ fontWeight: 700 }}>"Dokumentai -&gt; Pajamavimai -&gt; Atidėjimai -&gt; Importavimas iš .XML"</Box></>,
-              'Pasirinkite pirkimų failą, parsisiųstą iš DokSkeno',
-              <>Spauskite <Box component="span" sx={{ fontWeight: 700 }}>"Nuskaityti failą"</Box> -&gt; <Box component="span" sx={{ fontWeight: 700 }}>"Patikrinti"</Box> -&gt; <Box component="span" sx={{ fontWeight: 700 }}>"Importuoti"</Box></>,
-            ].map((item, idx) => (
-              <Box component="li" key={idx} sx={{ marginBottom: 1 }}>
-                <Typography sx={{ fontSize: { xs: '16px', sm: '18px' }, fontFamily: 'Helvetica', color: '#1b1b1b' }}>
-                  {item}
-                </Typography>
-              </Box>
-            ))}
-          </Box>
-
-          {/* Pardavimų importas */}
-          <Typography
-            variant="h4"
-            sx={{
-              fontWeight: 700,
-              marginBottom: 2,
-              fontSize: { xs: '18px', sm: '22px' },
-              fontFamily: 'Helvetica',
-              color: '#1b1b1b',
-            }}
-          >
-            Pardavimų importas:
-          </Typography>
-          <Box component="ul" sx={{ paddingLeft: 3 }}>
-            {[
-              <>Eikite į <Box component="span" sx={{ fontWeight: 700 }}>"Dokumentai -&gt; Pardavimai -&gt; Išankstinės sąskaitos -&gt; Importas iš XML"</Box></>,
-              'Pasirinkite pardavimų failą, parsisiųstą iš DokSkeno',
-              <>Spauskite <Box component="span" sx={{ fontWeight: 700 }}>"Nuskaityti failą"</Box> -&gt; <Box component="span" sx={{ fontWeight: 700 }}>"Patikrinti"</Box> -&gt; <Box component="span" sx={{ fontWeight: 700 }}>"Importuoti"</Box></>,
-            ].map((item, idx) => (
-              <Box component="li" key={idx} sx={{ marginBottom: 1 }}>
-                <Typography sx={{ fontSize: { xs: '16px', sm: '18px' }, fontFamily: 'Helvetica', color: '#1b1b1b' }}>
-                  {item}
-                </Typography>
-              </Box>
-            ))}
-          </Box>
-        </Box>
-
-        {/* Papildomi laukai su paveikslėliu */}
+        {/* Embedded YouTube Video */}
         <Box
           sx={{
             width: '100%',
             maxWidth: '900px',
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
+            aspectRatio: '16/9',
+            borderRadius: 3,
+            overflow: 'hidden',
+            boxShadow: 3,
             marginBottom: 5,
           }}
         >
+          <Box
+            component="iframe"
+            src={VIDEO_URL}
+            title="Importas į Apskaita5"
+            width="100%"
+            height="100%"
+            sx={{ border: 'none' }}
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+            allowFullScreen
+          />
+        </Box>
+
+        {/* PVM schemos instrukcija */}
+        <Box
+          sx={{
+            maxWidth: '800px',
+            width: '100%',
+            marginBottom: 5,
+            padding: { xs: 2, sm: 0 },
+          }}
+        >
+          <Typography
+            variant="h3"
+            sx={{
+              fontSize: { xs: '22px', sm: '26px' },
+              fontFamily: 'Helvetica',
+              fontWeight: 700,
+              marginBottom: 3,
+            }}
+          >
+            Kaip susikurti PVM schemas Apskaita5 programoje?
+          </Typography>
+
           <Typography
             variant="body1"
             sx={{
-              maxWidth: '800px',
-              marginBottom: 3,
               fontSize: '18px',
               fontFamily: 'Helvetica',
-              color: '#333',
-              textAlign: 'center',
+              color: '#1b1b1b',
+              marginBottom: 2.5,
             }}
           >
-            Taip pat DokSkeno nustatymuose galite nusistatyti numatytąsias reikšmes šių laukų, kurie automatiškai prisiskirs jūsų skaitmenizuotiems dokumentams:
+            Tam kad jūsų dokumentams prisiskirtų teisingi PVM klasifikatoriai (PVM schemos) Apskaita5 programoje, jus reikės:
           </Typography>
-          {/* Placeholder для картинки agnum_papildomi_laukai.jpg */}
+
           <Box
-            component="img"
-            src="agnum_papildomi_laukai.jpg"
-            alt="Agnum papildomi laukai nustatymai"
+            component="ul"
             sx={{
-              width: '100%',
-              maxWidth: '800px',
-              borderRadius: 3,
-              boxShadow: '0px 2px 16px rgba(0,0,0,0.08)',
-            }}
-            onError={(e) => {
-              e.target.style.display = 'none';
-              e.target.nextSibling.style.display = 'flex';
-            }}
-          />
-          <Box
-            sx={{
-              display: 'none',
-              width: '100%',
-              maxWidth: '800px',
-              height: '300px',
-              backgroundColor: '#e0e0e0',
-              borderRadius: 3,
-              alignItems: 'center',
-              justifyContent: 'center',
+              paddingLeft: { xs: '24px', sm: '40px' },
+              marginBottom: 4,
+              marginTop: 0,
             }}
           >
-            <Typography sx={{ color: '#666', fontFamily: 'Helvetica', fontSize: '16px' }}>
-              Paveikslėlis: agnum_papildomi_laukai.jpeg
-            </Typography>
+            {[
+              <>nukopijuoti naudojamus PVM kodus iš DokSkeno nustatymų</>,
+              <>atidaryti savo Apskaita5 <Box component="span" sx={{ fontWeight: 700 }}>„Bendras -&gt; Mokesčių nustatymai -&gt; Kodai"</Box>, tada pasirinkti <Box component="span" sx={{ fontWeight: 700 }}>„PVM kodas"</Box> iš Paste'inamų kodų tipas meniu ir paspausti ant įkelti įkonėlės</>,
+              <>sąraše kairėje atsiras nauji PVM kodai, spauskite OK</>,
+              <>tada eikite į <Box component="span" sx={{ fontWeight: 700 }}>„Dokumentai -&gt; PVM deklaravimo schemos"</Box> ir sukurkite PVM schemas kiekvienam iš sukurtų PVM kodų, kaip parodyta video</>,
+            ].map((item, idx) => (
+              <Typography
+                component="li"
+                key={idx}
+                sx={{
+                  fontSize: '18px',
+                  fontFamily: 'Helvetica',
+                  color: '#1b1b1b',
+                  marginBottom: 1.5,
+                  paddingLeft: 1,
+                }}
+              >
+                {item}
+              </Typography>
+            ))}
           </Box>
+
+          <Typography
+            variant="body1"
+            sx={{
+              fontSize: '18px',
+              fontFamily: 'Helvetica',
+              color: '#1b1b1b',
+              marginBottom: 2,
+            }}
+          >
+            Jei norite, kad PVM schema būtų padalinta į pirkimus ir pardavimus, sukurkite tam pačiam PVM kodui dvi PVM schemas: vieną pirkimams, kitą pardavimams.
+          </Typography>
+
+          <Typography
+            variant="body1"
+            sx={{
+              fontSize: '18px',
+              fontFamily: 'Helvetica',
+              color: '#1b1b1b',
+              marginBottom: 3,
+            }}
+          >
+            Pvz. PVM1 kodas galioja tiek pirkimams, tiek pardavimams. Norint tai atskirti sukurkite tokias dvi PVM schemas.
+          </Typography>
+
+          {/* PVM schemos pavyzdžiai */}
+          <Box
+            sx={{
+              display: 'flex',
+              flexDirection: { xs: 'column', sm: 'row' },
+              gap: 3,
+              marginBottom: 4,
+            }}
+          >
+            {/* Pardavimams */}
+            <Box
+              sx={{
+                flex: 1,
+                padding: 3,
+                borderRadius: 2,
+                background: '#fff',
+                boxShadow: '0px 2px 12px rgba(0,0,0,0.06)',
+                border: '1px solid #e8e8e8',
+              }}
+            >
+              <Typography
+                sx={{
+                  fontSize: '18px',
+                  fontFamily: 'Helvetica',
+                  fontWeight: 700,
+                  color: '#1b1b1b',
+                  marginBottom: 2,
+                  textDecoration: 'underline',
+                }}
+              >
+                Pardavimams:
+              </Typography>
+              {[
+                { label: 'Apyvartos tipas', value: 'parduodamos' },
+                { label: 'Tarifas (%)', value: '21' },
+                { label: 'PVM kodas', value: 'PVM1 (pasirinktas iš sąrašo)' },
+                { label: 'Kodas', value: 'PVM1_PARD' },
+                { label: 'Pavadinimas', value: 'PVM1 pard' },
+              ].map((item, idx) => (
+                <Typography key={idx} sx={{ fontSize: '16px', fontFamily: 'Helvetica', color: '#1b1b1b', marginBottom: 0.5 }}>
+                  <Box component="span" sx={{ textDecoration: 'underline' }}>{item.label}</Box>: {item.value}
+                </Typography>
+              ))}
+            </Box>
+
+            {/* Pirkimams */}
+            <Box
+              sx={{
+                flex: 1,
+                padding: 3,
+                borderRadius: 2,
+                background: '#fff',
+                boxShadow: '0px 2px 12px rgba(0,0,0,0.06)',
+                border: '1px solid #e8e8e8',
+              }}
+            >
+              <Typography
+                sx={{
+                  fontSize: '18px',
+                  fontFamily: 'Helvetica',
+                  fontWeight: 700,
+                  color: '#1b1b1b',
+                  marginBottom: 2,
+                  textDecoration: 'underline',
+                }}
+              >
+                Pirkimams:
+              </Typography>
+              {[
+                { label: 'Apyvartos tipas', value: 'perkamos' },
+                { label: 'Tarifas (%)', value: '21' },
+                { label: 'PVM kodas', value: 'PVM1 (pasirinktas iš sąrašo)' },
+                { label: 'Kodas', value: 'PVM1_PIRK' },
+                { label: 'Pavadinimas', value: 'PVM1 pirk' },
+              ].map((item, idx) => (
+                <Typography key={idx} sx={{ fontSize: '16px', fontFamily: 'Helvetica', color: '#1b1b1b', marginBottom: 0.5 }}>
+                  <Box component="span" sx={{ textDecoration: 'underline' }}>{item.label}</Box>: {item.value}
+                </Typography>
+              ))}
+            </Box>
+          </Box>
+
+          <Typography
+            variant="body1"
+            sx={{
+              fontSize: '18px',
+              fontFamily: 'Helvetica',
+              color: '#1b1b1b',
+              marginBottom: 2,
+            }}
+          >
+            Tą patį galit padaryti ir su kitais PVM kodais, kai reikia atskirti PVM schemas į pirkimus ir pardavimus. Tiesiog pirkimams pasirinkite Apyvartos tipas: <Box component="span" sx={{ fontWeight: 700 }}>perkamos</Box> o Kodas turi būti su <Box component="span" sx={{ fontWeight: 700 }}>_PIRK</Box>. Pardavimams Apyvartos tipas: <Box component="span" sx={{ fontWeight: 700 }}>parduodamos</Box>, o Kodas su <Box component="span" sx={{ fontWeight: 700 }}>_PARD</Box> gale.
+          </Typography>
+
+          <Typography
+            variant="body1"
+            sx={{
+              fontSize: '18px',
+              fontFamily: 'Helvetica',
+              color: '#1b1b1b',
+            }}
+          >
+            PVM schemas nusistatyti reikės tik vieną kartą. Kitą kartą atsidarius Apskaita5 programą galėsite eiti tiesiai į sąskaitų importo langą be jokių papildomų nustatymų.
+          </Typography>
         </Box>
 
         {/* Kaip tai veikia? */}
@@ -496,8 +597,8 @@ const Agnum = () => {
             { step: 1, bold: 'Įkelkite dokumentus:', text: ' tinka beveik visi dokumentų, nuotraukų bei archyvų formatai' },
             { step: 2, bold: 'Palaukite kol nusiskaitys duomenys:', text: ' vidutiniškai užtrunka ~30 sekundžių dokumentui' },
             { step: 3, bold: 'Peržiūrėkite rezultatus:', text: ' klaidos pažymimos dokumentų lentelėje. Pakoreguokite, jei reikia' },
-            { step: 4, bold: 'Eksportuokite į Agnum:', text: ' pasirinkite "Agnum" kaip savo apskaitos programą nustatymuose' },
-            { step: 5, bold: 'Importuokite į Agnum:', text: ' atidarykite .xml failą Agnum programoje ir patvirtinkite' },
+            { step: 4, bold: 'Eksportuokite į Apskaita5:', text: ' pasirinkite "Apskaita5" kaip savo apskaitos programą nustatymuose' },
+            { step: 5, bold: 'Importuokite į Apskaita5:', text: ' atidarykite failą Apskaita5 programoje ir patvirtinkite' },
           ].map((item, idx) => (
             <Stack key={idx} direction="row" alignItems="flex-start" spacing={2}>
               <Box
@@ -555,7 +656,6 @@ const Agnum = () => {
           {[
             'Skaitmenizuoja sumiškai ir kiekybiškai',
             'Atmeta dublikatus bei netinkamus dokumentus',
-            'Priskiria prekių/paslaugų kodus iš Agnum apskaitos programos',
             'Nuskaito ir kuro čekius',
             'Patikrina ar galioja PVM kodai',
             'Atpažįsta nuolaidas',
@@ -596,67 +696,6 @@ const Agnum = () => {
           >
             Vidutiniškai sutaupo 4,5 minutės darbo ir 93% finansinių kaštų vienam dokumentui
           </Typography>
-        </Box>
-      </Box>
-
-      {/* Automatinis prekių ir paslaugų kodų priskyrimas */}
-      <Box
-        sx={{
-          width: '100%',
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          marginTop: '80px',
-          marginBottom: '80px',
-        }}
-      >
-        <Typography
-          variant="h2"
-          sx={{
-            fontSize: '36px',
-            fontFamily: 'Helvetica',
-            fontWeight: 600,
-            marginBottom: 2,
-            textAlign: 'center',
-            maxWidth: '900px',
-          }}
-        >
-          Automatinis prekių ir paslaugų kodų iš Agnum priskyrimas
-        </Typography>
-        <Typography
-          variant="body1"
-          sx={{
-            maxWidth: '800px',
-            marginBottom: 4,
-            fontSize: '18px',
-            fontFamily: 'Helvetica',
-            color: '#333',
-            textAlign: 'center',
-          }}
-        >
-          Šiame video parodome kaip nusistatyti, kad prekių ir paslaugų kodai iš Agnum automatiškai prisiskirtų jūsų dokumentams, pagal jūsų nustatytas sąlygas.
-        </Typography>
-        {/* Embedded YouTube Video */}
-        <Box
-          sx={{
-            width: '100%',
-            maxWidth: '900px',
-            aspectRatio: '16/9',
-            borderRadius: 3,
-            overflow: 'hidden',
-            boxShadow: 3,
-          }}
-        >
-          <Box
-            component="iframe"
-            src={CODES_VIDEO_URL}
-            title="Automatinis prekių ir paslaugų kodų priskyrimas"
-            width="100%"
-            height="100%"
-            sx={{ border: 'none' }}
-            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-            allowFullScreen
-          />
         </Box>
       </Box>
 
@@ -916,4 +955,4 @@ const Agnum = () => {
   );
 };
 
-export default Agnum;
+export default Apskaita5;

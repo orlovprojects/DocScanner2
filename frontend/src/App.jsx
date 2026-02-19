@@ -51,6 +51,9 @@ import NotFound from './pages/NotFound';
 import SitePro from './LPs/site_pro';
 import Rivile from './LPs/rivile';
 import Agnum from './LPs/agnum';
+import Centas from './LPs/centas';
+import Apsa from './LPs/apsa';
+import Apskaita5 from './LPs/apskaita5';
 
 function App() {
   const location = useLocation();
@@ -113,6 +116,9 @@ function App() {
         <Route path="/site-pro" element={<SitePro />} />
         <Route path="/rivile" element={<Rivile />} />
         <Route path="/agnum" element={<Agnum />} />
+        <Route path="/centas" element={<Centas />} />
+        <Route path="/apsa" element={<Apsa />} />
+        <Route path="/apskaita5" element={<Apskaita5 />} />
 
         <Route
           path="/suvestine"

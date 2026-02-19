@@ -380,6 +380,46 @@ const SitePro = () => {
           </Typography>
         </Box>
 
+        {/* Papildomi laukai */}
+        <Typography
+          variant="body1"
+          sx={{
+            maxWidth: '800px',
+            marginBottom: 3,
+            fontSize: '18px',
+            fontFamily: 'Helvetica',
+            color: '#333',
+            textAlign: 'center',
+          }}
+        >
+          Be to DokSkeno nustatymuose galite nusistatymi numatytąsiais reikšmes šių papildomų laukų, kurie automatiškai prisiskirs jūsų skaitmenizuotiems dokumentams:
+        </Typography>
+        <Box
+          component="img"
+          src="site_pro_papildomi_laukai.jpg"
+          alt="Site.pro papildomi laukai DokSkenas nustatymuose"
+          sx={{
+            width: '100%',
+            maxWidth: '900px',
+            borderRadius: 3,
+            boxShadow: '0px 2px 16px rgba(0,0,0,0.08)',
+            marginBottom: 5,
+          }}
+        />
+        <Typography
+          variant="body1"
+          sx={{
+            maxWidth: '800px',
+            marginBottom: 3,
+            fontSize: '18px',
+            fontFamily: 'Helvetica',
+            color: '#333',
+            textAlign: 'center',
+          }}
+        >
+          Papildomi laukai nustatomi atskirai pirkimams ir pardavimams.
+        </Typography>
+
         {/* Kaip tai veikia? */}
         <Typography
           variant="h3"

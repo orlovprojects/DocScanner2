@@ -1095,7 +1095,7 @@ function SumaZodziasiInfo() {
             { name: "Finvalda", href: null },
             { name: "Rivilė GAMA", href: 'https://atlyginimoskaiciuokle.com/rivile' },
             { name: "Rivilė ERP", href: 'https://atlyginimoskaiciuokle.com/rivile' },
-            { name: "Agnum", href: null },
+            { name: "Agnum", href: 'https://atlyginimoskaiciuokle.com/agnum' },
             { name: "Centas", href: null },
             { name: "Apskaita5", href: null },
             { name: "Pragma 3.2", href: null },

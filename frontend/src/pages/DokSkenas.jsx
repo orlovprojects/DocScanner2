@@ -835,7 +835,7 @@ const Dokskenas = () => {
               { label: 'Finvalda', url: 'https://finvalda.lt/', hasLink: true },
               { label: 'Rivilė GAMA', url: 'https://atlyginimoskaiciuokle.com/rivile', hasLink: true },
               { label: 'Rivilė ERP', url: 'https://atlyginimoskaiciuokle.com/rivile', hasLink: true },
-              { label: 'Agnum', url: 'https://www.agnum.lt/', hasLink: true },
+              { label: 'Agnum', url: 'https://atlyginimoskaiciuokle.com/agnum', hasLink: true },
               { label: 'Centas', hasLink: false },
               { label: 'Apskaita5', hasLink: false },
               { label: 'Pragma 3.2', hasLink: false },
