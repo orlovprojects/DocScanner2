@@ -745,7 +745,7 @@ def export_documents_to_rivile_erp_xlsx(
 
                     # Ne pildom I i J
                     ws_lines.cell(row=line_idx, column=LineCols.VAT_CODE, value="")
-                    ws_lines.cell(row=line_idx, column=LineCols.VAT_AMOUNT, value="")
+                    set_cell_money(ws_lines, line_idx, LineCols.VAT_AMOUNT, 0)
                 else:
                     set_cell_price(ws_lines, line_idx, LineCols.PRICE, getattr(item, "price", None) or 0)
 
@@ -811,7 +811,7 @@ def export_documents_to_rivile_erp_xlsx(
 
                 # Ne pildom I i J
                 ws_lines.cell(row=line_idx, column=LineCols.VAT_CODE, value="")
-                ws_lines.cell(row=line_idx, column=LineCols.VAT_AMOUNT, value="")
+                set_cell_money(ws_lines, line_idx, LineCols.VAT_AMOUNT, 0)
             else:
                 set_cell_money(ws_lines, line_idx, LineCols.PRICE, amount_wo)
 
