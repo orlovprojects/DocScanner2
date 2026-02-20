@@ -384,8 +384,7 @@ def _build_master_supplier(parent: ET.Element, data: dict) -> ET.Element:
         _create_element(supplier, "RegistrationNumber", "ND")
 
     country = validate_country_code(data.get("country", ""))
-    if country:
-        _create_element(supplier, "Country", country)
+    _create_element(supplier, "Country", country or "LT")
 
     name = _s(data.get("name", ""))
     _create_element(supplier, "Name", truncate_str(name, Limits.LONG_TEXT) if name else "ND")
@@ -410,8 +409,7 @@ def _build_master_customer(parent: ET.Element, data: dict) -> ET.Element:
         _create_element(customer, "RegistrationNumber", "ND")
 
     country = validate_country_code(data.get("country", ""))
-    if country:
-        _create_element(customer, "Country", country)
+    _create_element(customer, "Country", country or "LT")
 
     name = _s(data.get("name", ""))
     _create_element(customer, "Name", truncate_str(name, Limits.LONG_TEXT) if name else "ND")
@@ -462,8 +460,7 @@ def _build_supplier_info(parent: ET.Element, doc) -> ET.Element:
 
     # Country = seller_country_iso (если есть)
     country = validate_country_code(getattr(doc, "seller_country_iso", ""))
-    if country:
-        _create_element(info, "Country", country)
+    _create_element(info, "Country", country or "LT")
     
     # Name = seller_name или "ND"
     name = _s(getattr(doc, "seller_name", ""))
@@ -495,8 +492,7 @@ def _build_customer_info(parent: ET.Element, doc) -> ET.Element:
         
     # Country = buyer_country_iso (если есть)
     country = validate_country_code(getattr(doc, "buyer_country_iso", ""))
-    if country:
-        _create_element(info, "Country", country)
+    _create_element(info, "Country", country or "LT")
     
     # Name = buyer_name или "ND"
     name = _s(getattr(doc, "buyer_name", ""))
