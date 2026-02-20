@@ -421,17 +421,18 @@ def _build_masterfiles(root: ET.Element, purchase_docs: List, sales_docs: List) 
     """MasterFiles with unique Suppliers and Customers."""
     master = _create_element(root, "MasterFiles")
 
-    customers_el = _create_element(master, "Customers")
-    suppliers_el = _create_element(master, "Suppliers")
-
     customers = _collect_parties(sales_docs, role="buyer")
     suppliers = _collect_parties(purchase_docs, role="seller")
 
-    for key in sorted(customers.keys()):
-        _build_master_customer(customers_el, customers[key])
+    if customers:
+        customers_el = _create_element(master, "Customers")
+        for key in sorted(customers.keys()):
+            _build_master_customer(customers_el, customers[key])
 
-    for key in sorted(suppliers.keys()):
-        _build_master_supplier(suppliers_el, suppliers[key])
+    if suppliers:
+        suppliers_el = _create_element(master, "Suppliers")
+        for key in sorted(suppliers.keys()):
+            _build_master_supplier(suppliers_el, suppliers[key])
 
     return master
 
