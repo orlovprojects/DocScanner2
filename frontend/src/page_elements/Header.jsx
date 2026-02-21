@@ -64,21 +64,23 @@ const Header = () => {
   const isSuper = !!profile?.is_superuser; // удобный флаг
 
   // --- ДЛЯ ЛОГО ---
-  const isDokskenasLogo = [
-    "/suvestine",
-    "/prisijungti",
-    "/registruotis",
-    "/papildyti",
-    "/nustatymai"
-  ].includes(location.pathname);
+  const logoSrc = "/DokSkenas_logo.jpg";
+  const logoAlt = "DokSkenas Logo";
+  // const isDokskenasLogo = [
+  //   "/suvestine",
+  //   "/prisijungti",
+  //   "/registruotis",
+  //   "/papildyti",
+  //   "/nustatymai"
+  // ].includes(location.pathname);
 
-  const logoSrc = isDokskenasLogo
-    ? "/DokSkenas_logo.jpg"
-    : "/atlyginimo_skaiciuokle_logo.jpg";
+  // const logoSrc = isDokskenasLogo
+  //   ? "/DokSkenas_logo.jpg"
+  //   : "/atlyginimo_skaiciuokle_logo.jpg";
 
-  const logoAlt = isDokskenasLogo
-    ? "DokSkenas Logo"
-    : "Atlyginimo Skaiciuokle Logo";
+  // const logoAlt = isDokskenasLogo
+  //   ? "DokSkenas Logo"
+  //   : "Atlyginimo Skaiciuokle Logo";
 
   // --- REST HANDLERS ---
   const handleLogout = async () => {

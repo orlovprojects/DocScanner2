@@ -210,7 +210,7 @@ const Footer = () => {
                 fontSize: { xs: '13px', md: '14px' }
               }}
             >
-              © {currentYear} Atlyginimo Skaičiuoklė. Visos teisės saugomos.
+              © {currentYear} DokSkenas. Visos teisės saugomos.
             </Typography>
             
             <Stack 

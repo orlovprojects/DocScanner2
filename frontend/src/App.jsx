@@ -41,6 +41,7 @@ import IsKlientu from './pages/IsKlientu';
 import Dokskenas from './pages/DokSkenas';
 import PvmCalculator from './pages/PVMskaiciuokle';
 import GpmSkaiciuokle from './pages/GPMskaiciuokle';
+import DividenduSkaiciuokle from './pages/DividenduSkaiciuokle';
 
 import { initMetaPixel } from './metaPixel';
 import { initGTM } from "./gtm";
@@ -109,6 +110,7 @@ function App() {
         <Route path="/saskaitu-skaitmenizavimas-dokskenas" element={<Dokskenas />} />
         <Route path="/pvm-skaiciuokle" element={<PvmCalculator />} />
         <Route path="/gpm-skaiciuokle" element={<GpmSkaiciuokle />} />
+        <Route path="/dividendu-skaiciuokle" element={<DividenduSkaiciuokle />} />
         <Route path="/naudojimo-gidas" element={<NaudojimoGidas />} />
         <Route path="/kategorija/:slug" element={<GidoCategories />} />
         <Route path="/straipsnis/:slug" element={<GidoArticle />} />

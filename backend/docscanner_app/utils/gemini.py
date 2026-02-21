@@ -96,11 +96,13 @@ Example (structure and field names; values may be empty strings, booleans must b
 {"docs":<number_of_documents>,"documents":[{"document_type":"","seller_id":"","seller_name":"","seller_vat_code":"","seller_address":"","seller_country":"","seller_country_iso":"","seller_iban":"","seller_is_person":false,"buyer_id":"","buyer_name":"","buyer_vat_code":"","buyer_address":"","buyer_country":"","buyer_country_iso":"","buyer_iban":"","buyer_is_person":false,"invoice_date":"","due_date":"","operation_date":"","document_series":"","document_number":"","order_number":"","amount_wo_vat":"","vat_amount":"","vat_percent":"","amount_with_vat":"","separate_vat":false,"currency":"","with_receipt":false,"paid_by_cash":false}]}
 
 Format dates as yyyy-mm-dd. Delete country from addresses. seller_country and buyer_country must be full country name in language of address provided. country_iso must be 2-letter code.
+In lithuanian documents dates are usually displayed in yyyy-mm-dd or dd/mm/yyyy formats. For example, when parsing 12/01/2026, it's 12th January, not 1st December.
 When identifying buyer/seller:
 - Look for "pirkėjas" / "paslaugos pirkėjas" label → this is BUYER
 - Look for "pardavėjas" / "tiekėjas" label→ this is SELLER
 - "Savarankiškas sąskaitų išrašymas" (self-billing) and "Atvirkštinis PVM" (reverse charge) do NOT swap roles: pirkėjas is still buyer, pardavėjas/tiekėjas is still seller
 - Don't rely on position (left/right/top/bottom) when labels are available
+- When no pirkejas/pardavejas/tiekejas labels and can not identify sides by other criteria, check a footer. Seller is usually mentioned in a footer.
 
 When extracting company codes and VAT codes:
 - "Įm. kodas" or "Įmonės kodas" → this is company registration code → put in seller_id / buyer_id (usually 9-digit code)
@@ -257,11 +259,13 @@ Example (structure and field names; values may be empty strings, booleans must b
 If any of values are empty, don't include them in JSON. For example, if "product_barcode" is empty, omit it from that lineitem in JSON.
 
 Format dates as yyyy-mm-dd. Delete country from addresses. seller_country and buyer_country must be full country name in language of address provided. country_iso must be 2-letter code.
+In lithuanian documents dates are usually displayed in yyyy-mm-dd or dd/mm/yyyy formats. For example, when parsing 12/01/2026, it's 12th January, not 1st December.
 When identifying buyer/seller:
 - Look for "pirkėjas" / "paslaugos pirkėjas" label → this is BUYER
 - Look for "pardavėjas" / "tiekėjas" label→ this is SELLER
 - "Savarankiškas sąskaitų išrašymas" (self-billing) and "Atvirkštinis PVM" (reverse charge) do NOT swap roles: pirkėjas is still buyer, pardavėjas/tiekėjas is still seller
 - Don't rely on position (left/right/top/bottom) when labels are available
+- When no pirkejas/pardavejas/tiekejas labels and can not identify sides by other criteria, check a footer. Seller is usually mentioned in a footer.
 
 When extracting company codes and VAT codes:
 - "Įm. kodas" or "Įmonės kodas" → this is company registration code → put in seller_id / buyer_id (usually 9-digit code)
@@ -299,22 +303,41 @@ Make sure you don't consider receipt or payment confirmation as a separate docum
 #Dlia dlinyx dokumentax s scan_type=detaliai kogda pervyj otvet imel 20 lineitems no v dokumente lineitems >20
 
 GEMINI_TRUNCATED_TO_FULL_PROMPT = """
-You previously returned a JSON with \"truncated_json\": true because of a 20 line items cap. Now produce the COMPLETE JSON for the same document.
+You previously returned a JSON with "truncated_json": true because of a 20 line items cap. Now produce the COMPLETE JSON for the same document.
 
-CONTEXT
-You are extracting structured data from OCR text of a financial document (invoice, receipt, etc.). You will receive:
+ABSOLUTE OUTPUT REQUIREMENT (START/END)
+- Your output MUST begin with the very first character "{" and MUST end with the very last character "}".
+- Do NOT output anything before the opening "{" (no BOM, no whitespace, no quotes, no backticks, no commentary).
+- Do NOT output anything after the closing "}" (no whitespace, no trailing text).
+- If you are about to output anything that does not start with "{", STOP and output the JSON again from the beginning.
+
+INPUTS YOU WILL RECEIVE
 - GLUED_RAW_TEXT: the full OCR text of the document.
 - PREVIOUS_PARTIAL_JSON: your earlier partial JSON (already contains valid extracted values).
 
-GOAL
-Return the full, final JSON for the same input, including ALL line items (products/services/fees) without any 20-item limit.
-Ensure that the number of returned line items EXACTLY MATCHES the value of "total_lines" from PREVIOUS_PARTIAL_JSON (do not recompute it).
-Omit "truncated_json".
+GOAL (MERGE — CRITICAL)
+- Treat PREVIOUS_PARTIAL_JSON as the AUTHORITATIVE PREFIX of the final answer. You MUST reuse it.
+- Your final output MUST be PREVIOUS_PARTIAL_JSON with ONLY additional missing content appended/filled in.
+- Do NOT create a new JSON from scratch. Do NOT drop any keys/objects already present in PREVIOUS_PARTIAL_JSON.
+- The final JSON MUST contain everything that is already present in PREVIOUS_PARTIAL_JSON, exactly unchanged, plus the missing tail.
 
-INVARIANTS — DO NOT CHANGE WHAT IS ALREADY EXTRACTED
-- Do NOT modify, rewrite, normalize, translate, or delete any existing values present in PREVIOUS_PARTIAL_JSON.
-- Keep all existing keys, values, data types, numeric precision, strings, booleans, and order as-is.
-- You may only ADD missing objects/fields/items to complete the JSON, based on GLUED_RAW_TEXT.
+LINE ITEMS COMPLETION (CRITICAL)
+- Preserve the entire PREVIOUS_PARTIAL_JSON line_items array EXACTLY as-is (same objects, same order, same values, same line_id).
+- Only APPEND the missing line items after the last existing item until the total number of line_items equals "total_lines" from PREVIOUS_PARTIAL_JSON.
+- Do NOT renumber or rewrite existing line_id values. Continue line_id numbering only for newly appended items.
+
+COUNT LOCK (CRITICAL)
+- Read "total_lines" from PREVIOUS_PARTIAL_JSON.
+- You MUST return exactly that many line items in the final JSON.
+- Copy "total_lines" from PREVIOUS_PARTIAL_JSON into the final JSON without change.
+- Do NOT recompute or change "total_lines".
+
+OTHER FIELDS
+- Keep all existing keys/values/data types/precision/booleans/strings and ORDER from PREVIOUS_PARTIAL_JSON exactly unchanged.
+- You may only ADD missing per-document fields if clearly present in GLUED_RAW_TEXT.
+- If a value is unclear, OMIT that field (do not guess).
+
+Omit "truncated_json" in the final JSON.
 
 LINE ITEMS COUNT LOCK (CRITICAL)
 - Read "total_lines" from PREVIOUS_PARTIAL_JSON.
@@ -376,18 +399,13 @@ ADDITIONAL RULES
 - If any of values are empty, don't include them in JSON.
   For example, if "product_barcode" is empty, omit it from that lineitem in JSON.
 - Format dates as yyyy-mm-dd.
+  In lithuanian documents dates are usually displayed in yyyy-mm-dd or dd/mm/yyyy formats. For example, when parsing 12/01/2026, it's 12th January, not 1st December.
 - When identifying buyer/seller:
   Look for "pirkėjas" / "paslaugos pirkėjas" label → this is BUYER
   Look for "pardavėjas" / "tiekėjas" label→ this is SELLER
   "Savarankiškas sąskaitų išrašymas" (self-billing) and "Atvirkštinis PVM" (reverse charge) do NOT swap roles: pirkėjas is still buyer, pardavėjas/tiekėjas is still seller
   Don't rely on position (left/right/top/bottom) when labels are available
-
-When extracting company codes and VAT codes:
-- "Įm. kodas" or "Įmonės kodas" → this is company registration code → put in seller_id / buyer_id (usually 9-digit code)
-- "PVM kodas" or "PVM mokėtojo kodas" → this is VAT code → put in seller_vat_code / buyer_vat_code (usually starts with country prefix like "LT" + 9-12 digits)
-
-If the buyer/seller block contains indicators of Lithuanian “individuali veikla” (e.g., “individuali veikla”, “pagal individualios veiklos pažymą”, “IV/IDV”, “Individualios veiklos Nr.” / “IV pažymos Nr.”), then set buyer_is_person=true / seller_is_person=true.
-
+  When no pirkejas/pardavejas/tiekejas labels and can not identify sides by other criteria, check a footer. Seller is usually mentioned in a footer.
 - If due_date is not stated in the document, but invoice date and payment terms like number of days for payment are mentioned, calculate the due date by adding the payment period to the invoice date.
 - In line items, always always try to take price after discount (without VAT) if such price is provided in the document. Use up to 4 decimal places for prices if needed. Do not round numbers.
 - Delete country names from addresses.
@@ -396,6 +414,7 @@ If the buyer/seller block contains indicators of Lithuanian “individuali veikl
 - Set "separate_vat": true ONLY when the document has 2 or more different VAT rates, AND each rate's taxable base > 0. A 0% VAT rate counts if its taxable base > 0, even though VAT amount = 0 (e.g., 21% on 100 EUR + 0% on 50 EUR = separate_vat: true).
   To decide this, you MUST check line items and VAT summary - if lines have different vat_percent (e.g., some 0%, some 21%) with subtotal > 0, set separate_vat: true.
   When separate_vat is true, omit document-level "vat_percent" (do NOT put a single rate like "21").
+  You MUST include "vat_percent" for EACH line item, even if not explicitly shown in the row. Use VAT summary section to deduce rates: match line item subtotals to taxable bases in summary. Hint: packaging/deposit items ("skardinė", "tara", "užstatas") are usually 0% VAT; make sure you add them as separate lineitems.
 - Set "doc_96_str": true only if the document explicitly mentions Lietuvos PVM įstatymo 96 straipsnis, e.g. “PVM įstatymo 96 straipsnis”, “96 straipsnis”, “96 str.”, “taikomas 96 straipsnis”, “pagal PVMĮ 96 str.”. Otherwise set "doc_96_str": false.
 - If the document is a kasos čekis (cash receipt), e.g. a fuel (kuro) receipt, buyer info is often at the bottom as a line
   with company name, company code, and VAT code — extract these as buyer details.
