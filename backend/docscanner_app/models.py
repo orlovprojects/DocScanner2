@@ -1150,6 +1150,7 @@ class APIExportLog(models.Model):
     program = models.CharField(max_length=50, choices=ExportProgram.choices)
     status = models.CharField(max_length=20, choices=ExportStatus.choices)
     created_at = models.DateTimeField(auto_now_add=True)
+    message = models.CharField(max_length=255, blank=True, default="")
 
     invoice_type = models.CharField(max_length=30)
     invoice_status = models.CharField(max_length=10)
@@ -1159,6 +1160,7 @@ class APIExportLog(models.Model):
     full_response = models.TextField(blank=True, default='')
     partner_status = models.CharField(max_length=10, blank=True, default='')
     partner_error = models.TextField(blank=True, default='')
+    partner_message = models.CharField(max_length=255, blank=True, default="")
 
     session = models.ForeignKey(
         'ExportSession',
@@ -1190,6 +1192,7 @@ class APIExportArticleLog(models.Model):
     status = models.CharField(max_length=10)
     result = models.IntegerField(null=True, blank=True)
     error = models.TextField(blank=True, default='')
+    message = models.CharField(max_length=255, blank=True, default="")
 
     full_response = models.TextField(blank=True, default='')
 
