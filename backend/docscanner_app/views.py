@@ -5487,6 +5487,7 @@ def mailgun_inbound(request):
 
     # 1. Проверяем подпись Mailgun
     signing_key = getattr(settings, 'MAILGUN_WEBHOOK_SIGNING_KEY', '')
+    logger.info(f"Mailgun POST keys: {list(request.POST.keys())}")
     if not signing_key:
         logger.error("MAILGUN_WEBHOOK_SIGNING_KEY not configured")
         return HttpResponseForbidden('Webhook not configured')
