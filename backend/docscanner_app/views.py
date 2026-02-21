@@ -29,6 +29,7 @@ from .pagination import DocumentsCursorPagination, UsersCursorPagination, Mobile
 
 import hmac
 from .utils.file_converter import SUPPORTED_EXTS
+from django.views.decorators.http import require_POST
 
 
 # --- Django ---
