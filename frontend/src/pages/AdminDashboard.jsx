@@ -26,6 +26,7 @@ import {
   Percent,
   Refresh,
   Block,
+  CreditCard,
 } from "@mui/icons-material";
 import { api } from "../api/endpoints";
 
@@ -126,6 +127,23 @@ function StatCard({ title, items, icon: Icon, color = "primary" }) {
         {items}
       </CardContent>
     </Card>
+  );
+}
+
+function PaymentStatItem({ label, data }) {
+  const { total_eur = 0, count = 0 } = data || {};
+  return (
+    <Box textAlign="center" sx={{ minWidth: 90 }}>
+      <Typography variant="caption" color="text.secondary">
+        {label}
+      </Typography>
+      <Typography variant="h6" fontWeight={700} color={total_eur > 0 ? "success.dark" : "text.primary"}>
+        €{total_eur.toFixed(2)}
+      </Typography>
+      <Typography variant="caption" color="text.secondary">
+        {count} mok.
+      </Typography>
+    </Box>
   );
 }
 
@@ -408,6 +426,41 @@ export default function AdminDashboard() {
                   <RejectedStatItem label="Pask. 7 d." data={rej?.last_7_days} />
                   <RejectedStatItem label="Pask. 30 d." data={rej?.last_30_days} />
                   <RejectedStatItem label="Viso" data={rej?.total} />
+                </Stack>
+              </Box>
+            </CardContent>
+          </Card>
+        </Grid>
+
+        {/* Apmokėjimai */}
+        <Grid size={12}>
+          <Card
+            elevation={0}
+            sx={{
+              border: 1,
+              borderColor: "info.main",
+              bgcolor: "info.50",
+              borderRadius: 2,
+            }}
+          >
+            <CardContent>
+              <Box display="flex" alignItems="center" gap={2} flexWrap="wrap">
+                <CreditCard sx={{ color: "info.main", fontSize: 32 }} />
+                <Box flex={1} minWidth={260}>
+                  <Typography variant="h6" fontWeight={800} color="info.dark">
+                    Apmokėjimai
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Gautos sumos pagal laikotarpius
+                  </Typography>
+                </Box>
+                <Stack direction="row" spacing={3} flexWrap="wrap">
+                  <PaymentStatItem label="Šiandien"    data={stats.payments?.today} />
+                  <PaymentStatItem label="Vakar"       data={stats.payments?.yesterday} />
+                  <PaymentStatItem label="Šią savaitę" data={stats.payments?.this_week} />
+                  <PaymentStatItem label="Šį mėnesį"  data={stats.payments?.this_month} />
+                  <PaymentStatItem label="Pask. 30 d." data={stats.payments?.last_30_days} />
+                  <PaymentStatItem label="Iš viso"     data={stats.payments?.total} />
                 </Stack>
               </Box>
             </CardContent>

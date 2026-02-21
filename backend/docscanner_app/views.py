@@ -123,7 +123,7 @@ from .serializers import (
     CounterpartySerializer,
 )
 from django.db.models import Prefetch
-from django.db.models import Count
+from django.db.models import Count, Sum
 
 from typing import Any, Optional
 
@@ -249,6 +249,18 @@ def _rejected_stats(rejected, total):
         "pct": _pct(rejected, total),
     }
 
+def _payments_agg(qs):
+    r = qs.aggregate(
+        total_eur=Sum('amount_total'),
+        net_eur=Sum('net_amount'),
+        count=Count('id'),
+    )
+    return {
+        "total_eur": round((r['total_eur'] or 0) / 100, 2),
+        "net_eur":   round((r['net_eur'] or 0) / 100, 2),
+        "count":     r['count'] or 0,
+    }
+
 @api_view(["GET"])
 @permission_classes([IsSuperUser])
 def superuser_dashboard_stats(request):
@@ -312,6 +324,24 @@ def superuser_dashboard_stats(request):
     st_sumiskai = qs_all.filter(scan_type="sumiskai").count()
     st_detaliai = qs_all.filter(scan_type="detaliai").count()
 
+    # Payments статистика
+    pay_base = Payments.objects.filter(payment_status='paid')
+
+    start_today = timezone.make_aware(datetime.combine(today, time.min))
+    end_today   = timezone.make_aware(datetime.combine(today, time.max))
+    start_yest  = timezone.make_aware(datetime.combine(yesterday, time.min))
+    end_yest    = timezone.make_aware(datetime.combine(yesterday, time.max))
+
+    week_start  = today - timedelta(days=today.weekday())  # Понедельник текущей недели
+    month_start = today.replace(day=1)
+
+    pay_today      = _payments_agg(pay_base.filter(paid_at__range=(start_today, end_today)))
+    pay_yesterday  = _payments_agg(pay_base.filter(paid_at__range=(start_yest, end_yest)))
+    pay_this_week  = _payments_agg(pay_base.filter(paid_at__gte=timezone.make_aware(datetime.combine(week_start, time.min))))
+    pay_this_month = _payments_agg(pay_base.filter(paid_at__gte=timezone.make_aware(datetime.combine(month_start, time.min))))
+    pay_30d        = _payments_agg(pay_base.filter(paid_at__gte=timezone.now() - timedelta(days=30)))
+    pay_total      = _payments_agg(pay_base)
+
     data = {
         "documents": {
             "today":       {"count": docs_today,     "errors": err_today},
@@ -349,6 +379,14 @@ def superuser_dashboard_stats(request):
             "new_last_7_days":  new_users_7d,
             "new_last_30_days": new_users_30d,
             "total":            total_users,
+        },
+        "payments": {
+            "today":       pay_today,
+            "yesterday":   pay_yesterday,
+            "this_week":   pay_this_week,
+            "this_month":  pay_this_month,
+            "last_30_days":pay_30d,
+            "total":       pay_total,
         },
         "meta": {
             "timezone": str(timezone.get_current_timezone()),
