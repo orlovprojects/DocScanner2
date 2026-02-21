@@ -5496,7 +5496,8 @@ def mailgun_inbound(request):
     signature = request.POST.get('signature', '')
 
     try:
-        if abs(time.time() - int(timestamp)) > 300:
+        import time as time_module
+        if abs(time_module.time() - int(timestamp)) > 300:
             logger.warning("Mailgun webhook: stale timestamp")
             return HttpResponseForbidden('Stale request')
     except (ValueError, TypeError):
