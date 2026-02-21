@@ -8,6 +8,7 @@ from django.conf import settings
 from django.utils import timezone
 import secrets
 from decimal import Decimal
+import string
 
 #wagtail importy
 from wagtail.models import Page
@@ -572,6 +573,14 @@ class CustomUser(AbstractUser):
     optimum_extra_fields       = models.JSONField(default=dict, blank=True)
     dineta_extra_fields       = models.JSONField(default=dict, blank=True)
 
+    email_inbox_token = models.CharField(
+        max_length=15,
+        unique=True,
+        null=True,
+        blank=True,
+        db_index=True,
+    )
+
     # mobile_key = models.CharField(max_length=64, unique=True, null=True, blank=True)
 
     # def generate_mobile_key(self, save: bool = True) -> str:
@@ -615,6 +624,31 @@ class CustomUser(AbstractUser):
                 return "canceled_expired"
             return "canceled"
         return "unknown"
+    
+    @staticmethod
+    def _generate_inbox_token():
+        """15 символов: lowercase буквы + цифры, без путаницы (без o/0/l/1)."""
+        alphabet = 'abcdefghjkmnpqrstuvwxyz23456789'
+        return ''.join(secrets.choice(alphabet) for _ in range(15))
+
+    def ensure_inbox_token(self, save=True):
+        """Генерирует токен если его ещё нет."""
+        if not self.email_inbox_token:
+            for _ in range(10):  # на случай коллизии
+                token = self._generate_inbox_token()
+                if not CustomUser.objects.filter(email_inbox_token=token).exists():
+                    self.email_inbox_token = token
+                    if save:
+                        self.save(update_fields=["email_inbox_token"])
+                    return token
+            raise RuntimeError("Failed to generate unique inbox token")
+        return self.email_inbox_token
+
+    @property
+    def inbox_email_address(self):
+        if self.email_inbox_token:
+            return f"{self.email_inbox_token}@inbox.dokskenas.lt"
+        return None
 
 
     
@@ -1114,6 +1148,18 @@ class MobileInboxDocument(models.Model):
         blank=True,
         help_text="Pilnas URL, kurį WEB gali naudoti peržiūrai (PDF/preview)",
     )
+
+    source = models.CharField(
+        max_length=10,
+        choices=[("mob", "Mob. programėlė"), ("email", "El. paštas")],
+        default="mob",
+        db_index=True,
+    )
+    sender_subject = models.CharField(
+        max_length=500,
+        blank=True,
+        default="",
+    )    
 
     class Meta:
         ordering = ["-created_at"]

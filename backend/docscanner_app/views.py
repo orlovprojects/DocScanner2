@@ -27,13 +27,15 @@ from .serializers import ScannedDocumentListSerializer
 from .pagination import DocumentsCursorPagination, UsersCursorPagination, MobileInboxCursorPagination, LineItemPagination
 
 
+import hmac
+from .utils.file_converter import SUPPORTED_EXTS
 
 
 # --- Django ---
 from django.conf import settings
 from django.db import transaction
 from django.db.models import Q
-from django.http import FileResponse, Http404, HttpResponse
+from django.http import FileResponse, Http404, HttpResponse, HttpResponseForbidden
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.utils.dateparse import parse_date
@@ -5466,3 +5468,103 @@ def export_log_detail(request, document_id):
     return Response(data, status=200)
 
 
+
+
+#Dokumenty iz emailov
+
+MAX_MAILGUN_FILE_SIZE = 25 * 1024 * 1024  # 25 MB
+
+
+@csrf_exempt
+@require_POST
+def mailgun_inbound(request):
+    """
+    POST /api/mailgun/inbound/
+    Webhook от Mailgun — принимает входящие email и сохраняет вложения
+    в MobileInboxDocument с source='email'.
+    """
+
+    # 1. Проверяем подпись Mailgun
+    signing_key = getattr(settings, 'MAILGUN_WEBHOOK_SIGNING_KEY', '')
+    if not signing_key:
+        logger.error("MAILGUN_WEBHOOK_SIGNING_KEY not configured")
+        return HttpResponseForbidden('Webhook not configured')
+
+    token = request.POST.get('token', '')
+    timestamp = request.POST.get('timestamp', '')
+    signature = request.POST.get('signature', '')
+
+    try:
+        if abs(time.time() - int(timestamp)) > 300:
+            logger.warning("Mailgun webhook: stale timestamp")
+            return HttpResponseForbidden('Stale request')
+    except (ValueError, TypeError):
+        return HttpResponseForbidden('Invalid timestamp')
+
+    expected = hmac.new(
+        key=signing_key.encode('utf-8'),
+        msg=f'{timestamp}{token}'.encode('utf-8'),
+        digestmod=hashlib.sha256,
+    ).hexdigest()
+
+    if not hmac.compare_digest(signature, expected):
+        logger.warning("Mailgun webhook: invalid signature")
+        return HttpResponseForbidden('Invalid signature')
+
+    # 2. Находим пользователя по inbox-токену
+    recipient = request.POST.get('recipient', '')
+    inbox_token = recipient.split('@')[0].lower().strip()
+
+    if not inbox_token:
+        return HttpResponse('ok', status=200)
+
+    try:
+        user = CustomUser.objects.get(email_inbox_token=inbox_token)
+    except CustomUser.DoesNotExist:
+        logger.info(f"Mailgun inbound: unknown token '{inbox_token}'")
+        return HttpResponse('ok', status=200)
+
+    sender_email = request.POST.get('sender', '')
+    subject = request.POST.get('subject', '')
+
+    # 3. Сохраняем вложения
+    saved_count = 0
+    skipped_count = 0
+
+    for key, uploaded_file in request.FILES.items():
+        # Проверка расширения
+        ext = os.path.splitext(uploaded_file.name)[1].lower()
+        if ext not in SUPPORTED_EXTS:
+            logger.debug(f"Mailgun inbound: skip unsupported ext '{ext}' ({uploaded_file.name})")
+            skipped_count += 1
+            continue
+
+        # Проверка размера
+        file_size = getattr(uploaded_file, 'size', 0) or 0
+        if file_size > MAX_MAILGUN_FILE_SIZE:
+            logger.warning(f"Mailgun inbound: skip too large file ({file_size} bytes): {uploaded_file.name}")
+            skipped_count += 1
+            continue
+
+        doc = MobileInboxDocument.objects.create(
+            user=user,
+            uploaded_file=uploaded_file,
+            original_filename=uploaded_file.name,
+            size_bytes=file_size,
+            sender_email=sender_email,
+            source='email',
+            sender_subject=subject,
+            is_processed=False,
+        )
+
+        doc.preview_url = f"{settings.SITE_URL_BACKEND}{doc.uploaded_file.url}"
+        doc.save(update_fields=["preview_url"])
+
+        saved_count += 1
+
+    logger.info(
+        f"Mailgun inbound: user={user.email}, token={inbox_token}, "
+        f"sender={sender_email}, saved={saved_count}, skipped={skipped_count}"
+    )
+
+    return HttpResponse('ok', status=200)
