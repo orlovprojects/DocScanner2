@@ -5510,9 +5510,19 @@ def mailgun_inbound(request):
         digestmod=hashlib.sha256,
     ).hexdigest()
 
+    logger.info(
+        f"Mailgun sig debug: "
+        f"sig={signature[:16]}..., "
+        f"expected={expected[:16]}..., "
+        f"key_first3={signing_key[:3]}, "
+        f"key_len={len(signing_key)}, "
+        f"ts={timestamp}, "
+        f"token_len={len(token)}"
+    )
+
     if not hmac.compare_digest(signature, expected):
         logger.warning("Mailgun webhook: invalid signature")
-        # return HttpResponseForbidden('Invalid signature')
+        # return HttpResponseForbidden('Invalid signature')  # ВРЕМЕННО ОТКЛЮЧЕНО
 
     # 2. Находим пользователя по inbox-токену
     recipient = request.POST.get('recipient', '')
