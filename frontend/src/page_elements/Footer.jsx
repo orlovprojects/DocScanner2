@@ -143,6 +143,15 @@ const Footer = () => {
                   <Link href="/centas" underline="none" color="inherit" sx={linkSx}>
                     Centas
                   </Link>   
+                  <Link href="/finvalda" underline="none" color="inherit" sx={linkSx}>
+                    Finvalda
+                  </Link>   
+                  <Link href="/debetas" underline="none" color="inherit" sx={linkSx}>
+                    Debetas
+                  </Link>   
+                  <Link href="/pragma" underline="none" color="inherit" sx={linkSx}>
+                    Pragma
+                  </Link>   
                   <Link href="/apskaita5" underline="none" color="inherit" sx={linkSx}>
                     Apskaita5
                   </Link>

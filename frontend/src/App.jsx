@@ -55,6 +55,9 @@ import Agnum from './LPs/agnum';
 import Centas from './LPs/centas';
 import Apsa from './LPs/apsa';
 import Apskaita5 from './LPs/apskaita5';
+import Finvalda from './LPs/finvalda';
+import Debetas from './LPs/debetas';
+import Pragma from './LPs/pragma';
 
 function App() {
   const location = useLocation();
@@ -121,6 +124,9 @@ function App() {
         <Route path="/centas" element={<Centas />} />
         <Route path="/apsa" element={<Apsa />} />
         <Route path="/apskaita5" element={<Apskaita5 />} />
+        <Route path="/finvalda" element={<Finvalda />} />
+        <Route path="/debetas" element={<Debetas />} />
+        <Route path="/pragma" element={<Pragma />} />
 
         <Route
           path="/suvestine"
