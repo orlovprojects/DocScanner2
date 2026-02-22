@@ -521,17 +521,17 @@ const PvmSkaiciuokle = () => {
           }}
         >
           {[
-            { name: "Finvalda", href: null },
+            { name: "Finvalda", href: 'https://atlyginimoskaiciuokle.com/finvalda' },
             { name: "Rivilė GAMA", href: 'https://atlyginimoskaiciuokle.com/rivile' },
             { name: "Rivilė ERP", href: 'https://atlyginimoskaiciuokle.com/rivile' },
             { name: "Agnum", href: 'https://atlyginimoskaiciuokle.com/agnum' },
             { name: "Centas", href: 'https://atlyginimoskaiciuokle.com/centas' },
             { name: "Apskaita5", href: 'https://atlyginimoskaiciuokle.com/apskaita5' },
-            { name: "Pragma 3.2", href: null },
-            { name: "Pragma 4", href: null },
+            { name: "Pragma 3.2", href: 'https://atlyginimoskaiciuokle.com/pragma' },
+            { name: "Pragma 4", href: 'https://atlyginimoskaiciuokle.com/pragma' },
             { name: "Būtenta", href: null },
             { name: "Site.pro", href: 'https://atlyginimoskaiciuokle.com/site-pro' },
-            { name: "Debetas", href: null },
+            { name: "Debetas", href: 'https://atlyginimoskaiciuokle.com/debetas' },
             { name: "APSA", href: 'https://atlyginimoskaiciuokle.com/apsa' },
             { name: "Paulita", href: null },
             { name: "Optimum", href: null },

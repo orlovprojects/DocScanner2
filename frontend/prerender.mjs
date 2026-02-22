@@ -30,6 +30,9 @@ const routesToPrerender = [
   '/apsa',
   '/centas',
   '/apskaita5',
+  '/pragma',
+  '/debetas',
+  '/finvalda',
 ];
 
 const distDir = path.resolve(__dirname, 'dist');

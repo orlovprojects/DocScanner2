@@ -832,17 +832,17 @@ const Dokskenas = () => {
             }}
           >
             {[
-              { label: 'Finvalda', url: 'https://finvalda.lt/', hasLink: true },
+              { label: 'Finvalda', url: 'https://atlyginimoskaiciuokle.com/finvalda', hasLink: true },
               { label: 'Rivilė GAMA', url: 'https://atlyginimoskaiciuokle.com/rivile', hasLink: true },
               { label: 'Rivilė ERP', url: 'https://atlyginimoskaiciuokle.com/rivile', hasLink: true },
               { label: 'Agnum', url: 'https://atlyginimoskaiciuokle.com/agnum', hasLink: true },
               { label: 'Centas', url: 'https://atlyginimoskaiciuokle.com/centas', hasLink: true },
               { label: 'Apskaita5', url: 'https://atlyginimoskaiciuokle.com/apskaita5', hasLink: true },
-              { label: 'Pragma 3.2', hasLink: false },
-              { label: 'Pragma 4', hasLink: false },
+              { label: 'Pragma 3.2', url: 'https://atlyginimoskaiciuokle.com/pragma', hasLink: true },
+              { label: 'Pragma 4', url: 'https://atlyginimoskaiciuokle.com/pragma', hasLink: true },
               { label: 'Būtenta', hasLink: false },
               { label: 'Site.pro', url: 'https://atlyginimoskaiciuokle.com/site-pro', hasLink: true },
-              { label: 'Debetas', hasLink: false },
+              { label: 'Debetas', url: 'https://atlyginimoskaiciuokle.com/debetas', hasLink: true },
               { label: 'APSA', url: 'https://atlyginimoskaiciuokle.com/apsa', hasLink: true },
               { label: 'Paulita', hasLink: false },
               { label: 'Optimum', hasLink: false },
