@@ -3128,6 +3128,106 @@ def sync_cloud_folder(self, cloud_folder_id, event_type="webhook"):
 
 
 
+"""
+Cloud Sync Tasks (Celery)
+Файлы сохраняются в MobileInboxDocument с source="google_drive"/"dropbox".
+
+CELERY_BEAT_SCHEDULE:
+    "cloud-fallback-poll": {
+        "task": "docscanner_app.tasks.fallback_poll_all",
+        "schedule": crontab(minute=0, hour="*/2"),
+    },
+    "cloud-renew-gdrive-watches": {
+        "task": "docscanner_app.tasks.renew_gdrive_watches",
+        "schedule": crontab(minute=0, hour="*/12"),
+    },
+"""
+
+
+WEBHOOK_DEBOUNCE_SECONDS = 5 * 60
+
+
+# ════════════════════════════════════════════════
+#  Webhook debounce — 5 мин после последнего webhook
+# ════════════════════════════════════════════════
+
+@shared_task
+def schedule_sync_after_webhook(connection_id):
+    from django.core.cache import cache
+    from .models import CloudClientFolder
+
+    folders = CloudClientFolder.objects.filter(
+        connection_id=connection_id, is_active=True,
+    ).values_list("id", flat=True)
+
+    for folder_id in folders:
+        debounce_key = f"cloud_sync:{connection_id}:{folder_id}"
+
+        prev_task_id = cache.get(debounce_key)
+        if prev_task_id:
+            try:
+                from celery.result import AsyncResult
+                AsyncResult(prev_task_id).revoke()
+            except Exception:
+                pass
+
+        task = sync_cloud_folder.apply_async(
+            args=[folder_id, "webhook"],
+            countdown=WEBHOOK_DEBOUNCE_SECONDS,
+        )
+        cache.set(debounce_key, task.id, timeout=WEBHOOK_DEBOUNCE_SECONDS + 60)
+
+    logger.info(
+        "Webhook debounce: %d folders, connection %s, sync in %ds",
+        len(folders), connection_id, WEBHOOK_DEBOUNCE_SECONDS,
+    )
+
+
+# ════════════════════════════════════════════════
+#  Fallback polling — каждые 2 часа
+# ════════════════════════════════════════════════
+
+@shared_task
+def fallback_poll_all():
+    from .models import CloudClientFolder
+
+    folders = CloudClientFolder.objects.filter(
+        is_active=True, connection__is_active=True,
+    )
+    count = 0
+    for folder in folders:
+        if folder.last_polled_at and (timezone.now() - folder.last_polled_at) < timedelta(hours=1):
+            continue
+        sync_cloud_folder.delay(folder.id, event_type="poll")
+        count += 1
+
+    logger.info("Fallback poll: %d folders", count)
+
+
+# ════════════════════════════════════════════════
+#  Google Drive watch renewal — каждые 12 часов
+# ════════════════════════════════════════════════
+
+@shared_task
+def renew_gdrive_watches():
+    from .models import CloudConnection, CloudClientFolder
+    from .cloud_services import GoogleDriveService
+
+    service = GoogleDriveService()
+    connections = CloudConnection.objects.filter(provider="google_drive", is_active=True)
+
+    for conn in connections:
+        if (conn.gdrive_channel_expiration and
+                conn.gdrive_channel_expiration > timezone.now() + timedelta(hours=6)):
+            continue
+
+        folders = CloudClientFolder.objects.filter(connection=conn, is_active=True)
+        for folder in folders:
+            try:
+                webhook_url = f"{settings.CLOUD_WEBHOOK_BASE_URL}/api/cloud/webhook/google/"
+                service.setup_push_notifications(conn, folder.remote_folder_id, webhook_url)
+            except Exception as e:
+                logger.error("Failed to renew watch folder %s: %s", folder.id, e)
 
 
 
@@ -3149,24 +3249,6 @@ def sync_cloud_folder(self, cloud_folder_id, event_type="webhook"):
 
 
 
-
-# """
-# Cloud Sync Tasks (Celery)
-# Файлы сохраняются в MobileInboxDocument с source="google_drive"/"dropbox".
-
-# CELERY_BEAT_SCHEDULE:
-#     "cloud-fallback-poll": {
-#         "task": "docscanner_app.cloud_tasks.fallback_poll_all",
-#         "schedule": crontab(minute=0, hour="*/2"),
-#     },
-#     "cloud-renew-gdrive-watches": {
-#         "task": "docscanner_app.cloud_tasks.renew_gdrive_watches",
-#         "schedule": crontab(minute=0, hour="*/12"),
-#     },
-# """
-
-
-# WEBHOOK_DEBOUNCE_SECONDS = 5 * 60
 
 
 # # ════════════════════════════════════════════════
@@ -3278,85 +3360,3 @@ def sync_cloud_folder(self, cloud_folder_id, event_type="webhook"):
 #         if self.request.retries < self.max_retries:
 #             raise self.retry(exc=e)
 
-
-# # ════════════════════════════════════════════════
-# #  Webhook debounce — 5 мин после последнего webhook
-# # ════════════════════════════════════════════════
-
-# @shared_task
-# def schedule_sync_after_webhook(connection_id):
-#     from django.core.cache import cache
-#     from .models import CloudClientFolder
-
-#     folders = CloudClientFolder.objects.filter(
-#         connection_id=connection_id, is_active=True,
-#     ).values_list("id", flat=True)
-
-#     for folder_id in folders:
-#         debounce_key = f"cloud_sync:{connection_id}:{folder_id}"
-
-#         prev_task_id = cache.get(debounce_key)
-#         if prev_task_id:
-#             try:
-#                 from celery.result import AsyncResult
-#                 AsyncResult(prev_task_id).revoke()
-#             except Exception:
-#                 pass
-
-#         task = sync_cloud_folder.apply_async(
-#             args=[folder_id, "webhook"],
-#             countdown=WEBHOOK_DEBOUNCE_SECONDS,
-#         )
-#         cache.set(debounce_key, task.id, timeout=WEBHOOK_DEBOUNCE_SECONDS + 60)
-
-#     logger.info(
-#         "Webhook debounce: %d folders, connection %s, sync in %ds",
-#         len(folders), connection_id, WEBHOOK_DEBOUNCE_SECONDS,
-#     )
-
-
-# # ════════════════════════════════════════════════
-# #  Fallback polling — каждые 2 часа
-# # ════════════════════════════════════════════════
-
-# @shared_task
-# def fallback_poll_all():
-#     from .models import CloudClientFolder
-
-#     folders = CloudClientFolder.objects.filter(
-#         is_active=True, connection__is_active=True,
-#     )
-#     count = 0
-#     for folder in folders:
-#         if folder.last_polled_at and (timezone.now() - folder.last_polled_at) < timedelta(hours=1):
-#             continue
-#         sync_cloud_folder.delay(folder.id, event_type="poll")
-#         count += 1
-
-#     logger.info("Fallback poll: %d folders", count)
-
-
-# # ════════════════════════════════════════════════
-# #  Google Drive watch renewal — каждые 12 часов
-# # ════════════════════════════════════════════════
-
-# @shared_task
-# def renew_gdrive_watches():
-#     from .models import CloudConnection, CloudClientFolder
-#     from .cloud_services import GoogleDriveService
-
-#     service = GoogleDriveService()
-#     connections = CloudConnection.objects.filter(provider="google_drive", is_active=True)
-
-#     for conn in connections:
-#         if (conn.gdrive_channel_expiration and
-#                 conn.gdrive_channel_expiration > timezone.now() + timedelta(hours=6)):
-#             continue
-
-#         folders = CloudClientFolder.objects.filter(connection=conn, is_active=True)
-#         for folder in folders:
-#             try:
-#                 webhook_url = f"{settings.CLOUD_WEBHOOK_BASE_URL}/api/cloud/webhook/google/"
-#                 service.setup_push_notifications(conn, folder.remote_folder_id, webhook_url)
-#             except Exception as e:
-#                 logger.error("Failed to renew watch folder %s: %s", folder.id, e)
