@@ -13,10 +13,19 @@ app.autodiscover_tasks()
 app.conf.timezone = 'Europe/Vilnius'
 app.conf.enable_utc = False
 
+
 app.conf.beat_schedule = {
     'fetch-currency-rates-every-morning': {
         'task': 'docscanner_app.tasks.fetch_daily_currency_rates',
-        'schedule': crontab(hour=13, minute=0),  # Каждый день в 13:00 по Вильнюсу
+        'schedule': crontab(hour=13, minute=0),
+    },
+    'cloud-fallback-poll': {
+        'task': 'docscanner_app.tasks.fallback_poll_all',
+        'schedule': crontab(minute=0, hour='*/2'),
+    },
+    'cloud-renew-gdrive-watches': {
+        'task': 'docscanner_app.tasks.renew_gdrive_watches',
+        'schedule': crontab(minute=0, hour='*/12'),
     },
 }
 

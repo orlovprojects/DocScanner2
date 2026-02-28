@@ -7,7 +7,6 @@ import re
 import logging
 import logging.config
 from django.db.models import F
-
 from decimal import Decimal
 
 from celery import shared_task
@@ -17,6 +16,7 @@ from django.conf import settings
 from django.core.files.base import ContentFile
 from django.db import transaction
 from django.utils import timezone
+from datetime import timedelta
 
 from .models import ScannedDocument, CustomUser, UploadSession
 
@@ -2857,3 +2857,506 @@ def export_to_dineta_task(self, session_id: int):
         session_id, len(documents), total_time,
         success_count, partial_count, error_count,
     )
+
+
+
+
+
+
+
+#Integracii s Google Drive i DropBox
+
+# ════════════════════════════════════════════════
+#  Cloud sync limits
+# ════════════════════════════════════════════════
+
+CLOUD_MAX_SINGLE_FILE_BYTES    = 50 * 1024 * 1024      # 50 MB
+CLOUD_MAX_FILES_PER_SYNC       = 500
+CLOUD_MAX_TOTAL_BYTES_PER_SYNC = 1 * 1024 * 1024 * 1024  # 1 GB
+CLOUD_RETRY_DELAY_SECONDS      = 300                      # 5 min
+
+# Поддерживаемые форматы (всё что умеет normalize_any, БЕЗ архивов)
+CLOUD_ALLOWED_EXT = {
+    ".pdf",
+    ".jpg", ".jpeg", ".jpe", ".png", ".tiff", ".tif",
+    ".webp", ".bmp", ".heic", ".heif", ".avif", ".gif",
+    ".doc", ".docx", ".xls", ".xlsx",
+}
+
+CLOUD_ARCHIVE_EXT = {
+    ".zip", ".rar", ".7z", ".tar", ".tgz",
+    ".tar.gz", ".tar.bz2", ".tar.xz", ".tbz2",
+}
+
+
+def _cloud_ext(name: str) -> str:
+    """Расширение файла (с поддержкой .tar.gz и т.п.)."""
+    n = (name or "").lower()
+    if n.endswith(".tar.gz"):  return ".tar.gz"
+    if n.endswith(".tar.bz2"): return ".tar.bz2"
+    if n.endswith(".tar.xz"):  return ".tar.xz"
+    import os
+    return os.path.splitext(n)[1]
+
+
+def _safe_rename(service, connection, file_id, new_name, logger):
+    """Rename с обрезкой до 250 символов."""
+    if len(new_name) > 250:
+        base, fext = (new_name.rsplit(".", 1) if "." in new_name else (new_name, ""))
+        new_name = f"{base[:250 - len(fext) - 1]}.{fext}" if fext else base[:250]
+    try:
+        service.rename_file(connection, file_id, new_name)
+    except Exception as e:
+        logger.warning("Rename failed for %s: %s", file_id, e)
+
+
+@shared_task(bind=True, max_retries=3, default_retry_delay=60,
+             soft_time_limit=900, time_limit=960)
+def sync_cloud_folder(self, cloud_folder_id, event_type="webhook"):
+    from .models import CloudClientFolder, MobileInboxDocument
+    from .cloud_services import get_cloud_service
+
+    try:
+        folder = CloudClientFolder.objects.select_related(
+            "connection", "connection__user", "cloud_client"
+        ).get(id=cloud_folder_id, is_active=True)
+    except CloudClientFolder.DoesNotExist:
+        logger.warning("CloudClientFolder %s not found", cloud_folder_id)
+        return
+
+    connection = folder.connection
+    if not connection.is_active:
+        return
+
+    user = connection.user
+    service = get_cloud_service(connection.provider)
+
+    has_remaining = False  # True если остались файлы (лимиты/время)
+
+    try:
+        service.refresh_token_if_needed(connection)
+        new_files = service.list_new_files(connection, folder.remote_folder_id)
+
+        logger.info(
+            "Folder %s (%s): %d new files",
+            folder.cloud_client.name, connection.provider, len(new_files),
+        )
+
+        downloaded_count = 0
+        total_downloaded_bytes = 0
+        date_str = timezone.now().strftime("%Y%m%d")
+
+        for cloud_file in new_files:
+            try:
+                # ── Лимит количества файлов ──
+                if downloaded_count >= CLOUD_MAX_FILES_PER_SYNC:
+                    logger.info(
+                        "Sync file limit reached (%d). Remaining files will be picked up next sync.",
+                        CLOUD_MAX_FILES_PER_SYNC,
+                    )
+                    has_remaining = True
+                    break
+
+                # ── Дедупликация ──
+                if MobileInboxDocument.objects.filter(
+                    user=user, remote_file_id=cloud_file.file_id,
+                ).exists():
+                    continue
+
+                # ── Проверка расширения ──
+                ext = _cloud_ext(cloud_file.name)
+
+                if ext in CLOUD_ARCHIVE_EXT:
+                    # Архив → не поддерживается в sync
+                    logger.info("Skipping archive: %s", cloud_file.name)
+                    _safe_rename(
+                        service, connection, cloud_file.file_id,
+                        f"KLAIDA_BLOGAS_FORMATAS_{date_str}_{cloud_file.name}",
+                        logger,
+                    )
+                    continue
+
+                if ext not in CLOUD_ALLOWED_EXT:
+                    # Неподдерживаемый формат
+                    logger.info("Skipping unsupported format: %s", cloud_file.name)
+                    _safe_rename(
+                        service, connection, cloud_file.file_id,
+                        f"KLAIDA_BLOGAS_FORMATAS_{date_str}_{cloud_file.name}",
+                        logger,
+                    )
+                    continue
+
+                # ── Проверка размера до скачивания ──
+                file_size = cloud_file.size or 0
+
+                if file_size > CLOUD_MAX_SINGLE_FILE_BYTES:
+                    logger.warning(
+                        "File too large: %s (%d bytes, limit %d)",
+                        cloud_file.name, file_size, CLOUD_MAX_SINGLE_FILE_BYTES,
+                    )
+                    _safe_rename(
+                        service, connection, cloud_file.file_id,
+                        f"KLAIDA_PER_DIDELIS_{date_str}_{cloud_file.name}",
+                        logger,
+                    )
+                    continue
+
+                # ── Лимит суммарного объёма (проверка до скачивания) ──
+                if file_size > 0 and (total_downloaded_bytes + file_size) > CLOUD_MAX_TOTAL_BYTES_PER_SYNC:
+                    logger.info(
+                        "Sync bytes limit would be exceeded (%d + %d > %d). Stopping.",
+                        total_downloaded_bytes, file_size, CLOUD_MAX_TOTAL_BYTES_PER_SYNC,
+                    )
+                    has_remaining = True
+                    break
+
+                # ── Скачиваем ──
+                content_bytes, filename = service.download_file(
+                    connection, cloud_file.file_id
+                )
+                actual_size = len(content_bytes)
+
+                # Перепроверка размера после скачивания (на случай если size был 0 в метаданных)
+                if actual_size > CLOUD_MAX_SINGLE_FILE_BYTES:
+                    logger.warning(
+                        "Downloaded file too large: %s (%d bytes). Discarding.",
+                        cloud_file.name, actual_size,
+                    )
+                    _safe_rename(
+                        service, connection, cloud_file.file_id,
+                        f"KLAIDA_PER_DIDELIS_{date_str}_{cloud_file.name}",
+                        logger,
+                    )
+                    continue
+
+                # Перепроверка суммарного объёма после скачивания
+                if (total_downloaded_bytes + actual_size) > CLOUD_MAX_TOTAL_BYTES_PER_SYNC:
+                    logger.info(
+                        "Sync bytes limit exceeded after download (%d + %d > %d). Stopping.",
+                        total_downloaded_bytes, actual_size, CLOUD_MAX_TOTAL_BYTES_PER_SYNC,
+                    )
+                    # Файл уже скачан но не сохраним — переименуем обратно? Нет.
+                    # Лучше сохраним, раз уже скачали. Но пометим has_remaining.
+                    # (не break'аем — сохраняем этот файл, потом break)
+
+                # ── Сохраняем в MobileInboxDocument ──
+                doc = MobileInboxDocument(
+                    user=user,
+                    original_filename=filename,
+                    size_bytes=actual_size,
+                    source=connection.provider,
+                    cloud_client=folder.cloud_client,
+                    remote_file_id=cloud_file.file_id,
+                    rename_status="pending",
+                )
+                doc.uploaded_file.save(filename, ContentFile(content_bytes), save=False)
+                doc.save()
+
+                downloaded_count += 1
+                total_downloaded_bytes += actual_size
+
+                # ── Rename в облаке → ISSIUSTA_ ──
+                new_name = f"ISSIUSTA_{date_str}_{filename}"
+                try:
+                    ok = service.rename_file(connection, cloud_file.file_id, new_name)
+                    doc.rename_status = "done" if ok else "failed"
+                    doc.save(update_fields=["rename_status"])
+                except Exception as rename_err:
+                    logger.warning("Rename failed for %s: %s", filename, rename_err)
+                    doc.rename_status = "failed"
+                    doc.save(update_fields=["rename_status"])
+
+                logger.info(
+                    "Downloaded + renamed: %s -> doc %d (%d/%d, %d bytes total)",
+                    filename, doc.id, downloaded_count, CLOUD_MAX_FILES_PER_SYNC,
+                    total_downloaded_bytes,
+                )
+
+                # Проверяем суммарный лимит после сохранения
+                if total_downloaded_bytes >= CLOUD_MAX_TOTAL_BYTES_PER_SYNC:
+                    logger.info("Sync bytes limit reached after save. Stopping.")
+                    has_remaining = True
+                    break
+
+            except Exception as e:
+                # Скачивание не удалось → KLAIDA_ в облаке
+                try:
+                    _safe_rename(
+                        service, connection, cloud_file.file_id,
+                        f"KLAIDA_{date_str}_{cloud_file.name}",
+                        logger,
+                    )
+                except Exception:
+                    pass
+                logger.error("Error downloading %s: %s", cloud_file.name, e, exc_info=True)
+
+        # ── Обновляем timestamps ──
+        folder.last_polled_at = timezone.now()
+        folder.save(update_fields=["last_polled_at"])
+        connection.last_synced_at = timezone.now()
+        connection.save(update_fields=["last_synced_at"])
+
+        logger.info(
+            "Sync complete: folder=%s, downloaded=%d, bytes=%d, has_remaining=%s",
+            folder.cloud_client.name, downloaded_count, total_downloaded_bytes, has_remaining,
+        )
+
+    except SoftTimeLimitExceeded:
+        logger.warning(
+            "Sync soft time limit (15min) for folder %s. "
+            "Already downloaded files are saved. Scheduling retry in %ds.",
+            cloud_folder_id, CLOUD_RETRY_DELAY_SECONDS,
+        )
+        has_remaining = True
+
+    except Exception as e:
+        logger.error("Sync failed for folder %s: %s", cloud_folder_id, e, exc_info=True)
+        if self.request.retries < self.max_retries:
+            raise self.retry(exc=e)
+        return
+
+    # ── Если остались файлы — повторный sync через 5 минут ──
+    if has_remaining:
+        logger.info(
+            "Scheduling follow-up sync for folder %s in %ds",
+            cloud_folder_id, CLOUD_RETRY_DELAY_SECONDS,
+        )
+        sync_cloud_folder.apply_async(
+            args=[cloud_folder_id, "follow_up"],
+            countdown=CLOUD_RETRY_DELAY_SECONDS,
+        )
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# """
+# Cloud Sync Tasks (Celery)
+# Файлы сохраняются в MobileInboxDocument с source="google_drive"/"dropbox".
+
+# CELERY_BEAT_SCHEDULE:
+#     "cloud-fallback-poll": {
+#         "task": "docscanner_app.cloud_tasks.fallback_poll_all",
+#         "schedule": crontab(minute=0, hour="*/2"),
+#     },
+#     "cloud-renew-gdrive-watches": {
+#         "task": "docscanner_app.cloud_tasks.renew_gdrive_watches",
+#         "schedule": crontab(minute=0, hour="*/12"),
+#     },
+# """
+
+
+# WEBHOOK_DEBOUNCE_SECONDS = 5 * 60
+
+
+# # ════════════════════════════════════════════════
+# #  Синхронизация одной папки
+# # ════════════════════════════════════════════════
+
+# @shared_task(bind=True, max_retries=3, default_retry_delay=60)
+# def sync_cloud_folder(self, cloud_folder_id, event_type="webhook"):
+#     from .models import CloudClientFolder, MobileInboxDocument
+#     from .cloud_services import get_cloud_service
+
+#     try:
+#         folder = CloudClientFolder.objects.select_related(
+#             "connection", "connection__user", "cloud_client"
+#         ).get(id=cloud_folder_id, is_active=True)
+#     except CloudClientFolder.DoesNotExist:
+#         logger.warning("CloudClientFolder %s not found", cloud_folder_id)
+#         return
+
+#     connection = folder.connection
+#     if not connection.is_active:
+#         return
+
+#     user = connection.user
+#     service = get_cloud_service(connection.provider)
+
+#     ALLOWED_EXT = {".pdf", ".jpg", ".jpeg", ".png", ".tiff", ".tif"}
+
+#     try:
+#         service.refresh_token_if_needed(connection)
+#         new_files = service.list_new_files(connection, folder.remote_folder_id)
+
+#         logger.info(
+#             "Folder %s (%s): %d new files",
+#             folder.cloud_client.name, connection.provider, len(new_files),
+#         )
+
+#         for cloud_file in new_files:
+#             try:
+#                 # Дедупликация
+#                 if MobileInboxDocument.objects.filter(
+#                     user=user, remote_file_id=cloud_file.file_id,
+#                 ).exists():
+#                     continue
+
+#                 # Проверка расширения
+#                 ext = ""
+#                 if "." in cloud_file.name:
+#                     ext = "." + cloud_file.name.rsplit(".", 1)[-1].lower()
+#                 if ext not in ALLOWED_EXT:
+#                     continue
+
+#                 # Скачиваем
+#                 content_bytes, filename = service.download_file(
+#                     connection, cloud_file.file_id
+#                 )
+
+#                 # Сохраняем в MobileInboxDocument
+#                 doc = MobileInboxDocument(
+#                     user=user,
+#                     original_filename=filename,
+#                     size_bytes=len(content_bytes),
+#                     source=connection.provider,
+#                     cloud_client=folder.cloud_client,
+#                     remote_file_id=cloud_file.file_id,
+#                     rename_status="pending",
+#                 )
+#                 doc.uploaded_file.save(filename, ContentFile(content_bytes), save=False)
+#                 doc.save()
+
+#                 # Сразу ренеймим в облаке → ISSIUSTA_ = файл доставлен в DokSkenas
+#                 date_str = timezone.now().strftime("%Y%m%d")
+#                 new_name = f"ISSIUSTA_{date_str}_{filename}"
+#                 if len(new_name) > 250:
+#                     base, fext = (new_name.rsplit(".", 1) if "." in new_name else (new_name, ""))
+#                     new_name = f"{base[:250 - len(fext) - 1]}.{fext}" if fext else base[:250]
+
+#                 try:
+#                     ok = service.rename_file(connection, cloud_file.file_id, new_name)
+#                     doc.rename_status = "done" if ok else "failed"
+#                     doc.save(update_fields=["rename_status"])
+#                 except Exception as rename_err:
+#                     logger.warning("Rename failed for %s: %s", filename, rename_err)
+#                     doc.rename_status = "failed"
+#                     doc.save(update_fields=["rename_status"])
+
+#                 logger.info("Downloaded + renamed: %s -> doc %d", filename, doc.id)
+
+#             except Exception as e:
+#                 # Скачивание не удалось → помечаем файл как KLAIDA_ в облаке
+#                 try:
+#                     date_str = timezone.now().strftime("%Y%m%d")
+#                     err_name = f"KLAIDA_{date_str}_{cloud_file.name}"
+#                     if len(err_name) > 250:
+#                         base, fext = (err_name.rsplit(".", 1) if "." in err_name else (err_name, ""))
+#                         err_name = f"{base[:250 - len(fext) - 1]}.{fext}" if fext else base[:250]
+#                     service.rename_file(connection, cloud_file.file_id, err_name)
+#                 except Exception:
+#                     pass
+#                 logger.error("Error downloading %s: %s", cloud_file.name, e, exc_info=True)
+
+#         folder.last_polled_at = timezone.now()
+#         folder.save(update_fields=["last_polled_at"])
+#         connection.last_synced_at = timezone.now()
+#         connection.save(update_fields=["last_synced_at"])
+
+#     except Exception as e:
+#         logger.error("Sync failed for folder %s: %s", cloud_folder_id, e, exc_info=True)
+#         if self.request.retries < self.max_retries:
+#             raise self.retry(exc=e)
+
+
+# # ════════════════════════════════════════════════
+# #  Webhook debounce — 5 мин после последнего webhook
+# # ════════════════════════════════════════════════
+
+# @shared_task
+# def schedule_sync_after_webhook(connection_id):
+#     from django.core.cache import cache
+#     from .models import CloudClientFolder
+
+#     folders = CloudClientFolder.objects.filter(
+#         connection_id=connection_id, is_active=True,
+#     ).values_list("id", flat=True)
+
+#     for folder_id in folders:
+#         debounce_key = f"cloud_sync:{connection_id}:{folder_id}"
+
+#         prev_task_id = cache.get(debounce_key)
+#         if prev_task_id:
+#             try:
+#                 from celery.result import AsyncResult
+#                 AsyncResult(prev_task_id).revoke()
+#             except Exception:
+#                 pass
+
+#         task = sync_cloud_folder.apply_async(
+#             args=[folder_id, "webhook"],
+#             countdown=WEBHOOK_DEBOUNCE_SECONDS,
+#         )
+#         cache.set(debounce_key, task.id, timeout=WEBHOOK_DEBOUNCE_SECONDS + 60)
+
+#     logger.info(
+#         "Webhook debounce: %d folders, connection %s, sync in %ds",
+#         len(folders), connection_id, WEBHOOK_DEBOUNCE_SECONDS,
+#     )
+
+
+# # ════════════════════════════════════════════════
+# #  Fallback polling — каждые 2 часа
+# # ════════════════════════════════════════════════
+
+# @shared_task
+# def fallback_poll_all():
+#     from .models import CloudClientFolder
+
+#     folders = CloudClientFolder.objects.filter(
+#         is_active=True, connection__is_active=True,
+#     )
+#     count = 0
+#     for folder in folders:
+#         if folder.last_polled_at and (timezone.now() - folder.last_polled_at) < timedelta(hours=1):
+#             continue
+#         sync_cloud_folder.delay(folder.id, event_type="poll")
+#         count += 1
+
+#     logger.info("Fallback poll: %d folders", count)
+
+
+# # ════════════════════════════════════════════════
+# #  Google Drive watch renewal — каждые 12 часов
+# # ════════════════════════════════════════════════
+
+# @shared_task
+# def renew_gdrive_watches():
+#     from .models import CloudConnection, CloudClientFolder
+#     from .cloud_services import GoogleDriveService
+
+#     service = GoogleDriveService()
+#     connections = CloudConnection.objects.filter(provider="google_drive", is_active=True)
+
+#     for conn in connections:
+#         if (conn.gdrive_channel_expiration and
+#                 conn.gdrive_channel_expiration > timezone.now() + timedelta(hours=6)):
+#             continue
+
+#         folders = CloudClientFolder.objects.filter(connection=conn, is_active=True)
+#         for folder in folders:
+#             try:
+#                 webhook_url = f"{settings.CLOUD_WEBHOOK_BASE_URL}/api/cloud/webhook/google/"
+#                 service.setup_push_notifications(conn, folder.remote_folder_id, webhook_url)
+#             except Exception as e:
+#                 logger.error("Failed to renew watch folder %s: %s", folder.id, e)

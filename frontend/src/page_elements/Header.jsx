@@ -104,6 +104,7 @@ const Header = () => {
   const menuItemsCenter = isAuthenticated
     ? [
         { text: "Suvestinė", onClick: () => nav("/suvestine") },
+        { text: "Iš klientų", onClick: () => nav("/is-klientu") },
         { text: "Kaip naudotis?", onClick: () => nav("/naudojimo-gidas") },
         { text: "Papildyti", onClick: () => nav("/papildyti") },
         // NEW: админ-пункты (показываем только если суперюзер)
@@ -346,6 +347,15 @@ const Header = () => {
                   }}
                 >
                   <ListItemText primary="Suvestinė" />
+                </ListItem>
+                <ListItem
+                  button
+                  onClick={() => {
+                    setIsDrawerOpen(false);
+                    nav("/is-klientu");
+                  }}
+                >
+                  <ListItemText primary="Iš klientų" />
                 </ListItem>
                 <ListItem
                   button

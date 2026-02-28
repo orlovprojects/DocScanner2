@@ -213,6 +213,28 @@ ANYMAIL = {
     "MAILJET_SECRET_KEY": os.getenv("MAILJET_SECRET_KEY"),
 }
 
+# ─── Cloud Integration ───
+GOOGLE_DRIVE_CLIENT_ID = os.getenv("GOOGLE_DRIVE_CLIENT_ID", default="")
+GOOGLE_DRIVE_CLIENT_SECRET = os.getenv("GOOGLE_DRIVE_CLIENT_SECRET", default="")
+GOOGLE_DRIVE_REDIRECT_URI = os.getenv(
+    "GOOGLE_DRIVE_REDIRECT_URI",
+    default="https://atlyginimoskaiciuokle.com/api/cloud/google/callback"
+)
+
+DROPBOX_APP_KEY = os.getenv("DROPBOX_APP_KEY", default="")
+DROPBOX_APP_SECRET = os.getenv("DROPBOX_APP_SECRET", default="")
+DROPBOX_REDIRECT_URI = os.getenv(
+    "DROPBOX_REDIRECT_URI",
+    default="https://atlyginimoskaiciuokle.com/api/cloud/dropbox/callback"
+)
+
+FRONTEND_URL = os.getenv("SITE_URL_FRONTEND", default="https://atlyginimoskaiciuokle.com")
+
+CLOUD_WEBHOOK_BASE_URL = os.getenv(
+    "CLOUD_WEBHOOK_BASE_URL",
+    default="https://atlyginimoskaiciuokle.com"
+)
+
 
 # Авто ID
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"

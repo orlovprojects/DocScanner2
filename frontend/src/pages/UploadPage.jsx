@@ -15,6 +15,9 @@ import ClearAllIcon from "@mui/icons-material/ClearAll";
 import PlayCircleIcon from "@mui/icons-material/PlayCircle";
 import PersonIcon from "@mui/icons-material/Person";
 import CloseIcon from "@mui/icons-material/Close";
+import HelpOutlineIcon from "@mui/icons-material/HelpOutline";
+import ContentCopyIcon from "@mui/icons-material/ContentCopy";
+import EmailIcon from "@mui/icons-material/Email";
 
 import { api } from "../api/endpoints";
 import DocumentsTable from "../page_elements/DocumentsTable";
@@ -158,6 +161,17 @@ export default function UploadPage() {
   const [selectedCpKey, setSelectedCpKey] = useState("");
 
   const [archiveWarnings, setArchiveWarnings] = useState([]);
+
+  const [kitiBudaiOpen, setKitiBudaiOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  const handleCopyEmail = () => {
+    if (user?.inbox_email_address) {
+      navigator.clipboard.writeText(user.inbox_email_address);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
+  };
 
   const {
     isUploading,
@@ -905,6 +919,15 @@ export default function UploadPage() {
             Įkelti failus
             <input type="file" hidden multiple onChange={handleFileChange} />
           </Button>
+
+          <Button
+            size="small"
+            startIcon={<HelpOutlineIcon sx={{ fontSize: 18 }} />}
+            onClick={() => setKitiBudaiOpen(true)}
+            sx={{ color: "text.secondary", textTransform: "none", fontSize: "0.85rem", alignSelf: "flex-start" }}
+          >
+            Kiti įkėlimo būdai
+          </Button>
           
           {/* Export button with program name */}
           <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 0.5 }}>
@@ -982,6 +1005,16 @@ export default function UploadPage() {
             Įkelti failus
             <input type="file" hidden multiple onChange={handleFileChange} />
           </Button>
+
+          <Button
+            size="small"
+            startIcon={<HelpOutlineIcon sx={{ fontSize: 18 }} />}
+            onClick={() => setKitiBudaiOpen(true)}
+            sx={{ color: "text.secondary", textTransform: "none", fontSize: "0.85rem" }}
+          >
+            Kiti būdai
+          </Button>
+
         </Box>
       )}
 
@@ -1366,6 +1399,71 @@ export default function UploadPage() {
         selectedCpKey={selectedCpKey}
         showRawPanels={false}
       />
+
+      {/* Kiti būdai popup */}
+      <Dialog
+        open={kitiBudaiOpen}
+        onClose={() => setKitiBudaiOpen(false)}
+        maxWidth="sm"
+        fullWidth
+        disableScrollLock
+      >
+        <DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          Kiti dokumentų siuntimo būdai
+          <IconButton size="small" onClick={() => setKitiBudaiOpen(false)}>
+            <CloseIcon fontSize="small" />
+          </IconButton>
+        </DialogTitle>
+        <DialogContent dividers>
+          {/* Email */}
+          <Box sx={{ mb: 3 }}>
+            <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 1 }}>
+              <EmailIcon sx={{ color: "primary.main", fontSize: 22 }} />
+              <Typography variant="subtitle2">Siųsti el. paštu</Typography>
+            </Box>
+            <Typography variant="body2" sx={{ color: "text.secondary", mb: 1.5 }}>
+              Persiųskite dokumentus į šį el. pašto adresą ir failai automatiškai atsiras skiltyje „Iš klientų".
+            </Typography>
+            {user?.inbox_email_address ? (
+              <Box
+                sx={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 1,
+                  p: 1.5,
+                  bgcolor: "grey.50",
+                  borderRadius: 1,
+                  border: "1px solid",
+                  borderColor: "divider",
+                }}
+              >
+                <Typography
+                  variant="body2"
+                  sx={{ fontFamily: "monospace", fontWeight: 600, flex: 1, wordBreak: "break-all" }}
+                >
+                  {user.inbox_email_address}
+                </Typography>
+                <Tooltip title={copied ? "Nukopijuota!" : "Kopijuoti"}>
+                  <IconButton size="small" onClick={handleCopyEmail}>
+                    <ContentCopyIcon fontSize="small" color={copied ? "success" : "action"} />
+                  </IconButton>
+                </Tooltip>
+              </Box>
+            ) : (
+              <Typography variant="body2" sx={{ color: "text.disabled" }}>
+                El. pašto adresas dar nesukurtas. Susisiekite su mumis.
+              </Typography>
+            )}
+          </Box>
+
+          <Divider sx={{ mb: 2 }} />
+
+          {/* Placeholder for future methods */}
+          <Typography variant="body2" sx={{ color: "text.disabled", textAlign: "center", py: 1 }}>
+            Daugiau būdų (mobili programėlė, Google Drive ir kt.) — netrukus!
+          </Typography>
+        </DialogContent>
+      </Dialog>
     </Box>
   );
 }

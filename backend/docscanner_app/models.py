@@ -488,6 +488,7 @@ ACCOUNTING_PROGRAM_CHOICES = [
     ('apsa', 'APSA'),
     ('isaf', 'iSAF'),
     ('paulita', 'Paulita'),
+    ('stekas', 'Stekas Plius'),
     # добавь нужные программы
 ]
 
@@ -579,6 +580,10 @@ class CustomUser(AbstractUser):
         null=True,
         blank=True,
         db_index=True,
+    )
+
+    registration_ip = models.GenericIPAddressField(
+        "Registracijos IP", null=True, blank=True
     )
 
     # mobile_key = models.CharField(max_length=64, unique=True, null=True, blank=True)
@@ -1088,6 +1093,125 @@ class MobileAccessKey(models.Model):
             self.save(update_fields=["is_active", "revoked_at"])
 
 
+#DLIA GOOGLE DRIVE I DROPBOX
+# ──────────────────────────────────────────────
+# Cloud Integration
+# ──────────────────────────────────────────────
+
+class CloudConnection(models.Model):
+    """OAuth подключение к Google Drive / Dropbox."""
+    PROVIDER_CHOICES = [
+        ("google_drive", "Google Drive"),
+        ("dropbox", "Dropbox"),
+    ]
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="cloud_connections",
+    )
+    provider = models.CharField(max_length=20, choices=PROVIDER_CHOICES, db_index=True)
+
+    access_token = models.TextField()
+    refresh_token = models.TextField(blank=True, null=True)
+    token_expires_at = models.DateTimeField(blank=True, null=True)
+
+    dropbox_cursor = models.TextField(blank=True, null=True)
+    gdrive_channel_id = models.CharField(max_length=255, blank=True, null=True)
+    gdrive_channel_expiration = models.DateTimeField(blank=True, null=True)
+
+    account_email = models.EmailField(blank=True, null=True)
+    is_active = models.BooleanField(default=True, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    last_synced_at = models.DateTimeField(blank=True, null=True)
+
+    class Meta:
+        unique_together = [("user", "provider")]
+
+    def __str__(self):
+        return f"{self.user.email} — {self.get_provider_display()}"
+
+    @property
+    def is_token_expired(self):
+        if not self.token_expires_at:
+            return False
+        from django.utils import timezone
+        now = timezone.now()
+        expires = self.token_expires_at
+        # Если одно naive, другое aware — приводим к aware
+        if expires.tzinfo is None:
+            from datetime import timezone as dt_tz
+            expires = expires.replace(tzinfo=dt_tz.utc)
+        return now >= expires
+
+
+class CloudClient(models.Model):
+    """Kliento (firmos) įrašas. UAB Senukai → UAB_Senukai_DokSkenas"""
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="cloud_clients",
+    )
+    name = models.CharField("Kliento pavadinimas", max_length=255)
+    folder_name = models.CharField("Aplanko pavadinimas", max_length=255)
+    company_code = models.CharField("Įmonės kodas", max_length=50, blank=True, null=True)
+
+    is_active = models.BooleanField(default=True, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["name"]
+        unique_together = [("user", "folder_name")]
+
+    def __str__(self):
+        return f"{self.name} ({self.folder_name})"
+
+    def save(self, *args, **kwargs):
+        if not self.folder_name:
+            self.folder_name = self.generate_folder_name(self.name)
+        super().save(*args, **kwargs)
+
+    @staticmethod
+    def generate_folder_name(client_name):
+        safe = "".join(
+            c if c.isalnum() or c in (" ", "-", "_") else ""
+            for c in client_name
+        )
+        safe = safe.strip().replace(" ", "_")
+        while "__" in safe:
+            safe = safe.replace("__", "_")
+        return f"{safe}_DokSkenas"
+
+
+class CloudClientFolder(models.Model):
+    """Папка клиента в конкретном облачном провайдере."""
+    cloud_client = models.ForeignKey(
+        CloudClient, on_delete=models.CASCADE, related_name="cloud_folders",
+    )
+    connection = models.ForeignKey(
+        CloudConnection, on_delete=models.CASCADE, related_name="client_folders",
+    )
+    remote_folder_id = models.CharField(max_length=512)
+
+    is_shared = models.BooleanField(default=False)
+    shared_with_emails = models.JSONField(default=list, blank=True)
+
+    is_active = models.BooleanField(default=True, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    last_polled_at = models.DateTimeField(blank=True, null=True)
+
+    class Meta:
+        unique_together = [("cloud_client", "connection")]
+
+    def __str__(self):
+        return f"{self.cloud_client.name} @ {self.connection.get_provider_display()}"
+
+
+
+
+
+
+#XRANIM FAILY IZ EMAIL, MOB, GOOGLE DRIVE, DROPBOX (pokazyvajem v is-klientu)
 class MobileInboxDocument(models.Model):
     """
     Чистая таблица ИМЕННО для файлов из mobile app.
@@ -1150,7 +1274,7 @@ class MobileInboxDocument(models.Model):
     )
 
     source = models.CharField(
-        max_length=10,
+        max_length=20,
         choices=[("mob", "Mob. programėlė"), ("email", "El. paštas")],
         default="mob",
         db_index=True,
@@ -1160,6 +1284,23 @@ class MobileInboxDocument(models.Model):
         blank=True,
         default="",
     )    
+    cloud_client = models.ForeignKey(
+        "CloudClient",
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name="inbox_documents",
+    )
+
+    remote_file_id = models.CharField(
+        max_length=512, blank=True, null=True,
+        help_text="Failo ID debesyje (reikalingas pervadinimui)",
+    )
+
+    rename_status = models.CharField(
+        max_length=10,
+        choices=[("na","N/A"),("pending","Laukia"),("done","Atlikta"),("failed","Klaida")],
+        default="na",
+    )
 
     class Meta:
         ordering = ["-created_at"]

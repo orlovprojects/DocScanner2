@@ -450,6 +450,8 @@ class CustomUserSerializer(serializers.ModelSerializer):
     is_superuser = serializers.BooleanField(read_only=True)
     is_staff     = serializers.BooleanField(read_only=True)
 
+    inbox_email_address = serializers.SerializerMethodField()
+
     # ВАЖНО: JSONField вместо many=True, чтобы принимать и dict (delete-команды), и list
     purchase_defaults = serializers.JSONField(required=False)
     sales_defaults    = serializers.JSONField(required=False)
@@ -484,7 +486,8 @@ class CustomUserSerializer(serializers.ModelSerializer):
             'extra_settings', 'is_superuser','is_staff', 'lineitem_rules',
             'rivile_erp_extra_fields', 'rivile_gama_extra_fields', 'butent_extra_fields','finvalda_extra_fields',
             'centas_extra_fields','agnum_extra_fields','debetas_extra_fields','site_pro_extra_fields',
-            'pragma3_extra_fields', 'pragma4_extra_fields', 'optimum_extra_fields', 'dineta_extra_fields'
+            'pragma3_extra_fields', 'pragma4_extra_fields', 'optimum_extra_fields', 'dineta_extra_fields',
+            'inbox_email_address'
         ]
         read_only_fields = ('credits',)
         extra_kwargs = {
@@ -504,6 +507,11 @@ class CustomUserSerializer(serializers.ModelSerializer):
         if v not in allowed:
             raise serializers.ValidationError("view_mode must be 'single' or 'multi'.")
         return v
+    
+    def get_inbox_email_address(self, obj):
+        if obj.email_inbox_token:
+            return f"{obj.email_inbox_token}@in.atlyginimoskaiciuokle.com"
+        return None
 
     def validate_extra_settings(self, value):
         if value in (None, ""): return None
@@ -1299,6 +1307,7 @@ class MobileInboxDocumentSerializer(serializers.ModelSerializer):
             "preview_url",      
             "is_processed",     
             "scanned_document_id",
+            "source",
         ]
 
 

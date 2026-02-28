@@ -17,6 +17,8 @@ import { COUNTRY_OPTIONS } from "../page_elements/Countries";
 import { ACCOUNTING_PROGRAMS } from "../page_elements/AccountingPrograms";
 import { AccountingProgramExtraSettings } from "../page_elements/AccountingProgramExtraSettings";
 import { Helmet } from "react-helmet";
+import CloudIntegrationSettings from '../components/CloudIntegrationSettings';
+
 
 /** ===== PVM copy text (tab-separated), for Apskaita5 button ===== */
 const PVM_COPY_TEXT = [
@@ -3974,6 +3976,11 @@ const saveOptimumSettings = async () => {
           )}
         </Box>
       </Paper>
+      {/* ─── Cloud Integration ─── */}
+      <Box mb={3}>
+        <Typography variant="h4" sx={{ mt: 10, fontWeight: 600 }}>Google Drive / Dropbox integracija</Typography>
+      </Box>
+      <CloudIntegrationSettings />
     </Box>
   );
 }

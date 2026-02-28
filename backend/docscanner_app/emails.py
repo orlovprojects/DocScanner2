@@ -57,7 +57,7 @@ def siusti_kontakto_laiska(*, vardas: str, email: str, zinute: str, tema: str | 
         msg = EmailMultiAlternatives(
             subject=subject,
             body=text_body,
-            from_email=formataddr(("Atlyginimo Skaičiuoklė", settings.DEFAULT_FROM_EMAIL)),
+            from_email=formataddr(("DokSkenas", settings.DEFAULT_FROM_EMAIL)),
             to=[getattr(settings, "CONTACT_EMAIL", settings.DEFAULT_FROM_EMAIL)],
             reply_to=[f"{vardas} <{email}>"],  # ← «Atsakyti» keliaus siuntėjui
         )

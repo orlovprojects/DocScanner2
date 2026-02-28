@@ -79,6 +79,7 @@ from .exports.rivile_erp import (
     export_prekes_and_paslaugos_to_rivile_erp_xlsx,
     export_documents_to_rivile_erp_xlsx,
 )
+from .exports.stekas import export_documents_group_to_stekas_files
 from .exports.apsa import export_to_apsa
 from .exports.dineta import dineta_hello, DinetaError
 from .exports.optimum import optimum_hello, OptimumError
@@ -1539,6 +1540,38 @@ def export_documents(request):
         else:
             logger.warning("[EXP] RIVILE_ERP nothing to export")
             response = Response({"error": "No clients or products to export"}, status=400)
+
+
+    # ========================= STEKAS PLIUS (ZIP/JSON) =========================
+    elif export_type == 'stekas':
+        logger.info("[EXP] STEKAS_PLIUS export started")
+
+        all_docs = []
+        for pack in (prepared.get("pirkimai", []) + prepared.get("pardavimai", [])):
+            doc = pack["doc"]
+            doc.pirkimas_pardavimas = pack.get("direction", "")
+            all_docs.append(doc)
+
+        logger.info("[EXP] STEKAS_PLIUS docs=%d pirk=%d pard=%d",
+                    len(all_docs),
+                    len(prepared.get("pirkimai", [])),
+                    len(prepared.get("pardavimai", [])))
+
+        if not all_docs:
+            logger.warning("[EXP] STEKAS_PLIUS nothing to export")
+            response = Response({"error": "Nėra dokumentų eksportui"}, status=400)
+        else:
+
+            content, filename, content_type = export_documents_group_to_stekas_files(
+                documents=all_docs,
+                site_url=request.build_absolute_uri('/') if request else "",
+                company_code=getattr(request.user, 'company_code', '') or '',
+                direction=None,  # направление берётся из doc.pirkimas_pardavimas
+            )
+
+            response = HttpResponse(content, content_type=content_type)
+            response['Content-Disposition'] = f'attachment; filename={filename}'
+            export_success = True
 
 
     # ========================= OPTIMUM (API) =========================
@@ -3443,7 +3476,12 @@ def create_trial_subscription(user):
         logger.error(f"Ошибка при создании триал-подписки для пользователя {user.email}: {str(e)}")
         raise e
 
-
+#Naxodit IP usera pri registracii
+def get_client_ip(request):
+    x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
+    if x_forwarded_for:
+        return x_forwarded_for.split(',')[0].strip()
+    return request.META.get('REMOTE_ADDR')
 
 @api_view(['POST'])
 @authentication_classes([])  # Отключение проверки аутентификации
@@ -3473,8 +3511,11 @@ def register(request):
             logger.info(f"Пользователь {user.email} успешно зарегистрирован.")
 
             # Устанавливаем default extra_settings
+            user.registration_ip = get_client_ip(request)
             user.extra_settings = {"fix_delta": 1}
             user.save(update_fields=["extra_settings"])
+
+            user.ensure_inbox_token(save=True)
 
             # Создаём триал-подписку для нового пользователя
             create_trial_subscription(user)
@@ -4441,32 +4482,32 @@ def web_mobile_inbox(request):
 @api_view(["DELETE"])
 @permission_classes([IsAuthenticated])
 def web_mobile_inbox_bulk_delete(request):
-    """
-    DELETE /api/web/mobile-inbox/bulk-delete/
-
-    Body (JSON):
-      { "ids": [1, 2, 3, ...] }
-
-    Удаляет MobileInboxDocument текущего пользователя.
-    Логично удалять только те, что ещё не перенесены (is_processed=False).
-    """
-
     user = request.user
-    ids = request.data.get("ids") or []
+    select_all = request.data.get("select_all", False)
+    exclude_ids = request.data.get("exclude_ids", [])
 
-    if not isinstance(ids, list) or not ids:
-        return Response(
-            {"error": "NO_IDS", "detail": "Pateikite bent vieną ID."},
-            status=status.HTTP_400_BAD_REQUEST,
+    if select_all:
+        qs = MobileInboxDocument.objects.filter(user=user, is_processed=False)
+        source = request.data.get("source")
+        client_id = request.data.get("client_id")
+        if source:
+            qs = qs.filter(source=source)
+        if client_id:
+            qs = qs.filter(cloud_client_id=client_id)
+        if exclude_ids:
+            qs = qs.exclude(id__in=exclude_ids)
+        docs = qs
+    else:
+        ids = request.data.get("ids") or []
+        if not isinstance(ids, list) or not ids:
+            return Response(
+                {"error": "NO_IDS", "detail": "Pateikite bent vieną ID."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        docs = MobileInboxDocument.objects.filter(
+            user=user, is_processed=False, id__in=ids,
         )
 
-    docs = MobileInboxDocument.objects.filter(
-        user=user,
-        is_processed=False,
-        id__in=ids,
-    )
-
-    # Если хочешь чистить и физические файлы – можно так:
     file_paths = []
     for d in docs:
         if d.uploaded_file and d.uploaded_file.name:
@@ -4476,9 +4517,9 @@ def web_mobile_inbox_bulk_delete(request):
                 pass
 
     deleted_count = docs.count()
+    deleted_ids = list(docs.values_list("id", flat=True))
     docs.delete()
 
-    # Пытаемся удалить файлы с диска (не критично, если не получится)
     for path in file_paths:
         try:
             if path and os.path.exists(path):
@@ -4487,65 +4528,96 @@ def web_mobile_inbox_bulk_delete(request):
             continue
 
     return Response(
-        {"status": "OK", "count": deleted_count, "deleted_ids": ids},
+        {"status": "OK", "count": deleted_count, "deleted_ids": deleted_ids},
         status=status.HTTP_200_OK,
     )
 
 
-#Perevodim vybranyje faily s IsKlientu v Suvestine (mobile file(original) i preview_url ostajuca)
+ARCHIVE_EXTS_PROMOTE = {".zip", ".rar", ".7z", ".tar", ".tgz", ".tar.gz", ".tar.bz2", ".tar.xz", ".tbz2"}
+
+def _ext_lower(name):
+    n = (name or "").lower()
+    if n.endswith(".tar.gz"): return ".tar.gz"
+    if n.endswith(".tar.bz2"): return ".tar.bz2"
+    if n.endswith(".tar.xz"): return ".tar.xz"
+    return os.path.splitext(n)[1]
+
+
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
 def web_mobile_inbox_promote(request):
-    """
-    POST /api/web/mobile-inbox/promote/
-    Body: { "ids": [1, 2, 3] }
-    """
-
     user = request.user
-    ids = request.data.get("ids") or []
+    scan_type = request.data.get("scan_type", "sumiskai")
 
-    if not isinstance(ids, list) or not ids:
-        return Response(
-            {"error": "NO_IDS", "detail": "Pateikite bent vieną ID."},
-            status=status.HTTP_400_BAD_REQUEST,
+    # 1. Blocked session check
+    if UploadSession.objects.filter(user=user, stage="blocked").exists():
+        return Response({
+            "error": "BLOCKED_SESSION_EXISTS",
+            "detail": "Turite neapmokėtą užduotį. Papildykite kreditus arba panaikinkite užduotį.",
+        }, status=409)
+
+    # 2. Get documents (support select_all)
+    select_all = request.data.get("select_all", False)
+    exclude_ids = request.data.get("exclude_ids", [])
+
+    if select_all:
+        qs = MobileInboxDocument.objects.filter(user=user, is_processed=False)
+        source = request.data.get("source")
+        client_id = request.data.get("client_id")
+        if source:
+            qs = qs.filter(source=source)
+        if client_id:
+            qs = qs.filter(cloud_client_id=client_id)
+        if exclude_ids:
+            qs = qs.exclude(id__in=exclude_ids)
+        mobile_docs = list(qs)
+    else:
+        ids = request.data.get("ids") or []
+        if not isinstance(ids, list) or not ids:
+            return Response(
+                {"error": "NO_IDS", "detail": "Pateikite bent vieną ID."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        mobile_docs = list(
+            MobileInboxDocument.objects
+            .filter(user=user, is_processed=False, id__in=ids)
         )
 
-    mobile_docs = (
-        MobileInboxDocument.objects
-        .filter(user=user, is_processed=False, id__in=ids)
-        .select_related("access_key")
+    if not mobile_docs:
+        return Response({"status": "OK", "count": 0, "processed_ids": []})
+
+    # 3. Create UploadSession
+    session = UploadSession.objects.create(
+        user=user,
+        scan_type=scan_type,
+        stage="uploading",
+        client_total_files=len(mobile_docs),
     )
 
-    if not mobile_docs.exists():
-        return Response(
-            {"status": "OK", "count": 0, "processed_ids": []},
-            status=status.HTTP_200_OK,
-        )
-
+    # 4. Copy files to ScannedDocuments
     processed_ids = []
-    scan_type = "sumiskai"  # пока фиксированно, как обычный web-upload
-
     for mobile_doc in mobile_docs:
         if not mobile_doc.uploaded_file:
             continue
-
         try:
             with transaction.atomic():
-                # 1) забираем байты исходного PDF из MobileInboxDocument
                 original_file = mobile_doc.uploaded_file
                 original_file.open("rb")
                 content = original_file.read()
                 original_file.close()
 
-                # 2) создаём ScannedDocument с тем же original_filename
+                ext = _ext_lower(mobile_doc.original_filename)
+                is_archive = ext in ARCHIVE_EXTS_PROMOTE
+
                 scanned = ScannedDocument(
                     user=user,
                     original_filename=mobile_doc.original_filename,
-                    status="processing",
+                    status="pending",
                     scan_type=scan_type,
+                    upload_session=session,
+                    is_archive_container=is_archive,
+                    uploaded_size_bytes=len(content),
                 )
-
-                # 3) сохраняем КОПИЮ файла (user_upload_path сгенерит своё имя)
                 scanned.file.save(
                     original_file.name.split("/")[-1],
                     ContentFile(content),
@@ -4553,7 +4625,6 @@ def web_mobile_inbox_promote(request):
                 )
                 scanned.save()
 
-                # 4) помечаем mobile-док как перенесённый
                 mobile_doc.processed_document = scanned
                 mobile_doc.processed_at = timezone.now()
                 mobile_doc.is_processed = True
@@ -4561,23 +4632,121 @@ def web_mobile_inbox_promote(request):
                     update_fields=["processed_document", "processed_at", "is_processed"]
                 )
 
-                # 5) запускаем твой Celery-пайплайн
-                process_uploaded_file_task.delay(user.id, scanned.id, scan_type)
-
                 processed_ids.append(mobile_doc.id)
 
         except Exception as e:
-            # логировать можно тут
+            logger.error("Promote failed for doc %s: %s", mobile_doc.id, e)
             continue
 
-    return Response(
-        {
-            "status": "OK",
-            "count": len(processed_ids),
-            "processed_ids": processed_ids,
-        },
-        status=status.HTTP_200_OK,
+    if not processed_ids:
+        session.delete()
+        return Response({"status": "OK", "count": 0, "processed_ids": []})
+
+    # 5. Update session counters
+    session.uploaded_files = len(processed_ids)
+    session.save(update_fields=["uploaded_files"])
+
+    # 6. Reserve credits + check
+    session = reserve_and_queue(str(session.id), user.id)
+
+    # 7. Start if not blocked
+    if session.stage == "processing":
+        start_session_processing.delay(str(session.id))
+
+    return Response({
+        "status": "OK",
+        "count": len(processed_ids),
+        "processed_ids": processed_ids,
+        "session_id": str(session.id),
+        "session_stage": session.stage,
+        "error_message": session.error_message or None,
+    })
+
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def retry_blocked_session(request, session_id):
+    """POST /api/web/sessions/<id>/retry/ — повтор после пополнения кредитов"""
+    try:
+        session = UploadSession.objects.get(id=session_id, user=request.user)
+    except UploadSession.DoesNotExist:
+        return Response(status=404)
+
+    if session.stage != "blocked":
+        return Response({"error": "Session is not blocked"}, status=400)
+
+    # Сбрасываем rejected docs обратно в pending
+    ScannedDocument.objects.filter(
+        upload_session=session,
+        status="rejected",
+        error_message="Nepakanka kreditų",
+    ).update(status="pending", error_message=None)
+
+    # Сбрасываем счётчики сессии
+    session.stage = "uploading"
+    session.error_message = ""
+    session.processed_items = 0
+    session.done_items = 0
+    session.failed_items = 0
+    session.save(update_fields=[
+        "stage", "error_message",
+        "processed_items", "done_items", "failed_items", "updated_at",
+    ])
+
+    # Заново проверяем кредиты
+    session = reserve_and_queue(str(session.id), request.user.id)
+
+    if session.stage == "processing":
+        start_session_processing.delay(str(session.id))
+
+    return Response({
+        "id": str(session.id),
+        "stage": session.stage,
+        "error_message": session.error_message or None,
+    })
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def cancel_blocked_session(request, session_id):
+    """POST /api/web/sessions/<id>/cancel/ — отмена, возврат файлов в inbox"""
+    try:
+        session = UploadSession.objects.get(id=session_id, user=request.user)
+    except UploadSession.DoesNotExist:
+        return Response(status=404)
+
+    if session.stage != "blocked":
+        return Response({"error": "Session is not blocked"}, status=400)
+
+    # Находим ScannedDocuments этой сессии
+    scanned_docs = ScannedDocument.objects.filter(upload_session=session)
+    scanned_ids = list(scanned_docs.values_list("id", flat=True))
+
+    # Возвращаем файлы в inbox
+    MobileInboxDocument.objects.filter(
+        user=request.user,
+        processed_document_id__in=scanned_ids,
+    ).update(
+        is_processed=False,
+        processed_document=None,
+        processed_at=None,
     )
+
+    # Удаляем физические файлы + ScannedDocuments
+    for doc in scanned_docs:
+        if doc.file:
+            try:
+                doc.file.delete(save=False)
+            except Exception:
+                pass
+    scanned_docs.delete()
+
+    # Удаляем сессию
+    session.delete()
+
+    return Response({"status": "cancelled"})
+
 
 
 
@@ -5251,6 +5420,12 @@ def finalize_session(request, session_id):
             "error": "Session already finalized"
         }, status=400)
     
+    if UploadSession.objects.filter(user=request.user, stage="blocked").exists():
+        return Response({
+            "error": "BLOCKED_SESSION_EXISTS",
+            "detail": "Turite neapmokėtą užduotį. Papildykite kreditus arba panaikinkite užduotį.",
+        }, status=409)
+    
     # Проверить что есть файлы
     docs_count = ScannedDocument.objects.filter(upload_session=s).count()
     if docs_count == 0:
@@ -5280,7 +5455,7 @@ def active_sessions(request):
     # Активные сессии
     active_qs = UploadSession.objects.filter(
         user=request.user,
-        stage__in=["processing", "queued", "credit_check"]
+        stage__in=["processing", "queued", "credit_check", "blocked"]
     )
     
     # Недавно завершённые (за последние 10 секунд) — чтобы показать финальный статус

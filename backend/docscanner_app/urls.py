@@ -47,6 +47,7 @@ from .views import (
     export_log_detail,
     mailgun_inbound,
 )
+from . import cloud_views
 from . import views
 from .views import TrackAdClickView
 
@@ -150,6 +151,8 @@ urlpatterns = [
     path("web/mobile-inbox/", web_mobile_inbox, name="web-mobile-inbox-list"),
     path("web/mobile-inbox/promote/", web_mobile_inbox_promote, name="web-mobile-inbox-promote"),
     path("web/mobile-inbox/bulk-delete/", web_mobile_inbox_bulk_delete, name="web-mobile-inbox-bulk-delete"),
+    path('web/sessions/<str:session_id>/retry/', views.retry_blocked_session),
+    path('web/sessions/<str:session_id>/cancel/', views.cancel_blocked_session),
 
     path('mailgun/inbound/', mailgun_inbound, name='mailgun_inbound'),
 
@@ -250,6 +253,21 @@ urlpatterns = [
     path('documents/<int:document_id>/export-log/', views.export_log_detail, name='export_log_detail'),
 
 
+    # ─── Google Drive/Dropbox Integration ───
+    path('cloud/google/auth/',      cloud_views.GoogleDriveAuthStartView.as_view()),
+    path('cloud/google/callback/',  cloud_views.GoogleDriveAuthCallbackView.as_view()),
+    path('cloud/dropbox/auth/',     cloud_views.DropboxAuthStartView.as_view()),
+    path('cloud/dropbox/callback/', cloud_views.DropboxAuthCallbackView.as_view()),
+    path('cloud/connections/',      cloud_views.CloudConnectionListView.as_view()),
+    path('cloud/connections/<str:provider>/disconnect/', cloud_views.CloudConnectionDisconnectView.as_view()),
+    path('cloud/clients/',                 cloud_views.CloudClientListCreateView.as_view()),
+    path('cloud/clients/<int:client_id>/', cloud_views.CloudClientDetailView.as_view()),
+    path('cloud/folders/share/',                cloud_views.ShareCloudFolderView.as_view()),
+    path('cloud/folders/<int:folder_id>/sync/', cloud_views.ManualSyncView.as_view()),
+    path('cloud/webhook/google/',  cloud_views.GoogleDriveWebhookView.as_view()),
+    path('cloud/webhook/dropbox/', cloud_views.DropboxWebhookView.as_view()),
+    path('cloud/inbox/',           cloud_views.UnifiedInboxView.as_view()),
+    path('cloud/inbox/clients/', cloud_views.InboxClientsView.as_view()),
 
 
 

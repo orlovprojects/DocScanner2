@@ -42,7 +42,7 @@ export default function ZoomableImage({ src, initialZoom = 0.80, buttonSize = 40
 
   return (
     <Box>
-      <Box display="flex" gap={0.5} mb={1}>
+      <Box display="flex" gap={0.5} mb={1} ml={1}>
         <Tooltip title="Užpildyti peržiūros langą">
           <IconButton 
             onClick={fitToPage}

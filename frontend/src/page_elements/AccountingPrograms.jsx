@@ -15,5 +15,6 @@ export const ACCOUNTING_PROGRAMS = [
   { value: "site_pro", label: "Site.pro (B1)" },
   { value: "apsa", label: "APSA" },
   { value: "isaf", label: "iSAF" },
-  { value: "paulita", label: "Paulita" }
+  { value: "paulita", label: "Paulita" },
+  { value: "stekas", label: "Stekas Plius" }
 ].sort((a, b) => a.label.localeCompare(b.label));
