@@ -96,16 +96,18 @@ class GoogleDriveService(BaseCloudService):
             prompt="consent",
             state=state,
         )
-        return auth_url
+        return auth_url, flow.code_verifier  
 
     @staticmethod
-    def exchange_code(code):
+    def exchange_code(code, code_verifier=None):  
         from google_auth_oauthlib.flow import Flow
         flow = Flow.from_client_config(
             GoogleDriveService._client_config(),
             scopes=GoogleDriveService.SCOPES,
         )
         flow.redirect_uri = settings.GOOGLE_DRIVE_REDIRECT_URI
+        if code_verifier:                          
+            flow.code_verifier = code_verifier     
         flow.fetch_token(code=code)
         creds = flow.credentials
         return {

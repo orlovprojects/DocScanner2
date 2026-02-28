@@ -65,7 +65,8 @@ class GoogleDriveAuthStartView(APIView):
 
     def get(self, request):
         from .cloud_services import GoogleDriveService
-        auth_url = GoogleDriveService.get_auth_url(state=str(request.user.id))
+        auth_url, code_verifier = GoogleDriveService.get_auth_url(state=str(request.user.id))
+        request.session["google_code_verifier"] = code_verifier
         return Response({"auth_url": auth_url})
 
 
@@ -92,7 +93,8 @@ class GoogleDriveAuthCallbackView(APIView):
             )
 
         try:
-            tokens = GoogleDriveService.exchange_code(code)
+            code_verifier = request.session.pop("google_code_verifier", None)  # ← добавлено
+            tokens = GoogleDriveService.exchange_code(code, code_verifier=code_verifier)  # ← изменено
             conn, _ = CloudConnection.objects.update_or_create(
                 user=user, provider="google_drive",
                 defaults={
