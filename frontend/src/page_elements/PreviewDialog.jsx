@@ -937,10 +937,20 @@ export default function PreviewDialog({
     return n;
   };
 
+  // const normVal = (v) => {
+  //   if (v === "" || v === undefined) return null;
+  //   if (typeof v === "string" && v.trim() !== "" && !isNaN(Number(v))) return Number(v);
+  //   return v;
+  // };
+
   const normVal = (v) => {
-    if (v === "" || v === undefined) return null;
-    if (typeof v === "string" && v.trim() !== "" && !isNaN(Number(v))) return Number(v);
-    return v;
+      if (v === "" || v === undefined) return null;
+      if (typeof v === "string" && v.trim() !== "" && !isNaN(Number(v))) {
+          const t = v.trim();
+          if (t.length > 1 && t[0] === '0' && t[1] !== '.') return t;
+          return Number(v);
+      }
+      return v;
   };
 
   const saveDocFields = async (patchOrField, maybeValue) => {
