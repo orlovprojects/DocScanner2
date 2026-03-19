@@ -1148,18 +1148,48 @@ def export_documents(request):
 
 
     # ========================= APSKAITA5 =========================
+    # elif export_type == 'apskaita5':
+    #     logger.info("[EXP] APSKAITA5 export started")
+    #     assign_random_prekes_kodai(documents)
+
+    #     content, filename, content_type = export_documents_group_to_apskaita5_files(
+    #         documents=documents,
+    #         site_url=site_url,   # предполагается, что переменная определена выше по модулю/конфигу
+    #         company_code=None,
+    #         direction=None,
+    #     )
+    #     logger.info("[EXP] APSKAITA5 produced file=%s content_type=%s size=%d",
+    #                 filename, content_type, len(content))
+    #     response = HttpResponse(content, content_type=content_type)
+    #     response['Content-Disposition'] = f'attachment; filename="{filename}"'
+    #     response['X-Content-Type-Options'] = 'nosniff'
+    #     export_success = True
+
     elif export_type == 'apskaita5':
         logger.info("[EXP] APSKAITA5 export started")
         assign_random_prekes_kodai(documents)
 
+        all_docs = (pirkimai_docs or []) + (pardavimai_docs or [])
+
+        if not all_docs:
+            logger.warning("[EXP] APSKAITA5 no documents to export")
+            return Response({"error": "No documents to export"}, status=400)
+
+        extra_fields = {
+            "user": {
+                "extra_settings": getattr(user, "extra_settings", {}) or {},
+            }
+        }
+
         content, filename, content_type = export_documents_group_to_apskaita5_files(
-            documents=documents,
-            site_url=site_url,   # предполагается, что переменная определена выше по модулю/конфигу
+            documents=all_docs,
+            site_url="",
             company_code=None,
             direction=None,
+            apskaita5_extra_fields=extra_fields,
         )
         logger.info("[EXP] APSKAITA5 produced file=%s content_type=%s size=%d",
-                    filename, content_type, len(content))
+                     filename, content_type, len(content))
         response = HttpResponse(content, content_type=content_type)
         response['Content-Disposition'] = f'attachment; filename="{filename}"'
         response['X-Content-Type-Options'] = 'nosniff'
