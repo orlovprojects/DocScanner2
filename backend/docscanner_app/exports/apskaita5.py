@@ -704,7 +704,7 @@ def _build_apskaita5_xml_for_documents(
                     _set_child_text(line_el, "price", get_price_or_zero(float(price_gross)))
                     _set_child_text(line_el, "subtotal", get_price_or_zero(float(gross)))
                     _set_child_text(line_el, "vat", "0")
-                    _set_child_text(line_el, "vatpercent", "")
+                    _set_child_text(line_el, "vatpercent", "0")
                     _set_child_text(line_el, "total", get_price_or_zero(float(gross)))
                 else:
                     # ===== Обычный режим =====
@@ -751,7 +751,7 @@ def _build_apskaita5_xml_for_documents(
                 _set_child_text(line_el, "price", get_price_or_zero(with_vat))
                 _set_child_text(line_el, "subtotal", get_price_or_zero(with_vat))
                 _set_child_text(line_el, "vat", "0")
-                _set_child_text(line_el, "vatpercent", "")
+                _set_child_text(line_el, "vatpercent", "0")
                 _set_child_text(line_el, "total", get_price_or_zero(with_vat))
             else:
                 # ===== Обычный режим sumiskai =====
@@ -763,7 +763,7 @@ def _build_apskaita5_xml_for_documents(
                 if vat_percent_for_line is not None:
                     _set_child_text(line_el, "vatpercent", get_price_or_zero(vat_percent_for_line))
                 else:
-                    _set_child_text(line_el, "vatpercent", "")  # Пустой при separate_vat=True
+                    _set_child_text(line_el, "vatpercent", "0")  # Пустой при separate_vat=True
 
                 _set_child_text(line_el, "total", get_price_or_zero(with_vat))
 
