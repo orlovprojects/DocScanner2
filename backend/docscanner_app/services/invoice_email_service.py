@@ -167,7 +167,7 @@ def _is_pvm_invoice(invoice):
 
 
 def _frontend_invoice_url(invoice):
-    base = getattr(settings, "SITE_URL_FRONTEND", "https://atlyginimoskaiciuokle.com").rstrip("/")
+    base = getattr(settings, "INVOICE_PUBLIC_URL", "https://saskaituisrasymas.lt").rstrip("/")
     return f"{base}/sf/{invoice.uuid}"
 
 
@@ -626,6 +626,17 @@ def send_invoice_email(
         logger.error(f"Invoice {invoice_id} not found")
         return None
 
+    # --- Inv subscription: email limit check ---
+    from ..views import check_inv_email_limit
+    allowed, err = check_inv_email_limit(invoice.user, invoice.id)
+    if not allowed:
+        logger.warning(
+            f"Invoice {invoice_id}: email blocked by inv subscription limit: {err}"
+        )
+        return err  # вызывающий код проверит что вернулся dict а не InvoiceEmail
+
+    to_email = recipient_email or invoice.buyer_email or invoice.sent_to_email
+
     to_email = recipient_email or invoice.buyer_email or invoice.sent_to_email
     if not to_email:
         logger.warning(f"Invoice {invoice_id}: no recipient email")
@@ -687,6 +698,16 @@ def send_invoice_email(
                 email_sent_count=models.F("email_sent_count") + 1,
                 email_last_status="sent",
             )
+
+        # --- Record inv email usage ---
+        try:
+            sub = getattr(invoice.user, "inv_subscription", None)
+            if sub and sub.status == "free":
+                from ..models import InvMonthlyUsage
+                usage = InvMonthlyUsage.get_current(invoice.user)
+                usage.record_email(invoice.id)
+        except Exception as e:
+            logger.warning(f"Failed to record inv email usage: {e}")
 
         if email_type in ("invoice", "auto_sf") and not invoice.sent_at:
             Invoice.objects.filter(id=invoice.id).update(

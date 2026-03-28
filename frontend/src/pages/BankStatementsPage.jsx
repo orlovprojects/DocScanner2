@@ -183,8 +183,8 @@ const BankStatementsPage = () => {
     { entries: 0, incoming: 0, outgoing: 0, matched: 0, likely: 0, unmatched: 0, dupes: 0 }
   );
 
-  const { isFeatureLocked } = useInvSubscription();
-  const bankImportLocked = isFeatureLocked("bank_import");
+    const { isFeatureLocked, loading: subscriptionLoading } = useInvSubscription();
+    const bankImportLocked = !subscriptionLoading && isFeatureLocked("bank_import");
 
   // ════════════════════════════════════════════
   // Render
@@ -201,31 +201,31 @@ const BankStatementsPage = () => {
           variant="contained"
           startIcon={<UploadIcon />}
           onClick={() => setUploadDialog(true)}
-          disabled={bankImportLocked}
+          disabled={subscriptionLoading || bankImportLocked}
         >
           Importuoti išrašą
         </Button>
       </Box>
 
-        {bankImportLocked && (
+        {!subscriptionLoading && bankImportLocked && (
+        <Box
+            sx={{
+            display: "flex",
+            alignItems: "center",
+            gap: 1.5,
+            px: 2.5,
+            py: { xs: 1.5, md: 2 },
+            mb: 3,
+            borderRadius: 3,
+            bgcolor: "rgba(255, 145, 0, 0.10)",
+            border: "1px solid rgba(255, 145, 0, 0.28)",
+            boxShadow: "0 10px 30px rgba(255, 145, 0, 0.10)",
+            backdropFilter: "blur(8px)",
+            flexWrap: "wrap",
+            }}
+        >
             <Box
             sx={{
-                display: "flex",
-                alignItems: "center",
-                gap: 1.5,
-                px: 2.5,
-                py: { xs: 1.5, md: 2 },
-                mb: 3,
-                borderRadius: 3,
-                bgcolor: "rgba(255, 145, 0, 0.10)",
-                border: "1px solid rgba(255, 145, 0, 0.28)",
-                boxShadow: "0 10px 30px rgba(255, 145, 0, 0.10)",
-                backdropFilter: "blur(8px)",
-                flexWrap: "wrap",
-            }}
-            >
-            <Box
-                sx={{
                 width: 34,
                 height: 34,
                 borderRadius: "12px",
@@ -234,31 +234,31 @@ const BankStatementsPage = () => {
                 justifyContent: "center",
                 bgcolor: "rgba(255, 145, 0, 0.14)",
                 flexShrink: 0,
-                }}
+            }}
             >
-                <LockIcon
+            <LockIcon
                 sx={{
-                    color: "#F57C00",
-                    fontSize: 18,
+                color: "#F57C00",
+                fontSize: 18,
                 }}
-                />
+            />
             </Box>
 
             <Typography
-                variant="body2"
-                sx={{
+            variant="body2"
+            sx={{
                 color: "#3B2A1A",
                 fontWeight: 500,
                 lineHeight: 1.5,
-                }}
+            }}
             >
-                Banko išrašų importas prieinamas tik su mokamu planu arba bandomuoju laikotarpiu.
+            Banko išrašų importas prieinamas tik su mokamu planu arba bandomuoju laikotarpiu.
             </Typography>
 
             <Button
-                size="small"
-                href="/papildyti#planai"
-                sx={{
+            size="small"
+            href="/papildyti#planai"
+            sx={{
                 textTransform: "none",
                 borderRadius: 2.5,
                 px: 2,
@@ -270,14 +270,14 @@ const BankStatementsPage = () => {
                 background: "linear-gradient(135deg, #FF9800 0%, #F57C00 100%)",
                 boxShadow: "none",
                 "&:hover": {
-                    background: "linear-gradient(135deg, #FB8C00 0%, #EF6C00 100%)",
-                    boxShadow: "none",
+                background: "linear-gradient(135deg, #FB8C00 0%, #EF6C00 100%)",
+                boxShadow: "none",
                 },
-                }}
+            }}
             >
-                Įsigyti planą
+            Įsigyti planą
             </Button>
-            </Box>
+        </Box>
         )}
 
         {/* Stats cards */}
