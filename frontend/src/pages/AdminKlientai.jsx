@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useCallback, useRef } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { Helmet } from "react-helmet";
 import {
   Box,
@@ -30,9 +30,7 @@ import { ACCOUNTING_PROGRAMS } from "../page_elements/AccountingPrograms";
 // ─── Skaitmenizavimas icon ───
 const SkaitmenizavimasCell = ({ lastPaymentDate }) => {
   if (!lastPaymentDate) {
-    return (
-      <Typography sx={{ color: "text.disabled", fontSize: 13 }}>—</Typography>
-    );
+    return <Typography sx={{ color: "text.disabled", fontSize: 13 }}>—</Typography>;
   }
 
   const date = new Date(lastPaymentDate);
@@ -52,9 +50,7 @@ const SkaitmenizavimasCell = ({ lastPaymentDate }) => {
 // ─── Išrašymas status icon ───
 const IsrasymasCell = ({ status }) => {
   if (!status) {
-    return (
-      <Typography sx={{ color: "text.disabled", fontSize: 13 }}>—</Typography>
-    );
+    return <Typography sx={{ color: "text.disabled", fontSize: 13 }}>—</Typography>;
   }
 
   const config = {
@@ -85,7 +81,7 @@ const IsrasymasCell = ({ status }) => {
 
   return (
     <Tooltip title={cfg.label} arrow>
-      <Box sx={{ color: cfg.color, display: "flex", alignItems: "center" }}>
+      <Box sx={{ color: cfg.color, display: "flex", alignItems: "center", justifyContent: "center" }}>
         {cfg.icon}
       </Box>
     </Tooltip>
@@ -95,9 +91,7 @@ const IsrasymasCell = ({ status }) => {
 // ─── Išleista (total spent) ───
 const IsleistaCell = ({ totalSpent }) => {
   if (!totalSpent || totalSpent === 0) {
-    return (
-      <Typography sx={{ color: "text.disabled", fontSize: 13 }}>—</Typography>
-    );
+    return <Typography sx={{ color: "text.disabled", fontSize: 13 }}>—</Typography>;
   }
 
   return (
@@ -227,13 +221,7 @@ export default function AdminUsers() {
 
   if (meLoaded && !me?.is_superuser) {
     return (
-      <Box
-        display="flex"
-        alignItems="center"
-        justifyContent="center"
-        minHeight="70vh"
-        px={3}
-      >
+      <Box display="flex" alignItems="center" justifyContent="center" minHeight="70vh" px={3}>
         <Alert severity="error" sx={{ maxWidth: 500 }}>
           Neturite prieigos prie administratoriaus suvestinės.
         </Alert>
@@ -247,14 +235,7 @@ export default function AdminUsers() {
         <title>Vartotojai (Admin)</title>
       </Helmet>
 
-      <Stack
-        direction="row"
-        alignItems="center"
-        justifyContent="space-between"
-        mb={4}
-        flexWrap="wrap"
-        gap={2}
-      >
+      <Stack direction="row" alignItems="center" justifyContent="space-between" mb={4} flexWrap="wrap" gap={2}>
         <Stack direction="row" alignItems="center" gap={2}>
           <Typography variant="h4" fontWeight={300} letterSpacing={-0.5}>
             Vartotojai
@@ -262,11 +243,7 @@ export default function AdminUsers() {
           <Chip
             label={`${users.length}${nextCursor ? "+" : ""}`}
             size="medium"
-            sx={{
-              fontWeight: 500,
-              bgcolor: "primary.50",
-              color: "primary.main",
-            }}
+            sx={{ fontWeight: 500, bgcolor: "primary.50", color: "primary.main" }}
           />
         </Stack>
 
@@ -274,11 +251,7 @@ export default function AdminUsers() {
           <IconButton
             onClick={fetchUsers}
             disabled={loading}
-            sx={{
-              border: "1px solid",
-              borderColor: "divider",
-              "&:hover": { bgcolor: "action.hover" },
-            }}
+            sx={{ border: "1px solid", borderColor: "divider", "&:hover": { bgcolor: "action.hover" } }}
           >
             <RefreshIcon />
           </IconButton>
@@ -287,15 +260,7 @@ export default function AdminUsers() {
 
       {loading && <LinearProgress sx={{ mb: 3, borderRadius: 1 }} />}
 
-      <Paper
-        elevation={0}
-        sx={{
-          border: "1px solid",
-          borderColor: "divider",
-          borderRadius: 2,
-          overflow: "hidden",
-        }}
-      >
+      <Paper elevation={0} sx={{ border: "1px solid", borderColor: "divider", borderRadius: 2, overflow: "hidden" }}>
         <TableContainer sx={{ maxHeight: "calc(100vh - 250px)" }}>
           <Table stickyHeader size="medium">
             <TableHead>
@@ -308,15 +273,15 @@ export default function AdminUsers() {
                 <TableCell sx={{ fontWeight: 600, bgcolor: "grey.50", minWidth: 180 }}>Apskaitos programa</TableCell>
                 <TableCell sx={{ fontWeight: 600, bgcolor: "grey.50", minWidth: 180 }}>Įmonė</TableCell>
                 <TableCell sx={{ fontWeight: 600, bgcolor: "grey.50", minWidth: 120 }}>Įmonės kodas</TableCell>
-                <TableCell sx={{ fontWeight: 600, bgcolor: "grey.50", minWidth: 100, textAlign: "center" }}>
+                <TableCell sx={{ fontWeight: 600, bgcolor: "grey.50", minWidth: 80, textAlign: "center" }}>
                   <Tooltip title="Skaitmenizavimas" arrow>
                     <ReceiptLongIcon sx={{ fontSize: 20, color: "text.secondary" }} />
                   </Tooltip>
                 </TableCell>
-                <TableCell sx={{ fontWeight: 600, bgcolor: "grey.50", minWidth: 100, textAlign: "center" }}>
+                <TableCell sx={{ fontWeight: 600, bgcolor: "grey.50", minWidth: 80, textAlign: "center" }}>
                   Išrašymas
                 </TableCell>
-                <TableCell sx={{ fontWeight: 600, bgcolor: "grey.50", minWidth: 100, textAlign: "center" }}>
+                <TableCell sx={{ fontWeight: 600, bgcolor: "grey.50", minWidth: 90, textAlign: "center" }}>
                   Išleista
                 </TableCell>
               </TableRow>
@@ -331,9 +296,7 @@ export default function AdminUsers() {
                     bgcolor: idx % 2 === 0 ? "transparent" : "grey.50",
                   }}
                 >
-                  <TableCell sx={{ color: "text.secondary", fontWeight: 500 }}>
-                    {u.id}
-                  </TableCell>
+                  <TableCell sx={{ color: "text.secondary", fontWeight: 500 }}>{u.id}</TableCell>
                   <TableCell sx={{ fontWeight: 500 }}>{u.email || "—"}</TableCell>
                   <TableCell sx={{ color: "text.secondary", fontSize: "0.875rem" }}>
                     {fmtDateTime(u.date_joined)}
@@ -345,14 +308,8 @@ export default function AdminUsers() {
                       sx={{
                         fontWeight: 600,
                         minWidth: 60,
-                        bgcolor:
-                          parseFloat(fmtCredits(u.credits)) > 0
-                            ? "success.50"
-                            : "grey.100",
-                        color:
-                          parseFloat(fmtCredits(u.credits)) > 0
-                            ? "success.dark"
-                            : "text.secondary",
+                        bgcolor: parseFloat(fmtCredits(u.credits)) > 0 ? "success.50" : "grey.100",
+                        color: parseFloat(fmtCredits(u.credits)) > 0 ? "success.dark" : "text.secondary",
                       }}
                     />
                   </TableCell>
@@ -368,29 +325,21 @@ export default function AdminUsers() {
                   <TableCell sx={{ color: "text.secondary" }}>
                     {programLabel(u.default_accounting_program)}
                   </TableCell>
-                  <TableCell sx={{ color: "text.secondary" }}>
-                    {u.company_name || "—"}
-                  </TableCell>
-                  <TableCell
-                    sx={{
-                      color: "text.secondary",
-                      fontFamily: "monospace",
-                      fontSize: "0.875rem",
-                    }}
-                  >
+                  <TableCell sx={{ color: "text.secondary" }}>{u.company_name || "—"}</TableCell>
+                  <TableCell sx={{ color: "text.secondary", fontFamily: "monospace", fontSize: "0.875rem" }}>
                     {u.company_code || "—"}
                   </TableCell>
-                  
+
                   {/* Skaitmenizavimas */}
                   <TableCell sx={{ textAlign: "center" }}>
                     <SkaitmenizavimasCell lastPaymentDate={u.last_payment_date} />
                   </TableCell>
-                  
+
                   {/* Išrašymas */}
                   <TableCell sx={{ textAlign: "center" }}>
                     <IsrasymasCell status={u.inv_subscription_status} />
                   </TableCell>
-                  
+
                   {/* Išleista */}
                   <TableCell sx={{ textAlign: "center" }}>
                     <IsleistaCell totalSpent={u.total_spent} />
@@ -424,9 +373,7 @@ export default function AdminUsers() {
               {!nextCursor && users.length > 0 && !loading && !loadingMore && (
                 <TableRow>
                   <TableCell colSpan={11} align="center" sx={{ py: 2, color: "text.disabled" }}>
-                    <Typography variant="body2">
-                      Visi vartotojai įkelti ({users.length})
-                    </Typography>
+                    <Typography variant="body2">Visi vartotojai įkelti ({users.length})</Typography>
                   </TableCell>
                 </TableRow>
               )}
