@@ -171,7 +171,7 @@ function App() {
         <Route path="/suma-zodziais" element={<SumaZodziais />} />
         <Route path="/privatumo-politika" element={<Privacy />} />
         <Route path="/naudojimo-taisykles" element={<Terms />} />
-        <Route path="/saskaita-faktura" element={<InvoiceGenerator />} />
+        <Route path="/saskaitu-israsymas" element={<InvoiceGenerator />} />
         <Route path="/admin-dashboard" element={<RequireSuperuser loginPath="/prisijungti" forbiddenPath="/403"><AdminDashboard /></RequireSuperuser>} />
         <Route path="/admin-visi-failai" element={<RequireSuperuser loginPath="/prisijungti" forbiddenPath="/403"><AdminVisiFailai /></RequireSuperuser>} />
         <Route path="/admin-suvestine" element={<RequireSuperuser loginPath="/prisijungti" forbiddenPath="/403"><AdminSuvestine /></RequireSuperuser>} />
