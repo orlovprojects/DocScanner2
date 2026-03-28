@@ -18,8 +18,101 @@ import {
   Tooltip,
 } from "@mui/material";
 import RefreshIcon from "@mui/icons-material/Refresh";
+import PaymentIcon from "@mui/icons-material/Payment";
+import ReceiptLongIcon from "@mui/icons-material/ReceiptLong";
+import HourglassEmptyIcon from "@mui/icons-material/HourglassEmpty";
+import HourglassDisabledIcon from "@mui/icons-material/HourglassDisabled";
+import CalendarMonthIcon from "@mui/icons-material/CalendarMonth";
+import CalendarTodayIcon from "@mui/icons-material/CalendarToday";
 import { api } from "../api/endpoints";
 import { ACCOUNTING_PROGRAMS } from "../page_elements/AccountingPrograms";
+
+// ─── Skaitmenizavimas icon ───
+const SkaitmenizavimasCell = ({ lastPaymentDate }) => {
+  if (!lastPaymentDate) {
+    return (
+      <Typography sx={{ color: "text.disabled", fontSize: 13 }}>—</Typography>
+    );
+  }
+
+  const date = new Date(lastPaymentDate);
+  const formatted = date.toLocaleDateString("lt-LT", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+
+  return (
+    <Tooltip title={`Paskutinis mokėjimas: ${formatted}`} arrow>
+      <PaymentIcon sx={{ color: "success.main", fontSize: 22 }} />
+    </Tooltip>
+  );
+};
+
+// ─── Išrašymas status icon ───
+const IsrasymasCell = ({ status }) => {
+  if (!status) {
+    return (
+      <Typography sx={{ color: "text.disabled", fontSize: 13 }}>—</Typography>
+    );
+  }
+
+  const config = {
+    trial_active: {
+      icon: <HourglassEmptyIcon sx={{ fontSize: 20 }} />,
+      color: "info.main",
+      label: "Bandomasis pradėtas",
+    },
+    trial_expired: {
+      icon: <HourglassDisabledIcon sx={{ fontSize: 20 }} />,
+      color: "warning.main",
+      label: "Bandomasis pasibaigęs",
+    },
+    monthly: {
+      icon: <CalendarTodayIcon sx={{ fontSize: 20 }} />,
+      color: "success.main",
+      label: "Mėnesinis planas",
+    },
+    yearly: {
+      icon: <CalendarMonthIcon sx={{ fontSize: 20 }} />,
+      color: "success.dark",
+      label: "Metinis planas",
+    },
+  };
+
+  const cfg = config[status];
+  if (!cfg) return <Typography sx={{ color: "text.disabled" }}>—</Typography>;
+
+  return (
+    <Tooltip title={cfg.label} arrow>
+      <Box sx={{ color: cfg.color, display: "flex", alignItems: "center" }}>
+        {cfg.icon}
+      </Box>
+    </Tooltip>
+  );
+};
+
+// ─── Išleista (total spent) ───
+const IsleistaCell = ({ totalSpent }) => {
+  if (!totalSpent || totalSpent === 0) {
+    return (
+      <Typography sx={{ color: "text.disabled", fontSize: 13 }}>—</Typography>
+    );
+  }
+
+  return (
+    <Chip
+      label={`€${totalSpent.toFixed(2)}`}
+      size="small"
+      sx={{
+        fontWeight: 600,
+        bgcolor: "primary.50",
+        color: "primary.dark",
+        minWidth: 70,
+      }}
+    />
+  );
+};
 
 export default function AdminUsers() {
   const [me, setMe] = useState(null);
@@ -33,7 +126,6 @@ export default function AdminUsers() {
   const observerRef = useRef(null);
   const sentinelRef = useRef(null);
 
-  // 1) грузим профиль
   useEffect(() => {
     api
       .get("/profile/", { withCredentials: true })
@@ -42,7 +134,6 @@ export default function AdminUsers() {
       .finally(() => setMeLoaded(true));
   }, []);
 
-  // Извлечение cursor из next URL
   const extractCursor = (nextUrl) => {
     if (!nextUrl) return null;
     try {
@@ -53,7 +144,6 @@ export default function AdminUsers() {
     }
   };
 
-  // Построение URL
   const buildUrl = useCallback((cursor = null) => {
     const params = new URLSearchParams();
     if (cursor) params.set("cursor", cursor);
@@ -61,7 +151,6 @@ export default function AdminUsers() {
     return `/admin/users/${qs ? `?${qs}` : ""}`;
   }, []);
 
-  // 2) первоначальная загрузка пользователей
   const fetchUsers = useCallback(async () => {
     setLoading(true);
     try {
@@ -77,7 +166,6 @@ export default function AdminUsers() {
     }
   }, [buildUrl]);
 
-  // Подгрузка следующей страницы
   const loadMore = useCallback(async () => {
     if (!nextCursor || loadingMore) return;
 
@@ -93,12 +181,10 @@ export default function AdminUsers() {
     }
   }, [nextCursor, loadingMore, buildUrl]);
 
-  // Initial load
   useEffect(() => {
     if (meLoaded && me?.is_superuser) fetchUsers();
   }, [meLoaded, me?.is_superuser, fetchUsers]);
 
-  // IntersectionObserver для infinite scroll
   useEffect(() => {
     if (observerRef.current) observerRef.current.disconnect();
 
@@ -118,7 +204,6 @@ export default function AdminUsers() {
     return () => observerRef.current?.disconnect();
   }, [nextCursor, loadingMore, loading, loadMore]);
 
-  // форматтеры
   const fmtDateTime = (iso) =>
     iso
       ? new Date(iso).toLocaleString("lt-LT", {
@@ -162,7 +247,6 @@ export default function AdminUsers() {
         <title>Vartotojai (Admin)</title>
       </Helmet>
 
-      {/* Header */}
       <Stack
         direction="row"
         alignItems="center"
@@ -203,7 +287,6 @@ export default function AdminUsers() {
 
       {loading && <LinearProgress sx={{ mb: 3, borderRadius: 1 }} />}
 
-      {/* Table */}
       <Paper
         elevation={0}
         sx={{
@@ -225,7 +308,17 @@ export default function AdminUsers() {
                 <TableCell sx={{ fontWeight: 600, bgcolor: "grey.50", minWidth: 180 }}>Apskaitos programa</TableCell>
                 <TableCell sx={{ fontWeight: 600, bgcolor: "grey.50", minWidth: 180 }}>Įmonė</TableCell>
                 <TableCell sx={{ fontWeight: 600, bgcolor: "grey.50", minWidth: 120 }}>Įmonės kodas</TableCell>
-                <TableCell sx={{ fontWeight: 600, bgcolor: "grey.50", minWidth: 120 }}>View Mode</TableCell>
+                <TableCell sx={{ fontWeight: 600, bgcolor: "grey.50", minWidth: 100, textAlign: "center" }}>
+                  <Tooltip title="Skaitmenizavimas" arrow>
+                    <ReceiptLongIcon sx={{ fontSize: 20, color: "text.secondary" }} />
+                  </Tooltip>
+                </TableCell>
+                <TableCell sx={{ fontWeight: 600, bgcolor: "grey.50", minWidth: 100, textAlign: "center" }}>
+                  Išrašymas
+                </TableCell>
+                <TableCell sx={{ fontWeight: 600, bgcolor: "grey.50", minWidth: 100, textAlign: "center" }}>
+                  Išleista
+                </TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
@@ -287,20 +380,31 @@ export default function AdminUsers() {
                   >
                     {u.company_code || "—"}
                   </TableCell>
-                  <TableCell sx={{ color: "text.secondary" }}>
-                    {u.view_mode || "—"}
+                  
+                  {/* Skaitmenizavimas */}
+                  <TableCell sx={{ textAlign: "center" }}>
+                    <SkaitmenizavimasCell lastPaymentDate={u.last_payment_date} />
+                  </TableCell>
+                  
+                  {/* Išrašymas */}
+                  <TableCell sx={{ textAlign: "center" }}>
+                    <IsrasymasCell status={u.inv_subscription_status} />
+                  </TableCell>
+                  
+                  {/* Išleista */}
+                  <TableCell sx={{ textAlign: "center" }}>
+                    <IsleistaCell totalSpent={u.total_spent} />
                   </TableCell>
                 </TableRow>
               ))}
 
-              {/* Sentinel row для infinite scroll */}
               <TableRow ref={sentinelRef}>
-                <TableCell colSpan={9} sx={{ p: 0, border: 0, height: 1 }} />
+                <TableCell colSpan={11} sx={{ p: 0, border: 0, height: 1 }} />
               </TableRow>
 
               {loadingMore && (
                 <TableRow>
-                  <TableCell colSpan={9} align="center" sx={{ py: 3 }}>
+                  <TableCell colSpan={11} align="center" sx={{ py: 3 }}>
                     <LinearProgress sx={{ maxWidth: 200, mx: "auto", mb: 1 }} />
                     <Typography variant="body2" color="text.secondary">
                       Kraunama daugiau...
@@ -311,7 +415,7 @@ export default function AdminUsers() {
 
               {!loading && !loadingMore && users.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={9} align="center" sx={{ py: 8, color: "text.disabled" }}>
+                  <TableCell colSpan={11} align="center" sx={{ py: 8, color: "text.disabled" }}>
                     <Typography variant="body1">Duomenų nėra</Typography>
                   </TableCell>
                 </TableRow>
@@ -319,7 +423,7 @@ export default function AdminUsers() {
 
               {!nextCursor && users.length > 0 && !loading && !loadingMore && (
                 <TableRow>
-                  <TableCell colSpan={9} align="center" sx={{ py: 2, color: "text.disabled" }}>
+                  <TableCell colSpan={11} align="center" sx={{ py: 2, color: "text.disabled" }}>
                     <Typography variant="body2">
                       Visi vartotojai įkelti ({users.length})
                     </Typography>

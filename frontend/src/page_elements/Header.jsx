@@ -32,34 +32,22 @@ import AccountCircleIcon from "@mui/icons-material/AccountCircle";
 import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
 import ExpandLess from "@mui/icons-material/ExpandLess";
 import ExpandMore from "@mui/icons-material/ExpandMore";
+import AdminPanelSettingsIcon from "@mui/icons-material/AdminPanelSettings";
 
 import { api } from "../api/endpoints";
 
 // ─── Mega-menu config ────────────────────────────────────────────
-// const MEGA_MENUS = {
-//   skaitmenizavimas: {
-//     label: "Skaitmenizavimas",
-//     items: [
-//       { text: "Suvestinė", path: "/suvestine" },
-//       { text: "Iš klientų", path: "/is-klientu" },
-//       { text: "Nustatymai", path: "/nustatymai" },
-//     ],
-//   },
-//   israsymas: {
-//     label: "Išrašymas",
-//     items: [
-//       { text: "Sąskaitos", path: "/israsymas" },
-//       { text: "Banko išrašai", path: "/israsymas/banko-israsai" },
-//       { text: "Klientai", path: "/israsymas/klientai" },
-//       { text: "Prekės / paslaugos", path: "/israsymas/prekes-paslaugos" },
-//       { text: "Serijos ir numeracijos", path: "/israsymas/serijos-numeracijos" },
-//       { text: "Matavimo vienetai", path: "/israsymas/matavimo-vienetai" },
-//       { text: "Nustatymai", path: "/israsymas/nustatymai" },
-//     ],
-//   },
-// };
-
 const MEGA_MENUS = {
+  admin: {
+    label: "Admin",
+    icon: AdminPanelSettingsIcon,
+    items: [
+      { text: "Analytics", path: "/admin-dashboard" },
+      { text: "Klaidų suvestinė", path: "/admin-suvestine" },
+      { text: "Visi failai", path: "/admin-visi-failai" },
+      { text: "Klientai", path: "/admin-klientai" },
+    ],
+  },
   skaitmenizavimas: {
     label: "Skaitmenizavimas",
     items: [
@@ -100,38 +88,14 @@ const NavDropdown = ({ menu, nav }) => {
 
   useEffect(() => () => clearTimeout(timeoutRef.current), []);
 
+  const IconComponent = menu.icon;
+
   return (
     <Box
       onMouseEnter={handleEnter}
       onMouseLeave={handleLeave}
       sx={{ position: "relative", display: "inline-flex" }}
     >
-      {/* <Button
-        ref={anchorRef}
-        disableRipple
-        sx={{
-          mx: 2,
-          color: "black",
-          fontWeight: 700,
-          fontFamily: "Arial",
-          background: "none",
-          textTransform: "none",
-          fontSize: 16,
-          cursor: "default",
-          "&:hover": { background: "#F5F5F5" },
-        }}
-        endIcon={
-          <KeyboardArrowDownIcon
-            sx={{
-              transition: "transform 0.2s",
-              transform: open ? "rotate(180deg)" : "rotate(0deg)",
-            }}
-          />
-        }
-      >
-        {menu.label}
-      </Button> */}
-
       <Button
         ref={anchorRef}
         disableRipple
@@ -149,6 +113,7 @@ const NavDropdown = ({ menu, nav }) => {
           minHeight: 52,
           "&:hover": { background: "#F5F5F5" },
         }}
+        startIcon={IconComponent ? <IconComponent sx={{ fontSize: 20 }} /> : null}
         endIcon={
           <KeyboardArrowDownIcon
             sx={{
@@ -256,6 +221,8 @@ const NavDropdown = ({ menu, nav }) => {
 const MobileDropdownSection = ({ menu, nav, closeDrawer }) => {
   const [open, setOpen] = useState(false);
 
+  const IconComponent = menu.icon;
+
   return (
     <>
       <ListItem
@@ -267,14 +234,21 @@ const MobileDropdownSection = ({ menu, nav, closeDrawer }) => {
           justifyContent: "space-between",
         }}
       >
-        <ListItemText
-          primary={menu.label}
-          primaryTypographyProps={{
-            fontFamily: "Arial",
-            fontWeight: 500,
-            fontSize: 16,
-          }}
-        />
+        <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+          {IconComponent && (
+            <ListItemIcon sx={{ minWidth: "auto" }}>
+              <IconComponent sx={{ fontSize: 22 }} />
+            </ListItemIcon>
+          )}
+          <ListItemText
+            primary={menu.label}
+            primaryTypographyProps={{
+              fontFamily: "Arial",
+              fontWeight: 500,
+              fontSize: 16,
+            }}
+          />
+        </Box>
 
         <Box
           sx={{
@@ -389,18 +363,10 @@ const Header = () => {
   const handleMenuClick = (event) => setAnchorEl(event.currentTarget);
   const handleStartTrial = () => nav("/registruotis");
 
-  // ─── Простые (не-dropdown) desktop-пункты ────────────────────
+  // ─── Простые (не-dropdown) desktop-пункты (без админ-пунктов) ────────────────────
   const plainDesktopItems = [
     { text: "Kaip naudotis?", onClick: () => nav("/naudojimo-gidas") },
     { text: "Papildyti", onClick: () => nav("/papildyti") },
-    ...(isSuper
-      ? [
-          { text: "Klaidų suvestinė", onClick: () => nav("/admin-suvestine") },
-          { text: "Visi failai", onClick: () => nav("/admin-visi-failai") },
-          { text: "Klientai", onClick: () => nav("/admin-klientai") },
-          { text: "Analytics", onClick: () => nav("/admin-dashboard") },
-        ]
-      : []),
   ];
 
   const guestDesktopItems = [
@@ -452,6 +418,11 @@ const Header = () => {
           >
             {isAuthenticated ? (
               <>
+                {/* Mega-dropdown: Admin (только для superuser, слева) */}
+                {isSuper && (
+                  <NavDropdown menu={MEGA_MENUS.admin} nav={nav} />
+                )}
+
                 {/* Mega-dropdown: Skaitmenizavimas */}
                 <NavDropdown menu={MEGA_MENUS.skaitmenizavimas} nav={nav} />
 
@@ -591,43 +562,6 @@ const Header = () => {
         anchorOrigin={{ horizontal: "right", vertical: "bottom" }}
         disableScrollLock
       >
-        {isAuthenticated && isSuper && (
-          <>
-            <MenuItem
-              onClick={() => {
-                handleClose();
-                nav("/admin-suvestine");
-              }}
-            >
-              Klaidų suvestinė
-            </MenuItem>
-            <MenuItem
-              onClick={() => {
-                handleClose();
-                nav("/admin-visi-failai");
-              }}
-            >
-              Visi failai
-            </MenuItem>
-            <MenuItem
-              onClick={() => {
-                handleClose();
-                nav("/admin-klientai");
-              }}
-            >
-              Klientai
-            </MenuItem>
-            <MenuItem
-              onClick={() => {
-                handleClose();
-                nav("/admin-dashboard");
-              }}
-            >
-              Analytics
-            </MenuItem>
-            <Divider />
-          </>
-        )}
         <MenuItem
           onClick={() => {
             handleClose();
@@ -706,6 +640,15 @@ const Header = () => {
             {/* ── Авторизован ────────────────────────────────── */}
             {isAuthenticated && (
               <>
+                {/* Collapsible: Admin (только для superuser, первым) */}
+                {isSuper && (
+                  <MobileDropdownSection
+                    menu={MEGA_MENUS.admin}
+                    nav={nav}
+                    closeDrawer={() => setIsDrawerOpen(false)}
+                  />
+                )}
+
                 {/* Collapsible: Skaitmenizavimas */}
                 <MobileDropdownSection
                   menu={MEGA_MENUS.skaitmenizavimas}
@@ -738,49 +681,6 @@ const Header = () => {
                 >
                   <ListItemText primary="Papildyti" />
                 </ListItem>
-
-                {/* Админ-пункты */}
-                {isSuper && (
-                  <>
-                    <Divider />
-                    <ListItem
-                      button
-                      onClick={() => {
-                        setIsDrawerOpen(false);
-                        nav("/admin-suvestine");
-                      }}
-                    >
-                      <ListItemText primary="Klaidų suvestinė" />
-                    </ListItem>
-                    <ListItem
-                      button
-                      onClick={() => {
-                        setIsDrawerOpen(false);
-                        nav("/admin-visi-failai");
-                      }}
-                    >
-                      <ListItemText primary="Visi failai" />
-                    </ListItem>
-                    <ListItem
-                      button
-                      onClick={() => {
-                        setIsDrawerOpen(false);
-                        nav("/admin-klientai");
-                      }}
-                    >
-                      <ListItemText primary="Klientai" />
-                    </ListItem>
-                    <ListItem
-                      button
-                      onClick={() => {
-                        setIsDrawerOpen(false);
-                        nav("/admin-dashboard");
-                      }}
-                    >
-                      <ListItemText primary="Analytics" />
-                    </ListItem>
-                  </>
-                )}
 
                 <Divider />
                 <ListItem
@@ -824,7 +724,6 @@ const Header = () => {
 };
 
 export default Header;
-
 
 
 

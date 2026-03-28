@@ -884,19 +884,65 @@ class CustomUserAdminListSerializer(CustomUserSerializer):
     Упрощённый сериалайзер для страницы суперюзера:
     без подписочных и Stripe-полей, без password.
     """
+    last_payment_date = serializers.SerializerMethodField()
+    inv_subscription_status = serializers.SerializerMethodField()
+    total_spent = serializers.SerializerMethodField()
+
     class Meta(CustomUserSerializer.Meta):
         model = CustomUser
         fields = [
-            'id','email','first_name','last_name',
-            'is_active','is_staff','is_superuser',
-            'date_joined','last_login',
-            'credits','default_accounting_program',
-            'company_name','company_code','vat_code',
-            'company_iban','company_address','company_country_iso',
-            'purchase_defaults','sales_defaults','view_mode',
-            'extra_settings','lineitem_rules',
+            'id', 'email', 'first_name', 'last_name',
+            'is_active', 'is_staff', 'is_superuser',
+            'date_joined', 'last_login',
+            'credits', 'default_accounting_program',
+            'company_name', 'company_code', 'vat_code',
+            'company_iban', 'company_address', 'company_country_iso',
+            'purchase_defaults', 'sales_defaults',
+            'extra_settings', 'lineitem_rules',
+            'stripe_customer_id',
+            # Новые поля:
+            'last_payment_date',
+            'inv_subscription_status',
+            'total_spent',
         ]
         read_only_fields = getattr(CustomUserSerializer.Meta, 'read_only_fields', ('credits',))
+
+    def get_last_payment_date(self, obj):
+        """Дата последнего платежа за credits (skaitmenizavimas)"""
+        last = obj.payments.filter(
+            payment_status='paid',
+            payment_type='credits'
+        ).order_by('-paid_at').first()
+        return last.paid_at.isoformat() if last else None
+
+    def get_inv_subscription_status(self, obj):
+        """Статус подписки Išrašymas"""
+        try:
+            sub = obj.inv_subscription
+        except:
+            return None
+        
+        if sub.status == 'trial':
+            return 'trial_active'
+        elif sub.status == 'active':
+            plan = (sub.plan or '').lower()
+            if 'yearly' in plan or 'annual' in plan or 'metinis' in plan:
+                return 'yearly'
+            return 'monthly'
+        elif sub.trial_used:
+            return 'trial_expired'
+        return None
+
+    def get_total_spent(self, obj):
+        """Сколько user всего потратил (EUR)"""
+        from django.db.models import Sum
+        total = obj.payments.filter(
+            payment_status='paid'
+        ).aggregate(total=Sum('amount_total'))['total']
+        
+        if total:
+            return round(total / 100, 2)  # cents -> EUR
+        return None
 
 
 
