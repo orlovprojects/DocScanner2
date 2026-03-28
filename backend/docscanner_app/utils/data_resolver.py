@@ -2728,7 +2728,69 @@ def _try_zero_informational_line_discounts(doc: Dict[str, Any]) -> None:
 
 
 
+DOC_VAT_ROUNDING_MAX_DELTA = Decimal("0.20")
 
+def _fix_doc_vat_rounding(doc: Dict[str, Any]) -> bool:
+    items = doc.get("line_items") or []
+    if not items:
+        return False
+    
+    if not doc.get("ar_sutapo", False):
+        return False
+    
+    if bool(doc.get("separate_vat")):
+        return False
+    
+    wo = d(doc.get("amount_wo_vat"), 2)
+    vat = d(doc.get("vat_amount"), 2)
+    vp = d(doc.get("vat_percent"), 2)
+    
+    if vp == 0 or wo == 0:
+        return False
+    
+    # Точный расчёт как в экспортном валидаторе (с Q2)
+    vat_from_rate = Q2(wo * vp / Decimal("100"))
+    delta_exact = (vat_from_rate - vat).copy_abs()
+    
+    # Уже проходит — не трогаем
+    if delta_exact <= Decimal("0.02"):
+        return False
+    
+    # Слишком большая дельта — не наш случай
+    if delta_exact > DOC_VAT_ROUNDING_MAX_DELTA:
+        append_log(doc, f"fix-vat-rounding: SKIP - delta {delta_exact} > {DOC_VAT_ROUNDING_MAX_DELTA}")
+        return False
+    
+    # Σvat строк
+    sum_vat = Q2(sum(d(li.get("vat"), 2) for li in items))
+    
+    # Пересечение интервалов [vat_from_rate ± 0.02] ∩ [sum_vat ± 0.02]
+    lo = max(vat_from_rate - Decimal("0.02"), sum_vat - Decimal("0.02"))
+    hi = min(vat_from_rate + Decimal("0.02"), sum_vat + Decimal("0.02"))
+    
+    if lo > hi:
+        append_log(doc, f"fix-vat-rounding: SKIP - no valid vat exists "
+                       f"(rate={vat_from_rate}, Σvat={sum_vat}, gap={Q2(lo - hi)})")
+        return False
+    
+    # Центр пересечения
+    new_vat = Q2((lo + hi) / Decimal("2"))
+    new_with = Q2(wo + new_vat)
+    
+    doc["_orig_vat_amount"] = vat
+    doc["_orig_amount_with_vat"] = doc.get("amount_with_vat")
+    doc["vat_amount"] = new_vat
+    doc["amount_with_vat"] = new_with
+    doc["_vat_rounding_fixed"] = True
+    
+    append_log(
+        doc,
+        f"fix-vat-rounding: vat {vat}→{new_vat}, with {doc['_orig_amount_with_vat']}→{new_with} "
+        f"(rate={vat_from_rate}, Σvat={sum_vat}, "
+        f"Δrate={Q2((new_vat - vat_from_rate).copy_abs())}, Δlines={Q2((new_vat - sum_vat).copy_abs())})"
+    )
+    
+    return True
 
 
 def _final_math_validation(doc: Dict[str, Any]) -> Dict[str, Any]:
@@ -3653,11 +3715,23 @@ def resolve_line_items(doc: Dict[str, Any], customer_user=None) -> Dict[str, Any
         append_log(doc, f"hints: {len(hints)} issues noted")
 
 
+    # # ✅ FIX_DELTA: Подгонка сумм документа под строки
+    # _fix_delta_adjust_lines_and_doc(doc, customer_user)
+    
+    # # Пересчитать флаги после возможной подгонки
+    # if doc.get("_doc_totals_adjusted_by_fix_delta"):
+    #     sum_wo, sum_vat, sum_with = _aggregate_lines(doc)
+    #     _check_against_doc(doc, sum_wo, sum_vat, sum_with)
+
+
     # ✅ FIX_DELTA: Подгонка сумм документа под строки
     _fix_delta_adjust_lines_and_doc(doc, customer_user)
     
+    # ✅ FIX VAT ROUNDING: Подгонка vat_amount при построчном округлении
+    _fix_doc_vat_rounding(doc)
+    
     # Пересчитать флаги после возможной подгонки
-    if doc.get("_doc_totals_adjusted_by_fix_delta"):
+    if doc.get("_doc_totals_adjusted_by_fix_delta") or doc.get("_vat_rounding_fixed"):
         sum_wo, sum_vat, sum_with = _aggregate_lines(doc)
         _check_against_doc(doc, sum_wo, sum_vat, sum_with)
 

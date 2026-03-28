@@ -18,7 +18,7 @@ from django.db import transaction
 from django.utils import timezone
 from datetime import timedelta
 
-from .models import ScannedDocument, CustomUser, UploadSession
+from .models import ScannedDocument, CustomUser, UploadSession, CreditUsageLog
 
 from .utils.ocr import get_ocr_text as get_ocr_text_gcv
 from .utils.gemini_ocr import get_ocr_text_gemini
@@ -109,6 +109,13 @@ def settle_session_for_doc(doc_id: int):
     if success:
         s.done_items = (s.done_items or 0) + 1
         u.credits = (u.credits or Decimal("0")) - cost
+        # --- audit log ---
+        CreditUsageLog.objects.create(
+            user=u,
+            scanned_document=doc,
+            credits_used=cost,
+            document_filename=doc.original_filename or '',
+        )
     else:
         s.failed_items = (s.failed_items or 0) + 1
 
@@ -679,37 +686,66 @@ def process_uploaded_file_task(self, user_id, doc_id, scan_type):
 
 
         # 6) OCR: Google Vision → fallback Gemini OCR
+        # t0 = _t()
+        # # get_ocr_text_gcv возвращает: raw_json, joined_text, paragraphs, error
+        # gcv_raw_json, gcv_joined_text, _, gcv_err = get_ocr_text_gcv(data, original_filename, logger)
+        # _log_t("OCR (Google Vision)", t0)
+        # logger.info("[TASK] GCV result: err=%s, raw_len=%s, text_len=%s",
+        #     gcv_err, len(gcv_raw_json or ''), len(gcv_joined_text or ''))
+
+        # if gcv_err or (not gcv_raw_json and not gcv_joined_text):
+        #     logger.warning(f"[TASK] GCV failed or empty ({gcv_err or 'empty'}). Trying Gemini OCR...")
+        #     t1 = _t()
+        #     gemini_text, gemini_err = get_ocr_text_gemini(data, original_filename, logger)  # текст БЕЗ координат
+        #     _log_t("OCR (Gemini OCR fallback)", t1)
+
+        #     if gemini_err or not gemini_text:
+        #         # финальная ошибка OCR
+        #         t0 = _t()
+        #         doc.status = 'rejected'
+        #         doc.error_message = gemini_err or gcv_err or "OCR returned empty text"
+        #         doc.preview_url = preview_url
+        #         doc.save(update_fields=['status', 'error_message', 'preview_url'])
+        #         _settle_and_finish_if_session(doc)
+        #         _log_t("Save rejected (OCR error)", t0)
+        #         logger.error(f"[TASK] OCR error (GCV+Gemini): {doc.error_message}")
+        #         _log_t("TOTAL", total_start)
+        #         return
+
+        #     # fallback: координат нет → raw_text кладём сам текст, glued_raw_text тоже текст
+        #     raw_json_for_db = gemini_text
+        #     glued_text_for_db = gemini_text
+        # else:
+        #     # GCV успех: есть компактный JSON + склеенный текст
+        #     raw_json_for_db = gcv_raw_json
+        #     glued_text_for_db = gcv_joined_text
+
+        # logger.info("[TASK] OCR lengths: raw=%s, glued=%s",
+        #             len(raw_json_for_db or ""), len(glued_text_for_db or ""))
+
         t0 = _t()
         # get_ocr_text_gcv возвращает: raw_json, joined_text, paragraphs, error
         gcv_raw_json, gcv_joined_text, _, gcv_err = get_ocr_text_gcv(data, original_filename, logger)
         _log_t("OCR (Google Vision)", t0)
+        logger.info("[TASK] GCV result: err=%s, raw_len=%s, text_len=%s",
+            gcv_err, len(gcv_raw_json or ''), len(gcv_joined_text or ''))
 
         if gcv_err or (not gcv_raw_json and not gcv_joined_text):
-            logger.warning(f"[TASK] GCV failed or empty ({gcv_err or 'empty'}). Trying Gemini OCR...")
-            t1 = _t()
-            gemini_text, gemini_err = get_ocr_text_gemini(data, original_filename, logger)  # текст БЕЗ координат
-            _log_t("OCR (Gemini OCR fallback)", t1)
+            # ВРЕМЕННО: без fallback, чтобы увидеть ошибку GCV
+            t0 = _t()
+            doc.status = 'rejected'
+            doc.error_message = f"GCV error: {gcv_err or 'empty result'}"
+            doc.preview_url = preview_url
+            doc.save(update_fields=['status', 'error_message', 'preview_url'])
+            _settle_and_finish_if_session(doc)
+            _log_t("Save rejected (GCV error, no fallback)", t0)
+            logger.error("[TASK] GCV FAILED: err=%s, raw=%s, text=%s",
+                gcv_err, len(gcv_raw_json or ''), len(gcv_joined_text or ''))
+            _log_t("TOTAL", total_start)
+            return
 
-            if gemini_err or not gemini_text:
-                # финальная ошибка OCR
-                t0 = _t()
-                doc.status = 'rejected'
-                doc.error_message = gemini_err or gcv_err or "OCR returned empty text"
-                doc.preview_url = preview_url
-                doc.save(update_fields=['status', 'error_message', 'preview_url'])
-                _settle_and_finish_if_session(doc)
-                _log_t("Save rejected (OCR error)", t0)
-                logger.error(f"[TASK] OCR error (GCV+Gemini): {doc.error_message}")
-                _log_t("TOTAL", total_start)
-                return
-
-            # fallback: координат нет → raw_text кладём сам текст, glued_raw_text тоже текст
-            raw_json_for_db = gemini_text
-            glued_text_for_db = gemini_text
-        else:
-            # GCV успех: есть компактный JSON + склеенный текст
-            raw_json_for_db = gcv_raw_json
-            glued_text_for_db = gcv_joined_text
+        raw_json_for_db = gcv_raw_json
+        glued_text_for_db = gcv_joined_text
 
         logger.info("[TASK] OCR lengths: raw=%s, glued=%s",
                     len(raw_json_for_db or ""), len(glued_text_for_db or ""))
@@ -1109,6 +1145,12 @@ def process_uploaded_file_task(self, user_id, doc_id, scan_type):
             credits_per_doc = Decimal("1.3") if scan_type == "detaliai" else Decimal("1")
             user.credits -= credits_per_doc
             user.save(update_fields=["credits"])
+            CreditUsageLog.objects.create(
+                user=user,
+                scanned_document=doc,
+                credits_used=credits_per_doc,
+                document_filename=doc.original_filename or '',
+            )
         _log_t("Finalize credits/session", t0)
 
         _log_t("TOTAL", total_start)
@@ -3230,13 +3272,203 @@ def renew_gdrive_watches():
                 logger.error("Failed to renew watch folder %s: %s", folder.id, e)
 
 
+# # ════════════════════════════════════════════════
+# #  Recurring invoices
+# # ════════════════════════════════════════════════
+
+
+@shared_task(name="process_recurring_invoices")
+def process_recurring_invoices():
+    """
+    Запускается каждый день в 8:55.
+    Находит все active recurring где next_run_at <= сегодня 23:59
+    и генерирует из них инвойсы.
+    """
+    from .models import RecurringInvoice, InvSubscription
+    from .services.recurring_generator import generate_invoice_from_recurring
+
+    today_end = timezone.now().replace(hour=23, minute=59, second=59)
+
+    recurring_qs = RecurringInvoice.objects.filter(
+        status="active",
+        next_run_at__isnull=False,
+        next_run_at__lte=today_end,
+    ).select_for_update(skip_locked=True)
+
+    count = 0
+    errors = 0
+    paused = 0
+
+    for recurring in recurring_qs:
+        # --- Inv subscription: check if recurring is allowed ---
+        try:
+            sub = InvSubscription.objects.filter(user=recurring.user).first()
+            if sub:
+                sub.check_and_expire()
+                if sub.status == "free":
+                    recurring.status = "paused"
+                    recurring.save(update_fields=["status"])
+                    paused += 1
+                    logger.info(
+                        "[Recurring] Paused recurring %d for user %s (free plan)",
+                        recurring.id, recurring.user.email,
+                    )
+                    continue
+        except Exception as e:
+            logger.warning("[Recurring] Subscription check failed for %d: %s", recurring.id, e)
+
+        try:
+            generate_invoice_from_recurring(recurring)
+            count += 1
+            logger.info(f"Generated invoice for recurring {recurring.id}")
+        except Exception as e:
+            errors += 1
+            logger.error(f"Failed recurring {recurring.id}: {e}")
+
+    logger.info(
+        "Recurring invoices: %d generated, %d paused (free), %d failed",
+        count, paused, errors,
+    )
+    return {"generated": count, "paused": paused, "errors": errors}
+
+
+# ════════════════════════════════════════════════════════════
+#  Invoice email tasks
+# ════════════════════════════════════════════════════════════
+
+@shared_task(name="send_invoice_email_task", bind=True, max_retries=3)
+def send_invoice_email_task(self, invoice_id, email_type, recipient_email=None, reminder_day=None, days_context=None):
+    """Универсальная задача отправки email для счёта."""
+    try:
+        from .services.invoice_email_service import send_invoice_email
+        from .models import Invoice
+
+        # --- Inv subscription: email limit check for free users ---
+        try:
+            inv = Invoice.objects.select_related("user").get(id=invoice_id)
+            from .views import check_inv_email_limit, record_inv_email
+            allowed, err = check_inv_email_limit(inv.user, invoice_id)
+            if not allowed:
+                logger.warning(
+                    "[EmailTask] Blocked by inv limit: invoice=%s, %s",
+                    invoice_id, err.get("message", ""),
+                )
+                return {"invoice_id": invoice_id, "status": "limit_reached"}
+        except Exception as e:
+            logger.warning("[EmailTask] Subscription check failed: %s", e)
+
+        result = send_invoice_email(
+            invoice_id=invoice_id,
+            email_type=email_type,
+            recipient_email=recipient_email,
+            reminder_day=reminder_day,
+            days_context=days_context,
+        )
+
+        if result and result.status == "failed":
+            raise self.retry(countdown=300)
+
+        # --- Record inv email usage ---
+        if result and result.status == "sent":
+            try:
+                record_inv_email(inv.user, invoice_id)
+            except Exception as e:
+                logger.warning("[EmailTask] Failed to record usage: %s", e)
+
+        return {
+            "invoice_id": invoice_id,
+            "email_type": email_type,
+            "status": result.status if result else "skipped",
+        }
+    except self.MaxRetriesExceededError:
+        logger.error(f"Max retries for invoice {invoice_id} email_type={email_type}")
+        return {"invoice_id": invoice_id, "status": "max_retries_exceeded"}
+    except Exception as e:
+        logger.error(f"send_invoice_email_task error: {e}")
+        raise self.retry(countdown=300, exc=e)
+    
 
 
 
+@shared_task(name="send_payment_reminders")
+def send_payment_reminders():
+    """Ежедневная проверка — автоматические напоминания по invoice_reminder_days."""
+    from .models import Invoice, InvoiceSettings, InvSubscription
 
+    today = timezone.localdate()
+    count = 0
+    errors = 0
+    skipped_free = 0
 
+    invoices = Invoice.objects.filter(
+        send_payment_reminders=True,
+        status__in=["issued", "sent", "partially_paid"],
+        due_date__isnull=False,
+        buyer_email__gt="",
+    ).select_related("user")
 
+    user_settings_cache = {}
+    user_sub_cache = {}
 
+    for inv in invoices:
+        try:
+            user_id = inv.user_id
+
+            # --- Inv subscription check (cached per user) ---
+            if user_id not in user_sub_cache:
+                sub = InvSubscription.objects.filter(user_id=user_id).first()
+                if sub:
+                    sub.check_and_expire()
+                    user_sub_cache[user_id] = sub.status
+                else:
+                    user_sub_cache[user_id] = None
+
+            if user_sub_cache[user_id] == "free":
+                # Free plan — disable auto reminders silently
+                # Also turn off the flag so it doesn't keep checking
+                Invoice.objects.filter(id=inv.id).update(send_payment_reminders=False)
+                skipped_free += 1
+                continue
+
+            if user_id not in user_settings_cache:
+                try:
+                    inv_settings = InvoiceSettings.objects.get(user_id=user_id)
+                    days_list = inv_settings.invoice_reminder_days or [-7, -1, 3]
+                except InvoiceSettings.DoesNotExist:
+                    days_list = [-7, -1, 3]
+                user_settings_cache[user_id] = days_list
+
+            reminder_days = user_settings_cache[user_id]
+            diff = (inv.due_date - today).days
+
+            for rd in reminder_days:
+                if diff != -rd:
+                    continue
+
+                if rd < 0:
+                    email_type = "reminder_before"
+                    days_context = abs(rd)
+                else:
+                    email_type = "reminder_overdue"
+                    days_context = rd
+
+                send_invoice_email_task.delay(
+                    invoice_id=inv.id,
+                    email_type=email_type,
+                    reminder_day=rd,
+                    days_context=days_context,
+                )
+                count += 1
+
+        except Exception as e:
+            errors += 1
+            logger.error(f"Reminder check error for invoice {inv.id}: {e}")
+
+    logger.info(
+        "Payment reminders: %d queued, %d skipped (free), %d errors",
+        count, skipped_free, errors,
+    )
+    return {"queued": count, "skipped_free": skipped_free, "errors": errors}
 
 
 

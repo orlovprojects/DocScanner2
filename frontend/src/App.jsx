@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { Route, Routes, useLocation, Navigate } from 'react-router-dom';
+import InvLayout from './components/InvLayout';
 
 import Login from './pages/login';
 import Subscribe from './pages/subscribe';
@@ -59,15 +60,25 @@ import Finvalda from './LPs/finvalda';
 import Debetas from './LPs/debetas';
 import Pragma from './LPs/pragma';
 
+import InvoiceSettingsPage from './pages/InvoiceSettingsPage';
+import InvoiceListPage from './pages/InvoiceListPage';
+import InvoiceEditorPage from './pages/InvoiceEditorPage';
+import InvoiceSeriesPage from './pages/InvoiceSeriesPage';
+import MeasurementUnitsPage from './pages/MeasurementUnitsPage';
+import CounterpartiesPage from './pages/CounterpartiesPage';
+import ProductsPage from './pages/ProductsPage';
+import BankStatementsPage from './pages/BankStatementsPage';
+import InvoicePublicPage from './pages/InvoicePublicPage';
+
+
 function App() {
   const location = useLocation();
+  const isPublicInvoice = location.pathname.startsWith('/sf/');
 
-  // Google Analytics — init once
   useEffect(() => {
     initializeAnalytics();
   }, []);
 
-  // Meta Pixel — init once
   useEffect(() => {
     initMetaPixel(import.meta.env.VITE_META_PIXEL_ID);
   }, []);
@@ -76,12 +87,10 @@ function App() {
     initGTM(import.meta.env.VITE_GTM_ID);
   }, []);
 
-  // GA: log page view on route change
   useEffect(() => {
     logPageView(location.pathname);
   }, [location]);
 
-  // Meta Pixel: PageView with strong duplicate guard
   useEffect(() => {
     if (typeof window === 'undefined' || !window.fbq) return;
 
@@ -104,7 +113,7 @@ function App() {
 
   return (
     <AuthProvider>
-      <Header />
+      {!isPublicInvoice && <Header />}
       <Routes>
         <Route path="/" element={<AtlyginimoSkaiciuokle2026 />} />
         <Route path="/apie-mus" element={<AboutUs />} />
@@ -113,7 +122,6 @@ function App() {
         <Route path="/saskaitu-skaitmenizavimas-dokskenas" element={<Dokskenas />} />
         <Route path="/pvm-skaiciuokle" element={<PvmCalculator />} />
         <Route path="/gpm-skaiciuokle" element={<GpmSkaiciuokle />} />
-        {/* <Route path="/dividendu-skaiciuokle" element={<DividenduSkaiciuokle />} /> */}
         <Route path="/naudojimo-gidas" element={<NaudojimoGidas />} />
         <Route path="/kategorija/:slug" element={<GidoCategories />} />
         <Route path="/straipsnis/:slug" element={<GidoArticle />} />
@@ -128,57 +136,36 @@ function App() {
         <Route path="/debetas" element={<Debetas />} />
         <Route path="/pragma" element={<Pragma />} />
 
-        <Route
-          path="/suvestine"
-          element={
-            <PrivateRoute>
-              <UploadPage />
-            </PrivateRoute>
-          }
-        />
-        <Route
-          path="/prisijungti"
-          element={
-            <RedirectIfAuthenticated>
-              <Login />
-            </RedirectIfAuthenticated>
-          }
-        />
-        <Route
-          path="/registruotis"
-          element={
-            <RedirectIfAuthenticated>
-              <Register />
-            </RedirectIfAuthenticated>
-          }
-        />
+        <Route element={<InvLayout />}>
+          <Route path="/israsymas" element={<InvoiceListPage />} />
+          <Route path="/israsymas/nustatymai" element={<InvoiceSettingsPage />} />
+          <Route path="/israsymas/nauja" element={<InvoiceEditorPage />} />
+          <Route path="/israsymas/:id" element={<InvoiceEditorPage />} />
+          <Route path="/israsymas/serijos-numeracijos" element={<InvoiceSeriesPage />} />
+          <Route path="/israsymas/matavimo-vienetai" element={<MeasurementUnitsPage />} />
+          <Route path="/israsymas/klientai" element={<CounterpartiesPage />} />
+          <Route path="/israsymas/prekes-paslaugos" element={<ProductsPage />} />
+          <Route path="/israsymas/banko-israsai" element={<BankStatementsPage />} />
+        </Route>
+        {/* 
+        <Route path="/israsymas" element={<PrivateRoute><InvoiceListPage /></PrivateRoute>} />
+        <Route path="/israsymas/nustatymai" element={<PrivateRoute><InvoiceSettingsPage /></PrivateRoute>} />
+        <Route path="/israsymas/nauja" element={<PrivateRoute><InvoiceEditorPage /></PrivateRoute>} />
+        <Route path="/israsymas/:id" element={<PrivateRoute><InvoiceEditorPage /></PrivateRoute>} />
+        <Route path="/israsymas/serijos-numeracijos" element={<PrivateRoute><InvoiceSeriesPage /></PrivateRoute>} />
+        <Route path="/israsymas/matavimo-vienetai" element={<PrivateRoute><MeasurementUnitsPage /></PrivateRoute>} />
+        <Route path="/israsymas/klientai" element={<PrivateRoute><CounterpartiesPage /></PrivateRoute>} />
+        <Route path="/israsymas/prekes-paslaugos" element={<PrivateRoute><ProductsPage /></PrivateRoute>} />
+        <Route path="/israsymas/banko-israsai" element={<PrivateRoute><BankStatementsPage /></PrivateRoute>} /> */}
+
+        <Route path="/suvestine" element={<PrivateRoute><UploadPage /></PrivateRoute>} />
+        <Route path="/prisijungti" element={<RedirectIfAuthenticated><Login /></RedirectIfAuthenticated>} />
+        <Route path="/registruotis" element={<RedirectIfAuthenticated><Register /></RedirectIfAuthenticated>} />
         <Route path="/papildyti" element={<Subscribe />} />
         <Route path="/susisiekti" element={<Contact />} />
-        <Route
-          path="/nustatymai"
-          element={
-            <PrivateRoute>
-              <NustatymaiPage />
-            </PrivateRoute>
-          }
-        />
-        <Route
-          path="/is-klientu"
-          element={
-            <PrivateRoute>
-              <IsKlientu />
-            </PrivateRoute>
-          }
-        />
-        <Route
-          path="/mokejimu-istorija"
-          element={
-            <PrivateRoute>
-              <MokejimuIstorija />
-            </PrivateRoute>
-          }
-        />
-        {/* <Route path="/pl" element={<AtlyginimoSkaiciuoklePL2026 />} /> */}
+        <Route path="/nustatymai" element={<PrivateRoute><NustatymaiPage /></PrivateRoute>} />
+        <Route path="/is-klientu" element={<PrivateRoute><IsKlientu /></PrivateRoute>} />
+        <Route path="/mokejimu-istorija" element={<PrivateRoute><MokejimuIstorija /></PrivateRoute>} />
         <Route path="/priminti-slaptazodi" element={<PasswordReset />} />
         <Route path="/buhalterine-apskaita" element={<BuhalterinenApskaita />} />
         <Route path="/suma-zodziais" element={<SumaZodziais />} />
@@ -190,9 +177,10 @@ function App() {
         <Route path="/admin-suvestine" element={<RequireSuperuser loginPath="/prisijungti" forbiddenPath="/403"><AdminSuvestine /></RequireSuperuser>} />
         <Route path="/admin-klientai" element={<RequireSuperuser loginPath="/prisijungti" forbiddenPath="/403"><AdminKlientai /></RequireSuperuser>} />
 
+        <Route path="/sf/:uuid" element={<InvoicePublicPage />} />
         <Route path="*" element={<NotFound />} />
       </Routes>
-      <Footer />
+      {!isPublicInvoice && <Footer />}
     </AuthProvider>
   );
 }

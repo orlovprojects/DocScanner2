@@ -208,6 +208,21 @@ export const confirmPasswordReset = async (email, code, password, password_confi
 };
 
 
+
+// === Inv Subscription ===
+export const getInvSubscription = async () => {
+  const { data } = await api.get('inv/subscription/');
+  return data;
+};
+
+export const startInvTrial = async () => {
+  const { data } = await api.post('inv/start-trial/');
+  return data;
+};
+
+
+
+
 // import axios from 'axios';
 // import config from '../config';
 

@@ -42,9 +42,20 @@ WKHTMLTOIMAGE_PATH = os.getenv("WKHTMLTOIMAGE_PATH", "")
 
 CRYPTOGRAPHY_ENCRYPTION_KEY = os.getenv("CRYPTOGRAPHY_ENCRYPTION_KEY", "")
 
+# Skaitmenizavimas
 MAILGUN_WEBHOOK_SIGNING_KEY = os.getenv('MAILGUN_WEBHOOK_SIGNING_KEY', "")
 
+# Israsymas (outbound invoices via m.saskaituisrasymas.lt)
+MAILGUN_INVOICE_API_KEY = os.getenv('MAILGUN_INVOICE_API_KEY', "")
+MAILGUN_INVOICE_DOMAIN = "m.saskaituisrasymas.lt"
+MAILGUN_INVOICE_API_URL = "https://api.eu.mailgun.net/v3"
+MAILGUN_INVOICE_FROM_EMAIL = "noreply@m.saskaituisrasymas.lt"
+MAILGUN_INVOICE_FROM_NAME = "DokSkenas"
+MAILGUN_INVOICE_WEBHOOK_SIGNING_KEY = os.getenv('MAILGUN_INVOICE_WEBHOOK_SIGNING_KEY', "")
+
 DOKSKENAS_ANDROID_PACKAGE_NAME = os.getenv("DOKSKENAS_ANDROID_PACKAGE_NAME", "")
+
+PAYMENT_ENVIRONMENT = os.getenv("PAYMENT_ENVIRONMENT", default="production")
 
 RARFILE_UNRAR_TOOL = os.getenv('RARFILE_UNRAR_TOOL', None)
 if RARFILE_UNRAR_TOOL:
@@ -59,6 +70,7 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+    'django.contrib.postgres',
     
     # Ваши приложения
     "docscanner_app",
@@ -112,6 +124,8 @@ REST_FRAMEWORK = {
     ],
     "EXCEPTION_HANDLER": "docscanner_app.error_handler.exceptions.custom_exception_handler",
 }
+
+INVOICE_PUBLIC_URL = os.getenv("INVOICE_PUBLIC_URL", "https://saskaituisrasymas.lt")
 
 # CORS
 CORS_ALLOWED_ORIGINS = os.getenv("CORS_ALLOWED_ORIGINS", SITE_URL_FRONTEND).split(",")
@@ -202,6 +216,10 @@ STATIC_ROOT = os.path.join(BASE_DIR, "static")
 # Stripe
 STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY")
 STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET")
+
+STRIPE_INV_PRO_PRICE_ID = os.getenv("STRIPE_INV_PRO_PRICE_ID", "")
+STRIPE_INV_PRO_YEARLY_PRICE_ID = os.getenv("STRIPE_INV_PRO_YEARLY_PRICE_ID", "")  
+
 
 # MailJet
 EMAIL_BACKEND = "anymail.backends.mailjet.EmailBackend"

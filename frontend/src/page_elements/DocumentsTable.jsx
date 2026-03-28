@@ -376,7 +376,7 @@ export default function DocumentsTable({
   const loadMoreTriggerRef = useRef(null);
 
   // Показывать столбец API status? (для API-программ)
-  const showApiStatusCol = accountingProgram === "optimum" || accountingProgram === "dineta";
+  const showApiStatusCol = accountingProgram === "optimum" || accountingProgram === "dineta" || accountingProgram === "rivile_gama_api";
 
   useEffect(() => {
     onSearchChangeRef.current = onSearchChange;
@@ -467,9 +467,13 @@ export default function DocumentsTable({
   const renderApiStatus = (d) => {
     const status = accountingProgram === "dineta"
       ? d.dineta_api_status
+      : accountingProgram === "rivile_gama_api"
+      ? d.rivile_api_status
       : d.optimum_api_status;
     const date = accountingProgram === "dineta"
       ? d.dineta_last_try_date
+      : accountingProgram === "rivile_gama_api"
+      ? d.rivile_api_last_try
       : d.optimum_last_try_date;
     const dateStr = fmtApiDate(date);
     const iconSx = isMobile ? { fontSize: 18 } : { fontSize: 20 };
@@ -859,6 +863,8 @@ export default function DocumentsTable({
                       {showApiStatusCol && (
                         accountingProgram === "dineta"
                           ? d.dineta_api_status
+                          : accountingProgram === "rivile_gama_api"
+                          ? d.rivile_api_status
                           : d.optimum_api_status
                       ) && (
                         <Box sx={{ ml: 0.75, display: 'inline-flex', alignItems: 'center' }}>
@@ -894,6 +900,7 @@ export default function DocumentsTable({
         anchorEl={anchorEl}
         open={Boolean(anchorEl)}
         onClose={handleMenuClose}
+        disableScrollLock
       >
         <MenuItem onClick={() => handleDeleteRow(menuRowId)}>Ištrinti</MenuItem>
       </Menu>
@@ -946,7 +953,7 @@ export default function DocumentsTable({
 
             {showApiStatusCol && (
               <TableCell sx={{ fontWeight: 600, textAlign: "center" }}>
-                {accountingProgram === "dineta" ? "Dineta API" : "Optimum API"}
+                {accountingProgram === "dineta" ? "Dineta API" : accountingProgram === "rivile_gama_api" ? "Rivile API" : "Optimum API"}
               </TableCell>
             )}
 
@@ -1064,6 +1071,7 @@ export default function DocumentsTable({
                         anchorEl={anchorEl}
                         open={Boolean(anchorEl) && menuRowId === d.id}
                         onClose={handleMenuClose}
+                        disableScrollLock
                       >
                         <MenuItem onClick={() => handleDeleteRow(d.id)}> Ištrinti </MenuItem>
                       </Menu>

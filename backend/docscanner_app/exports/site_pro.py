@@ -6,6 +6,8 @@ from datetime import date, datetime
 
 from openpyxl import load_workbook
 
+from ..utils.extra_fields import get_extra_for_export
+
 logger = logging.getLogger(__name__)
 
 # =========================
@@ -26,10 +28,10 @@ def _get_templates_dir() -> Path:
 TEMPLATES_DIR = _get_templates_dir()
 
 # Файлы шаблонов (твои текущие)
-SITE_PRO_TEMPLATE_CLIENTS   = "site_pro_import_klientai.xlsx"
-SITE_PRO_TEMPLATE_ITEMS     = "site_pro_import_prekes_paslaugos.xlsx"
+SITE_PRO_TEMPLATE_CLIENTS = "site_pro_import_klientai.xlsx"
+SITE_PRO_TEMPLATE_ITEMS = "site_pro_import_prekes_paslaugos.xlsx"
 SITE_PRO_TEMPLATE_PURCHASES = "site_pro_import_pirkimai.xlsx"
-SITE_PRO_TEMPLATE_SALES     = "site_pro_import_pardavimai.xlsx"
+SITE_PRO_TEMPLATE_SALES = "site_pro_import_pardavimai.xlsx"
 
 
 # =========================
@@ -41,8 +43,20 @@ EU_ISO2 = {
     "IT", "LV", "LT", "LU", "MT", "NL", "PL", "PT", "RO", "SK", "SI", "ES", "SE"
 }
 
+
 def _s(v) -> str:
     return str(v).strip() if v is not None else ""
+
+
+def _parse_cp_key(cp_key):
+    if not cp_key:
+        return ""
+
+    cp = str(cp_key).strip()
+    if cp.lower().startswith("id:"):
+        return cp.split(":", 1)[1].strip()
+    return cp
+
 
 # =========================
 # Units normalization
@@ -50,29 +64,27 @@ def _s(v) -> str:
 
 _UNITS_FORCE_DOT = {"vnt", "kg", "l", "m", "val"}
 
+
 def _normalize_measure_unit(unit: str) -> str:
     u = _s(unit)
     if not u:
         return ""
 
-    # убираем пробелы по краям, но сохраняем исходный регистр
     stripped = u.strip()
-
-    # для сравнения: lowercase и без завершающей точки
     base = stripped.lower().rstrip(".").strip()
 
-    # только эти 5 -> гарантируем точку на конце
     if base in _UNITS_FORCE_DOT:
         return base + "."
 
-    # остальные оставляем как есть (как в БД)
     return stripped
+
 
 def _safe_D(x) -> Decimal:
     try:
         return Decimal(str(x))
     except Exception:
         return Decimal("0")
+
 
 def _format_date_yyyy_mm_dd(dt) -> str:
     if not dt:
@@ -90,13 +102,16 @@ def _format_date_yyyy_mm_dd(dt) -> str:
         return dt.strftime("%Y-%m-%d")
     return ""
 
+
 def _quantize_2(x: Decimal) -> Decimal:
     return x.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
 
 def _is_eu_country(iso) -> bool:
     if not iso:
         return False
     return str(iso).strip().upper() in EU_ISO2
+
 
 def _location_from_country_iso(iso) -> str:
     """
@@ -112,6 +127,7 @@ def _location_from_country_iso(iso) -> str:
         return "eu"
     return "rest"
 
+
 def _attribute_name_from_preke_paslauga(code) -> str:
     """
     1 - Prekės
@@ -124,6 +140,7 @@ def _attribute_name_from_preke_paslauga(code) -> str:
     except Exception:
         v = 1
     return "Paslaugos" if v in (2, 4) else "Prekės"
+
 
 def _get_party_code(doc, *, role: str, id_field: str, vat_field: str, id_programoje_field: str) -> str:
     """
@@ -143,58 +160,141 @@ def _get_party_code(doc, *, role: str, id_field: str, vat_field: str, id_program
         return sidp
     return ""
 
+
 def _doc_type(doc) -> str:
     return _s(getattr(doc, "pirkimas_pardavimas", "")).lower()
 
-def _get_extra(user, key: str, default=""):
+
+# =========================
+# Per-company extra fields
+# =========================
+
+def _get_own_company_code_from_doc(doc) -> str:
     """
-    user.site_pro_extra_fields
+    Определяет код своей фирмы из документа.
+
+    - pirkimas -> своя фирма buyer
+    - pardavimas -> своя фирма seller
     """
-    if not user or not hasattr(user, "site_pro_extra_fields") or not user.site_pro_extra_fields:
+    doc_type = _doc_type(doc)
+
+    if doc_type == "pirkimas":
+        fields = ("buyer_id", "buyer_vat_code", "buyer_id_programoje")
+    else:
+        fields = ("seller_id", "seller_vat_code", "seller_id_programoje")
+
+    for field in fields:
+        value = _s(getattr(doc, field, ""))
+        if value:
+            return value
+    return ""
+
+
+
+def _get_site_pro_extra_for_doc(user, doc, own_company_code=None) -> dict:
+    """
+    Получает extra fields для конкретного документа.
+
+    Приоритет:
+    1. Профиль конкретной фирмы по own_company_code
+    2. Профиль фирмы, определённой из документа
+    3. Глобальный профиль (__all__)
+    4. Пустой dict
+    """
+    if not user:
+        return {}
+
+    requested_code = _parse_cp_key(own_company_code)
+    doc_company_code = _get_own_company_code_from_doc(doc)
+
+    extra = {}
+    resolved_by = ""
+
+    if requested_code:
+        extra = get_extra_for_export(user, "site_pro", requested_code)
+        if extra:
+            resolved_by = requested_code
+
+    if not extra and doc_company_code and doc_company_code != requested_code:
+        extra = get_extra_for_export(user, "site_pro", doc_company_code)
+        if extra:
+            resolved_by = doc_company_code
+
+    if not extra:
+        extra = get_extra_for_export(user, "site_pro", None)
+        if extra:
+            resolved_by = "__all__/legacy"
+
+    logger.info(
+        "[SITE_PRO:EXTRA] doc=%s own_company_code=%r requested_code=%r doc_company_code=%r resolved_by=%r fields=%s",
+        getattr(doc, "pk", None),
+        own_company_code,
+        requested_code,
+        doc_company_code,
+        resolved_by,
+        {k: v for k, v in extra.items() if v} if extra else {},
+    )
+
+    return extra or {}
+
+
+def _get_extra_value(extra_fields: dict, key: str, default=""):
+    if not extra_fields or not isinstance(extra_fields, dict):
         return default
-    v = user.site_pro_extra_fields.get(key, default)
+    v = extra_fields.get(key, default)
     return v if v is not None else default
 
-def _get_warehouse_name(user, doc_type_str: str) -> str:
+
+def _get_warehouse_name(extra_fields: dict, doc_type_str: str) -> str:
     if doc_type_str == "pirkimas":
-        v = _s(_get_extra(user, "pirkimas_sandelis", ""))
+        v = _s(_get_extra_value(extra_fields, "pirkimas_sandelis", ""))
     else:
-        v = _s(_get_extra(user, "pardavimas_sandelis", ""))
+        v = _s(_get_extra_value(extra_fields, "pardavimas_sandelis", ""))
     return v or "Pagrindinis"
 
-def _get_employee_name(user) -> str:
-    v = _s(_get_extra(user, "pardavimas_darbuotojas", ""))
+
+def _get_employee_name(extra_fields: dict) -> str:
+    v = _s(_get_extra_value(extra_fields, "pardavimas_darbuotojas", ""))
     return v or "Vardenis Pavardenis"
 
-def _get_purchase_employee_name(user) -> str:
-    return _s(_get_extra(user, "pirkimas_darbuotojas", ""))
 
-def _get_cost_center(user, doc_type_str: str) -> str:
-    if doc_type_str == "pirkimas":
-        return _s(_get_extra(user, "pirkimas_kastu_centras", ""))
-    return _s(_get_extra(user, "pardavimas_kastu_centras", ""))
+def _get_purchase_employee_name(extra_fields: dict) -> str:
+    return _s(_get_extra_value(extra_fields, "pirkimas_darbuotojas", ""))
 
-def _get_group_name(user, doc_type_str: str) -> str:
+
+def _get_cost_center(extra_fields: dict, doc_type_str: str) -> str:
     if doc_type_str == "pirkimas":
-        return _s(_get_extra(user, "pirkimas_prekes_grupe", ""))
-    return _s(_get_extra(user, "pardavimas_prekes_grupe", ""))
+        return _s(_get_extra_value(extra_fields, "pirkimas_kastu_centras", ""))
+    return _s(_get_extra_value(extra_fields, "pardavimas_kastu_centras", ""))
+
+
+def _get_group_name(extra_fields: dict, doc_type_str: str) -> str:
+    if doc_type_str == "pirkimas":
+        return _s(_get_extra_value(extra_fields, "pirkimas_prekes_grupe", ""))
+    return _s(_get_extra_value(extra_fields, "pardavimas_prekes_grupe", ""))
+
 
 def _get_measure_unit(item) -> str:
     raw = _s(getattr(item, "unit", ""))
     unit = _normalize_measure_unit(raw)
     return unit or "vnt."
 
+
 def _get_currency(doc) -> str:
     return _s(getattr(doc, "currency", "")) or "EUR"
+
 
 def _get_doc_number(doc) -> str:
     return _s(getattr(doc, "document_number", "")) or _s(getattr(doc, "number", "")) or _s(getattr(doc, "pk", ""))
 
+
 def _get_doc_series_for_sales(doc) -> str:
     return _s(getattr(doc, "document_series", "")) or "SF"
 
+
 def _get_doc_date(doc) -> str:
     return _format_date_yyyy_mm_dd(getattr(doc, "invoice_date", None)) or _format_date_yyyy_mm_dd(getattr(doc, "operation_date", None))
+
 
 def _get_seller_fields(doc):
     return {
@@ -212,6 +312,7 @@ def _get_seller_fields(doc):
         "is_person": bool(getattr(doc, "seller_is_person", False)),
     }
 
+
 def _get_buyer_fields(doc):
     return {
         "name": _s(getattr(doc, "buyer_name", "")),
@@ -228,6 +329,7 @@ def _get_buyer_fields(doc):
         "is_person": bool(getattr(doc, "buyer_is_person", False)),
     }
 
+
 def _get_item_identity(doc, it=None):
     """
     Возвращает (name, code, barcode) с приоритетом item -> doc
@@ -243,10 +345,11 @@ def _get_item_identity(doc, it=None):
     barcode = _s(getattr(doc, "prekes_barkodas", ""))
     return name, code, barcode
 
+
 def _get_operation_type_name(doc_type_str: str, attr_name: str) -> str:
     """
     Правило:
-      - Pirkimas + Prekės   -> "Pirkimas"
+      - Pirkimas + Prekės -> "Pirkimas"
       - Pirkimas + Paslaugos -> "Pirkimas (paslaugos)"
       - Pardavimas + Prekės -> "Pardavimai"
       - Pardavimas + Paslaugos -> "Pardavimas (paslaugos)"
@@ -263,51 +366,47 @@ def _get_operation_type_name(doc_type_str: str, attr_name: str) -> str:
 def _get_pvm_kodas_for_item(doc, item, line_map=None, default="") -> str:
     """
     Получает PVM kodas для строки с учётом резолвера и separate_vat.
-    
+
     Приоритет:
-    1. line_map[item.id] — от резолвера (если есть)
-    2. item.pvm_kodas — из БД
-    3. default — fallback
-    
-    ВАЖНО: "Keli skirtingi PVM" — это маркер, не реальный код -> возвращаем default
+    1. line_map[item.id] - от резолвера (если есть)
+    2. item.pvm_kodas - из БД
+    3. default - fallback
+
+    ВАЖНО: "Keli skirtingi PVM" - это маркер, не реальный код -> возвращаем default
     """
     item_id = getattr(item, "id", None)
-    
-    # Пробуем взять из line_map (от резолвера)
+
     if line_map is not None and item_id is not None and item_id in line_map:
         pvm = _s(line_map.get(item_id, ""))
         if pvm and pvm != "Keli skirtingi PVM":
             return pvm
-    
-    # Fallback на item.pvm_kodas
+
     pvm = _s(getattr(item, "pvm_kodas", ""))
     if pvm and pvm != "Keli skirtingi PVM":
         return pvm
-    
+
     return default
 
 
 def _get_pvm_kodas_for_doc(doc, default="") -> str:
     """
     Получает PVM kodas для документа (sumiskai режим).
-    
-    ВАЖНО: 
+
+    ВАЖНО:
     - При separate_vat=True -> пустой (смешанные ставки)
     - "Keli skirtingi PVM" -> пустой (это маркер, не код)
     """
     separate_vat = bool(getattr(doc, "separate_vat", False))
     scan_type = _s(getattr(doc, "scan_type", "")).lower()
-    
-    # sumiskai + separate_vat=True -> пустой
+
     if separate_vat and scan_type in ("sumiskai", "summary", "suminis"):
         return default
-    
+
     pvm = _s(getattr(doc, "pvm_kodas", ""))
-    
-    # Фильтруем маркер
+
     if pvm == "Keli skirtingi PVM":
         return default
-    
+
     return pvm or default
 
 
@@ -317,10 +416,10 @@ def _get_vat_classifier(doc, it=None) -> str:
     Использует helper функции с фильтрацией маркера.
     """
     line_map = getattr(doc, "_pvm_line_map", None)
-    
+
     if it is not None:
         return _get_pvm_kodas_for_item(doc, it, line_map, default="")
-    
+
     return _get_pvm_kodas_for_doc(doc, default="")
 
 
@@ -335,6 +434,7 @@ def _load_template(template_filename: str):
     wb = load_workbook(path)
     ws = wb.active
     return wb, ws
+
 
 def _build_field_map(ws, key_row: int = 2):
     """
@@ -352,6 +452,7 @@ def _build_field_map(ws, key_row: int = 2):
             base_to_col[base] = c
     return base_to_col
 
+
 def _clear_data_area(ws, start_row: int, base_to_col: dict):
     if ws.max_row < start_row:
         return
@@ -359,6 +460,7 @@ def _clear_data_area(ws, start_row: int, base_to_col: dict):
     for r in range(start_row, ws.max_row + 1):
         for c in cols:
             ws.cell(r, c).value = None
+
 
 def _write_rows(ws, base_to_col: dict, rows: list[dict], start_row: int = 3):
     for i, row in enumerate(rows):
@@ -373,19 +475,20 @@ def _write_rows(ws, base_to_col: dict, rows: list[dict], start_row: int = 3):
             else:
                 cell.value = value
 
+
 def _get_doc_series_optional(doc) -> str:
-    # без fallback
     return _s(getattr(doc, "document_series", ""))
+
 
 def _normalize_number_remove_series_prefix(series: str, number: str) -> str:
     """
-    Если number уже начинается с series (с разделителями или без) — удаляем series с начала.
+    Если number уже начинается с series (с разделителями или без) - удаляем series с начала.
     Примеры:
-      series="SF", number="SF123"    -> "123"
-      series="SF", number="SF-123"   -> "123"
-      series="SF", number="SF/123"   -> "123"
-      series="SF", number="SF 123"   -> "123"
-      series="SF", number="sf  123"  -> "123"
+      series="SF", number="SF123" -> "123"
+      series="SF", number="SF-123" -> "123"
+      series="SF", number="SF/123" -> "123"
+      series="SF", number="SF 123" -> "123"
+      series="SF", number="sf  123" -> "123"
     """
     series = _s(series)
     number = _s(number)
@@ -400,12 +503,11 @@ def _normalize_number_remove_series_prefix(series: str, number: str) -> str:
         return n
 
     rest = n[len(series):].lstrip()
-    # убрать типичные разделители
     while rest and rest[0] in ("-", "/", "\\", "_", " ", ".", ":", "#"):
         rest = rest[1:].lstrip()
 
-    # если после удаления стало пусто — оставим исходное число (чтоб не сделать number="")
     return rest or n
+
 
 # =========================
 # Скидка: только для экспорта (без мутаций item и без БД)
@@ -473,11 +575,12 @@ def _calc_discounted_price_map(doc, items_list: list) -> dict:
 
     return price_map
 
+
 # =========================
 # Экспорт (4 файла, но пустые НЕ возвращаем)
 # =========================
 
-def export_to_site_pro(documents: list, user=None) -> dict:
+def export_to_site_pro(documents: list, user=None, own_company_code=None) -> dict:
     """
     Возвращает только НЕпустые файлы:
       {
@@ -496,19 +599,20 @@ def export_to_site_pro(documents: list, user=None) -> dict:
     if clients_bytes:
         out["clients"] = clients_bytes
 
-    items_bytes = _export_items(documents, user=user)
+    items_bytes = _export_items(documents, user=user, own_company_code=own_company_code)
     if items_bytes:
         out["items"] = items_bytes
 
-    purchases_bytes = _export_purchases(documents, user=user)
+    purchases_bytes = _export_purchases(documents, user=user, own_company_code=own_company_code)
     if purchases_bytes:
         out["purchases"] = purchases_bytes
 
-    sales_bytes = _export_sales(documents, user=user)
+    sales_bytes = _export_sales(documents, user=user, own_company_code=own_company_code)
     if sales_bytes:
         out["sales"] = sales_bytes
 
     return out
+
 
 # ---------- CLIENTS ----------
 
@@ -556,16 +660,16 @@ def _export_clients(documents: list) -> bytes:
     bio.seek(0)
     return bio.read()
 
+
 # ---------- ITEMS ----------
 
-def _export_items(documents: list, user=None) -> bytes:
+def _export_items(documents: list, user=None, own_company_code=None) -> bytes:
     wb, ws = _load_template(SITE_PRO_TEMPLATE_ITEMS)
     base_to_col = _build_field_map(ws, key_row=2)
 
     start_row = 3
     _clear_data_area(ws, start_row, base_to_col)
 
-    # key = (name.lower(), attributeName, measurementUnitName)
     seen = {}
     rows = []
 
@@ -600,7 +704,8 @@ def _export_items(documents: list, user=None) -> bytes:
 
     for doc in documents:
         t = _doc_type(doc)
-        group_name = _get_group_name(user, t) or None
+        extra_fields = _get_site_pro_extra_for_doc(user, doc, own_company_code)
+        group_name = _get_group_name(extra_fields, t) or None
 
         line_items = getattr(doc, "line_items", None)
         if line_items and hasattr(line_items, "all") and line_items.exists():
@@ -616,7 +721,7 @@ def _export_items(documents: list, user=None) -> bytes:
             name, code, barcode = _get_item_identity(doc, None)
             if not name:
                 name = "Paslauga" if doc_attr == "Paslaugos" else "Preke"
-            unit = _normalize_measure_unit("vnt")  # станет "vnt."
+            unit = _normalize_measure_unit("vnt")
             add_item(name, doc_attr, unit, group_name, code=code, barcode=barcode)
 
     if not rows:
@@ -630,9 +735,10 @@ def _export_items(documents: list, user=None) -> bytes:
     bio.seek(0)
     return bio.read()
 
+
 # ---------- PURCHASES ----------
 
-def _export_purchases(documents: list, user=None) -> bytes:
+def _export_purchases(documents: list, user=None, own_company_code=None) -> bytes:
     wb, ws = _load_template(SITE_PRO_TEMPLATE_PURCHASES)
     base_to_col = _build_field_map(ws, key_row=2)
 
@@ -645,16 +751,17 @@ def _export_purchases(documents: list, user=None) -> bytes:
         if _doc_type(doc) != "pirkimas":
             continue
 
+        extra_fields = _get_site_pro_extra_for_doc(user, doc, own_company_code)
         supplier = _get_seller_fields(doc)
         purchase_date = _get_doc_date(doc)
-        series = _get_doc_series_optional(doc)   # без fallback
+        series = _get_doc_series_optional(doc)
         number_raw = _get_doc_number(doc)
         number = _normalize_number_remove_series_prefix(series, number_raw)
         currency = _get_currency(doc)
 
-        warehouse = _get_warehouse_name(user, "pirkimas")
-        cost_center = _get_cost_center(user, "pirkimas") or ""
-        employee = _get_purchase_employee_name(user)
+        warehouse = _get_warehouse_name(extra_fields, "pirkimas")
+        cost_center = _get_cost_center(extra_fields, "pirkimas") or ""
+        employee = _get_purchase_employee_name(extra_fields)
 
         line_items = getattr(doc, "line_items", None)
         if line_items and hasattr(line_items, "all") and line_items.exists():
@@ -662,7 +769,6 @@ def _export_purchases(documents: list, user=None) -> bytes:
             price_map = _calc_discounted_price_map(doc, items_list)
 
             for it in items_list:
-                # тип строки (Prekės/Paslaugos) -> operationTypeName*
                 attr = _attribute_name_from_preke_paslauga(
                     getattr(it, "preke_paslauga", None) or getattr(doc, "preke_paslauga", None)
                 )
@@ -695,18 +801,16 @@ def _export_purchases(documents: list, user=None) -> bytes:
 
                 row = dict(base)
                 row.update({
-                    "items": item_name,            # pavadinimas
+                    "items": item_name,
                     "quantity": float(qty),
                     "priceExclVat": float(_quantize_2(price)),
                 })
 
-                # 2) обязательно пробуем проставить и код, и баркод (если есть)
                 if code:
                     row["code"] = code
                 if barcode:
                     row["barcode"] = barcode
 
-                # 1) vatRate: item.vat_percent если есть lineitems
                 vat_rate = getattr(it, "vat_percent", None)
                 if vat_rate is not None and _s(vat_rate) != "":
                     try:
@@ -714,7 +818,6 @@ def _export_purchases(documents: list, user=None) -> bytes:
                     except Exception:
                         pass
 
-                # ====== ИСПРАВЛЕНИЕ: используем обновлённый _get_vat_classifier ======
                 vat_classifier = _get_vat_classifier(doc, it)
                 if vat_classifier:
                     row["vatClassifier"] = vat_classifier
@@ -722,7 +825,6 @@ def _export_purchases(documents: list, user=None) -> bytes:
                 rows.append(row)
 
         else:
-            # суммарный документ: vatRate берём из doc.vat_percent (если есть)
             doc_attr = _attribute_name_from_preke_paslauga(getattr(doc, "preke_paslauga", None))
             op_type = _get_operation_type_name("pirkimas", doc_attr)
 
@@ -772,8 +874,7 @@ def _export_purchases(documents: list, user=None) -> bytes:
                     row["vatRate"] = float(_safe_D(vat_rate))
                 except Exception:
                     pass
-            
-            # ====== ИСПРАВЛЕНИЕ: используем обновлённый _get_vat_classifier ======
+
             vat_classifier = _get_vat_classifier(doc, None)
             if vat_classifier:
                 row["vatClassifier"] = vat_classifier
@@ -791,9 +892,10 @@ def _export_purchases(documents: list, user=None) -> bytes:
     bio.seek(0)
     return bio.read()
 
+
 # ---------- SALES ----------
 
-def _export_sales(documents: list, user=None) -> bytes:
+def _export_sales(documents: list, user=None, own_company_code=None) -> bytes:
     wb, ws = _load_template(SITE_PRO_TEMPLATE_SALES)
     base_to_col = _build_field_map(ws, key_row=2)
 
@@ -806,16 +908,17 @@ def _export_sales(documents: list, user=None) -> bytes:
         if _doc_type(doc) != "pardavimas":
             continue
 
+        extra_fields = _get_site_pro_extra_for_doc(user, doc, own_company_code)
         buyer = _get_buyer_fields(doc)
         sale_date = _get_doc_date(doc)
-        series = _get_doc_series_for_sales(doc)  # fallback SF остаётся
+        series = _get_doc_series_for_sales(doc)
         number_raw = _get_doc_number(doc)
         number = _normalize_number_remove_series_prefix(series, number_raw)
         currency = _get_currency(doc)
 
-        warehouse = _get_warehouse_name(user, "pardavimas")
-        employee = _get_employee_name(user)
-        cost_center = _get_cost_center(user, "pardavimas") or ""
+        warehouse = _get_warehouse_name(extra_fields, "pardavimas")
+        employee = _get_employee_name(extra_fields)
+        cost_center = _get_cost_center(extra_fields, "pardavimas") or ""
 
         line_items = getattr(doc, "line_items", None)
         if line_items and hasattr(line_items, "all") and line_items.exists():
@@ -863,7 +966,6 @@ def _export_sales(documents: list, user=None) -> bytes:
                 if barcode:
                     row["barcode"] = barcode
 
-                # 1) vatRate: item.vat_percent если есть lineitems
                 vat_rate = getattr(it, "vat_percent", None)
                 if vat_rate is not None and _s(vat_rate) != "":
                     try:
@@ -871,7 +973,6 @@ def _export_sales(documents: list, user=None) -> bytes:
                     except Exception:
                         pass
 
-                # ====== ИСПРАВЛЕНИЕ: используем обновлённый _get_vat_classifier ======
                 vat_classifier = _get_vat_classifier(doc, it)
                 if vat_classifier:
                     row["vatClassifier"] = vat_classifier
@@ -927,7 +1028,6 @@ def _export_sales(documents: list, user=None) -> bytes:
                 except Exception:
                     pass
 
-            # ====== ИСПРАВЛЕНИЕ: используем обновлённый _get_vat_classifier ======
             vat_classifier = _get_vat_classifier(doc, None)
             if vat_classifier:
                 row["vatClassifier"] = vat_classifier
@@ -944,6 +1044,7 @@ def _export_sales(documents: list, user=None) -> bytes:
     wb.save(bio)
     bio.seek(0)
     return bio.read()
+
 
 
 
@@ -1206,27 +1307,73 @@ def _export_sales(documents: list, user=None) -> bytes:
 #         return "Pirkimas (paslaugos)" if attr_name == "Paslaugos" else "Pirkimas"
 #     return "Pardavimas (paslaugos)" if attr_name == "Paslaugos" else "Pardavimai"
 
+
+# # =========================
+# # PVM Kodas helpers
+# # =========================
+
+# def _get_pvm_kodas_for_item(doc, item, line_map=None, default="") -> str:
+#     """
+#     Получает PVM kodas для строки с учётом резолвера и separate_vat.
+    
+#     Приоритет:
+#     1. line_map[item.id] — от резолвера (если есть)
+#     2. item.pvm_kodas — из БД
+#     3. default — fallback
+    
+#     ВАЖНО: "Keli skirtingi PVM" — это маркер, не реальный код -> возвращаем default
+#     """
+#     item_id = getattr(item, "id", None)
+    
+#     # Пробуем взять из line_map (от резолвера)
+#     if line_map is not None and item_id is not None and item_id in line_map:
+#         pvm = _s(line_map.get(item_id, ""))
+#         if pvm and pvm != "Keli skirtingi PVM":
+#             return pvm
+    
+#     # Fallback на item.pvm_kodas
+#     pvm = _s(getattr(item, "pvm_kodas", ""))
+#     if pvm and pvm != "Keli skirtingi PVM":
+#         return pvm
+    
+#     return default
+
+
+# def _get_pvm_kodas_for_doc(doc, default="") -> str:
+#     """
+#     Получает PVM kodas для документа (sumiskai режим).
+    
+#     ВАЖНО: 
+#     - При separate_vat=True -> пустой (смешанные ставки)
+#     - "Keli skirtingi PVM" -> пустой (это маркер, не код)
+#     """
+#     separate_vat = bool(getattr(doc, "separate_vat", False))
+#     scan_type = _s(getattr(doc, "scan_type", "")).lower()
+    
+#     # sumiskai + separate_vat=True -> пустой
+#     if separate_vat and scan_type in ("sumiskai", "summary", "suminis"):
+#         return default
+    
+#     pvm = _s(getattr(doc, "pvm_kodas", ""))
+    
+#     # Фильтруем маркер
+#     if pvm == "Keli skirtingi PVM":
+#         return default
+    
+#     return pvm or default
+
+
 # def _get_vat_classifier(doc, it=None) -> str:
 #     """
-#     Приоритет:
-#       1) item.pvm_kodas (если есть)
-#       2) doc._pvm_line_map[item.id] (если resolver положил)
-#       3) doc.pvm_kodas
-#       4) пусто
+#     Получает PVM классификатор для Site Pro.
+#     Использует helper функции с фильтрацией маркера.
 #     """
+#     line_map = getattr(doc, "_pvm_line_map", None)
+    
 #     if it is not None:
-#         v = _s(getattr(it, "pvm_kodas", ""))
-#         if v:
-#             return v
-
-#         line_map = getattr(doc, "_pvm_line_map", None) or {}
-#         it_id = getattr(it, "id", None)
-#         if it_id is not None:
-#             v = _s(line_map.get(it_id, ""))
-#             if v:
-#                 return v
-
-#     return _s(getattr(doc, "pvm_kodas", ""))
+#         return _get_pvm_kodas_for_item(doc, it, line_map, default="")
+    
+#     return _get_pvm_kodas_for_doc(doc, default="")
 
 
 # # =========================
@@ -1619,6 +1766,7 @@ def _export_sales(documents: list, user=None) -> bytes:
 #                     except Exception:
 #                         pass
 
+#                 # ====== ИСПРАВЛЕНИЕ: используем обновлённый _get_vat_classifier ======
 #                 vat_classifier = _get_vat_classifier(doc, it)
 #                 if vat_classifier:
 #                     row["vatClassifier"] = vat_classifier
@@ -1677,6 +1825,7 @@ def _export_sales(documents: list, user=None) -> bytes:
 #                 except Exception:
 #                     pass
             
+#             # ====== ИСПРАВЛЕНИЕ: используем обновлённый _get_vat_classifier ======
 #             vat_classifier = _get_vat_classifier(doc, None)
 #             if vat_classifier:
 #                 row["vatClassifier"] = vat_classifier
@@ -1774,6 +1923,7 @@ def _export_sales(documents: list, user=None) -> bytes:
 #                     except Exception:
 #                         pass
 
+#                 # ====== ИСПРАВЛЕНИЕ: используем обновлённый _get_vat_classifier ======
 #                 vat_classifier = _get_vat_classifier(doc, it)
 #                 if vat_classifier:
 #                     row["vatClassifier"] = vat_classifier
@@ -1829,6 +1979,7 @@ def _export_sales(documents: list, user=None) -> bytes:
 #                 except Exception:
 #                     pass
 
+#             # ====== ИСПРАВЛЕНИЕ: используем обновлённый _get_vat_classifier ======
 #             vat_classifier = _get_vat_classifier(doc, None)
 #             if vat_classifier:
 #                 row["vatClassifier"] = vat_classifier
@@ -1845,3 +1996,5 @@ def _export_sales(documents: list, user=None) -> bytes:
 #     wb.save(bio)
 #     bio.seek(0)
 #     return bio.read()
+
+

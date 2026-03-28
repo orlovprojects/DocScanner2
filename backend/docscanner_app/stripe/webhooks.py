@@ -91,6 +91,26 @@ def StripeWebhookView(request):
         logger.info("[STRIPE] Event %s already processed, skipping", evt_id)
         return HttpResponse(status=200)
 
+
+    # ── Inv subscription events ──
+    if evt_type == "invoice.paid":
+        invoice_data = event["data"]["object"]
+        sub_id = invoice_data.get("subscription")
+        if sub_id:
+            from ..models import InvSubscription
+            inv_sub = InvSubscription.objects.filter(stripe_subscription_id=sub_id).first()
+            if inv_sub:
+                _handle_inv_invoice_paid(invoice_data, inv_sub)
+                return HttpResponse(status=200)
+
+    if evt_type in ("customer.subscription.deleted", "customer.subscription.updated"):
+        sub_data = event["data"]["object"]
+        from docscanner_app.models import InvSubscription
+        inv_sub = InvSubscription.objects.filter(stripe_subscription_id=sub_data.get("id")).first()
+        if inv_sub:
+            _handle_inv_subscription_change(sub_data, inv_sub)
+            return HttpResponse(status=200)
+
     if evt_type != "checkout.session.completed":
         logger.info("[STRIPE] Ignoring event type=%s", evt_type)
         return HttpResponse(status=200)
@@ -112,6 +132,10 @@ def StripeWebhookView(request):
     except Exception as e:
         logger.exception("[STRIPE] Failed to retrieve session %s: %s", session_id, e)
         return HttpResponse(status=500)
+
+    # Check if this is an inv subscription checkout
+    if _handle_inv_checkout_completed(session):
+        return HttpResponse(status=200)
 
     # 4) Проверяем, что оплата реально прошла
     payment_status = session.get("payment_status")
@@ -333,239 +357,123 @@ def StripeWebhookView(request):
 
 
 
-# import logging
-# import stripe
-# from django.conf import settings
-# from django.db import transaction, IntegrityError
-# from django.http import HttpResponse, HttpResponseBadRequest
-# from datetime import datetime, timezone as dt_timezone
-# from django.utils import timezone
-# import random
-# from django.db.models.functions import Cast
-# from django.db.models import IntegerField
-
-# from django.views.decorators.csrf import csrf_exempt
-# from rest_framework.decorators import api_view, permission_classes
-# from rest_framework.permissions import AllowAny
-# from django.contrib.auth import get_user_model
-
-# from ..models import Payments 
-
-# logger = logging.getLogger(__name__)
-# stripe.api_key = settings.STRIPE_SECRET_KEY
-
-# # price_id → сколько кредитов покупать
-# PRICE_CREDITS_MAP = {
-#     # примеры: подставь свои значения
-#     "price_1RfxUWIaJDydaLBY6Y3MGrBj": 100,
-#     "price_1RfxWUIaJDydaLBYJomOA1FD": 500,
-#     "price_1RfxY1IaJDydaLBY4YXDNSAO": 1000,
-#     "price_1SjdLJIaJDydaLBYKixOTMNc": 5000,
-#     "price_1SjdMMIaJDydaLBYAMXtAUra": 10000,
-# }
-
-# def _calc_credits_from_line_items(session) -> int:
-#     credits = 0
-#     line_items = (session.get("line_items") or {}).get("data") or []
-#     for li in line_items:
-#         price = li.get("price") or {}
-#         price_id = price.get("id")
-#         qty = li.get("quantity") or 1
-#         if price_id in PRICE_CREDITS_MAP:
-#             credits += PRICE_CREDITS_MAP[price_id] * int(qty)
-#     return credits
 
 
-# def _generate_dok_number() -> str:
-#     """Генерирует следующий dok_number: max + random(2..7)
-#     Должна вызываться внутри transaction.atomic()
-#     """
-#     last = Payments.objects.select_for_update().filter(
-#         dok_number__isnull=False
-#     ).exclude(
-#         dok_number=""
-#     ).annotate(
-#         dok_num_int=Cast("dok_number", IntegerField())
-#     ).order_by("-dok_num_int").values_list("dok_num_int", flat=True).first()
-    
-#     last_num = last or 0
-#     new_num = last_num + random.randint(2, 7)
-#     return str(new_num)
+def _handle_inv_checkout_completed(session):
+    """Activate PRO subscription after first checkout."""
+    from docscanner_app.models import InvSubscription
+
+    meta = session.get("metadata") or {}
+    if meta.get("type") != "inv_subscription":
+        return False  # Not ours
+
+    user_id = meta.get("user_id")
+    if not user_id:
+        return False
+
+    User = get_user_model()
+    try:
+        user = User.objects.get(id=int(user_id))
+    except User.DoesNotExist:
+        logger.error("[InvWebhook] User %s not found", user_id)
+        return False
+
+    subscription_id = session.get("subscription")
+    if not subscription_id:
+        return False
+
+    sub, _ = InvSubscription.objects.get_or_create(user=user)
+    sub.status = "active"
+    sub.plan = "pro"
+    sub.stripe_subscription_id = subscription_id
+    sub.save(update_fields=["status", "plan", "stripe_subscription_id"])
+
+    logger.info("[InvWebhook] Activated PRO for user %s (sub=%s)", user.email, subscription_id)
+    return True
 
 
-# @csrf_exempt
-# @api_view(["POST"])
-# @permission_classes([AllowAny])
-# def StripeWebhookView(request):
-#     payload = request.body
-#     sig_header = request.META.get("HTTP_STRIPE_SIGNATURE", "")
-#     endpoint_secret = settings.STRIPE_WEBHOOK_SECRET
+def _handle_inv_invoice_paid(invoice, inv_sub):
+    """Subscription invoice paid — extend plan, create payment record."""
+    user = inv_sub.user
+    stripe_invoice_id = invoice.get("id", "")
 
-#     # 1) Проверка подписи
-#     try:
-#         event = stripe.Webhook.construct_event(payload, sig_header, endpoint_secret)
-#     except ValueError:
-#         return HttpResponseBadRequest("Invalid payload")
-#     except stripe.error.SignatureVerificationError:
-#         return HttpResponseBadRequest("Invalid signature")
+    # Deduplicate
+    if Payments.objects.filter(stripe_invoice_id=stripe_invoice_id).exists():
+        logger.info("[InvWebhook] Duplicate invoice %s, skipping", stripe_invoice_id)
+        return
 
-#     evt_type = event.get("type")
-#     evt_id = event.get("id")
+    # Period
+    period_start = None
+    period_end = None
+    lines = invoice.get("lines", {}).get("data", [])
+    if lines:
+        period = lines[0].get("period", {})
+        if period.get("start"):
+            period_start = datetime.fromtimestamp(period["start"], tz=dt_timezone.utc).date()
+        if period.get("end"):
+            period_end = datetime.fromtimestamp(period["end"], tz=dt_timezone.utc).date()
 
-#     # 2) Идемпотентность: если уже сохранили этот event → выходим
-#     if evt_id and Payments.objects.filter(stripe_event_id=evt_id).exists():
-#         return HttpResponse(status=200)
+    # Update subscription
+    inv_sub.status = "active"
+    inv_sub.plan = "pro"
+    if period_end:
+        inv_sub.plan_end = period_end
+    inv_sub.save(update_fields=["status", "plan", "plan_end"])
 
-#     if evt_type != "checkout.session.completed":
-#         # другие типы можно игнорировать или логировать
-#         return HttpResponse(status=200)
+    # Payment record
+    amount_total = invoice.get("amount_paid", 0)
+    currency = invoice.get("currency", "eur")
+    pdf_url = invoice.get("invoice_pdf", "")
+    payment_intent_id = invoice.get("payment_intent", "") or ""
+    customer_id = invoice.get("customer", "") or ""
 
-#     raw_session = event["data"]["object"]
+    with transaction.atomic():
+        dok_number = _generate_dok_number()
 
-#     # 3) Добираем всё нужное одним запросом
-#     try:
-#         session = stripe.checkout.Session.retrieve(
-#             raw_session["id"],
-#             expand=[
-#                 "line_items.data.price.product",
-#                 "payment_intent.charges.data.balance_transaction",
-#             ],
-#         )
-#     except Exception as e:
-#         logger.exception("Stripe retrieve Session failed: %s", e)
-#         # Пусть Stripe повторит попытку
-#         return HttpResponse(status=500)
+        Payments.objects.create(
+            user=user,
+            stripe_event_id=f"inv_{stripe_invoice_id}",
+            session_id="",
+            payment_intent_id=payment_intent_id,
+            customer_id=customer_id,
+            amount_subtotal=amount_total,
+            amount_tax=0,
+            amount_total=amount_total,
+            stripe_fee=0,
+            net_amount=amount_total,
+            currency=currency,
+            credits_purchased=0,
+            dok_number=dok_number,
+            buyer_email=user.email,
+            payment_status="paid",
+            receipt_url="",
+            payment_type="inv_subscription",
+            plan="pro",
+            period_start=period_start,
+            period_end=period_end,
+            stripe_invoice_id=stripe_invoice_id,
+            invoice_pdf_url=pdf_url,
+        )
 
-#     # 4) Проверяем, что оплата реально прошла
-#     if session.get("payment_status") != "paid":
-#         return HttpResponse(status=200)
+    logger.info(
+        "[InvWebhook] Payment: user=%s, %.2f %s, %s→%s",
+        user.email, amount_total / 100, currency, period_start, period_end,
+    )
 
-#     # 5) Ищем пользователя: сперва по customer, потом по metadata.user_id
-#     User = get_user_model()
-#     user = None
-#     customer_id = session.get("customer")
-#     if customer_id:
-#         try:
-#             user = User.objects.get(stripe_customer_id=customer_id)
-#         except User.DoesNotExist:
-#             user = None
 
-#     if not user:
-#         md = session.get("metadata") or {}
-#         uid = md.get("user_id")
-#         if uid:
-#             try:
-#                 user = User.objects.get(id=uid)
-#             except User.DoesNotExist:
-#                 user = None
+def _handle_inv_subscription_change(sub_data, inv_sub):
+    """Subscription cancelled or status changed."""
+    stripe_status = sub_data.get("status")  # active, canceled, past_due, unpaid
 
-#     if not user:
-#         logger.error("Stripe webhook: user not found for customer=%s metadata.user_id=%s", customer_id, (session.get("metadata") or {}).get("user_id"))
-#         return HttpResponse(status=200)
+    if stripe_status in ("canceled", "unpaid"):
+        inv_sub.status = "free"
+        inv_sub.plan = ""
+        inv_sub.plan_end = None
+        inv_sub.stripe_subscription_id = ""
+        inv_sub.save(update_fields=["status", "plan", "plan_end", "stripe_subscription_id"])
+        logger.info("[InvWebhook] Cancelled sub for user %s", inv_sub.user.email)
+    elif stripe_status == "past_due":
+        logger.warning("[InvWebhook] Past due sub for user %s", inv_sub.user.email)
 
-#     # 6) Суммы/валюта/покупатель
-#     amount_subtotal = int(session.get("amount_subtotal") or 0)
-#     amount_total = int(session.get("amount_total") or 0)
-#     amount_tax = int((session.get("total_details") or {}).get("amount_tax") or 0)
-#     currency = session.get("currency") or "eur"
 
-#     buyer = session.get("customer_details") or {}
-#     buyer_email = buyer.get("email")
-#     buyer_address = buyer.get("address") or {}
-
-#     # 7) Charge / баланс-транзакция (комиссия, нетто, receipt)
-#     receipt_url = None
-#     stripe_fee = 0
-#     net_amount = 0
-#     pi = session.get("payment_intent")
-#     charge = None
-
-#     # expand вернёт dict
-#     if isinstance(pi, dict):
-#         charges = (pi.get("charges") or {}).get("data") or []
-#         if charges:
-#             charge = charges[0]
-#             receipt_url = charge.get("receipt_url")
-#             bt = charge.get("balance_transaction")
-#             if isinstance(bt, dict):
-#                 stripe_fee = int(bt.get("fee") or 0)
-#                 net_amount = int(bt.get("net") or 0)
-
-#     # 8) Считаем кредиты по price_id (надёжно). Если 0 — фолбэк на metadata.credits
-#     credits = _calc_credits_from_line_items(session)
-#     if credits <= 0:
-#         md = session.get("metadata") or {}
-#         try:
-#             credits = int(md.get("credits") or 0)
-#         except (TypeError, ValueError):
-#             credits = 0
-
-#     # 9) Атомарно: начислить кредиты + создать Payments
-#     paid_at_ts = session.get("created")
-#     paid_at = (
-#     datetime.fromtimestamp(paid_at_ts, tz=dt_timezone.utc)   # aware UTC datetime
-#     if paid_at_ts else timezone.now()
-#     )
-
-#     try:
-#         with transaction.atomic():
-#             # двойная защита от дублей: проверим снова в транзакции
-#             if evt_id and Payments.objects.select_for_update().filter(stripe_event_id=evt_id).exists():
-#                 return HttpResponse(status=200)
-
-#             # начисляем кредиты только если есть что начислять
-#             if credits > 0:
-#                 u = User.objects.select_for_update().get(pk=user.pk)
-#                 u.credits = (u.credits or 0) + credits
-#                 u.save(update_fields=["credits"])
-
-#             # берём первую позицию для хранения price_id/product_id (по желанию)
-#             price_id = None
-#             product_id = None
-#             quantity = 1
-#             lis = (session.get("line_items") or {}).get("data") or []
-#             if lis:
-#                 first = lis[0]
-#                 price = first.get("price") or {}
-#                 price_id = price.get("id")
-#                 prod = price.get("product")
-#                 if isinstance(prod, dict):
-#                     product_id = prod.get("id")
-#                 quantity = int(first.get("quantity") or 1)
-
-#             Payments.objects.create(
-#                 user=user,
-#                 stripe_event_id=event["id"],
-#                 dok_number=_generate_dok_number(),
-#                 session_id=session["id"],
-#                 payment_intent_id=(pi.get("id") if isinstance(pi, dict) else pi),
-#                 customer_id=customer_id,
-
-#                 amount_subtotal=amount_subtotal,
-#                 amount_tax=amount_tax,
-#                 amount_total=amount_total,
-#                 stripe_fee=stripe_fee,
-#                 net_amount=(net_amount or (amount_total - stripe_fee)),
-#                 currency=currency,
-
-#                 credits_purchased=credits,
-
-#                 buyer_email=buyer_email,
-#                 buyer_address_json=buyer_address,
-
-#                 payment_status=session.get("payment_status", "paid"),
-#                 paid_at=paid_at,
-
-#                 receipt_url=receipt_url,
-#             )
-
-#     except IntegrityError:
-#         # на случай гонки по unique(stripe_event_id)
-#         return HttpResponse(status=200)
-#     except Exception as e:
-#         logger.exception("Stripe webhook processing failed: %s", e)
-#         # дайте Stripe повторить попытку
-#         return HttpResponse(status=500)
-
-#     return HttpResponse(status=200)
 

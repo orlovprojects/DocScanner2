@@ -8,8 +8,28 @@ import random
 from decimal import Decimal, InvalidOperation
 
 from .formatters import format_date, get_price_or_zero, expand_empty_tags
+from ..utils.extra_fields import get_extra_for_export
 
 FNS = {"xsi": "http://www.w3.org/2001/XMLSchema-instance"}
+
+
+# =========================
+# Helpers: per-company extra_fields
+# =========================
+def _parse_cp_key(cp_key):
+    """Парсит cp_key: 'id:304401940' → '304401940', '304401940' → '304401940'"""
+    if not cp_key:
+        return ""
+    cp = str(cp_key).strip()
+    if cp.lower().startswith("id:"):
+        return cp.split(":", 1)[1].strip()
+    return cp
+
+
+def _get_extra_fields(user, program_key, own_company_code=None):
+    """Получает extra_fields с учётом per-company профилей."""
+    imones_kodas = _parse_cp_key(own_company_code)
+    return get_extra_for_export(user, program_key, imones_kodas)
 
 
 # =========================
@@ -144,23 +164,22 @@ def _fallback_doc_num(series: str, number: str) -> tuple[str, str]:
     return s, n
 
 
-def _get_extra_field_value(doc, user_extra_fields: dict, field_key: str) -> str:
+def _get_extra_field_value(finvalda_fields: dict, field_key: str) -> str:
     """
-    Извлекает значение extra field из user.finvalda_extra_fields.
+    Извлекает значение extra field из finvalda_fields.
     
     Args:
-        doc: Document instance
-        user_extra_fields: dict из user.finvalda_extra_fields
+        finvalda_fields: dict из get_extra_for_export()
         field_key: ключ типа "pirkimas_tipas", "pardavimas_zurnalas" и т.д.
     
     Returns:
         UPPERCASE значение или пустая строка
     """
-    if not user_extra_fields or not isinstance(user_extra_fields, dict):
+    if not finvalda_fields or not isinstance(finvalda_fields, dict):
         return ""
     
     # Получаем значение из extra_fields
-    value = user_extra_fields.get(field_key, "")
+    value = finvalda_fields.get(field_key, "")
     return _upper(value)
 
 
@@ -649,12 +668,15 @@ def _fill_line(
 # Pirkimai
 # =========================================================
 
-def export_pirkimai_group_to_finvalda(documents):
+def export_pirkimai_group_to_finvalda(documents, user=None, own_company_code=None):
     """Экспорт ПРИОБРЕТЕНИЙ (pirkimas) в формат Finvalda. Возвращает bytes.
     Формат: <fvsdata><klientai/><prekes/><paslaugos/><operacijos>...</operacijos></fvsdata>"""
     root = _root()
     operacijos = root.find("operacijos")
     assert operacijos is not None
+
+    # Получаем extra_fields один раз для всего экспорта
+    finvalda_fields = _get_extra_fields(user, "finvalda", own_company_code)
 
     for doc in documents:
         currency = _s(getattr(doc, "currency", "EUR") or "EUR").upper()
@@ -687,19 +709,13 @@ def export_pirkimai_group_to_finvalda(documents):
             country_iso=seller_country,
         )
 
-        # Получаем extra fields из user
-        user = getattr(doc, "user", None)
-        user_extra_fields = {}
-        if user:
-            user_extra_fields = getattr(user, "finvalda_extra_fields", None) or {}
-
         # ПРАВИЛЬНЫЙ ПОРЯДОК ПОЛЕЙ согласно XSD схеме
         pirkimas = ET.SubElement(operacijos, "pirkimas")
 
         # 1. Поля из operacijaType (базовый тип)
         # tipas (УРОВЕНЬ ДОКУМЕНТА - тип операции, не путать с tipas строки!)
         tipas_value = (
-            _get_extra_field_value(doc, user_extra_fields, "pirkimas_tipas")
+            _get_extra_field_value(finvalda_fields, "pirkimas_tipas")
             or _upper(getattr(doc, "tipo_kodas", None))
         )
         if tipas_value:
@@ -707,7 +723,7 @@ def export_pirkimai_group_to_finvalda(documents):
 
         # zurnalas
         zurnalas_value = (
-            _get_extra_field_value(doc, user_extra_fields, "pirkimas_zurnalas")
+            _get_extra_field_value(finvalda_fields, "pirkimas_zurnalas")
             or _upper(getattr(doc, "zurnalo_kodas", None))
         )
         if zurnalas_value:
@@ -715,7 +731,7 @@ def export_pirkimai_group_to_finvalda(documents):
 
         # padalinys
         padalinys_value = (
-            _get_extra_field_value(doc, user_extra_fields, "pirkimas_padalinys")
+            _get_extra_field_value(finvalda_fields, "pirkimas_padalinys")
             or _upper(getattr(doc, "padalinio_kodas", None))
             or "PP"  # fallback
         )
@@ -731,7 +747,7 @@ def export_pirkimai_group_to_finvalda(documents):
 
         # darbuotojas
         darbuotojas_value = (
-            _get_extra_field_value(doc, user_extra_fields, "pirkimas_darbuotojas")
+            _get_extra_field_value(finvalda_fields, "pirkimas_darbuotojas")
             or _upper(getattr(doc, "atsakingo_asmens_kodas", None))
         )
         if darbuotojas_value:
@@ -753,7 +769,7 @@ def export_pirkimai_group_to_finvalda(documents):
 
         # Получаем sandelis из extra_fields или doc
         default_sandelis = (
-            _get_extra_field_value(doc, user_extra_fields, "pirkimas_sandelis")
+            _get_extra_field_value(finvalda_fields, "pirkimas_sandelis")
             or _s(getattr(doc, "sandelio_kodas", ""))
         )
 
@@ -811,12 +827,15 @@ def export_pirkimai_group_to_finvalda(documents):
 # Pardavimai
 # =========================================================
 
-def export_pardavimai_group_to_finvalda(documents):
+def export_pardavimai_group_to_finvalda(documents, user=None, own_company_code=None):
     """Экспорт ПРОДАЖ (pardavimas) в формат Finvalda. Возвращает bytes.
     Формат: <fvsdata><klientai/><prekes/><paslaugos/><operacijos>...</operacijos></fvsdata>"""
     root = _root()
     operacijos = root.find("operacijos")
     assert operacijos is not None
+
+    # Получаем extra_fields один раз для всего экспорта
+    finvalda_fields = _get_extra_fields(user, "finvalda", own_company_code)
 
     for doc in documents:
         currency = _s(getattr(doc, "currency", "EUR") or "EUR").upper()
@@ -849,19 +868,13 @@ def export_pardavimai_group_to_finvalda(documents):
             country_iso=buyer_country,
         )
 
-        # Получаем extra fields из user
-        user = getattr(doc, "user", None)
-        user_extra_fields = {}
-        if user:
-            user_extra_fields = getattr(user, "finvalda_extra_fields", None) or {}
-
         # ПРАВИЛЬНЫЙ ПОРЯДОК ПОЛЕЙ согласно XSD схеме
         pard = ET.SubElement(operacijos, "pardavimas")
 
         # 1. Поля из operacijaType (базовый тип)
         # tipas (УРОВЕНЬ ДОКУМЕНТА - тип операции)
         tipas_value = (
-            _get_extra_field_value(doc, user_extra_fields, "pardavimas_tipas")
+            _get_extra_field_value(finvalda_fields, "pardavimas_tipas")
             or _upper(getattr(doc, "tipo_kodas", None))
         )
         if tipas_value:
@@ -869,7 +882,7 @@ def export_pardavimai_group_to_finvalda(documents):
 
         # zurnalas
         zurnalas_value = (
-            _get_extra_field_value(doc, user_extra_fields, "pardavimas_zurnalas")
+            _get_extra_field_value(finvalda_fields, "pardavimas_zurnalas")
             or _upper(getattr(doc, "zurnalo_kodas", None))
         )
         if zurnalas_value:
@@ -877,7 +890,7 @@ def export_pardavimai_group_to_finvalda(documents):
 
         # padalinys
         padalinys_value = (
-            _get_extra_field_value(doc, user_extra_fields, "pardavimas_padalinys")
+            _get_extra_field_value(finvalda_fields, "pardavimas_padalinys")
             or _upper(getattr(doc, "padalinio_kodas", None))
             or "PP"  # fallback
         )
@@ -893,7 +906,7 @@ def export_pardavimai_group_to_finvalda(documents):
 
         # darbuotojas
         darbuotojas_value = (
-            _get_extra_field_value(doc, user_extra_fields, "pardavimas_darbuotojas")
+            _get_extra_field_value(finvalda_fields, "pardavimas_darbuotojas")
             or _upper(getattr(doc, "atsakingo_asmens_kodas", None))
         )
         if darbuotojas_value:
@@ -913,7 +926,7 @@ def export_pardavimai_group_to_finvalda(documents):
 
         # Получаем sandelis из extra_fields или doc
         default_sandelis = (
-            _get_extra_field_value(doc, user_extra_fields, "pardavimas_sandelis")
+            _get_extra_field_value(finvalda_fields, "pardavimas_sandelis")
             or _s(getattr(doc, "sandelio_kodas", ""))
         )
 

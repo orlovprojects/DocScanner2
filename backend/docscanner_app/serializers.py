@@ -8,8 +8,10 @@ from django.db.models.functions import Cast
 from django.db.models import Case, When
 from .utils.password_encryption import encrypt_password
 from django.urls import reverse
+from datetime import date
+from decimal import Decimal
 
-from .models import Payments
+from .models import Payments, MeasurementUnit, InvoiceSeries, Product, RecurringInvoice, RecurringInvoiceLineItem, Invoice, InvoiceEmail, InvoiceSettings, RivileGamaAPIKey
 
 from .utils.lineitem_rules import normalize_lineitem_rules
 
@@ -532,6 +534,23 @@ class CustomUserSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError(f"{field_name} must be valid JSON")
         if not isinstance(value, dict):
             raise serializers.ValidationError(f"{field_name} must be a JSON object")
+    
+        # ── Защита nested структуры ──
+        # Если пришёл плоский dict (старый фронтенд), а на сервере уже nested —
+        # оборачиваем в __all__, сохраняя остальные per-company профили.
+        incoming_is_flat = (
+            "__all__" not in value
+            and any("_" in k and not k.startswith("__") for k in value)
+        )
+    
+        if incoming_is_flat and self.instance:
+            current = getattr(self.instance, field_name, None)
+            if isinstance(current, dict) and "__all__" in current:
+                # Сервер уже nested, а фронтенд шлёт плоский → wrap в __all__
+                merged = dict(current)  # копия со всеми per-company профилями
+                merged["__all__"] = value  # обновляем только __all__
+                return merged
+    
         return value
 
 
@@ -1704,3 +1723,1459 @@ class CounterpartySerializer(serializers.Serializer):
     name = serializers.CharField(allow_blank=True, required=False)
     vat = serializers.CharField(allow_blank=True, required=False)
     docs_count = serializers.IntegerField()
+
+
+
+
+
+
+#NEW - dlia israsymas
+"""
+DokSkenas — Sąskaitų išrašymas
+Serializers for Counterparty, InvoiceSettings, Invoice, InvoiceLineItem.
+"""
+
+from rest_framework import serializers
+from django.db import transaction
+
+from .models import Counterparty, InvoiceSettings, Invoice, InvoiceLineItem
+
+
+# ────────────────────────────────────────────────────────────
+# Counterparty
+# ────────────────────────────────────────────────────────────
+
+class InvoiceCounterpartySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Counterparty
+        fields = [
+            "id",
+            "name",
+            "name_normalized",
+            "company_code",
+            "vat_code",
+            "address",
+            "country",
+            "country_iso",
+            "phone",
+            "email",
+            "bank_name",
+            "iban",
+            "swift",
+            "is_person",
+            "default_role",
+            "id_programoje",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = ["id", "name_normalized", "created_at", "updated_at"]
+
+
+class InvoiceCounterpartyListSerializer(serializers.ModelSerializer):
+    """Лёгкая версия для списков и автозаполнения."""
+
+    class Meta:
+        model = Counterparty
+        fields = [
+            "id",
+            "name",
+            "company_code",
+            "vat_code",
+            "address",
+            "country",
+            "country_iso",
+            "phone",
+            "email",
+            "bank_name",
+            "iban",
+            "swift",
+            "is_person",
+            "default_role",
+            "id_programoje",
+            "extra_info",       
+            "delivery_address",
+        ]
+
+
+# ────────────────────────────────────────────────────────────
+# InvoiceSettings
+# ────────────────────────────────────────────────────────────
+
+class InvoiceSettingsSerializer(serializers.ModelSerializer):
+    logo_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = InvoiceSettings
+        fields = [
+            "seller_name", "seller_company_code", "seller_vat_code",
+            "seller_address", "seller_phone", "seller_email",
+            "seller_bank_name", "seller_iban", "seller_swift",
+            "logo", "logo_url",
+            "default_currency", "default_vat_percent", "default_payment_days",
+            "email_subject_template", "email_body_template",
+        ]
+        read_only_fields = ["id", "logo_url"]
+        extra_kwargs = {
+            "logo": {"write_only": True, "required": False},
+        }
+
+    def get_logo_url(self, obj):
+        if obj.logo and hasattr(obj.logo, "url"):
+            request = self.context.get("request")
+            if request:
+                return request.build_absolute_uri(obj.logo.url)
+            return obj.logo.url
+        return None
+
+
+# ────────────────────────────────────────────────────────────
+# InvoiceLineItem
+# ────────────────────────────────────────────────────────────
+
+class InvoiceLineItemSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = InvoiceLineItem
+        fields = [
+            "id",
+            "line_id",
+            # Продукт
+            "prekes_kodas",
+            "prekes_barkodas",
+            "prekes_pavadinimas",
+            "prekes_tipas",
+            "preke_paslauga",
+            # Количество / цена
+            "unit",
+            "quantity",
+            "price",
+            "subtotal",
+            "vat",
+            "vat_percent",
+            "total",
+            "discount_with_vat",
+            "discount_wo_vat",
+            "sort_order",
+        ]
+        read_only_fields = ["id"]
+
+
+# ────────────────────────────────────────────────────────────
+# Invoice — List (лёгкий, для таблицы)
+# ────────────────────────────────────────────────────────────
+
+class InvoiceListSerializer(serializers.ModelSerializer):
+    """Для списка счетов — без autocomplete полей, без line items."""
+
+    full_number = serializers.ReadOnlyField()
+    line_items_count = serializers.IntegerField(read_only=True)
+    buyer_display = serializers.SerializerMethodField()
+    is_overdue = serializers.SerializerMethodField()
+    paid_amount = serializers.DecimalField(
+        max_digits=12, decimal_places=4, read_only=True,
+    )
+    last_payment_date = serializers.DateField(read_only=True)
+    has_proposed_payments = serializers.SerializerMethodField()
+    email_sent_count = serializers.IntegerField(read_only=True)
+    email_last_status = serializers.CharField(read_only=True)
+
+    def get_has_proposed_payments(self, obj):
+        if hasattr(obj, '_has_proposed'):
+            return obj._has_proposed
+        return obj.payment_allocations.filter(status="proposed").exists()
+
+    class Meta:
+        model = Invoice
+        fields = [
+            "id",
+            "uuid",
+            "invoice_type",
+            "status",
+            "full_number",
+            "document_series",
+            "document_number",
+            "invoice_date",
+            "due_date",
+            "buyer_name",
+            "buyer_display",
+            "currency",
+            "amount_wo_vat",
+            "vat_amount",
+            "amount_with_vat",
+            "pvm_tipas",
+            "sent_at",
+            "paid_at",
+            "line_items_count",
+            "source_invoice",
+            "exported",         
+            "exported_at",      
+            "is_overdue",
+            "can_create_pvm_sf",       
+            "created_at",
+            "updated_at",
+            "paid_amount",
+            "last_payment_date",
+            "has_proposed_payments",
+            "email_sent_count",
+            "email_last_status",
+        ]
+
+    def get_is_overdue(self, obj):
+        if obj.status in ("issued", "sent") and obj.due_date:
+            return obj.due_date < date.today()
+        return False
+
+    def get_buyer_display(self, obj):
+        """Покупатель: имя + код компании."""
+        if obj.buyer_id:
+            return f"{obj.buyer_name} ({obj.buyer_id})"
+        return obj.buyer_name or ""
+
+
+# ────────────────────────────────────────────────────────────
+# Invoice — Detail (полный, с line items)
+# ────────────────────────────────────────────────────────────
+
+class InvoiceDetailSerializer(serializers.ModelSerializer):
+    """Полный сериализатор для просмотра и редактирования."""
+
+    line_items = InvoiceLineItemSerializer(many=True, read_only=True)
+    full_number = serializers.ReadOnlyField()
+    is_editable = serializers.ReadOnlyField()
+    can_be_sent = serializers.ReadOnlyField()
+    can_create_pvm_sf = serializers.ReadOnlyField()
+    public_url = serializers.ReadOnlyField()
+    pdf_url = serializers.SerializerMethodField()
+    paid_amount = serializers.DecimalField(
+        max_digits=12, decimal_places=4, read_only=True,
+    )
+    last_payment_date = serializers.DateField(read_only=True)
+    has_proposed_payments = serializers.SerializerMethodField()
+    payment_link_url = serializers.URLField(read_only=True)
+    payment_link_provider = serializers.CharField(read_only=True)
+    payment_link_created_at = serializers.DateTimeField(read_only=True)
+
+    def get_has_proposed_payments(self, obj):
+        return obj.payment_allocations.filter(status="proposed").exists()
+
+    class Meta:
+        model = Invoice
+        fields = [
+            "id",
+            "uuid",
+            "invoice_type",
+            "status",
+            "full_number",
+            "is_editable",
+            "can_be_sent",
+            "can_create_pvm_sf",
+            "public_url",
+            "pdf_url",
+            "source_invoice",
+            # Нумерация / даты
+            "document_series",
+            "document_number",
+            "invoice_date",
+            "due_date",
+            "operation_date",
+            "order_number",
+            # Seller
+            "seller_counterparty",
+            "seller_id_programoje",
+            "seller_name",
+            "seller_id",
+            "seller_vat_code",
+            "seller_address",
+            "seller_country",
+            "seller_country_iso",
+            "seller_phone",
+            "seller_email",
+            "seller_bank_name",
+            "seller_iban",
+            "seller_swift",
+            "seller_is_person",
+            "seller_vat_val",
+            "seller_extra_info",
+            # Buyer
+            "buyer_counterparty",
+            "buyer_id_programoje",
+            "buyer_name",
+            "buyer_id",
+            "buyer_vat_code",
+            "buyer_address",
+            "buyer_country",
+            "buyer_country_iso",
+            "buyer_phone",
+            "buyer_email",
+            "buyer_bank_name",
+            "buyer_iban",
+            "buyer_swift",
+            "buyer_is_person",
+            "buyer_vat_val",
+            "buyer_extra_info", 
+            "buyer_delivery_address",
+            # Суммы
+            "currency",
+            "pvm_tipas",
+            "vat_percent",
+            "amount_wo_vat",
+            "vat_amount",
+            "amount_with_vat",
+            "invoice_discount_with_vat",
+            "invoice_discount_wo_vat",
+            "delivery_fee",
+            "separate_vat",
+            "doc_96_str",
+            # Мета
+            "document_type",
+            "document_type_code",
+            "pirkimas_pardavimas",
+            "note",
+            "report_to_isaf",
+            "issued_by",
+            "received_by",
+            # Autocomplete для экспорта
+            "prekes_kodas",
+            "prekes_barkodas",
+            "prekes_pavadinimas",
+            "prekes_tipas",
+            "preke_paslauga",
+            # Экспорт
+            "optimum_api_status",
+            "optimum_last_try_date",
+            "dineta_api_status",
+            "dineta_last_try_date",
+            # PDF / отправка
+            "pdf_file",
+            "sent_at",
+            "sent_to_email",
+            "paid_at",
+            "cancelled_at",
+            "public_link_enabled",
+            "payment_link_url",
+            "payment_link_provider",
+            "payment_link_created_at",
+            # Line items
+            "line_items",
+            # Timestamps
+            "created_at",
+            "updated_at",
+            "auto_create_sf_on_paid",
+            "auto_sf_series",
+            "auto_sf_send",
+            "send_payment_reminders",
+            "paid_amount",
+            "last_payment_date",
+            "has_proposed_payments",
+        ]
+        read_only_fields = [
+            "id",
+            "uuid",
+            "full_number",
+            "is_editable",
+            "can_be_sent",
+            "can_create_pvm_sf",
+            "public_url",
+            "pdf_url",
+            "sent_at",
+            "paid_at",
+            "cancelled_at",
+            "optimum_api_status",
+            "optimum_last_try_date",
+            "dineta_api_status",
+            "dineta_last_try_date",
+            "created_at",
+            "updated_at",
+        ]
+        extra_kwargs = {
+            "pdf_file": {"read_only": True},
+        }
+
+    def get_pdf_url(self, obj):
+        if obj.pdf_file and hasattr(obj.pdf_file, "url"):
+            request = self.context.get("request")
+            if request:
+                return request.build_absolute_uri(obj.pdf_file.url)
+            return obj.pdf_file.url
+        return None
+
+
+# ────────────────────────────────────────────────────────────
+# Invoice — Create / Update (с nested line items)
+# ────────────────────────────────────────────────────────────
+
+class InvoiceWriteSerializer(serializers.ModelSerializer):
+    """
+    Для создания и обновления Invoice вместе с line items.
+
+    Фронтенд отправляет:
+    {
+        "invoice_type": "isankstine",
+        "buyer_name": "UAB Testas",
+        ...
+        "line_items": [
+            {"prekes_pavadinimas": "Paslauga", "quantity": 1, "price": "100.00", ...},
+            ...
+        ]
+    }
+    """
+
+    line_items = InvoiceLineItemSerializer(many=True, required=False)
+    seller_type = serializers.CharField(required=False, write_only=True)
+    buyer_type = serializers.CharField(required=False, write_only=True)
+
+    class Meta:
+        model = Invoice
+        fields = [
+            "invoice_type",
+            "source_invoice",
+            # Нумерация
+            "document_series",
+            "document_number",      
+            # Даты
+            "invoice_date",
+            "due_date",
+            "operation_date",
+            "order_number",
+            # Seller
+            "seller_type",
+            "seller_counterparty",
+            "seller_id_programoje",
+            "seller_name",
+            "seller_id",
+            "seller_vat_code",
+            "seller_address",
+            "seller_country",       
+            "seller_country_iso",   
+            "seller_phone",
+            "seller_email",
+            "seller_bank_name",
+            "seller_iban",
+            "seller_swift",
+            "seller_is_person",
+            "seller_vat_val",
+            "seller_extra_info",
+            # Buyer
+            "buyer_type",          
+            "buyer_counterparty",
+            "buyer_id_programoje",
+            "buyer_name",
+            "buyer_id",
+            "buyer_vat_code",
+            "buyer_address",
+            "buyer_country",        
+            "buyer_country_iso",    
+            "buyer_phone",
+            "buyer_email",
+            "buyer_bank_name",
+            "buyer_iban",
+            "buyer_swift",
+            "buyer_is_person",
+            "buyer_vat_val",
+            "buyer_extra_info",
+            "buyer_delivery_address",
+            # Суммы
+            "currency",
+            "pvm_tipas",
+            "vat_percent",
+            "amount_wo_vat",
+            "vat_amount",
+            "amount_with_vat",
+            "invoice_discount_with_vat",
+            "invoice_discount_wo_vat",
+            "delivery_fee",
+            "separate_vat",
+            "doc_96_str",
+            # Мета
+            "document_type",
+            "document_type_code",
+            "note",
+            "report_to_isaf",
+            "public_link_enabled",
+            "issued_by", "received_by",
+            # Line items
+            "line_items",
+            "auto_create_sf_on_paid",
+            "auto_sf_series",
+            "auto_sf_send",
+            "send_payment_reminders",
+        ]
+
+    def validate(self, data):
+        if self.instance and self.instance.status == 'cancelled':
+            raise serializers.ValidationError(
+                "Negalima redaguoti anuliuotos sąskaitos."
+            )
+
+        # seller_type → seller_is_person
+        seller_type = data.pop('seller_type', None)
+        if seller_type is not None:
+            data['seller_is_person'] = seller_type == 'fizinis'
+
+        # buyer_type → buyer_is_person
+        buyer_type = data.pop('buyer_type', None)
+        if buyer_type is not None:
+            data['buyer_is_person'] = buyer_type == 'fizinis'
+
+        errors = {}
+
+        # ---- Документ ----
+        if not data.get('invoice_type'):
+            errors['invoice_type'] = 'Privalomas laukas.'
+        if not data.get('document_series'):
+            errors['document_series'] = 'Privalomas laukas.'
+        if not data.get('currency'):
+            errors['currency'] = 'Privalomas laukas.'
+
+        # Проверка уникальности номера
+        doc_number = data.get('document_number', '')
+        doc_series = data.get('document_series', '')
+        if doc_number and doc_series:
+            qs = Invoice.objects.filter(
+                user=self.context["request"].user,
+                document_series=doc_series,
+                document_number=doc_number,
+            ).exclude(status="cancelled")
+            if self.instance:
+                qs = qs.exclude(pk=self.instance.pk)
+            if qs.exists():
+                errors['document_number'] = f'Numeris {doc_series}-{doc_number} jau užimtas.'
+
+        # ---- Seller (при update) ----
+        if self.instance:
+            if not data.get('seller_name', self.instance.seller_name):
+                errors['seller_name'] = 'Privalomas laukas.'
+            if not data.get('seller_id', self.instance.seller_id):
+                errors['seller_id'] = 'Privalomas laukas.'
+            if not (data.get('seller_country') or data.get('seller_country_iso') or self.instance.seller_country_iso):
+                errors['seller_country'] = 'Privalomas laukas.'
+            seller_is_person = data.get('seller_is_person', self.instance.seller_is_person)
+            if seller_is_person is None:
+                errors['seller_is_person'] = 'Privalomas laukas.'
+
+        # ---- Buyer ----
+        if not data.get('buyer_name'):
+            errors['buyer_name'] = 'Privalomas laukas.'
+        if not data.get('buyer_id'):
+            errors['buyer_id'] = 'Privalomas laukas.'
+        if not data.get('buyer_country') and not data.get('buyer_country_iso'):
+            errors['buyer_country'] = 'Privalomas laukas.'
+        if data.get('buyer_is_person') is None:
+            errors['buyer_is_person'] = 'Privalomas laukas.'
+
+        # ---- Line items ----
+        line_items = data.get('line_items', [])
+        if not line_items:
+            errors['line_items'] = 'Turi būti bent viena eilutė.'
+        else:
+            line_errors = []
+            for idx, li in enumerate(line_items):
+                li_err = {}
+                if not li.get('prekes_pavadinimas'):
+                    li_err['prekes_pavadinimas'] = 'Privalomas laukas.'
+                if not li.get('prekes_kodas'):
+                    li_err['prekes_kodas'] = 'Privalomas laukas.'
+                if not li.get('quantity') or li['quantity'] <= 0:
+                    li_err['quantity'] = 'Turi būti > 0.'
+                if li.get('price') is None:
+                    li_err['price'] = 'Privalomas laukas.'
+                if not li.get('unit'):
+                    li_err['unit'] = 'Privalomas laukas.'
+                if li_err:
+                    line_errors.append({str(idx): li_err})
+            if line_errors:
+                errors['line_items'] = line_errors
+
+        # ---- PVM ----
+        pvm_tipas = data.get('pvm_tipas', 'taikoma')
+        if pvm_tipas == 'taikoma':
+            separate_vat = data.get('separate_vat', False)
+            if separate_vat:
+                for idx, li in enumerate(line_items):
+                    if li.get('vat_percent') is None:
+                        errors.setdefault('line_items_vat', []).append(
+                            f'Eilutė {idx + 1}: PVM % privalomas.'
+                        )
+            else:
+                if data.get('vat_percent') is None:
+                    errors['vat_percent'] = 'PVM % privalomas.'
+
+        if errors:
+            raise serializers.ValidationError(errors)
+
+        return data
+
+    def validate_seller_counterparty(self, value):
+        if value and value.user != self.context["request"].user:
+            raise serializers.ValidationError("Kontrahento nerastas.")
+        return value
+
+    def validate_buyer_counterparty(self, value):
+        if value and value.user != self.context["request"].user:
+            raise serializers.ValidationError("Kontrahento nerastas.")
+        return value
+
+    @transaction.atomic
+    def create(self, validated_data):
+        line_items_data = validated_data.pop("line_items", [])
+        user = self.context["request"].user
+
+        # Автозаполнение seller из settings (если не передан)
+        if not validated_data.get("seller_name"):
+            settings_obj = InvoiceSettings.objects.filter(user=user).first()
+            if settings_obj:
+                validated_data.setdefault("seller_name", settings_obj.seller_name)
+                validated_data.setdefault("seller_id", settings_obj.seller_company_code)
+                validated_data.setdefault("seller_vat_code", settings_obj.seller_vat_code)
+                validated_data.setdefault("seller_address", settings_obj.seller_address)
+                validated_data.setdefault("seller_phone", settings_obj.seller_phone)
+                validated_data.setdefault("seller_email", settings_obj.seller_email)
+                validated_data.setdefault("seller_bank_name", settings_obj.seller_bank_name)
+                validated_data.setdefault("seller_iban", settings_obj.seller_iban)
+                validated_data.setdefault("seller_swift", settings_obj.seller_swift)
+
+        # Country defaults
+        validated_data.setdefault("seller_country", "Lietuva")
+        validated_data.setdefault("seller_country_iso", "LT")
+        validated_data.setdefault("buyer_country", "Lietuva")
+        validated_data.setdefault("buyer_country_iso", "LT")
+
+        # Проверка seller после автозаполнения
+        if not validated_data.get("seller_name"):
+            raise serializers.ValidationError({"seller_name": "Pardavėjo vardas privalomas. Užpildykite nustatymuose."})
+        if not validated_data.get("seller_id"):
+            raise serializers.ValidationError({"seller_id": "Pardavėjo įmonės kodas privalomas."})
+        if validated_data.get("seller_is_person") is None:
+            raise serializers.ValidationError({"seller_is_person": "Nurodykite pardavėjo tipą."})
+
+        # Автозаполнение buyer из counterparty (если выбран)
+        buyer_cp = validated_data.get("buyer_counterparty")
+        if buyer_cp and not validated_data.get("buyer_name"):
+            validated_data.setdefault("buyer_name", buyer_cp.name)
+            validated_data.setdefault("buyer_id", buyer_cp.company_code)
+            validated_data.setdefault("buyer_vat_code", buyer_cp.vat_code)
+            validated_data.setdefault("buyer_address", buyer_cp.address)
+            validated_data.setdefault("buyer_phone", buyer_cp.phone)
+            validated_data.setdefault("buyer_email", buyer_cp.email)
+            validated_data.setdefault("buyer_bank_name", buyer_cp.bank_name)
+            validated_data.setdefault("buyer_iban", buyer_cp.iban)
+            validated_data.setdefault("buyer_swift", buyer_cp.swift)
+            validated_data.setdefault("buyer_is_person", buyer_cp.is_person)
+            validated_data.setdefault("buyer_id_programoje", buyer_cp.id_programoje)
+
+        # Normalized names
+        if validated_data.get("seller_name"):
+            validated_data["seller_name_normalized"] = validated_data["seller_name"].strip().upper()
+        if validated_data.get("buyer_name"):
+            validated_data["buyer_name_normalized"] = validated_data["buyer_name"].strip().upper()
+
+        # Defaults
+        validated_data.setdefault("pirkimas_pardavimas", "pardavimas")
+        validated_data["status"] = "draft"
+
+        invoice = Invoice.objects.create(user=user, **validated_data)
+
+        # Line items
+        for idx, li_data in enumerate(line_items_data):
+            li_data.pop("id", None)
+            li_data.pop("sort_order", None)
+            InvoiceLineItem.objects.create(
+                invoice=invoice,
+                sort_order=idx,
+                **li_data,
+            )
+
+        return invoice
+
+    @transaction.atomic
+    def update(self, instance, validated_data):
+        line_items_data = validated_data.pop("line_items", None)
+
+        # Normalized names
+        if validated_data.get("seller_name"):
+            validated_data["seller_name_normalized"] = validated_data["seller_name"].strip().upper()
+        if validated_data.get("buyer_name"):
+            validated_data["buyer_name_normalized"] = validated_data["buyer_name"].strip().upper()
+
+        # Update invoice fields
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save()
+
+        # Replace line items (full replace strategy — проще и надёжнее)
+        if line_items_data is not None:
+            instance.line_items.all().delete()
+            for idx, li_data in enumerate(line_items_data):
+                li_data.pop("id", None)
+                li_data.pop("sort_order", None)
+                InvoiceLineItem.objects.create(
+                    invoice=instance,
+                    sort_order=idx,
+                    **li_data,
+                )
+
+        return instance
+
+    def to_representation(self, instance):
+        """После create/update возвращаем полный detail."""
+        return InvoiceDetailSerializer(instance, context=self.context).data
+
+
+# ────────────────────────────────────────────────────────────
+# Invoice — Public (для покупателя по uuid, без лишних полей)
+# ────────────────────────────────────────────────────────────
+
+class InvoicePublicSerializer(serializers.ModelSerializer):
+    """Для public page /sf/{uuid} — только то что нужно покупателю."""
+
+    line_items = InvoiceLineItemSerializer(many=True, read_only=True)
+    full_number = serializers.ReadOnlyField()
+    logo_url = serializers.SerializerMethodField()
+
+    def get_logo_url(self, obj):
+            try:
+                inv_settings = obj.user.invoice_settings
+                if inv_settings.logo and inv_settings.logo.storage.exists(inv_settings.logo.name):
+                    request = self.context.get('request')
+                    if request:
+                        return request.build_absolute_uri(inv_settings.logo.url)
+                    # Fallback: use SITE_URL_BACKEND
+                    from django.conf import settings as django_settings
+                    backend_url = getattr(django_settings, 'SITE_URL_BACKEND', '')
+                    return f"{backend_url}{inv_settings.logo.url}" if backend_url else inv_settings.logo.url
+            except Exception:
+                pass
+            return None
+
+    class Meta:
+        model = Invoice
+        fields = [
+            "uuid",
+            "invoice_type",
+            "status",
+            "full_number",
+            "document_series",
+            "document_number",
+            "invoice_date",
+            "due_date",
+            # Seller (покупатель видит кто выставил)
+            "seller_name",
+            "seller_id",
+            "seller_vat_code",
+            "seller_address",
+            "seller_phone",
+            "seller_email",
+            "seller_bank_name",
+            "seller_iban",
+            "seller_swift",
+            # Buyer
+            "buyer_name",
+            "buyer_id",
+            "buyer_vat_code",
+            "buyer_address",
+            # Суммы
+            "currency",
+            "pvm_tipas",
+            "vat_percent",
+            "amount_wo_vat",
+            "vat_amount",
+            "amount_with_vat",
+            "delivery_fee",
+            "invoice_discount_with_vat",
+            "note",
+            # Line items
+            "line_items",
+
+            "logo_url",
+            "payment_link_url",
+            "payment_link_provider",
+            "paid_amount",
+            "paid_at",
+            "seller_extra_info",
+            "seller_is_person",
+            "buyer_phone",
+            "buyer_email",
+            "issued_by",
+            "received_by",
+        ]
+
+
+
+
+
+
+
+class MeasurementUnitSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = MeasurementUnit
+        fields = ["id", "code", "name", "sort_order", "is_active", "is_default"]
+
+
+class InvoiceSeriesSerializer(serializers.ModelSerializer):
+    preview = serializers.SerializerMethodField()
+    invoice_type_display = serializers.CharField(
+        source="get_invoice_type_display", read_only=True
+    )
+
+    class Meta:
+        model = InvoiceSeries
+        fields = [
+            "id", "invoice_type", "invoice_type_display", "prefix",
+            "next_number", "padding", "is_default", "is_active",
+            "preview", "created_at",
+        ]
+        read_only_fields = ["created_at"]
+
+    def get_preview(self, obj):
+        return obj.preview()
+    
+
+
+
+class ProductListSerializer(serializers.ModelSerializer):
+    """Лёгкий сериализатор для списка."""
+    measurement_unit_code = serializers.CharField(
+        source="measurement_unit.code", read_only=True, default=""
+    )
+
+    class Meta:
+        model = Product
+        fields = [
+            "id", "preke_paslauga", "pavadinimas", "kodas", "barkodas",
+            "measurement_unit", "measurement_unit_code",
+            "pardavimo_kaina", "pvm_procentas",
+            "created_at",
+        ]
+
+
+class ProductSerializer(serializers.ModelSerializer):
+    """Полный сериализатор для CRUD."""
+    measurement_unit_code = serializers.CharField(
+        source="measurement_unit.code", read_only=True, default=""
+    )
+
+    class Meta:
+        model = Product
+        fields = [
+            "id", "preke_paslauga", "pavadinimas", "kodas", "barkodas",
+            "measurement_unit", "measurement_unit_code",
+            "pardavimo_kaina", "pvm_procentas",
+            "created_at", "updated_at",
+        ]
+        read_only_fields = ["id", "created_at", "updated_at"]
+
+    def validate_kodas(self, value):
+        user = self.context["request"].user
+        qs = Product.objects.filter(user=user, kodas=value)
+        if self.instance:
+            qs = qs.exclude(pk=self.instance.pk)
+        if qs.exists():
+            raise serializers.ValidationError("Toks kodas jau egzistuoja.")
+        return value
+    
+
+
+
+# ═══════════════════════════════════════════════════════════
+# Periodines saskaitos
+# ═══════════════════════════════════════════════════════════
+
+class RecurringInvoiceLineItemSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = RecurringInvoiceLineItem
+        fields = [
+            "prekes_pavadinimas", "prekes_kodas", "prekes_barkodas",
+            "preke_paslauga", "unit", "quantity", "price",
+            "vat_percent", "discount_wo_vat", "sort_order",
+        ]
+
+
+class RecurringInvoiceListSerializer(serializers.ModelSerializer):
+    """Для списка — лёгкий."""
+    next_run_date = serializers.SerializerMethodField()
+    estimated_amount = serializers.SerializerMethodField()
+
+    class Meta:
+        model = RecurringInvoice
+        fields = [
+            "id", "uuid", "status", "invoice_type", "document_series",
+            "currency", "buyer_name", "buyer_id",
+            "frequency", "interval", "first_day_of_month", "last_day_of_month",
+            "start_date", "end_date", "max_count", "generation_count",
+            "next_run_at", "next_run_date", "created_at", "estimated_amount",
+        ]
+
+    def get_next_run_date(self, obj):
+        if obj.next_run_at:
+            return obj.next_run_at.date().isoformat()
+        return None
+
+    def get_estimated_amount(self, obj):
+        total = Decimal("0")
+        for li in obj.line_items.all():
+            qty = li.quantity or Decimal("0")
+            price = li.price or Decimal("0")
+            discount = li.discount_wo_vat or Decimal("0")
+            subtotal = qty * price - discount
+            vat_pct = li.vat_percent if li.vat_percent is not None else (obj.vat_percent or Decimal("0"))
+            if obj.pvm_tipas == "taikoma":
+                total += subtotal + subtotal * vat_pct / Decimal("100")
+            else:
+                total += subtotal
+        return str(total.quantize(Decimal("0.01")))
+
+
+class RecurringInvoiceDetailSerializer(serializers.ModelSerializer):
+    line_items = RecurringInvoiceLineItemSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = RecurringInvoice
+        fields = [
+            "id", "uuid", "status",
+            # Что создавать
+            "invoice_type", "document_series", "currency",
+            "pvm_tipas", "vat_percent", "note", "order_number",
+            "public_link_enabled",
+            # Расписание
+            "start_date", "end_date", "frequency", "interval",
+            "first_day_of_month", "last_day_of_month",
+            "day_of_month", "weekday",
+            "payment_term_days", "max_count",
+            # Автодействия
+            "auto_issue", "auto_send", "send_to_email",
+            # Seller
+            "seller_counterparty", "seller_name", "seller_id",
+            "seller_vat_code", "seller_address",
+            "seller_country", "seller_country_iso",
+            "seller_phone", "seller_email",
+            "seller_bank_name", "seller_iban", "seller_swift",
+            "seller_is_person", "seller_extra_info",
+            # Buyer
+            "buyer_counterparty", "buyer_name", "buyer_id",
+            "buyer_vat_code", "buyer_address",
+            "buyer_country", "buyer_country_iso",
+            "buyer_phone", "buyer_email",
+            "buyer_bank_name", "buyer_iban", "buyer_swift",
+            "buyer_is_person", "buyer_extra_info",
+            "buyer_delivery_address",
+            # Подписи
+            "issued_by", "received_by",
+            # Служебные
+            "next_run_at", "last_run_at", "generation_count",
+            "created_at", "updated_at",
+            # Line items
+            "line_items",
+        ]
+
+
+class RecurringInvoiceWriteSerializer(serializers.ModelSerializer):
+    line_items = RecurringInvoiceLineItemSerializer(many=True, required=False)
+    seller_type = serializers.CharField(required=False, write_only=True)
+    buyer_type = serializers.CharField(required=False, write_only=True)
+
+    class Meta:
+        model = RecurringInvoice
+        fields = [
+            # Что создавать
+            "invoice_type", "document_series", "currency",
+            "pvm_tipas", "vat_percent", "note", "order_number",
+            "public_link_enabled",
+            # Расписание
+            "start_date", "end_date", "frequency", "interval",
+            "first_day_of_month", "last_day_of_month",
+            "payment_term_days", "max_count",
+            # Автодействия
+            "auto_issue", "auto_send", "send_to_email",
+            # Seller
+            "seller_type",
+            "seller_counterparty", "seller_name", "seller_id",
+            "seller_vat_code", "seller_address",
+            "seller_country", "seller_country_iso",
+            "seller_phone", "seller_email",
+            "seller_bank_name", "seller_iban", "seller_swift",
+            "seller_extra_info",
+            # Buyer
+            "buyer_type",
+            "buyer_counterparty", "buyer_name", "buyer_id",
+            "buyer_vat_code", "buyer_address",
+            "buyer_country", "buyer_country_iso",
+            "buyer_phone", "buyer_email",
+            "buyer_bank_name", "buyer_iban", "buyer_swift",
+            "buyer_extra_info", "buyer_delivery_address",
+            # Подписи
+            "issued_by", "received_by",
+            # Line items
+            "line_items",
+        ]
+
+    def validate(self, data):
+        # seller_type → seller_is_person
+        seller_type = data.pop("seller_type", None)
+        if seller_type is not None:
+            data["seller_is_person"] = seller_type == "fizinis"
+
+        # buyer_type → buyer_is_person
+        buyer_type = data.pop("buyer_type", None)
+        if buyer_type is not None:
+            data["buyer_is_person"] = buyer_type == "fizinis"
+
+        errors = {}
+
+        # ---- Документ ----
+        if not data.get("invoice_type"):
+            errors["invoice_type"] = "Privalomas laukas."
+        if not data.get("document_series"):
+            errors["document_series"] = "Privalomas laukas."
+        if not data.get("currency"):
+            errors["currency"] = "Privalomas laukas."
+
+        # ---- Расписание ----
+        if not data.get("start_date"):
+            errors["start_date"] = "Privalomas laukas."
+        if not data.get("frequency"):
+            errors["frequency"] = "Privalomas laukas."
+
+        end_date = data.get("end_date")
+        start_date = data.get("start_date")
+        if end_date and start_date and end_date < start_date:
+            errors["end_date"] = "Pabaigos data negali būti ankstesnė už pradžios datą."
+
+        interval = data.get("interval", 1)
+        if interval is not None and interval < 1:
+            errors["interval"] = "Turi būti >= 1."
+
+        # ---- Seller ----
+        if self.instance:
+            if not data.get("seller_name", self.instance.seller_name):
+                errors["seller_name"] = "Privalomas laukas."
+            if not data.get("seller_id", self.instance.seller_id):
+                errors["seller_id"] = "Privalomas laukas."
+
+        # ---- Buyer ----
+        if not data.get("buyer_name"):
+            errors["buyer_name"] = "Privalomas laukas."
+        if not data.get("buyer_id"):
+            errors["buyer_id"] = "Privalomas laukas."
+        if not data.get("buyer_country") and not data.get("buyer_country_iso"):
+            errors["buyer_country"] = "Privalomas laukas."
+        if data.get("buyer_is_person") is None:
+            errors["buyer_is_person"] = "Privalomas laukas."
+
+        # ---- auto_send → email ----
+        if data.get("auto_send") and not data.get("send_to_email"):
+            # fallback на buyer_email
+            buyer_email = data.get("buyer_email", "")
+            if buyer_email:
+                data["send_to_email"] = buyer_email
+            else:
+                errors["send_to_email"] = "El. paštas privalomas automatiniam siuntimui."
+
+        # ---- Line items ----
+        line_items = data.get("line_items", [])
+        if not line_items:
+            errors["line_items"] = "Turi būti bent viena eilutė."
+        else:
+            line_errors = []
+            for idx, li in enumerate(line_items):
+                li_err = {}
+                if not li.get("prekes_pavadinimas"):
+                    li_err["prekes_pavadinimas"] = "Privalomas laukas."
+                if not li.get("quantity") or li["quantity"] <= 0:
+                    li_err["quantity"] = "Turi būti > 0."
+                if li.get("price") is None:
+                    li_err["price"] = "Privalomas laukas."
+                if not li.get("unit"):
+                    li_err["unit"] = "Privalomas laukas."
+                if li_err:
+                    line_errors.append({str(idx): li_err})
+            if line_errors:
+                errors["line_items"] = line_errors
+
+        # ---- PVM ----
+        pvm_tipas = data.get("pvm_tipas", "taikoma")
+        if pvm_tipas == "taikoma" and data.get("vat_percent") is None:
+            errors["vat_percent"] = "PVM % privalomas."
+
+        if errors:
+            raise serializers.ValidationError(errors)
+
+        return data
+
+    def _normalize_schedule(self, instance):
+        """Установить day_of_month/frequency на основе toggles."""
+        if instance.first_day_of_month:
+            instance.frequency = "monthly"
+            instance.interval = 1
+            instance.day_of_month = 1
+            instance.weekday = None
+        elif instance.last_day_of_month:
+            instance.frequency = "monthly"
+            instance.interval = 1
+            instance.day_of_month = 31  # compute_next_run_after обработает через min(target, last_day)
+            instance.weekday = None
+        else:
+            instance.clean_schedule_fields()
+
+    @transaction.atomic
+    def create(self, validated_data):
+        line_items_data = validated_data.pop("line_items", [])
+        user = self.context["request"].user
+
+        # Country defaults
+        validated_data.setdefault("seller_country", "Lietuva")
+        validated_data.setdefault("seller_country_iso", "LT")
+        validated_data.setdefault("buyer_country", "Lietuva")
+        validated_data.setdefault("buyer_country_iso", "LT")
+
+        # Seller из settings если не передан
+        if not validated_data.get("seller_name"):
+            from .models import InvoiceSettings
+            settings_obj = InvoiceSettings.objects.filter(user=user).first()
+            if settings_obj:
+                validated_data.setdefault("seller_name", settings_obj.seller_name)
+                validated_data.setdefault("seller_id", settings_obj.seller_company_code)
+                validated_data.setdefault("seller_vat_code", settings_obj.seller_vat_code)
+                validated_data.setdefault("seller_address", settings_obj.seller_address)
+                validated_data.setdefault("seller_phone", settings_obj.seller_phone)
+                validated_data.setdefault("seller_email", settings_obj.seller_email)
+                validated_data.setdefault("seller_bank_name", settings_obj.seller_bank_name)
+                validated_data.setdefault("seller_iban", settings_obj.seller_iban)
+                validated_data.setdefault("seller_swift", settings_obj.seller_swift)
+
+        if not validated_data.get("seller_name"):
+            raise serializers.ValidationError(
+                {"seller_name": "Pardavėjo vardas privalomas. Užpildykite nustatymuose."}
+            )
+
+        validated_data["status"] = "active"
+        instance = RecurringInvoice.objects.create(user=user, **validated_data)
+
+        # Line items
+        for idx, li_data in enumerate(line_items_data):
+            li_data.pop("id", None)
+            li_data.pop("sort_order", None)
+            RecurringInvoiceLineItem.objects.create(
+                recurring_invoice=instance,
+                sort_order=idx,
+                **li_data,
+            )
+
+        # Нормализация расписания + первый запуск
+        self._normalize_schedule(instance)
+        instance.next_run_at = instance.compute_first_run_at()
+        instance.mark_finished_if_needed()
+        instance.save(update_fields=[
+            "frequency", "interval", "day_of_month", "weekday",
+            "next_run_at", "status", "updated_at",
+        ])
+
+        return instance
+
+    @transaction.atomic
+    def update(self, instance, validated_data):
+        line_items_data = validated_data.pop("line_items", None)
+
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+
+        self._normalize_schedule(instance)
+
+        # Пересчитать next_run если расписание менялось
+        if instance.status == "active":
+            instance.next_run_at = instance.compute_first_run_at()
+            instance.mark_finished_if_needed()
+
+        instance.save()
+
+        if line_items_data is not None:
+            instance.line_items.all().delete()
+            for idx, li_data in enumerate(line_items_data):
+                li_data.pop("id", None)
+                li_data.pop("sort_order", None)
+                RecurringInvoiceLineItem.objects.create(
+                    recurring_invoice=instance,
+                    sort_order=idx,
+                    **li_data,
+                )
+
+        return instance
+
+    def to_representation(self, instance):
+        return RecurringInvoiceDetailSerializer(instance, context=self.context).data
+    
+
+
+
+
+
+
+
+
+
+"""
+DRF Serializers для банковского импорта и платежей.
+"""
+
+from decimal import Decimal
+
+from rest_framework import serializers
+
+from .models import BankStatement, IncomingTransaction, PaymentAllocation
+
+
+# ────────────────────────────────────────────────────────────
+# BankStatement
+# ────────────────────────────────────────────────────────────
+
+
+class BankStatementListSerializer(serializers.ModelSerializer):
+    bank_display = serializers.CharField(source="get_bank_name_display", read_only=True)
+    status_display = serializers.CharField(source="get_status_display", read_only=True)
+
+    class Meta:
+        model = BankStatement
+        fields = [
+            "id", "uuid", "bank_name", "bank_display",
+            "original_filename", "file_format",
+            "account_iban", "currency",
+            "period_from", "period_to",
+            "total_entries", "credit_entries", "debit_entries",
+            "duplicates_skipped",
+            "auto_matched_count", "likely_matched_count", "unmatched_count",
+            "status", "status_display", "error_message",
+            "created_at",
+        ]
+        read_only_fields = fields
+
+
+class BankStatementUploadSerializer(serializers.Serializer):
+    file = serializers.FileField()
+    bank_name = serializers.ChoiceField(
+        choices=[("", "Automatinis")] + BankStatement.BANK_CHOICES,
+        required=False, default="", allow_blank=True,
+    )
+    file_format = serializers.ChoiceField(
+        choices=[("", "Automatinis")] + BankStatement.FORMAT_CHOICES,
+        required=False, default="", allow_blank=True,
+    )
+
+    def validate_file(self, value):
+        """Validate file extension and size before processing."""
+        import os
+    
+        ALLOWED_EXT = {".csv", ".xml"}
+        MAX_SIZE = 20 * 1024 * 1024  # 10 MB
+    
+        filename = getattr(value, "name", "")
+        ext = os.path.splitext(filename)[1].lower()
+    
+        if ext and ext not in ALLOWED_EXT:
+            raise serializers.ValidationError(
+                f"Netinkamas failo formatas: {ext}. Priimami tik CSV ir XML failai."
+            )
+    
+        if value.size > MAX_SIZE:
+            raise serializers.ValidationError(
+                f"Failas per didelis ({value.size // 1024 // 1024} MB). "
+                f"Maksimalus dydis: 20 MB."
+            )
+    
+        return value
+
+
+# ────────────────────────────────────────────────────────────
+# Payment Proof (для модалки в InvoiceListPage)
+# ────────────────────────────────────────────────────────────
+
+
+class TransactionInfoSerializer(serializers.Serializer):
+    """Данные транзакции внутри allocation — для отображения в модалке."""
+    id = serializers.IntegerField()
+    transaction_date = serializers.DateField()
+    counterparty_name = serializers.CharField()
+    counterparty_code = serializers.CharField()
+    counterparty_account = serializers.CharField()
+    payment_purpose = serializers.CharField()
+    bank_operation_code = serializers.CharField()
+    amount = serializers.DecimalField(max_digits=12, decimal_places=2)
+    currency = serializers.CharField()
+    source = serializers.CharField()
+    source_display = serializers.CharField()
+    bank_name = serializers.CharField()
+    bank_period = serializers.CharField()
+
+
+class PaymentAllocationDetailSerializer(serializers.Serializer):
+    """Одна allocation — один платёж/матч для invoice."""
+    id = serializers.IntegerField()
+    source = serializers.CharField()
+    source_display = serializers.CharField()
+    status = serializers.CharField()
+    status_display = serializers.CharField()
+    amount = serializers.DecimalField(max_digits=12, decimal_places=2)
+    payment_date = serializers.DateField()
+    confidence = serializers.DecimalField(max_digits=3, decimal_places=2)
+    match_reasons = serializers.DictField()
+    note = serializers.CharField()
+    created_at = serializers.DateTimeField()
+    transaction = TransactionInfoSerializer(allow_null=True)
+
+
+class InvoicePaymentDetailsSerializer(serializers.Serializer):
+    """
+    Полная информация о платежах invoice — для PaymentProofDialog.
+    Endpoint: GET /api/bank-import/invoice/{id}/payments/
+    """
+    invoice_id = serializers.IntegerField()
+    invoice_number = serializers.CharField()
+    invoice_total = serializers.DecimalField(max_digits=12, decimal_places=4)
+    paid_amount = serializers.DecimalField(max_digits=12, decimal_places=4)
+    remaining = serializers.DecimalField(max_digits=12, decimal_places=4)
+    payment_status = serializers.CharField()
+    allocations = PaymentAllocationDetailSerializer(many=True)
+
+
+# ────────────────────────────────────────────────────────────
+# Mark Paid (для диалога ручной пометки)
+# ────────────────────────────────────────────────────────────
+
+
+class MarkPaidSerializer(serializers.Serializer):
+    """Данные из MarkPaidDialog."""
+    amount = serializers.DecimalField(max_digits=12, decimal_places=2)
+    payment_date = serializers.DateField()
+    note = serializers.CharField(required=False, default="", allow_blank=True)
+
+
+# ────────────────────────────────────────────────────────────
+# Actions
+# ────────────────────────────────────────────────────────────
+
+
+class ConfirmAllocationSerializer(serializers.Serializer):
+    allocation_id = serializers.IntegerField()
+
+
+class BulkConfirmSerializer(serializers.Serializer):
+    allocation_ids = serializers.ListField(
+        child=serializers.IntegerField(), min_length=1,
+    )
+
+
+class ManualMatchSerializer(serializers.Serializer):
+    transaction_id = serializers.IntegerField()
+    invoice_id = serializers.IntegerField()
+    amount = serializers.DecimalField(
+        max_digits=12, decimal_places=2, required=False, allow_null=True,
+    )
+
+
+# ────────────────────────────────────────────────────────────
+# Invoice List additions (миксин для существующего serializer)
+# ────────────────────────────────────────────────────────────
+
+# Добавить в существующий InvoiceListSerializer / InvoiceDetailSerializer:
+#
+#   paid_amount = serializers.DecimalField(max_digits=12, decimal_places=4, read_only=True)
+#   last_payment_date = serializers.DateField(read_only=True)
+#   has_proposed_payments = serializers.SerializerMethodField()
+#
+#   def get_has_proposed_payments(self, obj):
+#       return obj.payment_allocations.filter(status="proposed").exists()
+
+
+
+
+
+class InvoiceEmailSerializer(serializers.ModelSerializer):
+    email_type_display = serializers.CharField(
+        source="get_email_type_display", read_only=True
+    )
+
+    class Meta:
+        model = InvoiceEmail
+        fields = [
+            "id",
+            "email_type",
+            "email_type_display",
+            "to_email",
+            "subject",
+            "sent_at",
+            "status",
+            "reminder_day",
+            "opened_at",
+            "open_count",
+            "error_text",
+        ]
+        read_only_fields = fields
+
+
+class ReminderSettingsSerializer(serializers.Serializer):
+    reminder_enabled = serializers.BooleanField(required=False)
+    invoice_reminder_days = serializers.ListField(
+        child=serializers.IntegerField(), required=False
+    )
+
+    def validate_invoice_reminder_days(self, value):
+        if not value:
+            return [-7, -1, 3]
+        if len(value) > 10:
+            raise serializers.ValidationError("Per daug priminimų (maks. 10).")
+        for d in value:
+            if abs(d) > 365:
+                raise serializers.ValidationError("Priminimo diena negali viršyti 365.")
+            if d == 0:
+                raise serializers.ValidationError("Priminimo diena negali būti 0.")
+        return sorted(value)
+    
+
+
+
+
+
+# ────────────────────────────────────────────────────────────
+# ─── Rivile GAMA API Key Serializers ───
+# ────────────────────────────────────────────────────────────
+class RivileGamaAPIKeySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = RivileGamaAPIKey
+        fields = [
+            "id", "label", "company_code", "key_suffix",
+            "is_active", "verified_at", "last_ok", "last_error",
+            "created_at", "updated_at",
+        ]
+        read_only_fields = [
+            "id", "key_suffix", "verified_at", "last_ok", "last_error",
+            "created_at", "updated_at",
+        ]
+
+
+class RivileGamaAPIKeyCreateSerializer(serializers.Serializer):
+    label = serializers.CharField(max_length=150, required=False, default="", allow_blank=True)
+    company_code = serializers.CharField(max_length=50, required=True)
+    api_key = serializers.CharField(max_length=500, required=True, write_only=True)
+    is_active = serializers.BooleanField(required=False, default=True)
+
+    def validate_company_code(self, value):
+        value = value.strip()
+        if not value:
+            raise serializers.ValidationError("Įmonės kodas yra privalomas.")
+        return value
+
+    def validate_api_key(self, value):
+        value = value.strip()
+        if not value:
+            raise serializers.ValidationError("API raktas yra privalomas.")
+        if len(value) < 10:
+            raise serializers.ValidationError("API raktas per trumpas.")
+        return value
+
+
+class RivileGamaAPIKeyUpdateSerializer(serializers.Serializer):
+    label = serializers.CharField(max_length=150, required=False, allow_blank=True)
+    company_code = serializers.CharField(max_length=50, required=False)
+    api_key = serializers.CharField(max_length=500, required=False, write_only=True, allow_blank=True)
+    is_active = serializers.BooleanField(required=False)
+
+# ────────────────────────────────────────────────────────────
+# END ─── Rivile GAMA API Key Serializers ───
+# ────────────────────────────────────────────────────────────

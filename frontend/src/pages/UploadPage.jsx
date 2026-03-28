@@ -29,6 +29,7 @@ import { useUploadSession } from "../components/useUploadSession";
 import UploadProgressDialog from "../components/UploadProgressDialog";
 import ProcessingStatusBar from "../components/ProcessingStatusBar";
 import ExportStatusBar from "../components/ExportStatusBar";
+import SettingsIcon from '@mui/icons-material/Settings';
 
 
 const SCAN_TYPES = [
@@ -769,28 +770,34 @@ export default function UploadPage() {
         }}
       >
         <Typography variant={isMobile ? "h6" : "h5"}>
-          Sąskaitų faktūrų suvestinė
+          Sąskaitų skaitmenizavimo suvestinė
         </Typography>
 
-        {/* Export button area */}
         {!isMobile && (
           <Box display="flex" flexDirection="column" alignItems="center" sx={{ minHeight: 70 }}>
-            <Tooltip
-              title={exportButtonContent.exportDisabled ? exportButtonContent.disabledReason : ""}
-              placement="bottom"
-              disableHoverListener={!exportButtonContent.exportDisabled}
-            >
-              <span style={{ display: "inline-flex" }}>
-                <Button
-                  variant="outlined"
-                  color="primary"
-                  onClick={handleExport}
-                  disabled={exportButtonContent.exportDisabled}
-                >
-                  Eksportuoti{exportButtonContent.exportCountToShow ? ` (${exportButtonContent.exportCountToShow})` : ""} į {programLabel}
-                </Button>
-              </span>
-            </Tooltip>
+            <Box display="flex" alignItems="center" gap={1}>
+              <Tooltip title="Skaitmenizavimo nustatymai">
+                <IconButton onClick={() => window.location = "/nustatymai"} size="small">
+                  <SettingsIcon sx={{ fontSize: 22, color: "text.secondary" }} />
+                </IconButton>
+              </Tooltip>
+              <Tooltip
+                title={exportButtonContent.exportDisabled ? exportButtonContent.disabledReason : ""}
+                placement="bottom"
+                disableHoverListener={!exportButtonContent.exportDisabled}
+              >
+                <span style={{ display: "inline-flex" }}>
+                  <Button
+                    variant="outlined"
+                    color="primary"
+                    onClick={handleExport}
+                    disabled={exportButtonContent.exportDisabled}
+                  >
+                    Eksportuoti{exportButtonContent.exportCountToShow ? ` (${exportButtonContent.exportCountToShow})` : ""} į {programLabel}
+                  </Button>
+                </span>
+              </Tooltip>
+            </Box>  
 
             <Box
               onClick={currentTutorial ? () => setTutorialOpen(true) : undefined}
@@ -898,6 +905,7 @@ export default function UploadPage() {
             label="Skaitmenizavimo tipas"
             value={scanType}
             onChange={e => setScanType(e.target.value)}
+            SelectProps={{ MenuProps: { disableScrollLock: true } }}
             fullWidth
           >
             {SCAN_TYPES.map((type) => (
@@ -987,6 +995,7 @@ export default function UploadPage() {
             label="Skaitmenizavimo tipas"
             value={scanType}
             onChange={e => setScanType(e.target.value)}
+            SelectProps={{ MenuProps: { disableScrollLock: true } }}
             sx={{ minWidth: 270 }}
           >
             {SCAN_TYPES.map((type) => (

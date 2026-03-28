@@ -9,6 +9,8 @@ from decimal import Decimal, ROUND_HALF_UP, InvalidOperation
 from datetime import date, datetime
 from typing import List, Dict, Any
 
+from ..utils.extra_fields import get_extra_for_export
+
 logger = logging.getLogger(__name__)
 
 # =========================
@@ -103,6 +105,16 @@ def _s(v) -> str:
     return str(v).strip() if v is not None else ""
 
 
+def _parse_cp_key(cp_key):
+    if not cp_key:
+        return ""
+
+    cp = str(cp_key).strip()
+    if cp.lower().startswith("id:"):
+        return cp.split(":", 1)[1].strip()
+    return cp
+
+
 def _format_date_debetas(dt) -> str:
     """
     Форматирует дату в строку 'yyyymmdd' для Debetas.
@@ -146,7 +158,7 @@ def _get_preke_paslauga(value) -> str:
             return "1"
     except (ValueError, TypeError):
         pass
-    return ""  # Пустое если не определено
+    return ""
 
 
 def _is_merge_vat(user) -> bool:
@@ -175,7 +187,7 @@ def get_party_code(
       1) *_id
       2) *_vat_code
       3) *_id_programoje
-    Если все пусто — вернётся "".
+    Если все пусто - вернётся "".
     """
     sid = _s(getattr(doc, id_field, None))
     if sid:
@@ -239,19 +251,91 @@ def _get_client_data_for_debetas(doc) -> Dict[str, Any]:
         }
 
 
-def _get_extra_field(user, doc_type: str, field_name: str, default: str = "") -> str:
+def _get_own_company_code_from_doc(doc) -> str:
     """
-    Получает значение из user.debetas_extra_fields.
+    Определяет код своей фирмы из документа.
+
+    - pirkimas -> своя фирма buyer
+    - pardavimas -> своя фирма seller
+    """
+    doc_type = _s(getattr(doc, "pirkimas_pardavimas", "")).lower()
+
+    if doc_type == "pirkimas":
+        candidates = [
+            getattr(doc, "buyer_id", ""),
+            getattr(doc, "buyer_vat_code", ""),
+            getattr(doc, "buyer_id_programoje", ""),
+        ]
+    else:
+        candidates = [
+            getattr(doc, "seller_id", ""),
+            getattr(doc, "seller_vat_code", ""),
+            getattr(doc, "seller_id_programoje", ""),
+        ]
+
+    for value in candidates:
+        code = _s(value)
+        if code:
+            return code
+    return ""
+
+
+def _get_debetas_extra_for_doc(user, doc, own_company_code=None) -> Dict[str, Any]:
+    """
+    Получает extra fields для конкретного документа.
+
+    Приоритет:
+    1. Профиль конкретной фирмы по own_company_code
+    2. Профиль фирмы, определённой из документа
+    3. Глобальный профиль (__all__)
+    4. Пустой dict
     """
     if not user:
-        return default
+        return {}
 
-    extra_fields = getattr(user, "debetas_extra_fields", None)
+    requested_code = _parse_cp_key(own_company_code)
+    doc_company_code = _get_own_company_code_from_doc(doc)
+
+    extra = {}
+    resolved_by = ""
+
+    if requested_code:
+        extra = get_extra_for_export(user, "debetas", requested_code)
+        if extra:
+            resolved_by = requested_code
+
+    if not extra and doc_company_code and doc_company_code != requested_code:
+        extra = get_extra_for_export(user, "debetas", doc_company_code)
+        if extra:
+            resolved_by = doc_company_code
+
+    if not extra:
+        extra = get_extra_for_export(user, "debetas", None)
+        if extra:
+            resolved_by = "__all__/legacy"
+
+    logger.debug(
+        "[DEBETAS:EXTRA] doc=%s own_company_code=%r requested_code=%r doc_company_code=%r resolved_by=%r fields=%s",
+        getattr(doc, "pk", None),
+        own_company_code,
+        requested_code,
+        doc_company_code,
+        resolved_by,
+        {k: v for k, v in extra.items() if v} if extra else {},
+    )
+
+    return extra or {}
+
+
+def _get_extra_field_from_profile(extra_fields: Dict[str, Any], doc_type: str, field_name: str, default: str = "") -> str:
+    """
+    Получает значение из уже резолвленного профиля debetas_extra_fields.
+    """
     if not extra_fields:
         return default
 
     key = f"{doc_type}_{field_name}"
-    value = extra_fields.get(key, "").strip()
+    value = _s(extra_fields.get(key, ""))
 
     if value:
         logger.debug("[DEBETAS:EXTRA] %s -> %r", key, value)
@@ -279,14 +363,10 @@ def _get_series_and_number(doc) -> tuple:
     series = _s(getattr(doc, "document_series", ""))
     number = _s(getattr(doc, "document_number", ""))
 
-    # Нормализация (на всякий случай убираем пробелы внутри)
     series_clean = series.replace(" ", "")
     number_clean = number.replace(" ", "")
 
-    # --- CASE 1: есть и серия и номер -> только L003 ---
     if series_clean and number_clean:
-        # Убираем дублирование серии из начала номера (MAK + MAK2829195 => 2829195)
-        # Удаляем серию столько раз, сколько она подряд встречается в начале number
         sc = series_clean
         while number_clean.startswith(sc) and sc:
             number_clean = number_clean[len(sc):]
@@ -300,13 +380,10 @@ def _get_series_and_number(doc) -> tuple:
             l003 = l003[:15]
         return (l003, "")
 
-    # --- CASE 2: серии нет, но есть номер ---
     if not series_clean and number_clean:
-        # Если строго цифры и 1..7 -> это L004
         if re.fullmatch(r"\d{1,7}", number_clean):
             return ("", number_clean)
 
-        # Иначе по правилу "во всех других случаях" -> L003, а L004 пустой
         l003 = number_clean
         if len(l003) > 15:
             logger.warning(
@@ -316,7 +393,6 @@ def _get_series_and_number(doc) -> tuple:
             l003 = l003[:15]
         return (l003, "")
 
-    # --- CASE 3: номера нет (или всё пусто) ---
     return ("", "")
 
 
@@ -349,7 +425,6 @@ def _distribute_discount_to_debetas_lines(doc, items_list: list) -> None:
         getattr(doc, "pk", None), discount_wo, len(items_list)
     )
 
-    # Сумма subtotal ДО скидки
     sum_subtotal_before = Decimal("0")
     for item in items_list:
         price = Decimal(str(getattr(item, "price", 0) or 0))
@@ -372,7 +447,6 @@ def _distribute_discount_to_debetas_lines(doc, items_list: list) -> None:
 
         subtotal_before = price_before * qty
 
-        # Последняя строка получает остаток
         if i == len(items_list) - 1:
             line_discount = discount_wo - discount_distributed
         else:
@@ -382,10 +456,8 @@ def _distribute_discount_to_debetas_lines(doc, items_list: list) -> None:
             )
             discount_distributed += line_discount
 
-        # Новый subtotal после скидки
         subtotal_after = subtotal_before - line_discount
 
-        # ПЕРЕСЧИТЫВАЕМ VAT от НОВОГО subtotal
         if vat_percent > 0 and subtotal_after > 0:
             vat_after = (subtotal_after * vat_percent / Decimal("100")).quantize(
                 Decimal("0.01"), rounding=ROUND_HALF_UP
@@ -414,7 +486,6 @@ def _distribute_discount_to_debetas_lines_merge_vat(doc, items_list: list) -> No
     if not items_list:
         return
 
-    # Считаем gross для каждой строки
     item_grosses: list[Decimal] = []
     gross_total = Decimal("0")
 
@@ -426,7 +497,6 @@ def _distribute_discount_to_debetas_lines_merge_vat(doc, items_list: list) -> No
         item_grosses.append(gross)
         gross_total += gross
 
-    # Скидка документа
     discount_raw = getattr(doc, "invoice_discount_wo_vat", None)
     discount_wo = Decimal("0")
     if discount_raw not in (None, "", 0, "0"):
@@ -436,7 +506,6 @@ def _distribute_discount_to_debetas_lines_merge_vat(doc, items_list: list) -> No
             discount_wo = Decimal("0")
 
     if discount_wo <= 0:
-        # Нет скидки — просто ставим gross как есть
         for i, item in enumerate(items_list):
             setattr(item, "_debetas_gross_after_discount", item_grosses[i])
         return
@@ -458,7 +527,6 @@ def _distribute_discount_to_debetas_lines_merge_vat(doc, items_list: list) -> No
     discount_distributed = Decimal("0")
 
     for i, item in enumerate(items_list):
-        # Последняя строка получает остаток (избегаем ошибок округления)
         if i == len(items_list) - 1:
             line_discount = discount_wo - discount_distributed
         else:
@@ -483,7 +551,8 @@ def _distribute_discount_to_debetas_lines_merge_vat(doc, items_list: list) -> No
 
 def export_to_debetas(
     documents: List,
-    user=None
+    user=None,
+    own_company_code=None,
 ) -> Dict[str, bytes]:
     """
     Экспортирует документы в формат Debetas CSV.
@@ -494,7 +563,10 @@ def export_to_debetas(
             - {"pardavimai": bytes, "pardavimai_filename": ...}
             - плюс "zip" / "zip_filename", если есть оба типа
     """
-    logger.info("[DEBETAS:EXPORT] Starting export, docs=%d", len(documents))
+    logger.info(
+        "[DEBETAS:EXPORT] Starting export, docs=%d own_company_code=%r",
+        len(documents), own_company_code
+    )
 
     if not documents:
         logger.warning("[DEBETAS:EXPORT] No documents to export")
@@ -525,13 +597,13 @@ def export_to_debetas(
 
     if docs_pirkimai:
         logger.info("[DEBETAS:EXPORT] Generating pirkimai CSV...")
-        pirkimai_csv = _generate_debetas_csv(docs_pirkimai, "pirkimas", user)
+        pirkimai_csv = _generate_debetas_csv(docs_pirkimai, "pirkimas", user, own_company_code)
         result["pirkimai"] = pirkimai_csv
         result["pirkimai_filename"] = f"Debetas_Pirkimai_{timestamp}.csv"
 
     if docs_pardavimai:
         logger.info("[DEBETAS:EXPORT] Generating pardavimai CSV...")
-        pardavimai_csv = _generate_debetas_csv(docs_pardavimai, "pardavimas", user)
+        pardavimai_csv = _generate_debetas_csv(docs_pardavimai, "pardavimas", user, own_company_code)
         result["pardavimai"] = pardavimai_csv
         result["pardavimai_filename"] = f"Debetas_Pardavimai_{timestamp}.csv"
 
@@ -553,13 +625,16 @@ def export_to_debetas(
     return result
 
 
-def _generate_debetas_csv(documents: List, doc_type: str, user=None) -> bytes:
+def _generate_debetas_csv(documents: List, doc_type: str, user=None, own_company_code=None) -> bytes:
     """
     Генерирует CSV для Debetas, используя существующий шаблон:
     первая строка берётся из Debetas_Import_Template.csv,
     дальше добавляются строки с данными.
     """
-    logger.info("[DEBETAS:CSV] Generating %s CSV for %d docs", doc_type, len(documents))
+    logger.info(
+        "[DEBETAS:CSV] Generating %s CSV for %d docs own_company_code=%r",
+        doc_type, len(documents), own_company_code
+    )
 
     merge_vat = _is_merge_vat(user)
     if merge_vat:
@@ -573,12 +648,13 @@ def _generate_debetas_csv(documents: List, doc_type: str, user=None) -> bytes:
 
         l003, l004 = _get_series_and_number(doc)
         client = _get_client_data_for_debetas(doc)
+        extra_fields = _get_debetas_extra_for_doc(user, doc, own_company_code)
 
-        filialas = _get_extra_field(user, doc_type, "filialas", "1")
-        padalinys = _get_extra_field(user, doc_type, "padalinys", "")
-        objektas = _get_extra_field(user, doc_type, "objektas", "")
-        mat_atsakingas = _get_extra_field(user, doc_type, "materialiai_atsakingas_asmuo", "")
-        atskaitingas = _get_extra_field(user, doc_type, "atskaitingas_asmuo", "")
+        filialas = _get_extra_field_from_profile(extra_fields, doc_type, "filialas", "1")
+        padalinys = _get_extra_field_from_profile(extra_fields, doc_type, "padalinys", "")
+        objektas = _get_extra_field_from_profile(extra_fields, doc_type, "objektas", "")
+        mat_atsakingas = _get_extra_field_from_profile(extra_fields, doc_type, "materialiai_atsakingas_asmuo", "")
+        atskaitingas = _get_extra_field_from_profile(extra_fields, doc_type, "atskaitingas_asmuo", "")
 
         l002 = DOC_TYPE_PIRKIMAS if doc_type == "pirkimas" else DOC_TYPE_PARDAVIMAS
 
@@ -605,7 +681,6 @@ def _generate_debetas_csv(documents: List, doc_type: str, user=None) -> bytes:
         }
 
         if has_items:
-            # ========== DETALIAI режим ==========
             items_list = list(line_items.all())
 
             if merge_vat:
@@ -638,10 +713,8 @@ def _generate_debetas_csv(documents: List, doc_type: str, user=None) -> bytes:
                 qty = Decimal(str(getattr(item, "quantity", 1) or 1))
 
                 if merge_vat:
-                    # ---- merge_vat: L015 = gross, L016 = 0, L017 = 0 ----
                     gross = getattr(item, "_debetas_gross_after_discount", None)
                     if gross is None:
-                        # Fallback: считаем gross вручную
                         price = _safe_D(getattr(item, "price", 0) or 0)
                         vat_line = _safe_D(getattr(item, "vat", 0) or 0)
                         gross = price * qty + vat_line
@@ -659,7 +732,6 @@ def _generate_debetas_csv(documents: List, doc_type: str, user=None) -> bytes:
                         "L017": "0",
                     }
                 else:
-                    # ---- обычный режим (без изменений) ----
                     subtotal = getattr(item, "_debetas_subtotal_after_discount", None)
                     if subtotal is None:
                         price = Decimal(str(getattr(item, "price", 0) or 0))
@@ -691,7 +763,6 @@ def _generate_debetas_csv(documents: List, doc_type: str, user=None) -> bytes:
                 getattr(doc, "pk", None), len(items_list), merge_vat
             )
         else:
-            # ========== SUMISKAI режим ==========
             prekes_kodas = (
                 _s(getattr(doc, "prekes_kodas", ""))
                 or _s(getattr(doc, "prekes_barkodas", ""))
@@ -702,7 +773,6 @@ def _generate_debetas_csv(documents: List, doc_type: str, user=None) -> bytes:
             l009 = _get_preke_paslauga(getattr(doc, "preke_paslauga", None))
 
             if merge_vat:
-                # ---- merge_vat: L015 = gross - скидка, L016 = 0, L017 = 0 ----
                 amount_wo = _safe_D(getattr(doc, "amount_wo_vat", 0) or 0)
                 vat_amount = _safe_D(getattr(doc, "vat_amount", 0) or 0)
                 discount = _safe_D(getattr(doc, "invoice_discount_wo_vat", 0) or 0)
@@ -724,7 +794,6 @@ def _generate_debetas_csv(documents: List, doc_type: str, user=None) -> bytes:
                     "L017": "0",
                 }
             else:
-                # ---- обычный режим (без изменений) ----
                 row = {
                     **doc_common,
                     "L009": l009,
@@ -745,31 +814,24 @@ def _generate_debetas_csv(documents: List, doc_type: str, user=None) -> bytes:
                 getattr(doc, "pk", None), merge_vat
             )
 
-    # ==== ГЕНЕРАЦИЯ CSV С ИСПОЛЬЗОВАНИЕМ ШАБЛОНА ====
-
     template_path = get_debetas_template_path()
 
     output = StringIO()
 
-    # 1) Переписываем первую строку из шаблона (заголовок)
     with open(template_path, "r", encoding=DEBETAS_ENCODING, newline="") as tf:
         header_line = tf.readline()
     if not header_line:
-        # На всякий случай, если шаблон пустой — подстрахуемся
         header_line = ",".join(CSV_HEADERS) + "\n"
 
-    # Гарантируем перевод строки
     if not header_line.endswith("\n"):
         header_line += "\n"
     output.write(header_line)
 
-    # 2) Пишем данные тем же форматом CSV (разделитель ',')
     writer = csv.DictWriter(
         output,
         fieldnames=CSV_HEADERS,
         quoting=csv.QUOTE_ALL,
         quotechar='"',
-        # delimiter по умолчанию ',', совпадает с шаблоном
     )
 
     for row in rows:
@@ -789,6 +851,8 @@ def _generate_debetas_csv(documents: List, doc_type: str, user=None) -> bytes:
         csv_bytes = csv_content.encode("utf-8")
 
     return csv_bytes
+
+
 
 
 
@@ -943,6 +1007,19 @@ def _generate_debetas_csv(documents: List, doc_type: str, user=None) -> bytes:
 #     except (ValueError, TypeError):
 #         pass
 #     return ""  # Пустое если не определено
+
+
+# def _is_merge_vat(user) -> bool:
+#     """
+#     Проверяет флаг merge_vat из user.extra_settings.
+#     Логика идентична Rivile ERP экспорту.
+#     """
+#     if not user:
+#         return False
+#     extra_settings = getattr(user, "extra_settings", None)
+#     if not extra_settings or not isinstance(extra_settings, dict):
+#         return False
+#     return str(extra_settings.get("merge_vat", "0")).strip() == "1"
 
 
 # def get_party_code(
@@ -1106,6 +1183,7 @@ def _generate_debetas_csv(documents: List, doc_type: str, user=None) -> bytes:
 # def _distribute_discount_to_debetas_lines(doc, items_list: list) -> None:
 #     """
 #     Распределяет скидку документа (invoice_discount_wo_vat) на строки товаров.
+#     Обычный режим: скидка распределяется по subtotal (price × qty).
 #     """
 #     if not items_list:
 #         return
@@ -1182,6 +1260,80 @@ def _generate_debetas_csv(documents: List, doc_type: str, user=None) -> bytes:
 #             "[DEBETAS:DISCOUNT] line=%d subtotal: %.2f->%.2f vat: %.2f (discount=%.2f)",
 #             i, float(subtotal_before), float(subtotal_after),
 #             float(vat_after), float(line_discount)
+#         )
+
+
+# def _distribute_discount_to_debetas_lines_merge_vat(doc, items_list: list) -> None:
+#     """
+#     Распределяет скидку документа при merge_vat=True.
+#     Логика аналогична Rivile ERP:
+#       - gross = price × qty + vat (на строку)
+#       - скидка распределяется пропорционально gross
+#       - результат: _debetas_gross_after_discount на каждой строке
+#     """
+#     if not items_list:
+#         return
+
+#     # Считаем gross для каждой строки
+#     item_grosses: list[Decimal] = []
+#     gross_total = Decimal("0")
+
+#     for item in items_list:
+#         price = _safe_D(getattr(item, "price", 0) or 0)
+#         qty = _safe_D(getattr(item, "quantity", 1) or 1)
+#         vat_line = _safe_D(getattr(item, "vat", 0) or 0)
+#         gross = price * qty + vat_line
+#         item_grosses.append(gross)
+#         gross_total += gross
+
+#     # Скидка документа
+#     discount_raw = getattr(doc, "invoice_discount_wo_vat", None)
+#     discount_wo = Decimal("0")
+#     if discount_raw not in (None, "", 0, "0"):
+#         try:
+#             discount_wo = Decimal(str(discount_raw))
+#         except (ValueError, InvalidOperation):
+#             discount_wo = Decimal("0")
+
+#     if discount_wo <= 0:
+#         # Нет скидки — просто ставим gross как есть
+#         for i, item in enumerate(items_list):
+#             setattr(item, "_debetas_gross_after_discount", item_grosses[i])
+#         return
+
+#     if gross_total <= 0:
+#         logger.warning(
+#             "[DEBETAS:DISCOUNT:MERGE_VAT] doc=%s gross_total=0, cannot distribute",
+#             getattr(doc, "pk", None)
+#         )
+#         for item in items_list:
+#             setattr(item, "_debetas_gross_after_discount", Decimal("0"))
+#         return
+
+#     logger.info(
+#         "[DEBETAS:DISCOUNT:MERGE_VAT] doc=%s distributing discount=%.2f across %d lines (by gross)",
+#         getattr(doc, "pk", None), discount_wo, len(items_list)
+#     )
+
+#     discount_distributed = Decimal("0")
+
+#     for i, item in enumerate(items_list):
+#         # Последняя строка получает остаток (избегаем ошибок округления)
+#         if i == len(items_list) - 1:
+#             line_discount = discount_wo - discount_distributed
+#         else:
+#             share = item_grosses[i] / gross_total
+#             line_discount = (discount_wo * share).quantize(
+#                 Decimal("0.01"), rounding=ROUND_HALF_UP
+#             )
+#             discount_distributed += line_discount
+
+#         gross_after = item_grosses[i] - line_discount
+#         setattr(item, "_debetas_gross_after_discount", gross_after)
+
+#         logger.debug(
+#             "[DEBETAS:DISCOUNT:MERGE_VAT] line=%d gross: %.2f->%.2f (discount=%.2f)",
+#             i, float(item_grosses[i]), float(gross_after), float(line_discount)
 #         )
 
 
@@ -1269,6 +1421,10 @@ def _generate_debetas_csv(documents: List, doc_type: str, user=None) -> bytes:
 #     """
 #     logger.info("[DEBETAS:CSV] Generating %s CSV for %d docs", doc_type, len(documents))
 
+#     merge_vat = _is_merge_vat(user)
+#     if merge_vat:
+#         logger.info("[DEBETAS:CSV] merge_vat=True, PVM будет включён в сумму")
+
 #     rows = []
 
 #     for doc in documents:
@@ -1309,8 +1465,13 @@ def _generate_debetas_csv(documents: List, doc_type: str, user=None) -> bytes:
 #         }
 
 #         if has_items:
+#             # ========== DETALIAI режим ==========
 #             items_list = list(line_items.all())
-#             _distribute_discount_to_debetas_lines(doc, items_list)
+
+#             if merge_vat:
+#                 _distribute_discount_to_debetas_lines_merge_vat(doc, items_list)
+#             else:
+#                 _distribute_discount_to_debetas_lines(doc, items_list)
 
 #             for item in items_list:
 #                 prekes_kodas = (
@@ -1336,36 +1497,61 @@ def _generate_debetas_csv(documents: List, doc_type: str, user=None) -> bytes:
 
 #                 qty = Decimal(str(getattr(item, "quantity", 1) or 1))
 
-#                 subtotal = getattr(item, "_debetas_subtotal_after_discount", None)
-#                 if subtotal is None:
-#                     price = Decimal(str(getattr(item, "price", 0) or 0))
-#                     subtotal = price * qty
+#                 if merge_vat:
+#                     # ---- merge_vat: L015 = gross, L016 = 0, L017 = 0 ----
+#                     gross = getattr(item, "_debetas_gross_after_discount", None)
+#                     if gross is None:
+#                         # Fallback: считаем gross вручную
+#                         price = _safe_D(getattr(item, "price", 0) or 0)
+#                         vat_line = _safe_D(getattr(item, "vat", 0) or 0)
+#                         gross = price * qty + vat_line
 
-#                 vat_amount = getattr(item, "_debetas_vat_after_discount", None)
-#                 if vat_amount is None:
-#                     vat_amount = Decimal(str(getattr(item, "vat", 0) or 0))
+#                     row = {
+#                         **doc_common,
+#                         "L009": l009,
+#                         "L010": prekes_kodas,
+#                         "L011": prekes_pavadinimas[:35],
+#                         "L012": mato_vienetas[:4],
+#                         "L013": "0",
+#                         "L014": _multiply_for_debetas(qty, 1000),
+#                         "L015": _multiply_for_debetas(gross, 100),
+#                         "L016": "0",
+#                         "L017": "0",
+#                     }
+#                 else:
+#                     # ---- обычный режим (без изменений) ----
+#                     subtotal = getattr(item, "_debetas_subtotal_after_discount", None)
+#                     if subtotal is None:
+#                         price = Decimal(str(getattr(item, "price", 0) or 0))
+#                         subtotal = price * qty
 
-#                 vat_percent = Decimal(str(getattr(item, "vat_percent", 0) or 0))
+#                     vat_amount = getattr(item, "_debetas_vat_after_discount", None)
+#                     if vat_amount is None:
+#                         vat_amount = Decimal(str(getattr(item, "vat", 0) or 0))
 
-#                 row = {
-#                     **doc_common,
-#                     "L009": l009,
-#                     "L010": prekes_kodas,
-#                     "L011": prekes_pavadinimas[:35],
-#                     "L012": mato_vienetas[:4],
-#                     "L013": "0",
-#                     "L014": _multiply_for_debetas(qty, 1000),
-#                     "L015": _multiply_for_debetas(subtotal, 100),
-#                     "L016": _multiply_for_debetas(vat_percent, 100),
-#                     "L017": _multiply_for_debetas(vat_amount, 100),
-#                 }
+#                     vat_percent = Decimal(str(getattr(item, "vat_percent", 0) or 0))
+
+#                     row = {
+#                         **doc_common,
+#                         "L009": l009,
+#                         "L010": prekes_kodas,
+#                         "L011": prekes_pavadinimas[:35],
+#                         "L012": mato_vienetas[:4],
+#                         "L013": "0",
+#                         "L014": _multiply_for_debetas(qty, 1000),
+#                         "L015": _multiply_for_debetas(subtotal, 100),
+#                         "L016": _multiply_for_debetas(vat_percent, 100),
+#                         "L017": _multiply_for_debetas(vat_amount, 100),
+#                     }
+
 #                 rows.append(row)
 
 #             logger.info(
-#                 "[DEBETAS:KIEKINIS] doc=%s items=%d",
-#                 getattr(doc, "pk", None), len(items_list)
+#                 "[DEBETAS:KIEKINIS] doc=%s items=%d merge_vat=%s",
+#                 getattr(doc, "pk", None), len(items_list), merge_vat
 #             )
 #         else:
+#             # ========== SUMISKAI режим ==========
 #             prekes_kodas = (
 #                 _s(getattr(doc, "prekes_kodas", ""))
 #                 or _s(getattr(doc, "prekes_barkodas", ""))
@@ -1375,21 +1561,49 @@ def _generate_debetas_csv(documents: List, doc_type: str, user=None) -> bytes:
 #             prekes_pavadinimas = _s(getattr(doc, "prekes_pavadinimas", "")) or ""
 #             l009 = _get_preke_paslauga(getattr(doc, "preke_paslauga", None))
 
-#             row = {
-#                 **doc_common,
-#                 "L009": l009,
-#                 "L010": prekes_kodas,
-#                 "L011": prekes_pavadinimas[:35],
-#                 "L012": "vnt",
-#                 "L013": "0",
-#                 "L014": _multiply_for_debetas(1, 1000),
-#                 "L015": _multiply_for_debetas(getattr(doc, "amount_wo_vat", 0), 100),
-#                 "L016": _multiply_for_debetas(getattr(doc, "vat_percent", 0), 100),
-#                 "L017": _multiply_for_debetas(getattr(doc, "vat_amount", 0), 100),
-#             }
+#             if merge_vat:
+#                 # ---- merge_vat: L015 = gross - скидка, L016 = 0, L017 = 0 ----
+#                 amount_wo = _safe_D(getattr(doc, "amount_wo_vat", 0) or 0)
+#                 vat_amount = _safe_D(getattr(doc, "vat_amount", 0) or 0)
+#                 discount = _safe_D(getattr(doc, "invoice_discount_wo_vat", 0) or 0)
+
+#                 gross_after_discount = amount_wo + vat_amount - discount
+#                 if gross_after_discount < 0:
+#                     gross_after_discount = Decimal("0")
+
+#                 row = {
+#                     **doc_common,
+#                     "L009": l009,
+#                     "L010": prekes_kodas,
+#                     "L011": prekes_pavadinimas[:35],
+#                     "L012": "vnt",
+#                     "L013": "0",
+#                     "L014": _multiply_for_debetas(1, 1000),
+#                     "L015": _multiply_for_debetas(gross_after_discount, 100),
+#                     "L016": "0",
+#                     "L017": "0",
+#                 }
+#             else:
+#                 # ---- обычный режим (без изменений) ----
+#                 row = {
+#                     **doc_common,
+#                     "L009": l009,
+#                     "L010": prekes_kodas,
+#                     "L011": prekes_pavadinimas[:35],
+#                     "L012": "vnt",
+#                     "L013": "0",
+#                     "L014": _multiply_for_debetas(1, 1000),
+#                     "L015": _multiply_for_debetas(getattr(doc, "amount_wo_vat", 0), 100),
+#                     "L016": _multiply_for_debetas(getattr(doc, "vat_percent", 0), 100),
+#                     "L017": _multiply_for_debetas(getattr(doc, "vat_amount", 0), 100),
+#                 }
+
 #             rows.append(row)
 
-#             logger.info("[DEBETAS:SUMINIS] doc=%s row added", getattr(doc, "pk", None))
+#             logger.info(
+#                 "[DEBETAS:SUMINIS] doc=%s merge_vat=%s",
+#                 getattr(doc, "pk", None), merge_vat
+#             )
 
 #     # ==== ГЕНЕРАЦИЯ CSV С ИСПОЛЬЗОВАНИЕМ ШАБЛОНА ====
 
@@ -1435,3 +1649,5 @@ def _generate_debetas_csv(documents: List, doc_type: str, user=None) -> bytes:
 #         csv_bytes = csv_content.encode("utf-8")
 
 #     return csv_bytes
+
+

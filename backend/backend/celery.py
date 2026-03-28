@@ -27,6 +27,14 @@ app.conf.beat_schedule = {
         'task': 'docscanner_app.tasks.renew_gdrive_watches',
         'schedule': crontab(minute=0, hour='*/12'),
     },
+    "process-recurring-invoices": {
+        "task": "process_recurring_invoices",
+        "schedule": crontab(hour=8, minute=55),
+    },
+    "send-payment-reminders": {
+        "task": "send_payment_reminders",
+        "schedule": crontab(hour=9, minute=30),
+    },
 }
 
 

@@ -1,9 +1,8 @@
 # validators/math_validator_for_export.py
-# validators/math_validator_for_export.py
 
 from __future__ import annotations
 
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 import logging
 from typing import Tuple, Dict, Any
 
@@ -14,6 +13,7 @@ DOC_TOLERANCE = Decimal("0.02")        # для точного совпаден�
 LINE_TOLERANCE = Decimal("0.02")       # для строк
 AGGREGATE_TOLERANCE = Decimal("0.20")  # для агрегатов (допустимая дельта)
 
+Q2 = lambda x: Decimal(str(x)).quantize(Decimal("1.00"), rounding=ROUND_HALF_UP)
 
 def validate_document_math_for_export(db_doc) -> Tuple[bool, Dict[str, Any]]:
     """
@@ -128,7 +128,7 @@ def _validate_document_totals(db_doc, separate_vat: bool, report: Dict[str, Any]
     # CHECK 2 — НДС через процент
     vat_percent_valid = vat_percent is not None and vat_percent != 0
     if not separate_vat and vat_percent_valid and amount_wo != 0:
-        expected_vat = (amount_wo - discount_wo) * vat_percent / Decimal("100")
+        expected_vat = Q2((amount_wo - discount_wo) * vat_percent / Decimal("100"))
         delta_vat = (expected_vat - vat_amount).copy_abs()
         match_vat = delta_vat <= DOC_TOLERANCE
 

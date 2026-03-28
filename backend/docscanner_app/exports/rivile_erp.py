@@ -11,6 +11,8 @@ from typing import Any, Iterable, Optional
 from openpyxl import load_workbook
 from openpyxl.worksheet.worksheet import Worksheet
 
+from ..utils.extra_fields import get_extra_for_export
+
 
 logger = logging.getLogger(__name__)
 
@@ -185,6 +187,162 @@ def set_cell_date(ws: Worksheet, row: int, col: int, d: Any):
 
 
 # =========================
+# Per-company extra fields helpers
+# =========================
+def _parse_cp_key(cp_key: Any) -> str:
+    if not cp_key:
+        return ""
+
+    cp = str(cp_key).strip()
+    if cp.lower().startswith("id:"):
+        return cp.split(":", 1)[1].strip()
+    return cp
+
+
+def _looks_nested(data: dict) -> bool:
+    if not data or not isinstance(data, dict):
+        return False
+    for key in data:
+        if key == "user":
+            continue
+        if str(key).startswith("__"):
+            continue
+        if "_" in str(key):
+            return False
+    return True
+
+
+def _strip_service_keys(profile: dict) -> dict:
+    if not isinstance(profile, dict):
+        return {}
+    return {k: v for k, v in profile.items() if not str(k).startswith("__")}
+
+
+def _resolve_extra_profile_from_data(data: Any, requested_code: str = "", doc_company_code: str = "") -> dict:
+    if not data or not isinstance(data, dict):
+        return {}
+
+    raw = {k: v for k, v in data.items() if k != "user"}
+    if not raw:
+        return {}
+
+    if "__all__" in raw or _looks_nested(raw):
+        if requested_code:
+            profile = raw.get(requested_code)
+            if isinstance(profile, dict):
+                return _strip_service_keys(profile)
+
+        if doc_company_code and doc_company_code != requested_code:
+            profile = raw.get(doc_company_code)
+            if isinstance(profile, dict):
+                return _strip_service_keys(profile)
+
+        all_profile = raw.get("__all__")
+        if isinstance(all_profile, dict):
+            return _strip_service_keys(all_profile)
+
+        return {}
+
+    return raw
+
+
+def _get_own_company_code_from_doc(doc: Any, doc_type: str) -> str:
+    """
+    Определяет код своей фирмы из документа.
+
+    - pirkimai -> своя фирма buyer
+    - pardavimai -> своя фирма seller
+    """
+    if doc_type == "pirkimai":
+        fields = ("buyer_id", "buyer_vat_code", "buyer_id_programoje")
+    else:
+        fields = ("seller_id", "seller_vat_code", "seller_id_programoje")
+
+    for field in fields:
+        value = _s(getattr(doc, field, None))
+        if value:
+            return value
+    return ""
+
+
+def _get_user_extra_settings(user: Any = None, fallback_extra_fields: Optional[dict] = None) -> dict:
+    if user is not None:
+        extra_settings = getattr(user, "extra_settings", None)
+        if isinstance(extra_settings, dict):
+            return extra_settings
+        return {}
+
+    fallback = fallback_extra_fields or {}
+    user_data = fallback.get("user") if isinstance(fallback, dict) else None
+    if isinstance(user_data, dict):
+        extra_settings = user_data.get("extra_settings")
+        if isinstance(extra_settings, dict):
+            return extra_settings
+    return {}
+
+
+def _get_rivile_erp_extra_for_doc(
+    doc: Any,
+    doc_type: str,
+    user: Any = None,
+    own_company_code: Any = None,
+    fallback_extra_fields: Optional[dict] = None,
+) -> dict:
+    """
+    Получает extra fields для конкретного документа.
+
+    Приоритет:
+    1. Профиль конкретной фирмы по own_company_code
+    2. Профиль фирмы, определённой из документа
+    3. Глобальный профиль (__all__)
+    4. fallback_extra_fields
+    5. Пустой dict
+    """
+    requested_code = _parse_cp_key(own_company_code)
+    doc_company_code = _get_own_company_code_from_doc(doc, doc_type)
+
+    extra = {}
+    resolved_by = ""
+
+    if user is not None and requested_code:
+        extra = get_extra_for_export(user, "rivile_erp", requested_code)
+        if extra:
+            resolved_by = requested_code
+
+    if user is not None and not extra and doc_company_code and doc_company_code != requested_code:
+        extra = get_extra_for_export(user, "rivile_erp", doc_company_code)
+        if extra:
+            resolved_by = doc_company_code
+
+    if user is not None and not extra:
+        extra = get_extra_for_export(user, "rivile_erp", None)
+        if extra:
+            resolved_by = "__all__/legacy(user)"
+
+    if not extra:
+        extra = _resolve_extra_profile_from_data(
+            fallback_extra_fields,
+            requested_code=requested_code,
+            doc_company_code=doc_company_code,
+        )
+        if extra:
+            resolved_by = "fallback_extra_fields"
+
+    logger.info(
+        "[RIVILE_ERP:EXTRA] doc=%s doc_type=%s own_company_code=%r requested_code=%r doc_company_code=%r resolved_by=%r fields=%s",
+        getattr(doc, "pk", None),
+        doc_type,
+        own_company_code,
+        requested_code,
+        doc_company_code,
+        resolved_by,
+        {k: v for k, v in extra.items() if v} if extra else {},
+    )
+
+    return extra or {}
+
+
+# =========================
 # Расчёт процента скидки документа
 # =========================
 def compute_global_invoice_discount_pct(doc: Any) -> Optional[Decimal]:
@@ -224,7 +382,7 @@ def compute_global_invoice_discount_pct_for_merge_vat(doc: Any) -> Optional[Deci
         for it in line_items.all():
             qty = _safe_D(getattr(it, "quantity", 1) or 1)
             price_wo = _safe_D(getattr(it, "price", 0) or 0)
-            vat_line = _safe_D(getattr(it, "vat", 0) or 0)  # PVM na stroku
+            vat_line = _safe_D(getattr(it, "vat", 0) or 0)
             gross_total += (price_wo * qty) + vat_line
     else:
         gross_total = _safe_D(getattr(doc, "amount_wo_vat", 0) or 0) + _safe_D(getattr(doc, "vat_amount", 0) or 0)
@@ -290,24 +448,22 @@ def build_unique_ref_id(
 ) -> str:
     """
     Строит уникальный ref_id.
-    
+
     Алгоритм:
     1. Строим базовый ref_id (series + number)
-    2. Если НЕ в seen_refs → возвращаем как есть
+    2. Если НЕ в seen_refs -> возвращаем как есть
     3. Если УЖЕ в seen_refs (дубликат):
        a) Пробуем "{base}_{doc_pk}" (например SF001_12345)
-       b) Если и это занято → "{base}_2", "{base}_3"...
-    
+       b) Если и это занято -> "{base}_2", "{base}_3"...
+
     Добавляет результат в seen_refs.
     """
     base_ref = build_ref_id(series, number)
-    
-    # Если уникальный — сразу возвращаем
+
     if base_ref not in seen_refs:
         seen_refs.add(base_ref)
         return base_ref
-    
-    # Дубликат! Пробуем с doc_pk
+
     if doc_pk is not None:
         ref_with_pk = f"{base_ref}_{doc_pk}"
         if ref_with_pk not in seen_refs:
@@ -317,8 +473,7 @@ def build_unique_ref_id(
                 base_ref, ref_with_pk
             )
             return ref_with_pk
-    
-    # doc_pk нет или тоже занят — добавляем порядковый суффикс
+
     counter = 2
     while True:
         candidate = f"{base_ref}_{counter}"
@@ -330,7 +485,6 @@ def build_unique_ref_id(
             )
             return candidate
         counter += 1
-        # Защита от бесконечного цикла (маловероятно, но на всякий случай)
         if counter > 9999:
             candidate = f"{base_ref}_{random.randint(10000, 99999)}"
             seen_refs.add(candidate)
@@ -360,7 +514,7 @@ def normalize_tip_lineitem(value: Any) -> str:
     s = str(value).strip() if value is not None else ""
     if not s:
         return "1"
-    
+
     try:
         n = int(float(s.replace(",", ".")))
         if n == 1:
@@ -374,13 +528,13 @@ def normalize_tip_lineitem(value: Any) -> str:
         return "1"
     except Exception:
         pass
-    
+
     low = s.lower()
     if low in ("preke", "prekė", "prekes", "prekės"):
         return "1"
     if low in ("paslauga", "paslaugos"):
         return "2"
-    
+
     return "1"
 
 
@@ -425,43 +579,38 @@ def _load_template(filename: str):
 def _get_pvm_kodas_for_export(doc, item=None, line_map=None) -> str:
     """
     Получает PVM kodas для экспорта с учётом separate_vat.
-    
+
     ПРАВИЛО:
     - Если separate_vat=True и нет line items (sumiskai) -> пустой
     - Если есть line_map и item -> берём из line_map
     - Иначе -> из item.pvm_kodas или doc.pvm_kodas
-    
-    ВАЖНО: "Keli skirtingi PVM" — это маркер, не реальный код -> возвращаем пустой
+
+    ВАЖНО: "Keli skirtingi PVM" - это маркер, не реальный код -> возвращаем пустой
     """
     separate_vat = bool(getattr(doc, "separate_vat", False))
     scan_type = _s(getattr(doc, "scan_type", "")).lower()
-    
-    # Случай: sumiskai + separate_vat=True -> пустой PVM код
+
     if separate_vat and scan_type == "sumiskai":
         logger.debug(
             "[RIVILE_ERP:PVM] doc=%s sumiskai+separate_vat=True -> empty pvm_kodas",
             getattr(doc, "pk", None)
         )
         return ""
-    
-    # Случай: есть item и line_map (detaliai режим)
+
     if item is not None and line_map is not None:
         item_id = getattr(item, "id", None)
         if item_id is not None and item_id in line_map:
             pvm = _s(line_map.get(item_id, ""))
-            # Фильтруем маркер
             if pvm == "Keli skirtingi PVM":
                 return ""
             return pvm
-    
-    # Случай: есть item, но нет line_map -> берём из item
+
     if item is not None:
         pvm = _s(getattr(item, "pvm_kodas", ""))
         if pvm == "Keli skirtingi PVM":
             return ""
         return pvm
-    
-    # Случай: нет item (sumiskai) -> берём из документа
+
     pvm = _s(getattr(doc, "pvm_kodas", ""))
     if pvm == "Keli skirtingi PVM":
         return ""
@@ -471,23 +620,21 @@ def _get_pvm_kodas_for_export(doc, item=None, line_map=None) -> str:
 def _get_vat_percent_for_export(doc, item=None) -> Any:
     """
     Получает vat_percent для экспорта.
-    
+
     ПРАВИЛО:
     - Если separate_vat=True и нет line items (sumiskai) -> None (пустой)
     - Иначе -> из item.vat_percent или doc.vat_percent
     """
     separate_vat = bool(getattr(doc, "separate_vat", False))
     scan_type = _s(getattr(doc, "scan_type", "")).lower()
-    
-    # Случай: sumiskai + separate_vat=True -> пустой
+
     if separate_vat and scan_type == "sumiskai":
         logger.debug(
             "[RIVILE_ERP:VAT] doc=%s sumiskai+separate_vat=True -> empty vat_percent",
             getattr(doc, "pk", None)
         )
         return None
-    
-    # Иначе возвращаем реальное значение
+
     if item is not None:
         return getattr(item, "vat_percent", None)
     return getattr(doc, "vat_percent", None)
@@ -553,14 +700,13 @@ def export_clients_to_rivile_erp_xlsx(clients: Iterable[dict], output_path: str 
     wb = _load_template(CLIENTS_TEMPLATE_FILE)
     ws = wb.active
 
-    # Проверяем наличие дополнительных листов
     ws_addresses = wb["ClientAddresses"] if "ClientAddresses" in wb.sheetnames else None
     ws_banks = wb["ClientBankAccounts"] if "ClientBankAccounts" in wb.sheetnames else None
 
     start_row = 6
     row_idx = 0
-    addr_row = 3   # стартовая строка для ClientAddresses
-    bank_row = 3   # стартовая строка для ClientBankAccounts
+    addr_row = 3
+    bank_row = 3
     seen_clients: set[str] = set()
 
     for client in clients or []:
@@ -581,7 +727,6 @@ def export_clients_to_rivile_erp_xlsx(clients: Iterable[dict], output_path: str 
         country_iso = safe_excel_text(client.get("country_iso"))
         iban = safe_excel_text(client.get("iban"))
 
-        # === Первый таб (основной) ===
         ws.cell(row=row, column=ClientCols.REF_ID, value=cid)
         ws.cell(row=row, column=ClientCols.NAME, value=name)
         ws.cell(row=row, column=ClientCols.CODE, value=code)
@@ -593,72 +738,24 @@ def export_clients_to_rivile_erp_xlsx(clients: Iterable[dict], output_path: str 
         ws.cell(row=row, column=ClientCols.IS_CUSTOMER, value=1 if doc_type == "pardavimas" else "")
         ws.cell(row=row, column=ClientCols.IS_SUPPLIER, value=1 if doc_type == "pirkimas" else "")
 
-        # === ClientAddresses (если есть address или country_iso) ===
         if ws_addresses is not None and (adr or country_iso):
-            ws_addresses.cell(row=addr_row, column=1, value=cid)          # A: RefID
-            ws_addresses.cell(row=addr_row, column=2, value=0)            # B: всегда 0
-            ws_addresses.cell(row=addr_row, column=3, value=name)         # C: Name
-            ws_addresses.cell(row=addr_row, column=4, value=adr)          # D: Address
-            ws_addresses.cell(row=addr_row, column=7, value=country_iso)  # G: Country ISO
+            ws_addresses.cell(row=addr_row, column=1, value=cid)
+            ws_addresses.cell(row=addr_row, column=2, value=0)
+            ws_addresses.cell(row=addr_row, column=3, value=name)
+            ws_addresses.cell(row=addr_row, column=4, value=adr)
+            ws_addresses.cell(row=addr_row, column=7, value=country_iso)
             addr_row += 1
 
-        # === ClientBankAccounts (если есть iban) ===
         if ws_banks is not None and iban:
-            ws_banks.cell(row=bank_row, column=1, value=cid)   # A: RefID
-            ws_banks.cell(row=bank_row, column=2, value=name)  # B: Name
-            ws_banks.cell(row=bank_row, column=3, value=iban)  # C: IBAN
+            ws_banks.cell(row=bank_row, column=1, value=cid)
+            ws_banks.cell(row=bank_row, column=2, value=name)
+            ws_banks.cell(row=bank_row, column=3, value=iban)
             bank_row += 1
 
         row_idx += 1
 
     wb.save(output_path)
     return Path(output_path)
-
-
-
-
-
-# def export_clients_to_rivile_erp_xlsx(clients: Iterable[dict], output_path: str | Path) -> Path:
-#     wb = _load_template(CLIENTS_TEMPLATE_FILE)
-#     ws = wb.active
-
-#     start_row = 6
-#     row_idx = 0
-#     seen_clients: set[str] = set()  # Для дедупликации
-
-#     for client in clients or []:
-#         cid = normalize_code(client.get("id"))
-        
-#         # Пропускаем пустые или дублирующиеся id
-#         if not cid or cid in seen_clients:
-#             continue
-#         seen_clients.add(cid)
-
-#         row = start_row + row_idx
-
-#         doc_type = (_s(client.get("type")) or "pirkimas").lower()
-#         is_person = bool(client.get("is_person", False))
-
-#         code = cid
-#         name = safe_excel_text(client.get("name"))
-#         vat = normalize_code(client.get("vat"))
-#         adr = safe_excel_text(client.get("address"))
-
-#         ws.cell(row=row, column=ClientCols.REF_ID, value=cid)
-#         ws.cell(row=row, column=ClientCols.NAME, value=name)
-#         ws.cell(row=row, column=ClientCols.CODE, value=code)
-#         ws.cell(row=row, column=ClientCols.TYPE_ID, value=1 if is_person else 0)
-#         ws.cell(row=row, column=ClientCols.REG_CODE, value=cid)
-#         ws.cell(row=row, column=ClientCols.VAT, value=vat)
-#         ws.cell(row=row, column=ClientCols.ADDRESS, value=adr)
-
-#         ws.cell(row=row, column=ClientCols.IS_CUSTOMER, value=1 if doc_type == "pardavimas" else "")
-#         ws.cell(row=row, column=ClientCols.IS_SUPPLIER, value=1 if doc_type == "pirkimas" else "")
-
-#         row_idx += 1
-
-#     wb.save(output_path)
-#     return Path(output_path)
 
 
 # =========================================================
@@ -669,10 +766,16 @@ def export_documents_to_rivile_erp_xlsx(
     output_path: str | Path,
     doc_type: str = "pirkimai",
     rivile_erp_extra_fields: Optional[dict] = None,
+    user: Any = None,
+    own_company_code: Any = None,
 ) -> Path:
     """
     Экспорт документов в XLSX-шаблоны Rivile ERP.
     doc_type: 'pirkimai' или 'pardavimai'
+
+    Поддерживает:
+    - новый режим: user + own_company_code
+    - fallback режим: rivile_erp_extra_fields (совместимость)
     """
     if doc_type == "pirkimai":
         wb = _load_template(PIRK_TEMPLATE_FILE)
@@ -694,17 +797,9 @@ def export_documents_to_rivile_erp_xlsx(
     if "Headers" not in wb.sheetnames or "Lines" not in wb.sheetnames:
         raise ValueError("Шаблон должен содержать листы 'Headers' и 'Lines'")
 
-    extra = rivile_erp_extra_fields or {}
-    user = extra.get("user") if isinstance(extra.get("user"), dict) else {}
-    extra_settings = user.get("extra_settings") if isinstance(user.get("extra_settings"), dict) else {}
+    fallback_extra = rivile_erp_extra_fields if isinstance(rivile_erp_extra_fields, dict) else {}
+    extra_settings = _get_user_extra_settings(user=user, fallback_extra_fields=fallback_extra)
     merge_vat = str(extra_settings.get("merge_vat", "0")).strip() == "1"
-    journal_key = f"{prefix}_zurnalo_kodas"
-    dept_key    = f"{prefix}_padalinio_kodas"
-    obj_key     = f"{prefix}_objekto_kodas"
-
-    user_journal = _s(extra.get(journal_key) or "")
-    user_dept    = _s(extra.get(dept_key) or "")
-    user_obj     = _s(extra.get(obj_key) or "")
 
     ws_headers = wb["Headers"]
     ws_lines = wb["Lines"]
@@ -712,15 +807,29 @@ def export_documents_to_rivile_erp_xlsx(
     header_idx = 6
     line_idx = 3
 
-    # ====== НОВОЕ: отслеживание уникальности ref_id ======
     seen_refs: set[str] = set()
 
     for doc in documents or []:
+        doc_profile = _get_rivile_erp_extra_for_doc(
+            doc=doc,
+            doc_type=doc_type,
+            user=user,
+            own_company_code=own_company_code,
+            fallback_extra_fields=fallback_extra,
+        )
+
+        journal_key = f"{prefix}_zurnalo_kodas"
+        dept_key = f"{prefix}_padalinio_kodas"
+        obj_key = f"{prefix}_objekto_kodas"
+
+        user_journal = _s(doc_profile.get(journal_key) or "")
+        user_dept = _s(doc_profile.get(dept_key) or "")
+        user_obj = _s(doc_profile.get(obj_key) or "")
+
         dok_nr = _s(getattr(doc, "document_number", "") or "")
         series = _s(getattr(doc, "document_series", "") or "")
         doc_pk = getattr(doc, "pk", None) or getattr(doc, "id", None)
 
-        # ====== ИЗМЕНЕНИЕ: используем build_unique_ref_id ======
         ref_id = build_unique_ref_id(series, dok_nr, seen_refs, doc_pk)
 
         client_code = get_party_code(
@@ -735,7 +844,6 @@ def export_documents_to_rivile_erp_xlsx(
         else:
             discount_pct = compute_global_invoice_discount_pct(doc)
 
-        # === Headers ===
         header_row = header_idx
 
         ws_headers.cell(row=header_row, column=HeaderCols.REF_ID, value=safe_excel_text(ref_id))
@@ -762,13 +870,11 @@ def export_documents_to_rivile_erp_xlsx(
 
         header_idx += 1
 
-        # === Lines ===
         line_map = getattr(doc, "_pvm_line_map", None)
         line_items = getattr(doc, "line_items", None)
         has_items = bool(line_items and hasattr(line_items, "all") and line_items.exists())
 
         if has_items:
-            # ========== DETALIAI режим ==========
             for item in line_items.all():
                 ws_lines.cell(row=line_idx, column=LineCols.REF_ID, value=safe_excel_text(ref_id))
                 ws_lines.cell(
@@ -795,14 +901,13 @@ def export_documents_to_rivile_erp_xlsx(
                     value=safe_excel_text(padalinio_kodas),
                 )
 
-                # qty nuzhen dlia rascheta unit_vat
                 qty_val = getattr(item, "quantity", None) or 1
                 set_cell_qty(ws_lines, line_idx, LineCols.QTY, qty_val)
 
                 if merge_vat:
                     qty_dec = _safe_D(qty_val)
                     price_wo = _safe_D(getattr(item, "price", 0) or 0)
-                    vat_line = _safe_D(getattr(item, "vat", 0) or 0)  # PVM na stroku
+                    vat_line = _safe_D(getattr(item, "vat", 0) or 0)
 
                     unit_vat = (vat_line / qty_dec) if qty_dec != 0 else Decimal("0")
                     price_gross = price_wo + unit_vat
@@ -812,7 +917,6 @@ def export_documents_to_rivile_erp_xlsx(
                     if discount_pct is not None:
                         ws_lines.cell(row=line_idx, column=LineCols.DISCOUNT_PCT, value=float(discount_pct))
 
-                    # Ne pildom I i J
                     ws_lines.cell(row=line_idx, column=LineCols.VAT_CODE, value="")
                     set_cell_money(ws_lines, line_idx, LineCols.VAT_AMOUNT, 0)
                 else:
@@ -840,7 +944,6 @@ def export_documents_to_rivile_erp_xlsx(
 
                 line_idx += 1
         else:
-            # ========== SUMISKAI режим ==========
             ws_lines.cell(row=line_idx, column=LineCols.REF_ID, value=safe_excel_text(ref_id))
             ws_lines.cell(
                 row=line_idx,
@@ -878,7 +981,6 @@ def export_documents_to_rivile_erp_xlsx(
                 if discount_pct is not None:
                     ws_lines.cell(row=line_idx, column=LineCols.DISCOUNT_PCT, value=float(discount_pct))
 
-                # Ne pildom I i J
                 ws_lines.cell(row=line_idx, column=LineCols.VAT_CODE, value="")
                 set_cell_money(ws_lines, line_idx, LineCols.VAT_AMOUNT, 0)
             else:
@@ -920,8 +1022,6 @@ def export_documents_to_rivile_erp_xlsx(
 
     wb.save(output_path)
     return Path(output_path)
-
-
 
 
 
@@ -1135,6 +1235,33 @@ def export_documents_to_rivile_erp_xlsx(
 #         return None
 
 #     pct = (disc / base_total) * Decimal("100")
+#     if pct < 0:
+#         pct = Decimal("0")
+#     if pct > Decimal("99.99"):
+#         pct = Decimal("99.99")
+#     return pct.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+
+# def compute_global_invoice_discount_pct_for_merge_vat(doc: Any) -> Optional[Decimal]:
+#     disc_wo = _safe_D(getattr(doc, "invoice_discount_wo_vat", 0) or 0)
+#     if disc_wo <= 0:
+#         return None
+
+#     line_items = getattr(doc, "line_items", None)
+#     if line_items and hasattr(line_items, "all") and line_items.exists():
+#         gross_total = Decimal("0")
+#         for it in line_items.all():
+#             qty = _safe_D(getattr(it, "quantity", 1) or 1)
+#             price_wo = _safe_D(getattr(it, "price", 0) or 0)
+#             vat_line = _safe_D(getattr(it, "vat", 0) or 0)  # PVM na stroku
+#             gross_total += (price_wo * qty) + vat_line
+#     else:
+#         gross_total = _safe_D(getattr(doc, "amount_wo_vat", 0) or 0) + _safe_D(getattr(doc, "vat_amount", 0) or 0)
+
+#     if gross_total <= 0:
+#         return None
+
+#     pct = (disc_wo / gross_total) * Decimal("100")
 #     if pct < 0:
 #         pct = Decimal("0")
 #     if pct > Decimal("99.99"):
@@ -1455,14 +1582,18 @@ def export_documents_to_rivile_erp_xlsx(
 #     wb = _load_template(CLIENTS_TEMPLATE_FILE)
 #     ws = wb.active
 
+#     # Проверяем наличие дополнительных листов
+#     ws_addresses = wb["ClientAddresses"] if "ClientAddresses" in wb.sheetnames else None
+#     ws_banks = wb["ClientBankAccounts"] if "ClientBankAccounts" in wb.sheetnames else None
+
 #     start_row = 6
 #     row_idx = 0
-#     seen_clients: set[str] = set()  # Для дедупликации
+#     addr_row = 3   # стартовая строка для ClientAddresses
+#     bank_row = 3   # стартовая строка для ClientBankAccounts
+#     seen_clients: set[str] = set()
 
 #     for client in clients or []:
 #         cid = normalize_code(client.get("id"))
-        
-#         # Пропускаем пустые или дублирующиеся id
 #         if not cid or cid in seen_clients:
 #             continue
 #         seen_clients.add(cid)
@@ -1476,7 +1607,10 @@ def export_documents_to_rivile_erp_xlsx(
 #         name = safe_excel_text(client.get("name"))
 #         vat = normalize_code(client.get("vat"))
 #         adr = safe_excel_text(client.get("address"))
+#         country_iso = safe_excel_text(client.get("country_iso"))
+#         iban = safe_excel_text(client.get("iban"))
 
+#         # === Первый таб (основной) ===
 #         ws.cell(row=row, column=ClientCols.REF_ID, value=cid)
 #         ws.cell(row=row, column=ClientCols.NAME, value=name)
 #         ws.cell(row=row, column=ClientCols.CODE, value=code)
@@ -1488,10 +1622,72 @@ def export_documents_to_rivile_erp_xlsx(
 #         ws.cell(row=row, column=ClientCols.IS_CUSTOMER, value=1 if doc_type == "pardavimas" else "")
 #         ws.cell(row=row, column=ClientCols.IS_SUPPLIER, value=1 if doc_type == "pirkimas" else "")
 
+#         # === ClientAddresses (если есть address или country_iso) ===
+#         if ws_addresses is not None and (adr or country_iso):
+#             ws_addresses.cell(row=addr_row, column=1, value=cid)          # A: RefID
+#             ws_addresses.cell(row=addr_row, column=2, value=0)            # B: всегда 0
+#             ws_addresses.cell(row=addr_row, column=3, value=name)         # C: Name
+#             ws_addresses.cell(row=addr_row, column=4, value=adr)          # D: Address
+#             ws_addresses.cell(row=addr_row, column=7, value=country_iso)  # G: Country ISO
+#             addr_row += 1
+
+#         # === ClientBankAccounts (если есть iban) ===
+#         if ws_banks is not None and iban:
+#             ws_banks.cell(row=bank_row, column=1, value=cid)   # A: RefID
+#             ws_banks.cell(row=bank_row, column=2, value=name)  # B: Name
+#             ws_banks.cell(row=bank_row, column=3, value=iban)  # C: IBAN
+#             bank_row += 1
+
 #         row_idx += 1
 
 #     wb.save(output_path)
 #     return Path(output_path)
+
+
+
+
+
+# # def export_clients_to_rivile_erp_xlsx(clients: Iterable[dict], output_path: str | Path) -> Path:
+# #     wb = _load_template(CLIENTS_TEMPLATE_FILE)
+# #     ws = wb.active
+
+# #     start_row = 6
+# #     row_idx = 0
+# #     seen_clients: set[str] = set()  # Для дедупликации
+
+# #     for client in clients or []:
+# #         cid = normalize_code(client.get("id"))
+        
+# #         # Пропускаем пустые или дублирующиеся id
+# #         if not cid or cid in seen_clients:
+# #             continue
+# #         seen_clients.add(cid)
+
+# #         row = start_row + row_idx
+
+# #         doc_type = (_s(client.get("type")) or "pirkimas").lower()
+# #         is_person = bool(client.get("is_person", False))
+
+# #         code = cid
+# #         name = safe_excel_text(client.get("name"))
+# #         vat = normalize_code(client.get("vat"))
+# #         adr = safe_excel_text(client.get("address"))
+
+# #         ws.cell(row=row, column=ClientCols.REF_ID, value=cid)
+# #         ws.cell(row=row, column=ClientCols.NAME, value=name)
+# #         ws.cell(row=row, column=ClientCols.CODE, value=code)
+# #         ws.cell(row=row, column=ClientCols.TYPE_ID, value=1 if is_person else 0)
+# #         ws.cell(row=row, column=ClientCols.REG_CODE, value=cid)
+# #         ws.cell(row=row, column=ClientCols.VAT, value=vat)
+# #         ws.cell(row=row, column=ClientCols.ADDRESS, value=adr)
+
+# #         ws.cell(row=row, column=ClientCols.IS_CUSTOMER, value=1 if doc_type == "pardavimas" else "")
+# #         ws.cell(row=row, column=ClientCols.IS_SUPPLIER, value=1 if doc_type == "pirkimas" else "")
+
+# #         row_idx += 1
+
+# #     wb.save(output_path)
+# #     return Path(output_path)
 
 
 # # =========================================================
@@ -1528,6 +1724,9 @@ def export_documents_to_rivile_erp_xlsx(
 #         raise ValueError("Шаблон должен содержать листы 'Headers' и 'Lines'")
 
 #     extra = rivile_erp_extra_fields or {}
+#     user = extra.get("user") if isinstance(extra.get("user"), dict) else {}
+#     extra_settings = user.get("extra_settings") if isinstance(user.get("extra_settings"), dict) else {}
+#     merge_vat = str(extra_settings.get("merge_vat", "0")).strip() == "1"
 #     journal_key = f"{prefix}_zurnalo_kodas"
 #     dept_key    = f"{prefix}_padalinio_kodas"
 #     obj_key     = f"{prefix}_objekto_kodas"
@@ -1560,7 +1759,10 @@ def export_documents_to_rivile_erp_xlsx(
 #             id_programoje_field=client_id_programoje_field,
 #         )
 
-#         discount_pct = compute_global_invoice_discount_pct(doc)
+#         if merge_vat:
+#             discount_pct = compute_global_invoice_discount_pct_for_merge_vat(doc)
+#         else:
+#             discount_pct = compute_global_invoice_discount_pct(doc)
 
 #         # === Headers ===
 #         header_row = header_idx
@@ -1622,21 +1824,36 @@ def export_documents_to_rivile_erp_xlsx(
 #                     value=safe_excel_text(padalinio_kodas),
 #                 )
 
-#                 set_cell_qty(ws_lines, line_idx, LineCols.QTY, getattr(item, "quantity", None) or 1)
-#                 set_cell_price(ws_lines, line_idx, LineCols.PRICE, getattr(item, "price", None) or 0)
+#                 # qty nuzhen dlia rascheta unit_vat
+#                 qty_val = getattr(item, "quantity", None) or 1
+#                 set_cell_qty(ws_lines, line_idx, LineCols.QTY, qty_val)
 
-#                 if discount_pct is not None:
-#                     ws_lines.cell(row=line_idx, column=LineCols.DISCOUNT_PCT, value=float(discount_pct))
+#                 if merge_vat:
+#                     qty_dec = _safe_D(qty_val)
+#                     price_wo = _safe_D(getattr(item, "price", 0) or 0)
+#                     vat_line = _safe_D(getattr(item, "vat", 0) or 0)  # PVM na stroku
+
+#                     unit_vat = (vat_line / qty_dec) if qty_dec != 0 else Decimal("0")
+#                     price_gross = price_wo + unit_vat
+
+#                     set_cell_price(ws_lines, line_idx, LineCols.PRICE, price_gross)
+
+#                     if discount_pct is not None:
+#                         ws_lines.cell(row=line_idx, column=LineCols.DISCOUNT_PCT, value=float(discount_pct))
+
+#                     # Ne pildom I i J
+#                     ws_lines.cell(row=line_idx, column=LineCols.VAT_CODE, value="")
+#                     set_cell_money(ws_lines, line_idx, LineCols.VAT_AMOUNT, 0)
 #                 else:
-#                     set_cell_money(ws_lines, line_idx, LineCols.VAT_AMOUNT, getattr(item, "vat", None) or 0)
+#                     set_cell_price(ws_lines, line_idx, LineCols.PRICE, getattr(item, "price", None) or 0)
 
-#                 # ====== ИСПРАВЛЕНИЕ: Используем helper для PVM кода ======
-#                 pvm_code = _get_pvm_kodas_for_export(doc, item=item, line_map=line_map)
-#                 ws_lines.cell(
-#                     row=line_idx,
-#                     column=LineCols.VAT_CODE,
-#                     value=safe_excel_text(pvm_code),
-#                 )
+#                     if discount_pct is not None:
+#                         ws_lines.cell(row=line_idx, column=LineCols.DISCOUNT_PCT, value=float(discount_pct))
+#                     else:
+#                         set_cell_money(ws_lines, line_idx, LineCols.VAT_AMOUNT, getattr(item, "vat", None) or 0)
+
+#                     pvm_code = _get_pvm_kodas_for_export(doc, item=item, line_map=line_map)
+#                     ws_lines.cell(row=line_idx, column=LineCols.VAT_CODE, value=safe_excel_text(pvm_code))
 
 #                 name = safe_excel_text(getattr(item, "prekes_pavadinimas", None) or "")
 #                 ws_lines.cell(row=line_idx, column=LineCols.NAME, value=name)
@@ -1680,23 +1897,29 @@ def export_documents_to_rivile_erp_xlsx(
 
 #             set_cell_qty(ws_lines, line_idx, LineCols.QTY, getattr(doc, "quantity", None) or 1)
 
-#             price = getattr(doc, "amount_wo_vat", None)
-#             set_cell_money(ws_lines, line_idx, LineCols.PRICE, price if price is not None else 0)
+#             amount_wo = _safe_D(getattr(doc, "amount_wo_vat", None) or 0)
+#             vat_amount = _safe_D(getattr(doc, "vat_amount", None) or 0)
 
-#             if discount_pct is not None:
-#                 ws_lines.cell(row=line_idx, column=LineCols.DISCOUNT_PCT, value=float(discount_pct))
+#             if merge_vat:
+#                 amount_gross = amount_wo + vat_amount
+#                 set_cell_money(ws_lines, line_idx, LineCols.PRICE, amount_gross)
+
+#                 if discount_pct is not None:
+#                     ws_lines.cell(row=line_idx, column=LineCols.DISCOUNT_PCT, value=float(discount_pct))
+
+#                 # Ne pildom I i J
+#                 ws_lines.cell(row=line_idx, column=LineCols.VAT_CODE, value="")
+#                 set_cell_money(ws_lines, line_idx, LineCols.VAT_AMOUNT, 0)
 #             else:
-#                 vat_amount = getattr(doc, "vat_amount", None)
-#                 set_cell_money(ws_lines, line_idx, LineCols.VAT_AMOUNT, vat_amount if vat_amount is not None else 0)
+#                 set_cell_money(ws_lines, line_idx, LineCols.PRICE, amount_wo)
 
-#             # ====== ИСПРАВЛЕНИЕ: Используем helper для PVM кода ======
-#             # При sumiskai + separate_vat=True -> пустой
-#             pvm_code = _get_pvm_kodas_for_export(doc, item=None, line_map=None)
-#             ws_lines.cell(
-#                 row=line_idx,
-#                 column=LineCols.VAT_CODE,
-#                 value=safe_excel_text(pvm_code),
-#             )
+#                 if discount_pct is not None:
+#                     ws_lines.cell(row=line_idx, column=LineCols.DISCOUNT_PCT, value=float(discount_pct))
+#                 else:
+#                     set_cell_money(ws_lines, line_idx, LineCols.VAT_AMOUNT, vat_amount)
+
+#                 pvm_code = _get_pvm_kodas_for_export(doc, item=None, line_map=None)
+#                 ws_lines.cell(row=line_idx, column=LineCols.VAT_CODE, value=safe_excel_text(pvm_code))
 
 #             name = safe_excel_text(getattr(doc, "prekes_pavadinimas", None) or "")
 #             ws_lines.cell(row=line_idx, column=LineCols.NAME, value=name)
@@ -1726,5 +1949,4 @@ def export_documents_to_rivile_erp_xlsx(
 
 #     wb.save(output_path)
 #     return Path(output_path)
-
 
