@@ -810,41 +810,146 @@ const InvoicePreviewDialog = ({ open, onClose, invoiceId, invoiceData }) => {
 
     const win = window.open('', '_blank', 'width=900,height=1200');
 
-    // Собираем все <style> теги из основного документа (MUI Emotion стили)
-    const styles = Array.from(document.querySelectorAll('style, link[rel="stylesheet"]'))
-      .map((el) => el.outerHTML)
-      .join('\n');
+    const printStyles = `
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      
+      @page { 
+        size: A4; 
+        margin: 0; /* Убирает browser headers/footers */
+      }
+      
+      html, body {
+        width: 210mm;
+        height: 297mm;
+        margin: 0;
+        padding: 0;
+        background: #fff;
+        font-family: "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+        font-size: 11px;
+        color: #222;
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+      }
 
-    win.document.write(`
-      <!DOCTYPE html>
+      @media print {
+        html, body {
+          width: 210mm;
+          height: 297mm;
+        }
+        body {
+          margin: 0 !important;
+          padding: 0 !important;
+        }
+      }
+
+      /* Layout */
+      [class*="MuiBox-root"] { display: block; }
+      
+      /* Typography */
+      [class*="MuiTypography-root"] { 
+        margin: 0; 
+        font-family: inherit;
+      }
+      
+      /* Divider */
+      [class*="MuiDivider-root"], hr {
+        border: none;
+        border-top: 1.2px solid #333;
+        margin: 14px 0;
+      }
+
+      /* Table */
+      table { 
+        width: 100%; 
+        border-collapse: collapse; 
+        table-layout: fixed;
+      }
+      th, td { 
+        padding: 5px 8px; 
+        font-size: 10px; 
+        text-align: left;
+        vertical-align: top;
+        border-bottom: 0.5px solid #e0e0e0;
+      }
+      th { 
+        font-weight: 700; 
+        font-size: 8.8px;
+        color: #555;
+        background: #f5f5f5;
+        border-bottom: 1.2px solid #333;
+      }
+      tr:nth-child(even) { background: #fafafa; }
+
+      /* Images */
+      img { max-width: 100%; height: auto; }
+
+      /* Links */
+      a { text-decoration: none; }
+    `;
+
+    const clone = content.cloneNode(true);
+    
+    const applyStyles = (original, cloned) => {
+      if (original.nodeType !== 1) return;
+      
+      const computed = window.getComputedStyle(original);
+      const important = [
+        'display', 'flex-direction', 'justify-content', 'align-items', 'gap', 'flex-wrap', 'flex',
+        'grid-template-columns', 'grid-column', 'column-gap', 'row-gap',
+        'width', 'min-width', 'max-width', 'height', 'min-height',
+        'margin', 'margin-top', 'margin-bottom', 'margin-left', 'margin-right',
+        'padding', 'padding-top', 'padding-bottom', 'padding-left', 'padding-right',
+        'font-family', 'font-size', 'font-weight', 'line-height', 'letter-spacing',
+        'color', 'background-color', 'background',
+        'border', 'border-top', 'border-bottom', 'border-left', 'border-right', 'border-radius',
+        'text-align', 'vertical-align', 'white-space', 'word-break',
+        'position', 'top', 'left', 'right', 'bottom',
+        'opacity',
+      ];
+      
+      important.forEach(prop => {
+        const val = computed.getPropertyValue(prop);
+        if (val && val !== 'none' && val !== 'normal' && val !== 'auto' && val !== 'initial') {
+          cloned.style.setProperty(prop, val);
+        }
+      });
+      
+      const origChildren = original.children;
+      const clonedChildren = cloned.children;
+      for (let i = 0; i < origChildren.length; i++) {
+        if (clonedChildren[i]) {
+          applyStyles(origChildren[i], clonedChildren[i]);
+        }
+      }
+    };
+    
+    applyStyles(content, clone);
+
+    win.document.write(`<!DOCTYPE html>
       <html>
-      <head>
-        <title>${invoice?.full_number || 'Sąskaita'}</title>
-        ${styles}
-        <style>
-          * { margin: 0; padding: 0; box-sizing: border-box; }
-          body { background: #fff; }
-          @page { size: A4; margin: 0; }
-          @media print {
-            body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-          }
-        </style>
-      </head>
-      <body>${content.outerHTML}</body>
-      </html>
-    `);
+        <head>
+          <title>${invoice?.full_number || invoice?.document_series + invoice?.document_number || 'Sąskaita'}</title>
+          <style>${printStyles}</style>
+        </head>
+        <body>${clone.outerHTML}</body>
+      </html>`);
     win.document.close();
 
     const images = win.document.querySelectorAll('img');
-    if (images.length > 0) {
-      let loaded = 0;
-      const tryPrint = () => {
-        loaded++;
-        if (loaded >= images.length) {
-          setTimeout(() => { win.print(); }, 100);
-        }
-      };
-      images.forEach((img) => {
+    let loaded = 0;
+    const total = images.length;
+
+    const tryPrint = () => {
+      loaded++;
+      if (loaded >= total) {
+        setTimeout(() => win.print(), 150);
+      }
+    };
+
+    if (total === 0) {
+      setTimeout(() => win.print(), 200);
+    } else {
+      images.forEach(img => {
         if (img.complete) {
           tryPrint();
         } else {
@@ -852,8 +957,6 @@ const InvoicePreviewDialog = ({ open, onClose, invoiceId, invoiceData }) => {
           img.onerror = tryPrint;
         }
       });
-    } else {
-      setTimeout(() => { win.print(); }, 300);
     }
   };
 

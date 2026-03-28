@@ -293,6 +293,82 @@ def _payments_agg(qs):
         "count":     r['count'] or 0,
     }
 
+def _invoice_count_by_date(date_val):
+    """Считает выставленные счета за дату (status != draft)"""
+    start = timezone.make_aware(datetime.combine(date_val, dt_time.min))
+    end = timezone.make_aware(datetime.combine(date_val, dt_time.max))
+    return Invoice.objects.filter(
+        created_at__range=(start, end)
+    ).exclude(status="draft").count()
+
+def _invoice_count_last_n_days(n):
+    since = timezone.now() - timedelta(days=n)
+    return Invoice.objects.filter(created_at__gte=since).exclude(status="draft").count()
+
+def _invoice_count_total():
+    return Invoice.objects.exclude(status="draft").count()
+
+def _email_stats_by_date(date_val):
+    """Возвращает {'sent': X, 'failed': Y} за дату"""
+    start = timezone.make_aware(datetime.combine(date_val, dt_time.min))
+    end = timezone.make_aware(datetime.combine(date_val, dt_time.max))
+    qs = InvoiceEmail.objects.filter(sent_at__range=(start, end))
+    return {
+        "sent": qs.filter(status="sent").count(),
+        "failed": qs.filter(status__in=["failed", "bounced"]).count(),
+    }
+
+def _email_stats_last_n_days(n):
+    since = timezone.now() - timedelta(days=n)
+    qs = InvoiceEmail.objects.filter(sent_at__gte=since)
+    return {
+        "sent": qs.filter(status="sent").count(),
+        "failed": qs.filter(status__in=["failed", "bounced"]).count(),
+    }
+
+def _email_stats_total():
+    qs = InvoiceEmail.objects.all()
+    return {
+        "sent": qs.filter(status="sent").count(),
+        "failed": qs.filter(status__in=["failed", "bounced"]).count(),
+    }
+
+def _inv_subscription_stats():
+    """Статистика подписок Išrašymas"""
+    now = timezone.now()
+    
+    # Активные триалы (status=trial И trial_end ещё не прошёл)
+    trial_active = InvSubscription.objects.filter(
+        status="trial",
+        trial_end__gte=now
+    ).count()
+    
+    # Завершённые триалы (trial_used=True И (status != trial ИЛИ trial_end < now))
+    trial_expired = InvSubscription.objects.filter(
+        trial_used=True
+    ).exclude(
+        status="trial",
+        trial_end__gte=now
+    ).count()
+    
+    # Платные подписки
+    paid_monthly = InvSubscription.objects.filter(
+        status="active",
+        plan__icontains="monthly"
+    ).count()
+    
+    paid_yearly = InvSubscription.objects.filter(
+        status="active",
+        plan__icontains="yearly"
+    ).count()
+    
+    return {
+        "trial_active": trial_active,
+        "trial_expired": trial_expired,
+        "paid_monthly": paid_monthly,
+        "paid_yearly": paid_yearly,
+    }
+
 @api_view(["GET"])
 @permission_classes([IsSuperUser])
 def superuser_dashboard_stats(request):
@@ -374,6 +450,21 @@ def superuser_dashboard_stats(request):
     pay_30d        = _payments_agg(pay_base.filter(paid_at__gte=timezone.now() - timedelta(days=30)))
     pay_total      = _payments_agg(pay_base)
 
+    # ========== Išrašymas stats ==========
+    inv_today = _invoice_count_by_date(today)
+    inv_yesterday = _invoice_count_by_date(yesterday)
+    inv_7d = _invoice_count_last_n_days(7)
+    inv_30d = _invoice_count_last_n_days(30)
+    inv_total = _invoice_count_total()
+
+    inv_subs = _inv_subscription_stats()
+
+    email_today = _email_stats_by_date(today)
+    email_yesterday = _email_stats_by_date(yesterday)
+    email_7d = _email_stats_last_n_days(7)
+    email_30d = _email_stats_last_n_days(30)
+    email_total = _email_stats_total()
+
     data = {
         "documents": {
             "today":       {"count": docs_today,     "errors": err_today},
@@ -419,6 +510,23 @@ def superuser_dashboard_stats(request):
             "this_month":  pay_this_month,
             "last_30_days":pay_30d,
             "total":       pay_total,
+        },
+        "israsymas": {
+            "invoices": {
+                "today": inv_today,
+                "yesterday": inv_yesterday,
+                "last_7_days": inv_7d,
+                "last_30_days": inv_30d,
+                "total": inv_total,
+            },
+            "subscriptions": inv_subs,
+            "emails": {
+                "today": email_today,
+                "yesterday": email_yesterday,
+                "last_7_days": email_7d,
+                "last_30_days": email_30d,
+                "total": email_total,
+            },
         },
         "meta": {
             "timezone": str(timezone.get_current_timezone()),
@@ -8721,7 +8829,7 @@ def invoice_send_email_view(request, invoice_id):
 
     if total_sent >= max_count:
         return Response(
-            {"detail": f"Pasiektas siunčtinių laiškų limitas ({max_count})."},
+            {"detail": f"Pasiektas išsiųstų laiškų limitas ({max_count}) vienai sąskaitai."},
             status=status.HTTP_429_TOO_MANY_REQUESTS,
         )
 

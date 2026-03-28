@@ -27,6 +27,9 @@ import {
   Refresh,
   Block,
   CreditCard,
+  Receipt,
+  CardMembership,
+  Email,
 } from "@mui/icons-material";
 import { api } from "../api/endpoints";
 
@@ -70,6 +73,22 @@ function DocStatItem({ label, count = 0, errors = 0, highlight = false }) {
           />
         )}
       </Stack>
+    </Box>
+  );
+}
+
+function EmailStatItem({ label, data }) {
+  const { sent = 0, failed = 0 } = data || {};
+  return (
+    <Box textAlign="center" sx={{ minWidth: 80 }}>
+      <Typography variant="caption" color="text.secondary">
+        {label}
+      </Typography>
+      <Typography variant="h6" fontWeight={700}>
+        <span style={{ color: '#16a34a' }}>{sent}</span>
+        {' / '}
+        <span style={{ color: failed > 0 ? '#dc2626' : '#9ca3af' }}>{failed}</span>
+      </Typography>
     </Box>
   );
 }
@@ -227,6 +246,10 @@ export default function AdminDashboard() {
   const meta = stats.meta || {};
   const sr = docs.success_rate || {};
   const rej = docs.rejected || {};
+  const israsymas = stats.israsymas || {};
+  const invInvoices = israsymas.invoices || {};
+  const invSubs = israsymas.subscriptions || {};
+  const invEmails = israsymas.emails || {};
   const st = docs.scan_types || {};
 
   const fmtPct = (v) => (typeof v === "number" ? `${v.toFixed(2)}%` : "0.00%");
@@ -461,6 +484,77 @@ export default function AdminDashboard() {
                   <PaymentStatItem label="Šį mėnesį"  data={stats.payments?.this_month} />
                   <PaymentStatItem label="Pask. 30 d." data={stats.payments?.last_30_days} />
                   <PaymentStatItem label="Iš viso"     data={stats.payments?.total} />
+                </Stack>
+              </Box>
+            </CardContent>
+          </Card>
+        </Grid>
+        {/* ========== IŠRAŠYMAS SECTION ========== */}
+        
+        {/* Išrašytos sąskaitos */}
+        <Grid size={{ xs: 12, md: 6 }}>
+          <StatCard
+            title="Išrašytos sąskaitos"
+            icon={Receipt}
+            color="primary"
+            items={
+              <>
+                <SimpleStatItem label="Šiandien" value={invInvoices.today} />
+                <SimpleStatItem label="Vakar" value={invInvoices.yesterday} />
+                <SimpleStatItem label="Per paskutines 7 dienas" value={invInvoices.last_7_days} />
+                <SimpleStatItem label="Per paskutines 30 dienų" value={invInvoices.last_30_days} />
+                <SimpleStatItem label="Viso" value={invInvoices.total} />
+              </>
+            }
+          />
+        </Grid>
+
+        {/* Prenumeratos */}
+        <Grid size={{ xs: 12, md: 6 }}>
+          <StatCard
+            title="Išrašymo prenumeratos"
+            icon={CardMembership}
+            color="warning"
+            items={
+              <>
+                <SimpleStatItem label="Bandomieji pradėti" value={invSubs.trial_active} color="info" />
+                <SimpleStatItem label="Bandomieji pasibaigę" value={invSubs.trial_expired} color="warning" />
+                <Divider sx={{ my: 1 }} />
+                <SimpleStatItem label="Mokami: mėnesiniai" value={invSubs.paid_monthly} color="success" />
+                <SimpleStatItem label="Mokami: metiniai" value={invSubs.paid_yearly} color="success" />
+              </>
+            }
+          />
+        </Grid>
+
+        {/* El. laiškai */}
+        <Grid size={12}>
+          <Card
+            elevation={0}
+            sx={{
+              border: 1,
+              borderColor: "primary.main",
+              bgcolor: "primary.50",
+              borderRadius: 2,
+            }}
+          >
+            <CardContent>
+              <Box display="flex" alignItems="center" gap={2} flexWrap="wrap">
+                <Email sx={{ color: "primary.main", fontSize: 32 }} />
+                <Box flex={1} minWidth={260}>
+                  <Typography variant="h6" fontWeight={800} color="primary.dark">
+                    El. laiškai (Išrašymas)
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Išsiųsta / Nepavyko
+                  </Typography>
+                </Box>
+                <Stack direction="row" spacing={3} flexWrap="wrap">
+                  <EmailStatItem label="Šiandien" data={invEmails.today} />
+                  <EmailStatItem label="Vakar" data={invEmails.yesterday} />
+                  <EmailStatItem label="Pask. 7 d." data={invEmails.last_7_days} />
+                  <EmailStatItem label="Pask. 30 d." data={invEmails.last_30_days} />
+                  <EmailStatItem label="Viso" data={invEmails.total} />
                 </Stack>
               </Box>
             </CardContent>
