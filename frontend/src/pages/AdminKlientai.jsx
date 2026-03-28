@@ -29,7 +29,7 @@ import { ACCOUNTING_PROGRAMS } from "../page_elements/AccountingPrograms";
 
 const SkaitmenizavimasCell = ({ lastPaymentDate }) => {
   if (!lastPaymentDate) {
-    return <Typography sx={{ color: "text.disabled", fontSize: 13 }}>—</Typography>;
+    return <Typography sx={{ color: "text.disabled", fontSize: 13 }}>-</Typography>;
   }
 
   const date = new Date(lastPaymentDate);
@@ -48,7 +48,7 @@ const SkaitmenizavimasCell = ({ lastPaymentDate }) => {
 
 const IsrasymasCell = ({ status }) => {
   if (!status) {
-    return <Typography sx={{ color: "text.disabled", fontSize: 13 }}>—</Typography>;
+    return <Typography sx={{ color: "text.disabled", fontSize: 13 }}>-</Typography>;
   }
 
   const config = {
@@ -75,7 +75,7 @@ const IsrasymasCell = ({ status }) => {
   };
 
   const cfg = config[status];
-  if (!cfg) return <Typography sx={{ color: "text.disabled" }}>—</Typography>;
+  if (!cfg) return <Typography sx={{ color: "text.disabled" }}>-</Typography>;
 
   return (
     <Tooltip title={cfg.label} arrow>
@@ -88,7 +88,7 @@ const IsrasymasCell = ({ status }) => {
 
 const IsleistaCell = ({ totalSpent }) => {
   if (!totalSpent || totalSpent === 0) {
-    return <Typography sx={{ color: "text.disabled", fontSize: 13 }}>—</Typography>;
+    return <Typography sx={{ color: "text.disabled", fontSize: 13 }}>-</Typography>;
   }
 
   return (
@@ -116,6 +116,10 @@ export default function AdminUsers() {
 
   const tableContainerRef = useRef(null);
 
+  const loadingRef = useRef(false);
+  const loadingMoreRef = useRef(false);
+  const nextCursorRef = useRef(null);
+
   useEffect(() => {
     api
       .get("/profile/", { withCredentials: true })
@@ -141,57 +145,88 @@ export default function AdminUsers() {
     return `/admin/users/${qs ? `?${qs}` : ""}`;
   }, []);
 
+  const mergeUniqueUsers = (prev, incoming) => {
+    const map = new Map(prev.map((item) => [item.id, item]));
+
+    (incoming || []).forEach((item) => {
+      map.set(item.id, item);
+    });
+
+    return Array.from(map.values());
+  };
+
   const fetchUsers = useCallback(async () => {
+    if (loadingRef.current) return;
+
+    loadingRef.current = true;
     setLoading(true);
+
     try {
       const { data } = await api.get(buildUrl(), { withCredentials: true });
+      const newCursor = extractCursor(data.next);
+
       setUsers(data.results || []);
-      setNextCursor(extractCursor(data.next));
+      setNextCursor(newCursor);
+      nextCursorRef.current = newCursor;
+
+      if (tableContainerRef.current) {
+        tableContainerRef.current.scrollTop = 0;
+      }
     } catch (e) {
       console.error("Nepavyko gauti vartotojų:", e);
       setUsers([]);
       setNextCursor(null);
+      nextCursorRef.current = null;
     } finally {
       setLoading(false);
+      loadingRef.current = false;
     }
   }, [buildUrl]);
 
   const loadMore = useCallback(async () => {
-    if (!nextCursor || loadingMore) return;
+    if (loadingMoreRef.current || loadingRef.current || !nextCursorRef.current) return;
 
+    const cursorToLoad = nextCursorRef.current;
+
+    loadingMoreRef.current = true;
     setLoadingMore(true);
+
     try {
-      const { data } = await api.get(buildUrl(nextCursor), { withCredentials: true });
-      setUsers((prev) => [...prev, ...(data.results || [])]);
-      setNextCursor(extractCursor(data.next));
+      const { data } = await api.get(buildUrl(cursorToLoad), { withCredentials: true });
+      const newCursor = extractCursor(data.next);
+
+      setUsers((prev) => mergeUniqueUsers(prev, data.results || []));
+      setNextCursor(newCursor);
+      nextCursorRef.current = newCursor;
     } catch (e) {
       console.error("Nepavyko įkelti daugiau:", e);
     } finally {
       setLoadingMore(false);
+      loadingMoreRef.current = false;
     }
-  }, [nextCursor, loadingMore, buildUrl]);
+  }, [buildUrl]);
 
   useEffect(() => {
     if (meLoaded && me?.is_superuser) fetchUsers();
   }, [meLoaded, me?.is_superuser, fetchUsers]);
 
-  // Scroll-based infinite loading
   useEffect(() => {
     const container = tableContainerRef.current;
     if (!container) return;
 
     const handleScroll = () => {
-      if (loading || loadingMore || !nextCursor) return;
+      if (loadingRef.current || loadingMoreRef.current || !nextCursorRef.current) return;
 
       const { scrollTop, scrollHeight, clientHeight } = container;
+
       if (scrollHeight - scrollTop - clientHeight < 300) {
         loadMore();
       }
     };
 
-    container.addEventListener("scroll", handleScroll);
+    container.addEventListener("scroll", handleScroll, { passive: true });
     return () => container.removeEventListener("scroll", handleScroll);
-  }, [loading, loadingMore, nextCursor, loadMore]);
+  }, [loadMore]);
 
   const fmtDateTime = (iso) =>
     iso
@@ -202,7 +237,7 @@ export default function AdminUsers() {
           hour: "2-digit",
           minute: "2-digit",
         })
-      : "—";
+      : "-";
 
   const fmtCredits = (v) => {
     if (v === null || v === undefined) return "0.00";
@@ -212,7 +247,7 @@ export default function AdminUsers() {
   };
 
   const programLabel = (value) =>
-    ACCOUNTING_PROGRAMS.find((p) => p.value === value)?.label || value || "—";
+    ACCOUNTING_PROGRAMS.find((p) => p.value === value)?.label || value || "-";
 
   if (meLoaded && !me?.is_superuser) {
     return (
@@ -292,7 +327,7 @@ export default function AdminUsers() {
                   }}
                 >
                   <TableCell sx={{ color: "text.secondary", fontWeight: 500 }}>{u.id}</TableCell>
-                  <TableCell sx={{ fontWeight: 500 }}>{u.email || "—"}</TableCell>
+                  <TableCell sx={{ fontWeight: 500 }}>{u.email || "-"}</TableCell>
                   <TableCell sx={{ color: "text.secondary", fontSize: "0.875rem" }}>
                     {fmtDateTime(u.date_joined)}
                   </TableCell>
@@ -315,14 +350,14 @@ export default function AdminUsers() {
                       fontSize: "0.875rem",
                     }}
                   >
-                    {u.stripe_customer_id || "—"}
+                    {u.stripe_customer_id || "-"}
                   </TableCell>
                   <TableCell sx={{ color: "text.secondary" }}>
                     {programLabel(u.default_accounting_program)}
                   </TableCell>
-                  <TableCell sx={{ color: "text.secondary" }}>{u.company_name || "—"}</TableCell>
+                  <TableCell sx={{ color: "text.secondary" }}>{u.company_name || "-"}</TableCell>
                   <TableCell sx={{ color: "text.secondary", fontFamily: "monospace", fontSize: "0.875rem" }}>
-                    {u.company_code || "—"}
+                    {u.company_code || "-"}
                   </TableCell>
 
                   <TableCell sx={{ textAlign: "center" }}>
