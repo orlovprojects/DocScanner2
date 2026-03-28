@@ -19,7 +19,7 @@ const routesToPrerender = [
   '/gpm-skaiciuokle',
   '/buhalterine-apskaita',
   '/suma-zodziais',
-  '/saskaita-faktura',
+  '/saskaitu-israsymas',
   '/naudojimo-gidas',
   '/susisiekti',
   '/privatumo-politika',
