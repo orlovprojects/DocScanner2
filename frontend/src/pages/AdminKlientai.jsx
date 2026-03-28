@@ -27,7 +27,6 @@ import CalendarTodayIcon from "@mui/icons-material/CalendarToday";
 import { api } from "../api/endpoints";
 import { ACCOUNTING_PROGRAMS } from "../page_elements/AccountingPrograms";
 
-// ─── Skaitmenizavimas icon ───
 const SkaitmenizavimasCell = ({ lastPaymentDate }) => {
   if (!lastPaymentDate) {
     return <Typography sx={{ color: "text.disabled", fontSize: 13 }}>—</Typography>;
@@ -47,7 +46,6 @@ const SkaitmenizavimasCell = ({ lastPaymentDate }) => {
   );
 };
 
-// ─── Išrašymas status icon ───
 const IsrasymasCell = ({ status }) => {
   if (!status) {
     return <Typography sx={{ color: "text.disabled", fontSize: 13 }}>—</Typography>;
@@ -88,7 +86,6 @@ const IsrasymasCell = ({ status }) => {
   );
 };
 
-// ─── Išleista (total spent) ───
 const IsleistaCell = ({ totalSpent }) => {
   if (!totalSpent || totalSpent === 0) {
     return <Typography sx={{ color: "text.disabled", fontSize: 13 }}>—</Typography>;
@@ -117,8 +114,7 @@ export default function AdminUsers() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [nextCursor, setNextCursor] = useState(null);
 
-  const observerRef = useRef(null);
-  const sentinelRef = useRef(null);
+  const tableContainerRef = useRef(null);
 
   useEffect(() => {
     api
@@ -179,24 +175,23 @@ export default function AdminUsers() {
     if (meLoaded && me?.is_superuser) fetchUsers();
   }, [meLoaded, me?.is_superuser, fetchUsers]);
 
+  // Scroll-based infinite loading
   useEffect(() => {
-    if (observerRef.current) observerRef.current.disconnect();
+    const container = tableContainerRef.current;
+    if (!container) return;
 
-    observerRef.current = new IntersectionObserver(
-      (entries) => {
-        if (entries[0].isIntersecting && nextCursor && !loadingMore && !loading) {
-          loadMore();
-        }
-      },
-      { rootMargin: "200px" }
-    );
+    const handleScroll = () => {
+      if (loading || loadingMore || !nextCursor) return;
 
-    if (sentinelRef.current) {
-      observerRef.current.observe(sentinelRef.current);
-    }
+      const { scrollTop, scrollHeight, clientHeight } = container;
+      if (scrollHeight - scrollTop - clientHeight < 300) {
+        loadMore();
+      }
+    };
 
-    return () => observerRef.current?.disconnect();
-  }, [nextCursor, loadingMore, loading, loadMore]);
+    container.addEventListener("scroll", handleScroll);
+    return () => container.removeEventListener("scroll", handleScroll);
+  }, [loading, loadingMore, nextCursor, loadMore]);
 
   const fmtDateTime = (iso) =>
     iso
@@ -261,7 +256,7 @@ export default function AdminUsers() {
       {loading && <LinearProgress sx={{ mb: 3, borderRadius: 1 }} />}
 
       <Paper elevation={0} sx={{ border: "1px solid", borderColor: "divider", borderRadius: 2, overflow: "hidden" }}>
-        <TableContainer sx={{ maxHeight: "calc(100vh - 250px)" }}>
+        <TableContainer ref={tableContainerRef} sx={{ maxHeight: "calc(100vh - 250px)" }}>
           <Table stickyHeader size="medium">
             <TableHead>
               <TableRow>
@@ -330,26 +325,19 @@ export default function AdminUsers() {
                     {u.company_code || "—"}
                   </TableCell>
 
-                  {/* Skaitmenizavimas */}
                   <TableCell sx={{ textAlign: "center" }}>
                     <SkaitmenizavimasCell lastPaymentDate={u.last_payment_date} />
                   </TableCell>
 
-                  {/* Išrašymas */}
                   <TableCell sx={{ textAlign: "center" }}>
                     <IsrasymasCell status={u.inv_subscription_status} />
                   </TableCell>
 
-                  {/* Išleista */}
                   <TableCell sx={{ textAlign: "center" }}>
                     <IsleistaCell totalSpent={u.total_spent} />
                   </TableCell>
                 </TableRow>
               ))}
-
-              <TableRow ref={sentinelRef}>
-                <TableCell colSpan={11} sx={{ p: 0, border: 0, height: 1 }} />
-              </TableRow>
 
               {loadingMore && (
                 <TableRow>
