@@ -121,44 +121,43 @@ def create_sf_from_isankstine(source, user, series_prefix=None):
         new_invoice.save(update_fields=["pvm_kodas"])
 
         # ── Payment allocation from source išankstinė ───────
-        source_allocations = source.payment_allocations.filter(
-            status__in=["confirmed", "auto", "manual"],
-        )
+        if source.status == "paid" or source.paid_at:
+            source_allocations = source.payment_allocations.filter(
+                status__in=["confirmed", "auto", "manual"],
+            )
 
-        if source_allocations.exists():
-            # Copy each allocation from source → new SF
-            for src_alloc in source_allocations:
+            if source_allocations.exists():
+                for src_alloc in source_allocations:
+                    PaymentAllocation.objects.create(
+                        incoming_transaction=src_alloc.incoming_transaction,
+                        invoice=new_invoice,
+                        source=src_alloc.source,
+                        status=src_alloc.status,
+                        amount=src_alloc.amount,
+                        payment_date=src_alloc.effective_payment_date,
+                        confidence=Decimal("1.00"),
+                        match_reasons={
+                            "Apmokėta pagal išankstinę sąskaitą": source.full_number,
+                            **src_alloc.match_reasons,
+                        },
+                        confirmed_at=src_alloc.confirmed_at or timezone.now(),
+                        confirmed_by=src_alloc.confirmed_by,
+                    )
+            else:
+                paid_amount = new_invoice.amount_with_vat or Decimal("0")
                 PaymentAllocation.objects.create(
-                    incoming_transaction=src_alloc.incoming_transaction,
+                    incoming_transaction=None,
                     invoice=new_invoice,
-                    source=src_alloc.source,
-                    status=src_alloc.status,
-                    amount=src_alloc.amount,
-                    payment_date=src_alloc.effective_payment_date,
+                    source="manual",
+                    status="auto",
+                    amount=paid_amount,
+                    payment_date=source.paid_at or timezone.now().date(),
                     confidence=Decimal("1.00"),
                     match_reasons={
                         "Apmokėta pagal išankstinę sąskaitą": source.full_number,
-                        **src_alloc.match_reasons,
                     },
-                    confirmed_at=src_alloc.confirmed_at or timezone.now(),
-                    confirmed_by=src_alloc.confirmed_by,
+                    confirmed_at=timezone.now(),
                 )
-        else:
-            # No transaction-based allocations — create standalone
-            paid_amount = new_invoice.amount_with_vat or Decimal("0")
-            PaymentAllocation.objects.create(
-                incoming_transaction=None,
-                invoice=new_invoice,
-                source="manual",
-                status="auto",
-                amount=paid_amount,
-                payment_date=source.paid_at or timezone.now().date(),
-                confidence=Decimal("1.00"),
-                match_reasons={
-                    "Apmokėta pagal išankstinę sąskaitą": source.full_number,
-                },
-                confirmed_at=timezone.now(),
-            )
 
         new_invoice.recalc_payment_status()
 
