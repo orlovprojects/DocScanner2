@@ -92,32 +92,37 @@ def _mailgun_send(*, to, subject, html, reply_to=None, pdf_bytes=None, pdf_filen
 
 def _get_invoice_pdf(invoice):
     """
-    Возвращает (pdf_bytes, filename) для вложения.
-    Если PDF не сгенерирован, генерирует.
+    Возвращает (pdf_bytes, filename) для вложения в email.
+    Генерирует PDF в памяти, не сохраняет на диск.
     """
-    if invoice.pdf_file:
-        try:
-            invoice.pdf_file.open("rb")
-            pdf_bytes = invoice.pdf_file.read()
-            invoice.pdf_file.close()
-            filename = f"saskaita-{invoice.document_series}{invoice.document_number}.pdf"
-            return pdf_bytes, filename
-        except Exception:
-            pass
+    from ..utils.invoice_pdf import generate_invoice_pdf
 
-    from ..utils.invoice_pdf import save_invoice_pdf
+    # Логотип
+    logo_path = None
+    try:
+        settings = invoice.user.invoice_settings
+        if settings.logo and settings.logo.storage.exists(settings.logo.name):
+            logo_path = settings.logo.path
+    except Exception:
+        pass
 
-    save_invoice_pdf(invoice)
-    invoice.refresh_from_db(fields=["pdf_file"])
+    # Watermark для free
+    watermark = False
+    try:
+        from ..models import InvSubscription
+        sub = InvSubscription.objects.filter(user=invoice.user).first()
+        if sub:
+            sub.check_and_expire()
+            watermark = sub.status == "free"
+    except Exception:
+        pass
 
-    if invoice.pdf_file:
-        invoice.pdf_file.open("rb")
-        pdf_bytes = invoice.pdf_file.read()
-        invoice.pdf_file.close()
+    try:
+        pdf_bytes = generate_invoice_pdf(invoice, logo_path=logo_path, watermark=watermark)
         filename = f"saskaita-{invoice.document_series}{invoice.document_number}.pdf"
         return pdf_bytes, filename
-
-    return None, None
+    except Exception:
+        return None, None
 
 
 # ════════════════════════════════════════════════════════════
