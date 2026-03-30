@@ -2918,6 +2918,23 @@ class RecurringInvoiceWriteSerializer(serializers.ModelSerializer):
             "next_run_at", "status", "updated_at",
         ])
 
+        # ── Если next_run_at сегодня — генерируем сразу ──
+        instance._first_invoice_generated = False
+        instance._first_invoice_sent = False
+        if instance.status == "active" and instance.next_run_at:
+            from django.utils import timezone as tz
+            if instance.next_run_at <= tz.now():
+                try:
+                    from .services.recurring_generator import generate_invoice_from_recurring
+                    invoice = generate_invoice_from_recurring(instance)
+                    instance._first_invoice_generated = True
+                    instance._first_invoice_sent = bool(invoice.sent_at)
+                except Exception as e:
+                    import logging
+                    logging.getLogger("docscanner_app").warning(
+                        "Immediate generation failed for recurring %d: %s", instance.id, e
+                    )
+
         return instance
 
     @transaction.atomic
@@ -2950,7 +2967,11 @@ class RecurringInvoiceWriteSerializer(serializers.ModelSerializer):
         return instance
 
     def to_representation(self, instance):
-        return RecurringInvoiceDetailSerializer(instance, context=self.context).data
+        data = RecurringInvoiceDetailSerializer(instance, context=self.context).data
+        if hasattr(instance, '_first_invoice_generated'):
+            data['first_invoice_generated'] = instance._first_invoice_generated
+            data['first_invoice_sent'] = getattr(instance, '_first_invoice_sent', False)
+        return data
     
 
 
