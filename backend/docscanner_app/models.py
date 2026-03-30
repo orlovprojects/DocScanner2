@@ -2511,7 +2511,7 @@ class RecurringInvoice(models.Model):
     issued_by = models.CharField(max_length=255, blank=True, default="")
     received_by = models.CharField(max_length=255, blank=True, default="")
 
-    # ---- Служебные поля scheduler ----
+    # ---- Служебные поля schedulers ----
     next_run_at = models.DateTimeField(null=True, blank=True, db_index=True)
     last_run_at = models.DateTimeField(null=True, blank=True)
     last_invoice = models.ForeignKey(
