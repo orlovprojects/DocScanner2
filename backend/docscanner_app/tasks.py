@@ -3334,39 +3334,6 @@ def process_recurring_invoices():
     return {"generated": count, "paused": paused, "errors": errors}
 
 
-
-@shared_task(name="generate_single_recurring")
-def generate_single_recurring(recurring_id):
-    """Немедленная генерация одного recurring invoice."""
-    from .models import RecurringInvoice, InvSubscription
-    from .services.recurring_generator import generate_invoice_from_recurring
-
-    try:
-        recurring = RecurringInvoice.objects.get(id=recurring_id, status="active")
-    except RecurringInvoice.DoesNotExist:
-        return {"status": "not_found"}
-
-    # Subscription check
-    try:
-        sub = InvSubscription.objects.filter(user=recurring.user).first()
-        if sub:
-            sub.check_and_expire()
-            if sub.status == "free":
-                recurring.status = "paused"
-                recurring.save(update_fields=["status"])
-                return {"status": "paused_free"}
-    except Exception as e:
-        logger.warning("[Recurring] Subscription check failed for %d: %s", recurring.id, e)
-
-    try:
-        invoice = generate_invoice_from_recurring(recurring)
-        logger.info(f"Immediate generation: invoice {invoice} for recurring {recurring_id}")
-        return {"status": "generated", "recurring_id": recurring_id}
-    except Exception as e:
-        logger.error(f"Immediate generation failed for recurring {recurring_id}: {e}")
-        return {"status": "error", "error": str(e)}
-
-
 # ════════════════════════════════════════════════════════════
 #  Invoice email tasks
 # ════════════════════════════════════════════════════════════
