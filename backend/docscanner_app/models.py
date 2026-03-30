@@ -2526,6 +2526,11 @@ class RecurringInvoice(models.Model):
     first_day_of_month = models.BooleanField(default=False)
     last_day_of_month = models.BooleanField(default=False)
 
+    send_payment_reminders = models.BooleanField(default=False)
+    auto_create_sf_on_paid = models.BooleanField(default=False)
+    auto_sf_series = models.CharField(max_length=50, blank=True, default="")
+    auto_sf_send = models.BooleanField(default=False)
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

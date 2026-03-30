@@ -46,6 +46,10 @@ def generate_invoice_from_recurring(recurring: RecurringInvoice) -> Invoice:
                 order_number=recurring.order_number,
                 public_link_enabled=recurring.public_link_enabled,
                 pirkimas_pardavimas="pardavimas",
+                send_payment_reminders=recurring.send_payment_reminders,
+                auto_create_sf_on_paid=recurring.auto_create_sf_on_paid,
+                auto_sf_series=recurring.auto_sf_series,
+                auto_sf_send=recurring.auto_sf_send,
                 # Seller
                 seller_counterparty=recurring.seller_counterparty,
                 seller_name=recurring.seller_name,

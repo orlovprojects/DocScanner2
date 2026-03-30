@@ -2704,6 +2704,7 @@ class RecurringInvoiceDetailSerializer(serializers.ModelSerializer):
             "buyer_bank_name", "buyer_iban", "buyer_swift",
             "buyer_is_person", "buyer_extra_info",
             "buyer_delivery_address",
+            "send_payment_reminders", "auto_create_sf_on_paid", "auto_sf_series", "auto_sf_send",
             # Подписи
             "issued_by", "received_by",
             # Служебные
@@ -2748,6 +2749,7 @@ class RecurringInvoiceWriteSerializer(serializers.ModelSerializer):
             "buyer_phone", "buyer_email",
             "buyer_bank_name", "buyer_iban", "buyer_swift",
             "buyer_extra_info", "buyer_delivery_address",
+            "send_payment_reminders", "auto_create_sf_on_paid", "auto_sf_series", "auto_sf_send",
             # Подписи
             "issued_by", "received_by",
             # Line items
