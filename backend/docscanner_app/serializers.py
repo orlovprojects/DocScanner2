@@ -10,6 +10,7 @@ from .utils.password_encryption import encrypt_password
 from django.urls import reverse
 from datetime import date
 from decimal import Decimal
+from django.utils import timezone
 
 from .models import Payments, MeasurementUnit, InvoiceSeries, Product, RecurringInvoice, RecurringInvoiceLineItem, Invoice, InvoiceEmail, InvoiceSettings, RivileGamaAPIKey
 
@@ -2784,6 +2785,9 @@ class RecurringInvoiceWriteSerializer(serializers.ModelSerializer):
         start_date = data.get("start_date")
         if end_date and start_date and end_date < start_date:
             errors["end_date"] = "Pabaigos data negali būti ankstesnė už pradžios datą."
+        
+        if start_date and start_date < timezone.localdate():
+            errors["start_date"] = "Pradžios data negali būti praeityje."
 
         interval = data.get("interval", 1)
         if interval is not None and interval < 1:

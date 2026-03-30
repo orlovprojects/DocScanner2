@@ -1633,6 +1633,10 @@ const InvoiceEditorPage = () => {
       const errs = [];
       if (!form.document_series) errs.push('Serija');
       if (!recurringForm.start_date) errs.push('Pirmos sąskaitos data');
+      const today = new Date().toISOString().split('T')[0];
+      if (recurringForm.start_date && recurringForm.start_date < today) {
+        errs.push('Pirmos sąskaitos data negali būti praeityje');
+      }
       if (!form.seller_name) errs.push('Pardavėjo pavadinimas');
       if (!form.seller_id) errs.push('Pardavėjo įmonės kodas');
       if (!form.buyer_name) errs.push('Pirkėjo pavadinimas');
@@ -1652,7 +1656,15 @@ const InvoiceEditorPage = () => {
           showMsg('Periodinė sąskaita atnaujinta');
         } else {
           res = await invoicingApi.createRecurringInvoice(payload);
-          showMsg('Periodinė sąskaita sukurta');
+          if (res.data?.first_invoice_generated) {
+            if (res.data?.first_invoice_sent) {
+              showMsg('Periodinė sąskaita sukurta. Pirmoji sąskaita išrašyta ir išsiųsta klientui.');
+            } else {
+              showMsg('Periodinė sąskaita sukurta. Pirmoji sąskaita išrašyta.');
+            }
+          } else {
+            showMsg('Periodinė sąskaita sukurta');
+          }
         }
         if (saveBuyerAsClient && form.buyer_name) {
           try {
@@ -1681,6 +1693,9 @@ const InvoiceEditorPage = () => {
               });
             } catch { /* duplicate — ok */ }
           }
+        }
+        if (lastSnackRef.current) {
+          sessionStorage.setItem('inv_snack', JSON.stringify(lastSnackRef.current));
         }
         navigate('/israsymas', { replace: true });
       } catch (e) {
