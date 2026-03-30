@@ -6,7 +6,7 @@ from ..models import (
     RecurringInvoice, RecurringInvoiceRun,
     Invoice, InvoiceLineItem, InvoiceSeries,
 )
-from ..views import _send_invoice_email
+from ..services.invoice_email_service import send_invoice_email
 
 
 def generate_invoice_from_recurring(recurring: RecurringInvoice) -> Invoice:
@@ -147,7 +147,7 @@ def generate_invoice_from_recurring(recurring: RecurringInvoice) -> Invoice:
             # 6. Auto-send
             if recurring.auto_send and recurring.send_to_email and invoice.status == "issued":
                 try:
-                    _send_invoice_email(invoice, recurring.send_to_email)
+                    send_invoice_email(invoice.id, "recurring", recipient_email=recurring.send_to_email)
                     invoice.status = "sent"
                     invoice.sent_at = timezone.now()
                     invoice.sent_to_email = recurring.send_to_email

@@ -3286,44 +3286,46 @@ def process_recurring_invoices():
     """
     from .models import RecurringInvoice, InvSubscription
     from .services.recurring_generator import generate_invoice_from_recurring
+    from django.db import transaction
 
     today_end = timezone.now().replace(hour=23, minute=59, second=59)
-
-    recurring_qs = RecurringInvoice.objects.filter(
-        status="active",
-        next_run_at__isnull=False,
-        next_run_at__lte=today_end,
-    ).select_for_update(skip_locked=True)
 
     count = 0
     errors = 0
     paused = 0
 
-    for recurring in recurring_qs:
-        # --- Inv subscription: check if recurring is allowed ---
-        try:
-            sub = InvSubscription.objects.filter(user=recurring.user).first()
-            if sub:
-                sub.check_and_expire()
-                if sub.status == "free":
-                    recurring.status = "paused"
-                    recurring.save(update_fields=["status"])
-                    paused += 1
-                    logger.info(
-                        "[Recurring] Paused recurring %d for user %s (free plan)",
-                        recurring.id, recurring.user.email,
-                    )
-                    continue
-        except Exception as e:
-            logger.warning("[Recurring] Subscription check failed for %d: %s", recurring.id, e)
+    with transaction.atomic():
+        recurring_qs = RecurringInvoice.objects.filter(
+            status="active",
+            next_run_at__isnull=False,
+            next_run_at__lte=today_end,
+        ).select_for_update(skip_locked=True)
 
-        try:
-            generate_invoice_from_recurring(recurring)
-            count += 1
-            logger.info(f"Generated invoice for recurring {recurring.id}")
-        except Exception as e:
-            errors += 1
-            logger.error(f"Failed recurring {recurring.id}: {e}")
+        for recurring in recurring_qs:
+            # --- Inv subscription: check if recurring is allowed ---
+            try:
+                sub = InvSubscription.objects.filter(user=recurring.user).first()
+                if sub:
+                    sub.check_and_expire()
+                    if sub.status == "free":
+                        recurring.status = "paused"
+                        recurring.save(update_fields=["status"])
+                        paused += 1
+                        logger.info(
+                            "[Recurring] Paused recurring %d for user %s (free plan)",
+                            recurring.id, recurring.user.email,
+                        )
+                        continue
+            except Exception as e:
+                logger.warning("[Recurring] Subscription check failed for %d: %s", recurring.id, e)
+
+            try:
+                generate_invoice_from_recurring(recurring)
+                count += 1
+                logger.info(f"Generated invoice for recurring {recurring.id}")
+            except Exception as e:
+                errors += 1
+                logger.error(f"Failed recurring {recurring.id}: {e}")
 
     logger.info(
         "Recurring invoices: %d generated, %d paused (free), %d failed",
