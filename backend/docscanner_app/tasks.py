@@ -3430,6 +3430,14 @@ def send_invoice_email_task(self, invoice_id, email_type, recipient_email=None, 
         }
     except self.MaxRetriesExceededError:
         logger.error(f"Max retries for invoice {invoice_id} email_type={email_type}")
+
+        from .celery_signals import _send_telegram
+        _send_telegram(
+            f"📧 <b>Email max retries exceeded</b>\n"
+            f"Invoice: {invoice_id}\n"
+            f"Type: {email_type}"
+        )
+
         return {"invoice_id": invoice_id, "status": "max_retries_exceeded"}
     except Exception as e:
         logger.error(f"send_invoice_email_task error: {e}")
@@ -3534,6 +3542,77 @@ def fetch_daily_currency_rates():
     result = update_currency_rates()
     logger.info("Currency rates: %s", result)
     return result
+
+
+
+
+
+
+
+# ════════════════════════════════════════════════════════════
+#  HEALTH MONITORING
+# ════════════════════════════════════════════════════════════
+
+@shared_task
+def monitor_stuck_sessions():
+    """Мониторинг зависших сессий и документов"""
+    now = timezone.now()
+    alerts = []
+
+    # 1. uploading > 1 час
+    stuck_uploading = UploadSession.objects.filter(
+        stage="uploading",
+        updated_at__lt=now - timedelta(hours=1),
+    )
+    if stuck_uploading.exists():
+        ids = list(stuck_uploading.values_list("id", flat=True)[:5])
+        alerts.append(f"📤 Stuck uploading: {stuck_uploading.count()}\n{ids}")
+
+    # 2. processing > 30 мин без прогресса
+    stuck_processing = UploadSession.objects.filter(
+        stage="processing",
+        updated_at__lt=now - timedelta(minutes=30),
+    )
+    if stuck_processing.exists():
+        for s in stuck_processing[:5]:
+            alerts.append(
+                f"⚙️ Stuck processing: {s.id}\n"
+                f"items: {s.processed_items}/{s.actual_items}, "
+                f"pending_archives: {s.pending_archives}"
+            )
+
+    # 3. Документы зависшие в processing > 20 мин
+    stuck_docs = ScannedDocument.objects.filter(
+        status="processing",
+        updated_at__lt=now - timedelta(minutes=20),
+    )
+    if stuck_docs.exists():
+        doc_ids = list(stuck_docs.values_list("id", flat=True)[:10])
+        alerts.append(f"📄 Stuck docs in processing: {stuck_docs.count()}\n{doc_ids}")
+
+    # 4. credits_reserved > 0 без активных сессий
+    from django.db.models import Q
+    leaked = CustomUser.objects.filter(
+        credits_reserved__gt=0,
+    ).exclude(
+        uploadsession__stage__in=["processing", "queued", "blocked", "credit_check"]
+    ).distinct()
+    if leaked.exists():
+        for u in leaked[:5]:
+            alerts.append(f"💰 Leaked credits: {u.email} reserved={u.credits_reserved}")
+
+    if alerts:
+        from .celery_signals import _send_telegram
+        msg = f"⚠️ <b>System health alert</b>\n\n" + "\n\n".join(alerts)
+        _send_telegram(msg)
+        logger.warning("[MONITOR] %s", msg)
+
+    return {"alerts": len(alerts)}
+
+
+
+
+
 
 
 

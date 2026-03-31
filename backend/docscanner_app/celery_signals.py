@@ -11,6 +11,7 @@ MONITORED_TASKS = {
     "docscanner_app.tasks.fetch_daily_currency_rates",
     "docscanner_app.tasks.fallback_poll_all",
     "docscanner_app.tasks.renew_gdrive_watches",
+    "docscanner_app.tasks.monitor_stuck_sessions",
 }
 
 

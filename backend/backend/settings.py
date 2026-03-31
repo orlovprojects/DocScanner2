@@ -127,6 +127,10 @@ REST_FRAMEWORK = {
 
 INVOICE_PUBLIC_URL = os.getenv("INVOICE_PUBLIC_URL", "https://saskaituisrasymas.lt")
 
+TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
+TELEGRAM_NOTIFY_SUCCESS = os.environ.get("TELEGRAM_NOTIFY_SUCCESS", "False").lower() == "true"
+
 # CORS
 CORS_ALLOWED_ORIGINS = os.getenv("CORS_ALLOWED_ORIGINS", SITE_URL_FRONTEND).split(",")
 CSRF_TRUSTED_ORIGINS = os.getenv("CSRF_TRUSTED_ORIGINS", SITE_URL_FRONTEND).split(",")

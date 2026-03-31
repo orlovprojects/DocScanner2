@@ -7946,6 +7946,15 @@ class StatementUploadView(APIView):
                 original_filename=ser.validated_data["file"].name,
             )
         except BankImportError as e:
+
+            from .celery_signals import _send_telegram
+            _send_telegram(
+                f"🏦 <b>Bank import failed</b>\n"
+                f"User: {request.user.email}\n"
+                f"File: {ser.validated_data['file'].name}\n"
+                f"Error: {str(e)[:300]}"
+            )
+
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
         return Response(
@@ -8276,6 +8285,16 @@ def generate_payment_link(request, invoice_id):
         return Response({"detail": str(e)}, status=400)
     except Exception as e:
         logger.exception("generate_payment_link error: invoice=%s", invoice_id)
+
+        from .celery_signals import _send_telegram
+        _send_telegram(
+            f"💳 <b>Payment link failed</b>\n"
+            f"Invoice: {invoice_id}\n"
+            f"Provider: {provider_name}\n"
+            f"User: {request.user.email}\n"
+            f"Error: {str(e)[:300]}"
+        )
+
         return Response(
             {"detail": f"Klaida kuriant mokėjimo nuorodą: {e}"},
             status=500,
@@ -8472,6 +8491,15 @@ def payment_webhook(request, provider_name, invoice_id):
             "[Webhook] ERROR: provider=%s invoice=%s error=%s",
             provider_name, invoice_id, e,
         )
+
+        from .celery_signals import _send_telegram
+        _send_telegram(
+            f"💳 <b>Payment webhook error</b>\n"
+            f"Provider: {provider_name}\n"
+            f"Invoice: {invoice_id}\n"
+            f"Error: {str(e)[:300]}"
+        )
+
         logger.info("=" * 60)
  
         # Always 200 — prevent infinite retries from provider
@@ -9153,6 +9181,15 @@ def mailgun_invoice_tracking_webhook(request):
         email_log.error_text = error_msg
         email_log.save(update_fields=["status", "error_text"])
         logger.warning(f"Invoice email {email_log.id} failed: {error_msg}")
+
+        from .celery_signals import _send_telegram
+        _send_telegram(
+            f"📧 <b>Email failed</b>\n"
+            f"Invoice: {email_log.invoice_id}\n"
+            f"To: {email_log.to_email}\n"
+            f"Type: {email_log.email_type}\n"
+            f"Error: {error_msg[:300]}"
+        )
 
     elif event_type == "complained":
         email_log.status = "bounced"

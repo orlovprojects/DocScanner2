@@ -35,6 +35,10 @@ app.conf.beat_schedule = {
         "task": "send_payment_reminders",
         "schedule": crontab(hour=9, minute=30),
     },
+    'monitor-stuck-sessions': {
+        'task': 'docscanner_app.tasks.monitor_stuck_sessions',
+        'schedule': crontab(minute='*/15'),
+    },
 }
 
 
