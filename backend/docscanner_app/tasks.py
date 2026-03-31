@@ -3584,7 +3584,7 @@ def monitor_stuck_sessions():
     # 3. Документы зависшие в processing > 20 мин
     stuck_docs = ScannedDocument.objects.filter(
         status="processing",
-        updated_at__lt=now - timedelta(minutes=20),
+        uploaded_at__lt=now - timedelta(minutes=20),
     )
     if stuck_docs.exists():
         doc_ids = list(stuck_docs.values_list("id", flat=True)[:10])
