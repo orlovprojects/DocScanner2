@@ -3595,7 +3595,7 @@ def monitor_stuck_sessions():
     leaked = CustomUser.objects.filter(
         credits_reserved__gt=0,
     ).exclude(
-        uploadsession__stage__in=["processing", "queued", "blocked", "credit_check"]
+        upload_sessions__stage__in=["processing", "queued", "blocked", "credit_check"]
     ).distinct()
     if leaked.exists():
         for u in leaked[:5]:
