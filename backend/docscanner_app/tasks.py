@@ -3474,9 +3474,17 @@ def send_payment_reminders():
 
 
 
+# ════════════════════════════════════════════════════════════
+#  Get daily currency rates
+# ════════════════════════════════════════════════════════════
 
-
-
+@shared_task(name="docscanner_app.tasks.fetch_daily_currency_rates")
+def fetch_daily_currency_rates():
+    """Ежедневное обновление курсов валют с Lietuvos Bankas."""
+    from .utils.update_currency_rates import update_currency_rates
+    result = update_currency_rates()
+    logger.info("Currency rates: %s", result)
+    return result
 
 
 
