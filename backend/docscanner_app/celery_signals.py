@@ -8,6 +8,9 @@ logger = logging.getLogger("celery_beat_monitor")
 MONITORED_TASKS = {
     "process_recurring_invoices",
     "send_payment_reminders",
+    "docscanner_app.tasks.fetch_daily_currency_rates",
+    "docscanner_app.tasks.fallback_poll_all",
+    "docscanner_app.tasks.renew_gdrive_watches",
 }
 
 
