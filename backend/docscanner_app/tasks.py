@@ -85,14 +85,42 @@ def settle_session_for_doc(doc_id: int):
 
     # === 1) архив-контейнер ===
     if doc.is_archive_container:
-        # НЕ трогаем credits_reserved и reserved_credits!
-        # Кредиты резервировались за файлы ВНУТРИ архива, не за сам контейнер.
-        # Освобождение кредитов произойдёт когда обработаются распакованные файлы.
         s.pending_archives = max((s.pending_archives or 0) - 1, 0)
 
-        doc.counted_in_session = True
+        # НОВОЕ: если архив rejected/failed — дочерних не будет,
+        # надо освободить кредиты за expected_items из этого архива
+        if doc.status in ("rejected", "failed"):
+            # считаем сколько дочерних реально создалось
+            actual_children = ScannedDocument.objects.filter(
+                parent_document=doc,
+            ).count()
+            
+            # если дочерних 0 — освобождаем весь резерв за этот архив
+            if actual_children == 0:
+                # сколько файлов было expected из этого архива
+                # (берём из expected_items сессии минус обычные файлы)
+                archive_expected = max(s.expected_items - ScannedDocument.objects.filter(
+                    upload_session=s,
+                    is_archive_container=False,
+                    parent_document__isnull=True,
+                ).count(), 0)
+                
+                cost = _doc_cost(doc.scan_type)
+                release = cost * Decimal(archive_expected)
+                
+                if release > 0:
+                    u.credits_reserved = max(
+                        (u.credits_reserved or Decimal("0")) - release, 
+                        Decimal("0")
+                    )
+                    s.reserved_credits = max(
+                        (s.reserved_credits or Decimal("0")) - release, 
+                        Decimal("0")
+                    )
+                    u.save(update_fields=["credits_reserved"])
 
-        s.save(update_fields=["pending_archives", "updated_at"])
+        doc.counted_in_session = True
+        s.save(update_fields=["pending_archives", "reserved_credits", "updated_at"])
         doc.save(update_fields=["counted_in_session"])
         return
 
@@ -149,14 +177,32 @@ def _maybe_finish_session(session_id: str):
     if s.stage != "processing":
         return
 
-    # критерий завершения:
-    # - всё что поставили в работу (actual_items) обработано (processed_items)
-    # - и нет “висящих” архивов в распаковке
-    if (s.pending_archives or 0) == 0 and (s.actual_items or 0) > 0 and (s.processed_items or 0) >= (s.actual_items or 0):
-        s.stage = "done"
-        s.finished_at = timezone.now()
-        s.save(update_fields=["stage", "finished_at", "updated_at"])
+    pending = s.pending_archives or 0
+    actual = s.actual_items or 0
+    processed = s.processed_items or 0
 
+    normal_done = (pending == 0 and actual > 0 and processed >= actual)
+
+    # НОВОЕ: архивы распакованы (или rejected), но дочерних 0
+    empty_done = (pending == 0 and actual == 0)
+
+    if normal_done or empty_done:
+        s.stage = "done" if normal_done else "failed"
+        s.finished_at = timezone.now()
+        
+        # Освободить зависшие резервы
+        if s.reserved_credits > 0:
+            u = CustomUser.objects.select_for_update().get(id=s.user_id)
+            u.credits_reserved = max(
+                (u.credits_reserved or Decimal("0")) - s.reserved_credits,
+                Decimal("0")
+            )
+            u.save(update_fields=["credits_reserved"])
+            s.reserved_credits = Decimal("0")
+
+        s.save(update_fields=[
+            "stage", "finished_at", "reserved_credits", "updated_at"
+        ])
         kick_next_session_task.delay(s.user_id)
 
 @shared_task
@@ -3395,7 +3441,7 @@ def send_invoice_email_task(self, invoice_id, email_type, recipient_email=None, 
 @shared_task(name="send_payment_reminders")
 def send_payment_reminders():
     """Ежедневная проверка — автоматические напоминания по invoice_reminder_days."""
-    from .models import Invoice, InvoiceSettings, InvSubscription
+    from .models import Invoice, InvoiceSettings, InvSubscription, InvoiceEmail
 
     today = timezone.localdate()
     count = 0
@@ -3426,8 +3472,6 @@ def send_payment_reminders():
                     user_sub_cache[user_id] = None
 
             if user_sub_cache[user_id] == "free":
-                # Free plan — disable auto reminders silently
-                # Also turn off the flag so it doesn't keep checking
                 Invoice.objects.filter(id=inv.id).update(send_payment_reminders=False)
                 skipped_free += 1
                 continue
@@ -3466,12 +3510,17 @@ def send_payment_reminders():
             errors += 1
             logger.error(f"Reminder check error for invoice {inv.id}: {e}")
 
-    logger.info(
-        "Payment reminders: %d queued, %d skipped (free), %d errors",
-        count, skipped_free, errors,
-    )
-    return {"queued": count, "skipped_free": skipped_free, "errors": errors}
+    sent_today = InvoiceEmail.objects.filter(
+        email_type__in=["reminder_before", "reminder_overdue"],
+        status="sent",
+        sent_at__date=today,
+    ).count()
 
+    logger.info(
+        "Payment reminders: %d queued, %d skipped (free), %d errors, %d sent today",
+        count, skipped_free, errors, sent_today,
+    )
+    return {"queued": count, "skipped_free": skipped_free, "errors": errors, "sent_today": sent_today}
 
 
 # ════════════════════════════════════════════════════════════
