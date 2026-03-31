@@ -298,6 +298,14 @@ LOGGING = {
             "filename": os.path.join(BASE_DIR, "celeryTasks.log"),
             "formatter": "verbose",
         },
+        "celery_beat_file": {
+            "level": "INFO",
+            "class": "logging.handlers.RotatingFileHandler",
+            "filename": os.path.join(BASE_DIR, "celery-beat-tasks.log"),
+            "maxBytes": 5 * 1024 * 1024,
+            "backupCount": 3,
+            "formatter": "verbose",
+        },
         "console": {
             "level": "DEBUG",
             "class": "logging.StreamHandler",
@@ -323,6 +331,11 @@ LOGGING = {
         },
         "celery": {
             "handlers": ["celery_file"],
+            "level": "INFO",
+            "propagate": False,
+        },
+        "celery_beat_monitor": {
+            "handlers": ["celery_beat_file"],
             "level": "INFO",
             "propagate": False,
         },
