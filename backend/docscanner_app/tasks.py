@@ -87,37 +87,24 @@ def settle_session_for_doc(doc_id: int):
     if doc.is_archive_container:
         s.pending_archives = max((s.pending_archives or 0) - 1, 0)
 
-        # НОВОЕ: если архив rejected/failed — дочерних не будет,
-        # надо освободить кредиты за expected_items из этого архива
         if doc.status in ("rejected", "failed"):
-            # считаем сколько дочерних реально создалось
             actual_children = ScannedDocument.objects.filter(
                 parent_document=doc,
             ).count()
-            
-            # если дочерних 0 — освобождаем весь резерв за этот архив
-            if actual_children == 0:
-                # сколько файлов было expected из этого архива
-                # (берём из expected_items сессии минус обычные файлы)
-                archive_expected = max(s.expected_items - ScannedDocument.objects.filter(
-                    upload_session=s,
-                    is_archive_container=False,
-                    parent_document__isnull=True,
-                ).count(), 0)
-                
-                cost = _doc_cost(doc.scan_type)
-                release = cost * Decimal(archive_expected)
-                
-                if release > 0:
-                    u.credits_reserved = max(
-                        (u.credits_reserved or Decimal("0")) - release, 
-                        Decimal("0")
-                    )
-                    s.reserved_credits = max(
-                        (s.reserved_credits or Decimal("0")) - release, 
-                        Decimal("0")
-                    )
-                    u.save(update_fields=["credits_reserved"])
+
+            unrealized = max((doc.archive_file_count or 0) - actual_children, 0)
+            release = _doc_cost(doc.scan_type) * Decimal(unrealized)
+
+            if release > 0:
+                u.credits_reserved = max(
+                    (u.credits_reserved or Decimal("0")) - release,
+                    Decimal("0")
+                )
+                s.reserved_credits = max(
+                    (s.reserved_credits or Decimal("0")) - release,
+                    Decimal("0")
+                )
+                u.save(update_fields=["credits_reserved"])
 
         doc.counted_in_session = True
         s.save(update_fields=["pending_archives", "reserved_credits", "updated_at"])
@@ -182,15 +169,12 @@ def _maybe_finish_session(session_id: str):
     processed = s.processed_items or 0
 
     normal_done = (pending == 0 and actual > 0 and processed >= actual)
-
-    # НОВОЕ: архивы распакованы (или rejected), но дочерних 0
     empty_done = (pending == 0 and actual == 0)
 
     if normal_done or empty_done:
         s.stage = "done" if normal_done else "failed"
         s.finished_at = timezone.now()
-        
-        # Освободить зависшие резервы
+
         if s.reserved_credits > 0:
             u = CustomUser.objects.select_for_update().get(id=s.user_id)
             u.credits_reserved = max(

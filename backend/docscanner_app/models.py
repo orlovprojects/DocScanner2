@@ -326,6 +326,8 @@ class ScannedDocument(models.Model):
     counted_in_session = models.BooleanField(default=False)
 
     is_archive_container = models.BooleanField(default=False)
+    archive_file_count = models.PositiveIntegerField(default=0)
+
 
     parent_document = models.ForeignKey(
         "self",

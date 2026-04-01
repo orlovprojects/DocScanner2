@@ -5603,23 +5603,23 @@ def compute_expected_items(session: UploadSession) -> int:
     for a in archives:
         path = a.file.path
         ext = _ext(a.original_filename)
+        count = 0
 
         if ext == ".zip":
             with zipfile.ZipFile(path) as zf:
                 for zi in zf.infolist():
-                    if zi.is_dir(): 
+                    if zi.is_dir():
                         continue
-                    name = zi.filename
-                    if not name: 
+                    if not zi.filename:
                         continue
-                    total_inside += 1
+                    count += 1
 
         elif ext in {".tar", ".tgz", ".tar.gz", ".tar.bz2", ".tar.xz", ".tbz2"}:
             with tarfile.open(path, mode="r:*") as tf:
                 for m in tf.getmembers():
                     if not m.isfile():
                         continue
-                    total_inside += 1
+                    count += 1
 
         elif ext == ".7z":
             try:
@@ -5627,10 +5627,10 @@ def compute_expected_items(session: UploadSession) -> int:
                 with py7zr.SevenZipFile(path, mode='r') as sz:
                     for name in sz.getnames():
                         if not name.endswith('/'):
-                            total_inside += 1
+                            count += 1
             except Exception as e:
                 logger.warning(f"Failed to read 7z archive {a.original_filename}: {e}")
-                total_inside += 1  # fallback
+                count = 1
 
         elif ext == ".rar":
             try:
@@ -5639,53 +5639,19 @@ def compute_expected_items(session: UploadSession) -> int:
                     for ri in rf.infolist():
                         if ri.isdir():
                             continue
-                        total_inside += 1
+                        count += 1
             except Exception as e:
                 logger.warning(f"Failed to read rar archive {a.original_filename}: {e}")
-                total_inside += 1  # fallback
+                count = 1
 
         else:
-            # Неизвестный архив — считаем как 1 (безопаснее чем 0)
-            total_inside += 1
+            count = 1
 
-    return base + total_inside
+        a.archive_file_count = count
+        a.save(update_fields=["archive_file_count"])
 
-# def compute_expected_items(session: UploadSession) -> int:
-#     # обычные файлы
-#     base = ScannedDocument.objects.filter(upload_session=session, is_archive_container=False).count()
+        total_inside += count
 
-#     # архивы (минимальный preflight)
-#     archives = ScannedDocument.objects.filter(upload_session=session, is_archive_container=True)
-#     total_inside = 0
-
-#     for a in archives:
-#         path = a.file.path  # если storage не локальный — надо будет иначе
-#         ext = _ext(a.original_filename)
-
-#         if ext == ".zip":
-#             with zipfile.ZipFile(path) as zf:
-#                 for zi in zf.infolist():
-#                     if zi.is_dir(): 
-#                         continue
-#                     name = zi.filename
-#                     if not name: 
-#                         continue
-#                     # можно тут пропускать __MACOSX/Thumbs.db и т.п.
-#                     total_inside += 1
-
-#         elif ext in {".tar",".tgz",".tar.gz",".tar.bz2",".tar.xz",".tbz2"}:
-#             with tarfile.open(path, mode="r:*") as tf:
-#                 for m in tf.getmembers():
-#                     if not m.isfile():
-#                         continue
-#                     total_inside += 1
-
-#         else:
-#             # RAR/7Z: если хочешь пока без preflight — можно вернуть 0 и обрабатывать позже
-#             # но ты выбрал reserved_credits -> лучше добавить позже поддержку
-#             total_inside += 0
-
-#     return base + total_inside
 
 
 
