@@ -6313,7 +6313,10 @@ def invoice_create(request):
 @permission_classes([IsAuthenticated])
 def invoice_detail(request, pk):
     """Получить полный счёт с line items."""
-    invoice = get_object_or_404(Invoice, pk=pk, user=request.user)
+    if request.user.is_superuser:
+        invoice = get_object_or_404(Invoice, pk=pk)
+    else:
+        invoice = get_object_or_404(Invoice, pk=pk, user=request.user)
     serializer = InvoiceDetailSerializer(invoice, context={"request": request})
     return Response(serializer.data)
 
