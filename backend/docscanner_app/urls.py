@@ -113,6 +113,7 @@ from .views import (
     inv_subscription_status,
     inv_start_trial,
     inv_cancel_subscription,
+    admin_all_invoices,
 )
 from . import cloud_views
 from . import views
@@ -303,6 +304,8 @@ urlpatterns = [
     path('admin/visi-failai/', admin_all_documents, name='admin_all_documents'),
     path("admin/users/", admin_users_simple, name="admin_users_simple"),
 
+    #ADMIN israsymas
+    path("admin/visos-saskaitos/", admin_all_invoices, name="admin_all_invoices"),
 
     #Optimizacija skorosti
 

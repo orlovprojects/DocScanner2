@@ -21,6 +21,7 @@ import AdminDashboard from "./pages/AdminDashboard";
 import AdminSuvestine from "./pages/AdminSuvestine";
 import AdminVisiFailai from "./pages/AdminVisiFailai";
 import AdminKlientai from "./pages/AdminKlientai";
+import AdminIsrasytosSaskaitos from './pages/AdminIsrasytosSaskaitos';
 
 import NaudojimoGidas from './pages/NaudojimoGidas';
 import GidoCategories from './pages/GidoCategories';
@@ -176,6 +177,7 @@ function App() {
         <Route path="/admin-visi-failai" element={<RequireSuperuser loginPath="/prisijungti" forbiddenPath="/403"><AdminVisiFailai /></RequireSuperuser>} />
         <Route path="/admin-suvestine" element={<RequireSuperuser loginPath="/prisijungti" forbiddenPath="/403"><AdminSuvestine /></RequireSuperuser>} />
         <Route path="/admin-klientai" element={<RequireSuperuser loginPath="/prisijungti" forbiddenPath="/403"><AdminKlientai /></RequireSuperuser>} />
+        <Route path="/admin-israsytos-saskaitos" element={<RequireSuperuser loginPath="/prisijungti" forbiddenPath="/403"><AdminIsrasytosSaskaitos /></RequireSuperuser>} />
 
         <Route path="/sf/:uuid" element={<InvoicePublicPage />} />
         <Route path="*" element={<NotFound />} />

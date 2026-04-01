@@ -3252,3 +3252,63 @@ class RivileGamaAPIKeyUpdateSerializer(serializers.Serializer):
 # ────────────────────────────────────────────────────────────
 # END ─── Rivile GAMA API Key Serializers ───
 # ────────────────────────────────────────────────────────────
+
+
+# ────────────────────────────────────────────────────────────
+# ─── Dlia ADMIN israsymas ───
+# ────────────────────────────────────────────────────────────
+
+class InvoiceAdminListSerializer(serializers.ModelSerializer):
+    user_id = serializers.IntegerField(source="user.id", read_only=True)
+    owner_email = serializers.EmailField(source="user.email", read_only=True)
+    full_number = serializers.CharField(read_only=True)
+    can_create_pvm_sf = serializers.BooleanField(read_only=True)
+    has_proposed_payments = serializers.BooleanField(read_only=True)
+    is_overdue = serializers.SerializerMethodField()
+ 
+    class Meta:
+        model = Invoice
+        fields = [
+            "id",
+            "user_id",
+            "owner_email",
+            "uuid",
+            "invoice_type",
+            "status",
+            "document_series",
+            "document_number",
+            "full_number",
+            "invoice_date",
+            "due_date",
+            "buyer_name",
+            "buyer_email",
+            "seller_name",
+            "currency",
+            "pvm_tipas",
+            "amount_wo_vat",
+            "vat_amount",
+            "amount_with_vat",
+            "paid_amount",
+            "exported",
+            "exported_at",
+            "email_sent_count",
+            "email_last_status",
+            "can_create_pvm_sf",
+            "has_proposed_payments",
+            "is_overdue",
+            "source_invoice",
+            "created_at",
+        ]
+ 
+    def get_is_overdue(self, obj):
+        if obj.status not in ("issued", "sent"):
+            return False
+        if not obj.due_date:
+            return False
+        from datetime import date
+        return obj.due_date < date.today()
+
+
+# ────────────────────────────────────────────────────────────
+# END ─── Dlia ADMIN israsymas ───
+# ────────────────────────────────────────────────────────────

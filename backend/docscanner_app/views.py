@@ -155,6 +155,7 @@ from .serializers import (
     RivileGamaAPIKeySerializer,
     RivileGamaAPIKeyCreateSerializer,
     RivileGamaAPIKeyUpdateSerializer,
+    InvoiceAdminListSerializer,
 )
 from django.db.models import Prefetch
 from django.db.models import Count, Sum
@@ -9795,4 +9796,92 @@ def _ensure_nested(data):
 
 # ════════════════════════════════════════════════════════════
 # END ─── Extra fields v nustatymai ───
+# ════════════════════════════════════════════════════════════
+
+
+# ════════════════════════════════════════════════════════════
+# ─── Dlia ADMIN israsymas ───
+# ════════════════════════════════════════════════════════════
+
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+from rest_framework import status
+from django.db.models import Q
+from django.utils.dateparse import parse_date
+from datetime import timedelta
+ 
+ 
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def admin_all_invoices(request):
+    """
+    Dlia superuser — spisok VSEX sčotov vsex polzovatelej.
+    Offset/limit paginacija dlia infinite scroll.
+    """
+    if not request.user.is_superuser:
+        return Response({"detail": "Not authorized"}, status=status.HTTP_403_FORBIDDEN)
+ 
+    qs = Invoice.objects.select_related("user").all()
+ 
+    # --- filtry ---
+ 
+    st = request.GET.get("status")
+    if st:
+        qs = qs.filter(status=st)
+ 
+    invoice_type = request.GET.get("invoice_type")
+    if invoice_type:
+        qs = qs.filter(invoice_type=invoice_type)
+ 
+    q = request.GET.get("q")
+    if q:
+        qs = qs.filter(
+            Q(document_number__icontains=q)
+            | Q(document_series__icontains=q)
+            | Q(buyer_name__icontains=q)
+            | Q(buyer_email__icontains=q)
+            | Q(seller_name__icontains=q)
+            | Q(user__email__icontains=q)
+        )
+ 
+    date_from = request.GET.get("date_from")
+    if date_from:
+        d = parse_date(date_from)
+        if d:
+            qs = qs.filter(invoice_date__gte=d)
+ 
+    date_to = request.GET.get("date_to")
+    if date_to:
+        d = parse_date(date_to)
+        if d:
+            qs = qs.filter(invoice_date__lte=d)
+ 
+    # --- sortirovka ---
+    qs = qs.order_by("-created_at", "-id")
+ 
+    # --- offset/limit paginacija ---
+    try:
+        offset = int(request.GET.get("offset", 0))
+    except (ValueError, TypeError):
+        offset = 0
+    try:
+        limit = int(request.GET.get("limit", 50))
+    except (ValueError, TypeError):
+        limit = 50
+    limit = min(limit, 100)  # max 100
+ 
+    total = qs.count()
+    results = qs[offset : offset + limit]
+ 
+    serializer = InvoiceAdminListSerializer(results, many=True)
+ 
+    return Response({
+        "count": total,
+        "results": serializer.data,
+    })
+
+
+# ════════════════════════════════════════════════════════════
+# END ─── Dlia ADMIN israsymas ───
 # ════════════════════════════════════════════════════════════

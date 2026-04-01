@@ -46,6 +46,7 @@ const MEGA_MENUS = {
       { text: "Klaidų suvestinė", path: "/admin-suvestine" },
       { text: "Visi failai", path: "/admin-visi-failai" },
       { text: "Klientai", path: "/admin-klientai" },
+      { text: "Išrašymas visos sąskaitos", path: "/admin-israsytos-saskaitos" },
     ],
   },
   skaitmenizavimas: {
