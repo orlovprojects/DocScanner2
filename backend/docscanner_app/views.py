@@ -156,6 +156,7 @@ from .serializers import (
     RivileGamaAPIKeyCreateSerializer,
     RivileGamaAPIKeyUpdateSerializer,
     InvoiceAdminListSerializer,
+    RecurringInvoiceAdminListSerializer,
 )
 from django.db.models import Prefetch
 from django.db.models import Count, Sum
@@ -5652,6 +5653,7 @@ def compute_expected_items(session: UploadSession) -> int:
         a.save(update_fields=["archive_file_count"])
 
         total_inside += count
+    return base + total_inside
 
 
 
@@ -7391,6 +7393,8 @@ class RecurringInvoiceViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
+        if self.request.user.is_superuser:
+            return RecurringInvoice.objects.all().prefetch_related("line_items")
         return RecurringInvoice.objects.filter(
             user=self.request.user
         ).prefetch_related("line_items")
@@ -8776,7 +8780,10 @@ from .serializers import InvoiceEmailSerializer, ReminderSettingsSerializer
 @permission_classes([IsAuthenticated])
 def invoice_email_list(request, invoice_id):
     """GET /api/invoicing/invoices/<id>/emails/ — список отправленных email."""
-    invoice = get_object_or_404(Invoice, id=invoice_id, user=request.user)
+    if request.user.is_superuser:
+        invoice = get_object_or_404(Invoice, id=invoice_id)
+    else:
+        invoice = get_object_or_404(Invoice, id=invoice_id, user=request.user)
     emails = invoice.emails.all().order_by("-sent_at")
     serializer = InvoiceEmailSerializer(emails, many=True)
     return Response(serializer.data)
@@ -9884,6 +9891,58 @@ def admin_all_invoices(request):
         "results": serializer.data,
     })
 
+
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def admin_all_recurring_invoices(request):
+    """
+    Dlia superuser — spisok VSEX periodičeskich sčotov vsex polzovatelej.
+    Offset/limit paginacija.
+    """
+    if not request.user.is_superuser:
+        return Response({"detail": "Not authorized"}, status=status.HTTP_403_FORBIDDEN)
+ 
+    qs = RecurringInvoice.objects.select_related("user").prefetch_related("line_items").all()
+ 
+    # --- filtry ---
+    q = request.GET.get("q")
+    if q:
+        qs = qs.filter(
+            Q(document_series__icontains=q)
+            | Q(buyer_name__icontains=q)
+            | Q(buyer_email__icontains=q)
+            | Q(seller_name__icontains=q)
+            | Q(user__email__icontains=q)
+        )
+ 
+    st = request.GET.get("status")
+    if st:
+        qs = qs.filter(status=st)
+ 
+    qs = qs.order_by("-created_at", "-id")
+ 
+    # --- offset/limit ---
+    try:
+        offset = int(request.GET.get("offset", 0))
+    except (ValueError, TypeError):
+        offset = 0
+    try:
+        limit = int(request.GET.get("limit", 50))
+    except (ValueError, TypeError):
+        limit = 50
+    limit = min(limit, 100)
+ 
+    total = qs.count()
+    results = qs[offset : offset + limit]
+ 
+    serializer = RecurringInvoiceAdminListSerializer(results, many=True)
+ 
+    return Response({
+        "count": total,
+        "results": serializer.data,
+    })
 
 # ════════════════════════════════════════════════════════════
 # END ─── Dlia ADMIN israsymas ───

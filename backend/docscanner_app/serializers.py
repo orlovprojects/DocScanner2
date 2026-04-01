@@ -3309,6 +3309,55 @@ class InvoiceAdminListSerializer(serializers.ModelSerializer):
         return obj.due_date < date.today()
 
 
+class RecurringInvoiceAdminListSerializer(serializers.ModelSerializer):
+    user_id = serializers.IntegerField(source="user.id", read_only=True)
+    owner_email = serializers.EmailField(source="user.email", read_only=True)
+    estimated_amount = serializers.SerializerMethodField()
+ 
+    class Meta:
+        model = RecurringInvoice
+        fields = [
+            "id",
+            "user_id",
+            "owner_email",
+            "uuid",
+            "status",
+            "invoice_type",
+            "document_series",
+            "currency",
+            "buyer_name",
+            "buyer_email",
+            "seller_name",
+            "frequency",
+            "interval",
+            "first_day_of_month",
+            "last_day_of_month",
+            "start_date",
+            "end_date",
+            "next_run_at",
+            "last_run_at",
+            "generation_count",
+            "max_count",
+            "auto_issue",
+            "auto_send",
+            "created_at",
+            "estimated_amount",
+        ]
+ 
+    def get_estimated_amount(self, obj):
+        """Примерная сумма из line_items (как в обычном листинге)."""
+        from decimal import Decimal
+        total = Decimal("0")
+        for li in obj.line_items.all():
+            qty = li.quantity or Decimal("1")
+            price = li.price or Decimal("0")
+            vat_pct = li.vat_percent or Decimal("0")
+            subtotal = qty * price
+            vat = subtotal * vat_pct / Decimal("100")
+            total += subtotal + vat
+        return str(total.quantize(Decimal("0.01")))
+
+
 # ────────────────────────────────────────────────────────────
 # END ─── Dlia ADMIN israsymas ───
 # ────────────────────────────────────────────────────────────

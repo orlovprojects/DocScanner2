@@ -114,6 +114,7 @@ from .views import (
     inv_start_trial,
     inv_cancel_subscription,
     admin_all_invoices,
+    admin_all_recurring_invoices,
 )
 from . import cloud_views
 from . import views
@@ -306,6 +307,7 @@ urlpatterns = [
 
     #ADMIN israsymas
     path("admin/visos-saskaitos/", admin_all_invoices, name="admin_all_invoices"),
+    path("admin/visos-periodines/", admin_all_recurring_invoices, name="admin_all_recurring_invoices"),
 
     #Optimizacija skorosti
 
