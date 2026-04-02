@@ -428,7 +428,7 @@ urlpatterns = [
 
     # ─── Direct payment links ───
     # Payment providers
-    path("invoices/<int:invoice_id>/generate-payment-link/", generate_payment_link, name="generate_payment_link"),
+    path("invoicing/invoices/<int:invoice_id>/generate-payment-link/", generate_payment_link, name="generate_payment_link"),
     path("invoicing/payment-providers/", available_payment_providers, name="available_payment_providers"),
  
     # NEW — single connect (save + test) endpoint

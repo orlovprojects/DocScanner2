@@ -66,24 +66,21 @@ class PaymentLinkService:
 
         # Webhook URL — публичный, без auth
         webhook_url = (
-            f"{settings.BACKEND_URL}/api/invoicing/"
+            f"{settings.SITE_URL_BACKEND}/api/invoicing/"
             f"payment-webhook/{provider_name}/{invoice.id}/"
         )
 
-        # Return URL после оплаты
+        # Return URL после оплаты — публичная страница счёта
         return_url = (
-            f"{settings.FRONTEND_URL}/mokejimas/aciu/{invoice.id}/"
+            f"{getattr(settings, 'INVOICE_PUBLIC_URL', 'https://saskaituisrasymas.lt')}/sf/{invoice.uuid}/"
         )
 
         # Описание
-        series_prefix = ""
-        if hasattr(invoice, "series") and invoice.series:
-            series_prefix = invoice.series.prefix or ""
-        description = f"Sąskaita faktūra {series_prefix}{invoice.number}"
+        description = f"Sąskaita faktūra {invoice.full_number}"
 
         result = provider.create_payment_link(
             invoice_id=invoice.id,
-            amount=invoice.total_amount,
+            amount=invoice.amount_with_vat,
             currency=getattr(invoice, "currency", "EUR") or "EUR",
             description=description,
             due_date=getattr(invoice, "due_date", None),
@@ -115,8 +112,8 @@ class PaymentLinkService:
         Вызывается из webhook view.
         Находит invoice → user → provider config → verify → create transaction.
         """
-        from ..models import Invoice  # lazy import, avoid circular
-        from ..models import IncomingTransaction, PaymentAllocation  # adjust import path
+        from ..models import Invoice
+        from ..models import IncomingTransaction, PaymentAllocation
 
         # 1. Находим invoice и владельца
         try:
@@ -153,7 +150,7 @@ class PaymentLinkService:
             transaction_date=timezone.now().date(),
             counterparty_name=result.payer_name or getattr(invoice, "buyer_name", "") or "",
             counterparty_code="",
-            payment_purpose=f"Apmokėjimas pagal sąskaitą {_series_prefix(invoice)}{invoice.number}",
+            payment_purpose=f"Apmokėjimas pagal sąskaitą {invoice.full_number}",
             amount=result.amount,
             currency=result.currency,
             provider_name=provider_name,
@@ -195,7 +192,7 @@ class PaymentLinkService:
             .aggregate(t=Sum("amount"))["t"]
         ) or Decimal("0")
 
-        if total_paid >= invoice.total_amount:
+        if total_paid >= invoice.amount_with_vat:
             invoice.status = "paid"
             invoice.save(update_fields=["status"])
             logger.info("Invoice %s marked as paid via %s", invoice_id, provider_name)
@@ -242,7 +239,6 @@ class PaymentLinkService:
             if meta_key in data:
                 new_config[meta_key] = data[meta_key]
             elif meta_key in current:
-                # Preserve existing value if not in incoming data
                 new_config[meta_key] = current[meta_key]
 
         providers[provider_name] = new_config
@@ -255,9 +251,3 @@ def _get_secret_fields(provider_name: str) -> set[str]:
         "montonio": {"secret_key"},
         "paysera": {"sign_password"},
     }.get(provider_name, set())
-
-
-def _series_prefix(invoice) -> str:
-    if hasattr(invoice, "series") and invoice.series:
-        return invoice.series.prefix or ""
-    return ""

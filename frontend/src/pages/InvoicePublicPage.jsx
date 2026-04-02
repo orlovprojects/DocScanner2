@@ -480,10 +480,10 @@ const InvoicePublicPage = () => {
 
   if (!invoice) return null;
 
-  const invoiceForPreview = {
-    ...invoice,
-    payment_link_url: hasPaymentLink ? invoice.payment_link_url : '',
-  };
+    const invoiceForPreview = {
+        ...invoice,
+        payment_link_url: '',
+    };
 
   return (
     <Box
@@ -601,32 +601,43 @@ const InvoicePublicPage = () => {
                 </Stack>
               </Box>
 
-              {hasPaymentLink ? (
+                {hasPaymentLink ? (
                 <Button
-                  variant="contained"
-                  size="large"
-                  href={invoice.payment_link_url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  sx={{
+                    variant="contained"
+                    size="large"
+                    href={invoice.payment_link_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    disableElevation
+                    sx={{
                     alignSelf: { xs: 'stretch', md: 'center' },
-                    minWidth: { md: 180 },
-                    height: 52,
+                    minWidth: { md: 200 },
+                    height: 'auto',
+                    py: 1.5,
+                    px: 4,
                     borderRadius: 3,
                     textTransform: 'none',
-                    fontWeight: 700,
-                    fontSize: 16,
-                    backgroundColor: '#2563EB',
-                    boxShadow: 'none',
+                    backgroundColor: '#3B82F6',
+                    color: '#fff',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 0.25,
+                    boxShadow: '0 1px 3px rgba(59,130,246,0.15), 0 4px 12px rgba(59,130,246,0.12)',
+                    transition: 'all 0.15s ease',
                     '&:hover': {
-                      backgroundColor: '#1D4ED8',
-                      boxShadow: 'none',
+                        backgroundColor: '#2563EB',
+                        boxShadow: '0 2px 6px rgba(59,130,246,0.2), 0 8px 24px rgba(59,130,246,0.18)',
                     },
-                  }}
+                    }}
                 >
-                  Apmokėti
+                    <span style={{ fontSize: 16, fontWeight: 700, lineHeight: 1.3 }}>
+                    Apmokėti sąskaitą
+                    </span>
+                    <span style={{ fontSize: 13, fontWeight: 500, opacity: 0.75, lineHeight: 1.2 }}>
+                    {fmtAmount(displayAmount, invoice.currency)}
+                    </span>
                 </Button>
-              ) : (
+                ) : (
                 <Box
                   sx={{
                     px: 2,

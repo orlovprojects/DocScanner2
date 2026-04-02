@@ -203,7 +203,7 @@ class MontonioProvider(BasePaymentProvider):
                 success=False, payment_id="", merchant_reference="",
                 amount=Decimal("0"),
             )
-    
+
         try:
             decoded = jwt.decode(token, self.secret_key, algorithms=["HS256"])
         except jwt.InvalidTokenError as e:
@@ -212,10 +212,10 @@ class MontonioProvider(BasePaymentProvider):
                 success=False, payment_id="", merchant_reference="",
                 amount=Decimal("0"),
             )
-    
+
         status = decoded.get("paymentStatus", decoded.get("status", ""))
         is_finalized = status in ("finalized", "PAID")
-    
+
         logger.info(
             "[Montonio Webhook] Decoded: status=%s, uuid=%s, ref=%s, amount=%s, currency=%s",
             status,
@@ -224,10 +224,10 @@ class MontonioProvider(BasePaymentProvider):
             decoded.get("grandTotal", decoded.get("amount", 0)),
             decoded.get("currency", "EUR"),
         )
-    
+
         if not is_finalized:
             logger.info("[Montonio Webhook] Not finalized (status=%s)", status)
-    
+
         return WebhookResult(
             success=is_finalized,
             payment_id=decoded.get("uuid", decoded.get("payment_uuid", "")),
@@ -273,6 +273,9 @@ class PayseraProvider(BasePaymentProvider):
     https://developers.paysera.com/en/payments/current
 
     Auth: project_id + sign_password (MD5 подпись).
+
+    ВАЖНО: У Paysera нет рабочего sandbox.
+    Тестирование идёт на production URL с параметром test=1.
     """
 
     name = "paysera"
@@ -284,8 +287,8 @@ class PayseraProvider(BasePaymentProvider):
          "options": [("sandbox", "Sandbox (testavimas)"), ("production", "Production")]},
     ]
 
+    # Всегда production URL — тестирование через test=1 параметр
     PAY_URL = "https://www.paysera.com/pay/"
-    TEST_URL = "https://sandbox.paysera.com/pay/"
 
     @property
     def project_id(self):
@@ -297,7 +300,7 @@ class PayseraProvider(BasePaymentProvider):
 
     @property
     def is_test(self):
-        return self.config.get("environment", "production") == "sandbox"
+        return self.config.get("environment", "production") != "production"
 
     def _sign(self, data_base64: str) -> str:
         return hashlib.md5((data_base64 + self.sign_password).encode()).hexdigest()
@@ -315,7 +318,7 @@ class PayseraProvider(BasePaymentProvider):
         return_url: str = "",
     ) -> PaymentLinkResult:
 
-        fallback_url = f"{settings.FRONTEND_URL}/israsymas/saskaitos"
+        fallback_url = f"{settings.SITE_URL_FRONTEND}/israsymas/saskaitos"
 
         params = {
             "projectid": self.project_id,
@@ -342,8 +345,8 @@ class PayseraProvider(BasePaymentProvider):
         data_b64 = base64.urlsafe_b64encode(data_str.encode()).decode()
         sign = self._sign(data_b64)
 
-        pay_base = self.TEST_URL if self.is_test else self.PAY_URL
-        payment_url = f"{pay_base}?data={data_b64}&sign={sign}"
+        # Всегда production URL — test=1 в параметрах включает тестовый режим
+        payment_url = f"{self.PAY_URL}?data={data_b64}&sign={sign}"
 
         logger.info("Paysera payment link created: invoice=%s", invoice_id)
 
@@ -355,41 +358,41 @@ class PayseraProvider(BasePaymentProvider):
     def verify_webhook(self, request_data: dict) -> WebhookResult:
         data_b64 = request_data.get("data", "")
         ss1 = request_data.get("ss1", "")
-    
+
         # Verify signature
         expected = self._sign(data_b64)
-    
+
         logger.info(
             "[Paysera Webhook] data=%s..., ss1=%s, expected=%s, match=%s",
             data_b64[:40], ss1, expected, ss1 == expected,
         )
-    
+
         if ss1 != expected:
             logger.warning("[Paysera Webhook] Signature mismatch!")
             return WebhookResult(
                 success=False, payment_id="", merchant_reference="",
                 amount=Decimal("0"),
             )
-    
+
         # Decode
         decoded_str = base64.urlsafe_b64decode(data_b64).decode()
         params = parse_qs(decoded_str)
-    
+
         def first(key, default=""):
             vals = params.get(key, [default])
             return vals[0] if vals else default
-    
+
         status = first("status")
         is_success = status in ("1", "3")
-    
+
         logger.info(
             "[Paysera Webhook] Decoded: status=%s, orderid=%s, amount=%s, currency=%s, requestid=%s",
             status, first("orderid"), first("amount", "0"), first("currency", "EUR"), first("requestid"),
         )
-    
+
         if not is_success:
             logger.info("[Paysera Webhook] Not successful (status=%s)", status)
-    
+
         return WebhookResult(
             success=is_success,
             payment_id=first("requestid"),

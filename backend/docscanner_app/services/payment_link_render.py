@@ -8,6 +8,8 @@ from reportlab.lib.colors import HexColor, white
 from reportlab.lib.units import mm
 from reportlab.platypus import Flowable
 
+from django.conf import settings
+
 
 # ════════════════════════════════════════════════════════════
 # PDF — ReportLab Flowable button for header
@@ -79,20 +81,22 @@ class PaymentButton(Flowable):
 # Email — HTML button
 # ════════════════════════════════════════════════════════════
 
-def render_payment_button_html(payment_url: str, amount=None, currency="EUR") -> str:
+def render_payment_button_html(invoice, payment_url: str = "") -> str:
     """
-    Returns HTML block with "Apmokėti" button for email body.
+    Returns HTML block with "Peržiūrėti ir apmokėti" button for email body.
+    Links to the PUBLIC invoice page (not directly to payment provider).
+
+    The public page shows invoice details + payment button.
 
     Usage:
         if invoice.payment_link_url:
-            body_html += render_payment_button_html(
-                invoice.payment_link_url,
-                amount=invoice.amount_with_vat,
-                currency=invoice.currency,
-            )
+            body_html += render_payment_button_html(invoice)
     """
-    if not payment_url:
-        return ""
+    # Build public invoice URL
+    public_url = f"{settings.SITE_URL_FRONTEND}/saskaita/{invoice.uuid}/"
+
+    amount = invoice.amount_with_vat
+    currency = getattr(invoice, "currency", "EUR") or "EUR"
 
     amount_line = ""
     if amount is not None:
@@ -105,8 +109,12 @@ def render_payment_button_html(payment_url: str, amount=None, currency="EUR") ->
             </span>"""
 
     return f"""
-    <div style="text-align: center; margin: 28px 0 16px;">
-        <a href="{payment_url}"
+    <div style="text-align: center; margin: 28px 0 8px;">
+        <p style="color: #666; font-size: 14px; margin: 0 0 16px;
+                  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
+            S&#261;skait&#261; galite per&#382;i&#363;r&#279;ti ir apmok&#279;ti paspaud&#281; mygtuk&#261; &#382;emiau.
+        </p>
+        <a href="{public_url}"
            target="_blank"
            style="background-color: #1976d2;
                   color: #ffffff;
@@ -118,12 +126,7 @@ def render_payment_button_html(payment_url: str, amount=None, currency="EUR") ->
                   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
                   display: inline-block;
                   ">
-            Apmok&#279;ti s&#261;skait&#261;{amount_line}
+            Per&#382;i&#363;r&#279;ti ir apmok&#279;ti s&#261;skait&#261;{amount_line}
         </a>
     </div>
-    <p style="text-align: center; color: #999; font-size: 12px; margin: 0;
-              font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
-        Arba nukopijuokite nuorod&#261;:
-        <a href="{payment_url}" style="color: #1976d2; word-break: break-all;">{payment_url}</a>
-    </p>
     """

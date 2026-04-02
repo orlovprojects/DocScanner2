@@ -26,8 +26,6 @@ from reportlab.pdfbase.pdfmetrics import registerFontFamily
 
 from django.core.files.base import ContentFile
 
-from ..services.payment_link_render import PaymentButton
-
 logger = logging.getLogger("docscanner_app")
 
 # ════════════════════════════════════════════════════════════
@@ -595,6 +593,7 @@ def _separator():
 
 def _build_header(inv, logo_path, s):
     elements = []
+    payment_btn = None
     doc_title = TYPE_LABELS.get(inv.invoice_type, "SĄSKAITA FAKTŪRA")
     series_line = f"Serija {inv.document_series or ''} Nr. {inv.document_number or ''}"
  
@@ -602,17 +601,6 @@ def _build_header(inv, logo_path, s):
     if inv.due_date:
         right_lines.append(f"Apmokėti iki: <b>{_format_date(inv.due_date)}</b>")
     right_content = [Paragraph(line, s["date_label"]) for line in right_lines]
- 
-    # ── Payment button (if payment link exists) ──────────
-    has_payment_link = bool(getattr(inv, "payment_link_url", None))
-    payment_btn = None
-    if has_payment_link:
-        payment_btn = PaymentButton(
-            url=inv.payment_link_url,
-            amount=getattr(inv, "amount_with_vat", None) or 0,
-            currency=inv.currency or "EUR",
-        )
-        payment_btn.hAlign = "RIGHT"
  
     # ── Logo ─────────────────────────────────────────────
     has_logo = False

@@ -351,15 +351,11 @@ def _render_view_button(invoice, text=None):
 
 def _render_payment_button(invoice):
     if not invoice.payment_link_url:
-        return _render_view_button(invoice, "Peržiūrėti sąskaitą")
+        return _render_view_button(invoice, "Peržiūrėti ir apmokėti sąskaitą")
 
     from .payment_link_render import render_payment_button_html
 
-    return render_payment_button_html(
-        invoice.payment_link_url,
-        amount=invoice.amount_with_vat,
-        currency=invoice.currency or "EUR",
-    )
+    return render_payment_button_html(invoice)
 
 
 # ────────────────────────────────────────────────
@@ -385,7 +381,6 @@ def _render_invoice_sent(invoice):
         <p class="text">Siunčiame sąskaitą Nr. {invoice_no} iš {seller_name}.</p>
 
         {_render_meta_block(meta_lines)}
-        <p class="note">Sąskaitą galite peržiūrėti ir apmokėti paspaudę mygtuką žemiau.</p>
         {_render_payment_button(invoice)}
     </div>
     {_render_footer(invoice)}
@@ -509,7 +504,7 @@ def _render_reminder_overdue(invoice, days_overdue):
 
     meta_lines = [
         ("Suma", _fmt_amount(invoice.amount_with_vat, invoice.currency or "EUR")),
-        ("Apmokėti reikėjo iki", _fmt_date(invoice.due_date)),
+        ("Apmokėjimo terminas iki", _fmt_date(invoice.due_date)),
     ]
 
     body = f"""
@@ -546,7 +541,7 @@ def _render_manual_reminder(invoice):
 
     meta_lines = [
         ("Suma", _fmt_amount(invoice.amount_with_vat, invoice.currency or "EUR")),
-        ("Apmokėti reikėjo iki", _fmt_date(invoice.due_date)),
+        ("Apmokėjimo terminas iki", _fmt_date(invoice.due_date)),
     ]
 
     body = f"""

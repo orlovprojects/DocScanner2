@@ -1898,7 +1898,7 @@ class Invoice(models.Model):
     send_payment_reminders = models.BooleanField(default=False)
     payment_link_url = models.URLField(
         "Mokėjimo nuoroda",
-        max_length=500,
+        max_length=1024,
         blank=True,
         default="",
     )

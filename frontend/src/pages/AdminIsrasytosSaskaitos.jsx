@@ -26,12 +26,17 @@ import {
   Tab,
   useTheme,
   useMediaQuery,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
 } from "@mui/material";
 import {
   Search as SearchIcon,
   Download as DownloadIcon,
   Refresh as RefreshIcon,
 } from "@mui/icons-material";
+import { CalendarMonth as CalendarMonthIcon } from "@mui/icons-material";
 import MailOutlineIcon from "@mui/icons-material/MailOutline";
 import MarkEmailReadIcon from "@mui/icons-material/MarkEmailRead";
 import ErrorOutlineIcon from "@mui/icons-material/ErrorOutline";
@@ -135,6 +140,8 @@ export default function AdminIsrasytosSaskaitos() {
   const [recurringTotal, setRecurringTotal] = useState(0);
   const [recurringLoading, setRecurringLoading] = useState(false);
   const [recurringLoadingMore, setRecurringLoadingMore] = useState(false);
+
+    const [planDialog, setPlanDialog] = useState({ open: false, recurringId: null, data: null, loading: false });
 
   // ── Filters ──
   const defaultDates = useMemo(() => getDefaultDates(), []);
@@ -335,6 +342,16 @@ export default function AdminIsrasytosSaskaitos() {
   };
 
   const handleRefresh = () => { if (activeTab === 0) loadInvoices(); else loadRecurring(); };
+
+    const openPlanDialog = async (recurringId) => {
+    setPlanDialog({ open: true, recurringId, data: null, loading: true });
+    try {
+        const { data } = await invoicingApi.getRecurringPlanHistory(recurringId);
+        setPlanDialog((p) => ({ ...p, data, loading: false }));
+    } catch {
+        setPlanDialog((p) => ({ ...p, loading: false }));
+    }
+    };
 
   // ── Email popover ──
 
@@ -610,6 +627,7 @@ export default function AdminIsrasytosSaskaitos() {
                     <TableCell>Išrašymo data</TableCell>
                     <TableCell>Mokėti iki</TableCell>
                     <TableCell align="right">Suma</TableCell>
+                    <TableCell align="left">Veiksmai</TableCell>
                     <TableCell align="center">Eksp.</TableCell>
                     <TableCell align="center" sx={{ width: 44 }}>
                       <MailOutlineIcon sx={{ fontSize: 16, color: "text.secondary" }} />
@@ -702,6 +720,13 @@ export default function AdminIsrasytosSaskaitos() {
                   <Typography variant="caption" color="text.secondary">
                     Sekanti: {rec.next_run_at ? fmtDate(rec.next_run_at.split("T")[0]) : "—"}
                   </Typography>
+                  <Box sx={{ mt: 1, display: "flex", justifyContent: "flex-end" }}>
+                    <Tooltip title="Planas ir istorija">
+                        <IconButton size="small" onClick={() => openPlanDialog(rec.id)}>
+                        <CalendarMonthIcon fontSize="small" />
+                        </IconButton>
+                    </Tooltip>
+                  </Box>
                 </Paper>
               ))}
               {renderSentinel(null, false, recurringLoading, recurringLoadingMore, recurring.length)}
@@ -752,9 +777,16 @@ export default function AdminIsrasytosSaskaitos() {
                       <TableCell align="right">
                         <Typography fontWeight={700} fontSize={13}>{fmtAmount(rec.estimated_amount, rec.currency)}</Typography>
                       </TableCell>
+                        <TableCell align="left" onClick={(e) => e.stopPropagation()}>
+                        <Tooltip title="Planas ir istorija">
+                            <IconButton size="small" onClick={() => openPlanDialog(rec.id)}>
+                            <CalendarMonthIcon fontSize="small" />
+                            </IconButton>
+                        </Tooltip>
+                        </TableCell>
                     </TableRow>
                   ))}
-                  {renderSentinel(10, true, recurringLoading, recurringLoadingMore, recurring.length)}
+                  {renderSentinel(11, true, recurringLoading, recurringLoadingMore, recurring.length)}
                 </TableBody>
               </Table>
             </TableContainer>
@@ -769,6 +801,62 @@ export default function AdminIsrasytosSaskaitos() {
         invoiceId={previewInvoiceId}
         disableScrollLock
       />
+
+        {/* Plan & History Dialog */}
+        <Dialog
+        open={planDialog.open}
+        onClose={() => setPlanDialog({ open: false, recurringId: null, data: null, loading: false })}
+        maxWidth="sm" fullWidth disableScrollLock
+        >
+        <DialogTitle>Siuntimo planas ir istorija</DialogTitle>
+        <DialogContent>
+            {planDialog.loading ? (
+            <Box sx={{ display: "flex", justifyContent: "center", py: 4 }}><CircularProgress /></Box>
+            ) : planDialog.data ? (
+            <Box>
+                {planDialog.data.past?.length > 0 && (
+                <>
+                    <Typography variant="body2" fontWeight={700} sx={{ mb: 1 }}>Istorija</Typography>
+                    <Box sx={{ mb: 2 }}>
+                    {planDialog.data.past.map((run, i) => (
+                        <Box key={i} sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", py: 0.5, borderBottom: "1px solid #f0f0f0" }}>
+                        <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                            <Typography variant="body2" fontSize={13}>{fmtDate(run.date)}</Typography>
+                            <Chip
+                            label={run.status === "success" ? "Sėkminga" : run.status === "failed" ? "Nepavyko" : "Vykdoma"}
+                            color={run.status === "success" ? "success" : run.status === "failed" ? "error" : "default"}
+                            size="small" variant="outlined" sx={{ fontSize: 11, height: 20 }}
+                            />
+                        </Box>
+                        </Box>
+                    ))}
+                    </Box>
+                </>
+                )}
+                {planDialog.data.future?.length > 0 && (
+                <>
+                    <Typography variant="body2" fontWeight={700} sx={{ mb: 1 }}>Būsimos sąskaitos</Typography>
+                    <Box>
+                    {planDialog.data.future.map((date, i) => (
+                        <Box key={i} sx={{ py: 0.5, borderBottom: "1px solid #f0f0f0" }}>
+                        <Typography variant="body2" fontSize={13}>{fmtDate(date)}</Typography>
+                        </Box>
+                    ))}
+                    </Box>
+                </>
+                )}
+                {!planDialog.data.past?.length && !planDialog.data.future?.length && (
+                <Typography color="text.secondary" sx={{ py: 2, textAlign: "center" }}>Nėra duomenų</Typography>
+                )}
+            </Box>
+            ) : null}
+        </DialogContent>
+        <DialogActions>
+            <Button onClick={() => setPlanDialog({ open: false, recurringId: null, data: null, loading: false })}>
+            Uždaryti
+            </Button>
+        </DialogActions>
+        </Dialog>
 
       {/* Email History Popover */}
       <Popover
