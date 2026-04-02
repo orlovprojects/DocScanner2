@@ -93,7 +93,8 @@ def render_payment_button_html(invoice, payment_url: str = "") -> str:
             body_html += render_payment_button_html(invoice)
     """
     # Build public invoice URL
-    public_url = f"{settings.SITE_URL_FRONTEND}/saskaita/{invoice.uuid}/"
+    from .invoice_email_service import _frontend_invoice_url
+    public_url = _frontend_invoice_url(invoice)
 
     amount = invoice.amount_with_vat
     currency = getattr(invoice, "currency", "EUR") or "EUR"

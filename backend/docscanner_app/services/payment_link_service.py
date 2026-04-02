@@ -194,8 +194,21 @@ class PaymentLinkService:
 
         if total_paid >= invoice.amount_with_vat:
             invoice.status = "paid"
-            invoice.save(update_fields=["status"])
+            invoice.paid_at = timezone.now()
+            invoice.save(update_fields=["status", "paid_at"])
             logger.info("Invoice %s marked as paid via %s", invoice_id, provider_name)
+
+            # Auto-create SF from išankstinė
+            from .auto_sf import maybe_auto_create_sf
+            try:
+                created_sf = maybe_auto_create_sf(invoice)
+                if created_sf:
+                    logger.info(
+                        "Webhook: auto-created %s from išankstinė %s",
+                        created_sf.full_number, invoice.full_number,
+                    )
+            except Exception as e:
+                logger.exception("Webhook: auto_sf failed for invoice %s: %s", invoice_id, e)
 
         return allocation
 
