@@ -1250,11 +1250,9 @@ const InvoiceListPage = () => {
     }
 
     if (inv.status === 'partially_paid') {
-      const paid = parseFloat(inv.paid_amount || 0);
-      const totalAmt = parseFloat(inv.amount_with_vat || 0);
       return (
         <Chip
-          label={`Dalinai ${paid.toFixed(0)}/${totalAmt.toFixed(0)} €`}
+          label="Dalinai apmokėta"
           color="warning"
           size="small"
           variant="outlined"
@@ -1295,7 +1293,9 @@ const InvoiceListPage = () => {
 
   const renderNumberLink = (inv) => {
     const isDraft = inv.status === 'draft';
-    const display = inv.full_number || '—';
+    const display = (inv.document_series && inv.document_number)
+      ? `${inv.document_series}-${inv.document_number}`
+      : inv.full_number || '—';
 
     if (isDraft) {
       return (

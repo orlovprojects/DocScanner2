@@ -1965,7 +1965,7 @@ class Invoice(models.Model):
         self.last_payment_date = last_date
 
         invoice_total = self.amount_with_vat or Decimal("0")
-        tolerance = Decimal("0.05")
+        tolerance = Decimal("0.009")
 
         if invoice_total > 0 and total_paid >= invoice_total - tolerance:
             if self.status not in ("cancelled",):

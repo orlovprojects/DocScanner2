@@ -397,6 +397,7 @@ def _render_invoice_paid(invoice):
     invoice_no = _invoice_no(invoice)
     seller_name = invoice.seller_name or "DokSkenas"
     doc_label = "PVM sąskaita faktūra" if _is_pvm_invoice(invoice) else "Sąskaita faktūra"
+    doc_label_acc = "PVM sąskaitą faktūrą" if _is_pvm_invoice(invoice) else "Sąskaitą faktūrą"
 
     subject = f"{doc_label} {invoice_no}"
 
@@ -408,7 +409,7 @@ def _render_invoice_paid(invoice):
 
         <p class="text">Sveiki,</p>
         <p class="text">
-            Siunčiame {doc_label.lower()} Nr. {invoice_no} iš {seller_name}, išrašytą po apmokėtos išankstinės sąskaitos.
+            Siunčiame {doc_label_acc.lower()} Nr. {invoice_no} iš {seller_name}, išrašytą po apmokėtos išankstinės sąskaitos.
         </p>
 
         <p class="note">PDF sąskaita prisegta šiame laiške.</p>
