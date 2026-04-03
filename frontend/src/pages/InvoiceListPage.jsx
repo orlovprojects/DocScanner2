@@ -512,62 +512,87 @@ const InvoiceListPage = () => {
       setSnack({ open: true, msg: 'Pasirinkite buhalterinę programą nustatymuose', severity: 'warning' });
       return;
     }
+
+    const API_PROGRAMS = new Set(["optimum", "dineta", "rivile_gama_api"]);
+    const isApiExport = API_PROGRAMS.has(programKey);
+
     setExportLoading(true);
     try {
-      const payload = { ids: selectedRows.map(Number).filter(Number.isFinite), source: 'invoice', export_type: programKey };
-      const res = await api.post('/documents/export_xml/', payload, { withCredentials: true, responseType: 'blob' });
+      const payload = {
+        ids: selectedRows.map(Number).filter(Number.isFinite),
+        source: 'invoice',
+        export_type: programKey,
+      };
 
-      let filename = '';
-      const cd = res.headers?.['content-disposition'];
-      if (cd) { const m = cd.match(/filename="?([^"]+)"?/); if (m) filename = m[1]; }
-      if (!filename) filename = 'eksportas.zip';
+      if (isApiExport) {
+        // --- API export (Optimum, Dineta, Rivile GAMA API) ---
+        const res = await api.post('/documents/export_xml/', payload, {
+          withCredentials: true,
+        });
 
-      const blob = new Blob([res.data], { type: res.headers?.['content-type'] || 'application/octet-stream' });
-      const url = window.URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.setAttribute('download', filename);
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      window.URL.revokeObjectURL(url);
+        setSelectedRows([]);
+        setSnack({ open: true, msg: 'Eksportas pradėtas', severity: 'success' });
+        loadInvoices();
+        loadSummary();
 
-      setSelectedRows([]);
+      } else {
+        // --- File export (все остальные программы) ---
+        const res = await api.post('/documents/export_xml/', payload, {
+          withCredentials: true,
+          responseType: 'blob',
+        });
 
-      // --- Inv subscription: show usage snackbar ---
-      const invStatus = res.headers?.['x-inv-status'];
-      const exportsUsed = parseInt(res.headers?.['x-inv-exports-used'], 10);
-      const exportsMax = parseInt(res.headers?.['x-inv-exports-max'], 10);
+        let filename = '';
+        const cd = res.headers?.['content-disposition'];
+        if (cd) { const m = cd.match(/filename="?([^"]+)"?/); if (m) filename = m[1]; }
+        if (!filename) filename = 'eksportas.zip';
 
-      if (invStatus === 'free' && !isNaN(exportsUsed) && !isNaN(exportsMax)) {
-        if (exportsUsed >= exportsMax) {
-          setSnack({
-            open: true,
-            msg: `Pasiektas mėnesio eksporto limitas (${exportsUsed}/${exportsMax}). Įsigykite planą neribotam naudojimui.`,
-            severity: 'warning',
-          });
-        } else if (exportsUsed >= exportsMax * 0.5) {
-          setSnack({
-            open: true,
-            msg: `Šį mėnesį eksportuota ${exportsUsed}/${exportsMax} sąskaitų. Įsigykite mokamą planą neribotam naudojimui.`,
-            severity: 'info',
-          });
+        const blob = new Blob([res.data], { type: res.headers?.['content-type'] || 'application/octet-stream' });
+        const url = window.URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.setAttribute('download', filename);
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        window.URL.revokeObjectURL(url);
+
+        setSelectedRows([]);
+
+        // --- Inv subscription: show usage snackbar ---
+        const invStatus = res.headers?.['x-inv-status'];
+        const exportsUsed = parseInt(res.headers?.['x-inv-exports-used'], 10);
+        const exportsMax = parseInt(res.headers?.['x-inv-exports-max'], 10);
+
+        if (invStatus === 'free' && !isNaN(exportsUsed) && !isNaN(exportsMax)) {
+          if (exportsUsed >= exportsMax) {
+            setSnack({
+              open: true,
+              msg: `Pasiektas mėnesio eksporto limitas (${exportsUsed}/${exportsMax}). Įsigykite planą neribotam naudojimui.`,
+              severity: 'warning',
+            });
+          } else if (exportsUsed >= exportsMax * 0.5) {
+            setSnack({
+              open: true,
+              msg: `Šį mėnesį eksportuota ${exportsUsed}/${exportsMax} sąskaitų. Įsigykite mokamą planą neribotam naudojimui.`,
+              severity: 'info',
+            });
+          } else {
+            setSnack({ open: true, msg: 'Eksportas sėkmingas', severity: 'success' });
+          }
         } else {
           setSnack({ open: true, msg: 'Eksportas sėkmingas', severity: 'success' });
         }
-      } else {
-        setSnack({ open: true, msg: 'Eksportas sėkmingas', severity: 'success' });
-      }
 
-      loadInvoices();
-      loadSummary();
+        loadInvoices();
+        loadSummary();
+      }
     } catch (err) {
       console.error(err);
       if (err?.response?.data instanceof Blob) {
         try {
           const text = await err.response.data.text();
           const json = JSON.parse(text);
-          console.log('EXPORT ERROR JSON:', json);
           if (json.error === 'limit_reached') {
             setSnack({
               open: true,

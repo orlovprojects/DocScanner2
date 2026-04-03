@@ -112,6 +112,15 @@ function App() {
     }
   }, [location.pathname, location.search]);
 
+  // Публичная страница — без AuthProvider, без Header/Footer
+  if (isPublicInvoice) {
+    return (
+      <Routes>
+        <Route path="/sf/:uuid" element={<InvoicePublicPage />} />
+      </Routes>
+    );
+  }  
+
   return (
     <AuthProvider>
       {!isPublicInvoice && <Header />}
@@ -148,16 +157,6 @@ function App() {
           <Route path="/israsymas/prekes-paslaugos" element={<ProductsPage />} />
           <Route path="/israsymas/banko-israsai" element={<BankStatementsPage />} />
         </Route>
-        {/* 
-        <Route path="/israsymas" element={<PrivateRoute><InvoiceListPage /></PrivateRoute>} />
-        <Route path="/israsymas/nustatymai" element={<PrivateRoute><InvoiceSettingsPage /></PrivateRoute>} />
-        <Route path="/israsymas/nauja" element={<PrivateRoute><InvoiceEditorPage /></PrivateRoute>} />
-        <Route path="/israsymas/:id" element={<PrivateRoute><InvoiceEditorPage /></PrivateRoute>} />
-        <Route path="/israsymas/serijos-numeracijos" element={<PrivateRoute><InvoiceSeriesPage /></PrivateRoute>} />
-        <Route path="/israsymas/matavimo-vienetai" element={<PrivateRoute><MeasurementUnitsPage /></PrivateRoute>} />
-        <Route path="/israsymas/klientai" element={<PrivateRoute><CounterpartiesPage /></PrivateRoute>} />
-        <Route path="/israsymas/prekes-paslaugos" element={<PrivateRoute><ProductsPage /></PrivateRoute>} />
-        <Route path="/israsymas/banko-israsai" element={<PrivateRoute><BankStatementsPage /></PrivateRoute>} /> */}
 
         <Route path="/suvestine" element={<PrivateRoute><UploadPage /></PrivateRoute>} />
         <Route path="/prisijungti" element={<RedirectIfAuthenticated><Login /></RedirectIfAuthenticated>} />
@@ -179,7 +178,7 @@ function App() {
         <Route path="/admin-klientai" element={<RequireSuperuser loginPath="/prisijungti" forbiddenPath="/403"><AdminKlientai /></RequireSuperuser>} />
         <Route path="/admin-israsytos-saskaitos" element={<RequireSuperuser loginPath="/prisijungti" forbiddenPath="/403"><AdminIsrasytosSaskaitos /></RequireSuperuser>} />
 
-        <Route path="/sf/:uuid" element={<InvoicePublicPage />} />
+        {/* <Route path="/sf/:uuid" element={<InvoicePublicPage />} /> */}
         <Route path="*" element={<NotFound />} />
       </Routes>
       {!isPublicInvoice && <Footer />}

@@ -1387,6 +1387,7 @@ class APIExportLog(models.Model):
     class ExportProgram(models.TextChoices):
         OPTIMUM = 'optimum', 'Optimum'
         DINETA = 'dineta', 'Dineta'
+        RIVILE_GAMA_API = 'rivile_gama_api', 'Rivile GAMA API'
 
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -1404,7 +1405,7 @@ class APIExportLog(models.Model):
     message = models.CharField(max_length=255, blank=True, default="")
 
     invoice_type = models.CharField(max_length=30)
-    invoice_status = models.CharField(max_length=10)
+    invoice_status = models.CharField(max_length=20)
     invoice_result = models.IntegerField(null=True, blank=True)
     invoice_error = models.TextField(blank=True, default='')
 
@@ -1885,6 +1886,24 @@ class Invoice(models.Model):
     optimum_last_try_date = models.DateTimeField(null=True, blank=True)
     dineta_api_status = models.CharField(max_length=20, blank=True, default="")
     dineta_last_try_date = models.DateTimeField(null=True, blank=True)
+    rivile_api_status = models.CharField(
+        "Rivile API statusas",
+        max_length=20,
+        blank=True,
+        null=True,
+        help_text="success / partial_success / error",
+    )
+    rivile_api_last_try = models.DateTimeField(
+        "Rivile API paskutinis bandymas",
+        null=True,
+        blank=True,
+    )
+    rivile_api_kodas_po = models.CharField(
+        "Rivile operacijos numeris (I06_KODAS_PO)",
+        max_length=20,
+        blank=True,
+        help_text="Grąžintas Rivile GAMA operacijos numeris",
+    )
 
     exported = models.BooleanField("Eksportuota", default=False)
     exported_at = models.DateTimeField("Eksportavimo data", null=True, blank=True)

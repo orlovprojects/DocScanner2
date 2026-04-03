@@ -2931,6 +2931,119 @@ def export_to_dineta_task(self, session_id: int):
     )
 
 
+@shared_task(bind=True, max_retries=0)
+def export_to_rivile_gama_api_task(self, session_id: int, api_key_id: int, own_company_code: str):
+    """
+    Экспортирует документы из ExportSession в Rivile GAMA через REST API.
+    Workflow: N08 (контрагенты) → N17 (товары) → N25 (коды) → I06 (документы).
+    """
+    from docscanner_app.models import ExportSession, ScannedDocument, RivileGamaAPIKey
+    from docscanner_app.exports.rivile_gama_api import (
+        export_documents_to_rivile_api,
+        save_export_results,
+    )
+
+    try:
+        session = ExportSession.objects.get(pk=session_id)
+    except ExportSession.DoesNotExist:
+        logger.error("[RIVILE_API_TASK] ExportSession %s not found", session_id)
+        return
+
+    # --- Стартуем ---
+    session.stage = ExportSession.Stage.PROCESSING
+    session.started_at = timezone.now()
+    session.save(update_fields=["stage", "started_at"])
+
+    # --- API ключ ---
+    try:
+        api_key_obj = RivileGamaAPIKey.objects.get(pk=api_key_id)
+    except RivileGamaAPIKey.DoesNotExist:
+        logger.error("[RIVILE_API_TASK] session=%s API key %s not found", session_id, api_key_id)
+        session.stage = ExportSession.Stage.DONE
+        session.finished_at = timezone.now()
+        session.save(update_fields=["stage", "finished_at"])
+        return
+
+    user = session.user
+
+    # --- Документы ---
+    documents = list(
+        session.documents.all().prefetch_related("line_items")
+    )
+    session.total_documents = len(documents)
+    session.save(update_fields=["total_documents"])
+
+    if not documents:
+        logger.warning("[RIVILE_API_TASK] session=%s no documents", session_id)
+        session.stage = ExportSession.Stage.DONE
+        session.finished_at = timezone.now()
+        session.save(update_fields=["stage", "finished_at"])
+        return
+
+    start_time = time.time()
+
+    # --- Экспорт пачки ---
+    try:
+        rivile_session = export_documents_to_rivile_api(
+            documents=documents,
+            user=user,
+            api_key_obj=api_key_obj,
+            own_company_code=own_company_code,
+        )
+    except Exception as e:
+        logger.exception("[RIVILE_API_TASK] session=%s export failed: %s", session_id, e)
+        session.stage = ExportSession.Stage.DONE
+        session.finished_at = timezone.now()
+        session.error_count = len(documents)
+        session.processed_documents = len(documents)
+        session.save(update_fields=[
+            "stage", "finished_at", "error_count", "processed_documents",
+        ])
+        return
+
+    # --- Сохраняем логи (APIExportLog, APIExportArticleLog, rivile_api_status) ---
+    try:
+        save_export_results(rivile_session, user, api_key_obj, export_session=session)
+    except Exception as e:
+        logger.exception("[RIVILE_API_TASK] session=%s save_export_results failed: %s", session_id, e)
+
+    # --- Считаем результаты и помечаем exported ---
+    success_count = 0
+    partial_count = 0
+    error_count = 0
+
+    for doc_result in rivile_session.i06_results:
+        if doc_result.overall_status == "success":
+            success_count += 1
+            ScannedDocument.objects.filter(pk=doc_result.doc_id).update(status="exported")
+        elif doc_result.overall_status == "partial_success":
+            partial_count += 1
+            ScannedDocument.objects.filter(pk=doc_result.doc_id).update(status="exported")
+        else:
+            error_count += 1
+
+    # --- Финализация сессии ---
+    total_time = time.time() - start_time
+
+    session.stage = ExportSession.Stage.DONE
+    session.finished_at = timezone.now()
+    session.processed_documents = len(rivile_session.i06_results)
+    session.success_count = success_count
+    session.partial_count = partial_count
+    session.error_count = error_count
+    session.save(update_fields=[
+        "stage", "finished_at", "processed_documents",
+        "success_count", "partial_count", "error_count",
+    ])
+
+    logger.info(
+        "[RIVILE_API_TASK] session=%s DONE total_docs=%d time=%.1fs "
+        "requests=%d success=%d partial=%d error=%d infra=%r",
+        session_id, len(documents), total_time,
+        rivile_session.total_requests,
+        success_count, partial_count, error_count,
+        rivile_session.infra_error or "",
+    )
 
 
 
@@ -3539,59 +3652,192 @@ def fetch_daily_currency_rates():
 
 @shared_task
 def monitor_stuck_sessions():
-    """Мониторинг зависших сессий и документов"""
+    """
+    Мониторинг + авто-починка зависших сессий и документов.
+    Запускается каждые 10 минут через Celery Beat.
+    """
     now = timezone.now()
     alerts = []
+    fixes = []
 
-    # 1. uploading > 1 час
+    # ─── 1. uploading > 1 час ───
     stuck_uploading = UploadSession.objects.filter(
         stage="uploading",
         updated_at__lt=now - timedelta(hours=1),
     )
     if stuck_uploading.exists():
         ids = list(stuck_uploading.values_list("id", flat=True)[:5])
-        alerts.append(f"📤 Stuck uploading: {stuck_uploading.count()}\n{ids}")
+        alerts.append(
+            f"📤 Stuck uploading: {stuck_uploading.count()}\n"
+            f"{ids}"
+        )
 
-    # 2. processing > 30 мин без прогресса
+    # ─── 2. processing > 30 мин — WATCHDOG ───
     stuck_processing = UploadSession.objects.filter(
         stage="processing",
         updated_at__lt=now - timedelta(minutes=30),
     )
-    if stuck_processing.exists():
-        for s in stuck_processing[:5]:
-            alerts.append(
-                f"⚙️ Stuck processing: {s.id}\n"
-                f"items: {s.processed_items}/{s.actual_items}, "
-                f"pending_archives: {s.pending_archives}"
-            )
+    for s in stuck_processing:
+        pending_docs = ScannedDocument.objects.filter(
+            upload_session=s,
+            status__in=["processing", "pending"],
+        )
+        pending_count = pending_docs.count()
 
-    # 3. Документы зависшие в processing > 20 мин
-    stuck_docs = ScannedDocument.objects.filter(
+        if pending_count == 0:
+            # Все доки обработаны — закрываем сессию
+            try:
+                with transaction.atomic():
+                    ss = UploadSession.objects.select_for_update().get(id=s.id)
+                    if ss.stage != "processing":
+                        continue
+
+                    released = Decimal("0")
+                    if ss.reserved_credits > 0:
+                        released = ss.reserved_credits
+                        u = CustomUser.objects.select_for_update().get(id=ss.user_id)
+                        u.credits_reserved = max(
+                            (u.credits_reserved or Decimal("0")) - ss.reserved_credits,
+                            Decimal("0"),
+                        )
+                        u.save(update_fields=["credits_reserved"])
+                        ss.reserved_credits = Decimal("0")
+
+                    ss.stage = "done"
+                    ss.finished_at = now
+                    ss.save(update_fields=[
+                        "stage", "finished_at", "reserved_credits", "updated_at",
+                    ])
+
+                kick_next_session_task.delay(s.user_id)
+                fixes.append(
+                    f"✅ Session <code>{str(s.id)[:8]}</code> → done\n"
+                    f"   done={s.done_items}/{s.actual_items}"
+                    + (f", released {released} credits" if released > 0 else "")
+                )
+            except Exception as e:
+                alerts.append(
+                    f"⚙️ Session <code>{str(s.id)[:8]}</code> stuck, 0 pending\n"
+                    f"   fix failed: {str(e)[:200]}"
+                )
+        else:
+            # Есть зависшие доки — перезапускаем (только unsettled)
+            stale_docs = pending_docs.filter(
+                uploaded_at__lt=now - timedelta(minutes=20),
+                counted_in_session=False,
+            )
+            requeued = 0
+            for d in stale_docs:
+                try:
+                    process_uploaded_file_task.delay(d.user_id, d.id, s.scan_type)
+                    requeued += 1
+                except Exception as e:
+                    logger.error("[WATCHDOG] Re-queue failed doc %s: %s", d.id, e)
+
+            if requeued:
+                fixes.append(
+                    f"🔄 Session <code>{str(s.id)[:8]}</code>: "
+                    f"re-queued {requeued}/{pending_count} docs"
+                )
+            else:
+                alerts.append(
+                    f"⚙️ Session <code>{str(s.id)[:8]}</code> stuck\n"
+                    f"   {pending_count} pending, "
+                    f"items={s.processed_items}/{s.actual_items}"
+                )
+
+    # ─── 3. Сиротские доки (processing > 20 мин, сессия не active) ───
+    orphan_docs = ScannedDocument.objects.filter(
         status="processing",
         uploaded_at__lt=now - timedelta(minutes=20),
+    ).exclude(
+        upload_session__stage="processing",
     )
-    if stuck_docs.exists():
-        doc_ids = list(stuck_docs.values_list("id", flat=True)[:10])
-        alerts.append(f"📄 Stuck docs in processing: {stuck_docs.count()}\n{doc_ids}")
+    if orphan_docs.exists():
+        doc_ids = list(orphan_docs.values_list("id", flat=True)[:10])
+        alerts.append(
+            f"📄 Orphan docs (session not active): "
+            f"{orphan_docs.count()}\n{doc_ids}"
+        )
 
-    # 4. credits_reserved > 0 без активных сессий
-    from django.db.models import Q
+    # ─── 4. Утечка credits_reserved ───
     leaked = CustomUser.objects.filter(
         credits_reserved__gt=0,
     ).exclude(
-        upload_sessions__stage__in=["processing", "queued", "blocked", "credit_check"]
+        upload_sessions__stage__in=[
+            "processing", "queued", "blocked",
+            "credit_check", "uploading",
+        ],
     ).distinct()
     if leaked.exists():
         for u in leaked[:5]:
-            alerts.append(f"💰 Leaked credits: {u.email} reserved={u.credits_reserved}")
+            alerts.append(
+                f"💰 Leaked credits: {u.email}\n"
+                f"   reserved={u.credits_reserved}"
+            )
 
-    if alerts:
-        from .celery_signals import _send_telegram
-        msg = f"⚠️ <b>System health alert</b>\n\n" + "\n\n".join(alerts)
+    # ─── 5. queued > 10 мин без processing у юзера ───
+    stuck_queued = UploadSession.objects.filter(
+        stage="queued",
+        updated_at__lt=now - timedelta(minutes=10),
+    )
+    for sq in stuck_queued:
+        has_active = UploadSession.objects.filter(
+            user_id=sq.user_id,
+            stage="processing",
+        ).exists()
+        if not has_active:
+            try:
+                kick_next_session_task.delay(sq.user_id)
+                wait_min = (now - sq.updated_at).seconds // 60
+                fixes.append(
+                    f"🚀 Kicked queued session <code>{str(sq.id)[:8]}</code>\n"
+                    f"   waiting {wait_min}m, user_id={sq.user_id}"
+                )
+            except Exception as e:
+                alerts.append(
+                    f"📋 Queued session <code>{str(sq.id)[:8]}</code> stuck\n"
+                    f"   kick failed: {str(e)[:200]}"
+                )
+
+    # ─── Telegram ───
+    from .celery_signals import _send_telegram
+
+    if fixes and not alerts:
+        msg = (
+            f"🔧 <b>Watchdog auto-fix</b>\n\n"
+            + "\n\n".join(fixes)
+            + "\n\n✅ <i>Action not needed — all issues resolved automatically</i>"
+        )
         _send_telegram(msg)
-        logger.warning("[MONITOR] %s", msg)
+        logger.info("[WATCHDOG] %d fixes applied, 0 alerts", len(fixes))
 
-    return {"alerts": len(alerts)}
+    elif fixes and alerts:
+        msg = (
+            f"🔧 <b>Watchdog auto-fix</b>\n\n"
+            + "\n\n".join(fixes)
+            + "\n\n✅ <i>Action not needed — resolved automatically</i>"
+        )
+        _send_telegram(msg)
+
+        msg = (
+            f"⚠️ <b>System health alert</b>\n\n"
+            + "\n\n".join(alerts)
+            + "\n\n🚨 <i>Manual action needed — check pgAdmin / shell</i>"
+        )
+        _send_telegram(msg)
+        logger.warning("[MONITOR] %d fixes, %d alerts", len(fixes), len(alerts))
+
+    elif alerts:
+        msg = (
+            f"⚠️ <b>System health alert</b>\n\n"
+            + "\n\n".join(alerts)
+            + "\n\n🚨 <i>Manual action needed — check pgAdmin / shell</i>"
+        )
+        _send_telegram(msg)
+        logger.warning("[MONITOR] %d alerts", len(alerts))
+
+    return {"alerts": len(alerts), "fixes": len(fixes)}
 
 
 

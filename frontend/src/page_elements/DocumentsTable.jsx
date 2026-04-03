@@ -297,18 +297,18 @@ function ExportLogPopup({ open, onClose, documentId, program }) {
                       p: 1.25,
                       mb: 0.75,
                       borderRadius: 1,
-                      bgcolor: a.status === "success"
+                      bgcolor: (a.status === "success" || a.status === "duplicate")
                         ? alpha(API_STATUS_COLORS.success, 0.04)
                         : alpha(API_STATUS_COLORS.error, 0.04),
                       border: `1px solid ${
-                        a.status === "success"
+                        (a.status === "success" || a.status === "duplicate")
                           ? alpha(API_STATUS_COLORS.success, 0.15)
                           : alpha(API_STATUS_COLORS.error, 0.15)
                       }`,
                     }}
                   >
                     <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-                      {a.status === "success" ? (
+                      {(a.status === "success" || a.status === "duplicate") ? (
                         <CheckCircleIcon sx={{ color: API_STATUS_COLORS.success, fontSize: 16 }} />
                       ) : (
                         <CancelIcon sx={{ color: API_STATUS_COLORS.error, fontSize: 16 }} />

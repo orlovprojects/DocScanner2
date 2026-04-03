@@ -47,7 +47,8 @@ logger = logging.getLogger("docscanner_app")
 # ═══════════════════════════════════════════════════════════
 # Константы
 # ═══════════════════════════════════════════════════════════
-RIVILE_API_URL = "https://api.manorivile.lt/client/v2"
+# RIVILE_API_URL = "https://api.manorivile.lt/client/v2"
+RIVILE_API_URL = "http://localhost:8879/client/v2" #fake server for testing
 REQUEST_TIMEOUT = 45  # секунды
 
 # Коды ошибок, которые означают "запись уже существует" = не ошибка
@@ -407,7 +408,7 @@ def build_n08_full_payload(doc, direction: str) -> Optional[dict]:
 
 
 def build_n17_payload(doc, item=None, direction: str = "pirkimas",
-                       user=None) -> Optional[dict]:
+                       user=None, own_company_code=None) -> Optional[dict]:
     """
     Строит payload для EDIT_N17 (товар/услуга).
     """
@@ -433,7 +434,7 @@ def build_n17_payload(doc, item=None, direction: str = "pirkimas",
         return None
 
     # Extra fields из user settings
-    extras = _get_gama_extras(user) if user else {}
+    extras = _get_gama_extras(user, own_company_code) if user else {}
     prefix = f"{direction}_"
 
     rysio_kodas = extras.get(prefix + "saskaitos_rysio_kodas") or kodas_ds
@@ -487,7 +488,7 @@ def build_n17_payload(doc, item=None, direction: str = "pirkimas",
 
 
 def build_n25_payload(doc, item=None, direction: str = "pirkimas",
-                       user=None) -> Optional[dict]:
+                       user=None, own_company_code=None) -> Optional[dict]:
     """
     Строит payload для EDIT_N25 (код).
     """
@@ -512,7 +513,7 @@ def build_n25_payload(doc, item=None, direction: str = "pirkimas",
     if not kodas:
         return None
 
-    extras = _get_gama_extras(user) if user else {}
+    extras = _get_gama_extras(user, own_company_code) if user else {}
     prefix = f"{direction}_"
 
     tipas = "1" if direction == "pirkimas" else "2"
@@ -540,12 +541,12 @@ def build_n25_payload(doc, item=None, direction: str = "pirkimas",
     }
 
 
-def build_i06_full_payload(doc, direction: str, user=None, merge_vat: bool = False) -> dict:
+def build_i06_full_payload(doc, direction: str, user=None, merge_vat: bool = False, own_company_code=None) -> dict:
     """
     Строит payload для EDIT_I06_FULL (документ + строки I07).
     """
 
-    extras = _get_gama_extras(user) if user else {}
+    extras = _get_gama_extras(user, own_company_code) if user else {}
     prefix = f"{direction}_"
     frac = get_rivile_fraction(user) if user else 1
     use_frac = (frac != 1)
@@ -816,6 +817,7 @@ def export_documents_to_rivile_api(
     documents: list,
     user,
     api_key_obj,  # RivileGamaAPIKey instance
+    own_company_code=None,
 ) -> RivileExportSession:
     """
     Экспортирует пачку документов в Rivile GAMA через API.
@@ -837,6 +839,9 @@ def export_documents_to_rivile_api(
 
     # ─── Определяем direction для каждого документа ───
     doc_directions = {}
+    import time as _time
+    _phase_start = _time.time()
+
     for doc in documents:
         direction = _s(getattr(doc, "pirkimas_pardavimas", "")).lower()
         if direction not in ("pirkimas", "pardavimas"):
@@ -852,6 +857,7 @@ def export_documents_to_rivile_api(
     # ШАГ 1: Контрагенты (EDIT_N08_FULL)
     # ════════════════════════════════════
     n08_seen = set()
+    n08_results_map = {}
     for doc in documents:
         direction = doc_directions[id(doc)]
         payload = build_n08_full_payload(doc, direction)
@@ -877,6 +883,13 @@ def export_documents_to_rivile_api(
             return session
 
         _save_ref_log(api_key_obj, user, session.session_id, result)
+        n08_results_map[entity_code] = result
+
+    _t1 = _time.time()
+    logger.info(
+        "[RIVILE_API] Phase N08 done: %d requests, %d unique, %.1fs",
+        len(session.n08_results), len(n08_seen), _t1 - _phase_start,
+    )
 
     # ════════════════════════════════════
     # ШАГ 2: Товары/Услуги (EDIT_N17)
@@ -897,7 +910,7 @@ def export_documents_to_rivile_api(
             tipas = normalize_preke_paslauga_tipas(tipas_src)
 
             if tipas in ("1", "2"):  # prekė или paslauga
-                payload = build_n17_payload(doc, item, direction, user)
+                payload = build_n17_payload(doc, item, direction, user, own_company_code=own_company_code)
                 if not payload:
                     continue
                 entity_code = payload["data"]["N17"]["N17_KODAS_PS"]
@@ -918,6 +931,12 @@ def export_documents_to_rivile_api(
 
                 _save_ref_log(api_key_obj, user, session.session_id, result)
 
+    _t2 = _time.time()
+    logger.info(
+        "[RIVILE_API] Phase N17 done: %d requests, %d unique, %.1fs",
+        len(session.n17_results), len(n17_seen), _t2 - _t1,
+    )
+
     # ════════════════════════════════════
     # ШАГ 3: Коды (EDIT_N25)
     # ════════════════════════════════════
@@ -936,7 +955,7 @@ def export_documents_to_rivile_api(
             tipas = normalize_preke_paslauga_tipas(tipas_src)
 
             if tipas == "3":  # kodas
-                payload = build_n25_payload(doc, item, direction, user)
+                payload = build_n25_payload(doc, item, direction, user, own_company_code=own_company_code)
                 if not payload:
                     continue
                 entity_code = payload["data"]["N25"]["N25_KODAS_BS"]
@@ -957,6 +976,12 @@ def export_documents_to_rivile_api(
 
                 _save_ref_log(api_key_obj, user, session.session_id, result)
 
+    _t3 = _time.time()
+    logger.info(
+        "[RIVILE_API] Phase N25 done: %d requests, %d unique, %.1fs",
+        len(session.n25_results), len(n25_seen), _t3 - _t2,
+    )
+
     # ════════════════════════════════════
     # ШАГ 4: Документы (EDIT_I06_FULL)
     # ════════════════════════════════════
@@ -965,8 +990,21 @@ def export_documents_to_rivile_api(
         doc_id = getattr(doc, "id", None) or getattr(doc, "pk", 0)
 
         doc_result = RivileDocExportResult(doc_id=doc_id)
+        if direction == "pirkimas":
+            _party = get_party_code(
+                doc, role="seller", id_field="seller_id",
+                vat_field="seller_vat_code",
+                id_programoje_field="seller_id_programoje",
+            )
+        else:
+            _party = get_party_code(
+                doc, role="buyer", id_field="buyer_id",
+                vat_field="buyer_vat_code",
+                id_programoje_field="buyer_id_programoje",
+            )
+        doc_result.n08_result = n08_results_map.get(_party)
 
-        payload = build_i06_full_payload(doc, direction, user, merge_vat)
+        payload = build_i06_full_payload(doc, direction, user, merge_vat, own_company_code=own_company_code)
         logger.info("[RIVILE_API] EDIT_I06_FULL doc=%s dir=%s", doc_id, direction)
 
         result = _send_request(api_key, payload)
@@ -1000,11 +1038,18 @@ def export_documents_to_rivile_api(
     else:
         session.overall_status = "partial_success"
 
+    _t4 = _time.time()
+    _total = _t4 - _phase_start
     logger.info(
-        "[RIVILE_API] Session %s done: status=%s requests=%d n08=%d n17=%d n25=%d docs=%d",
-        session.session_id, session.overall_status, session.total_requests,
-        len(session.n08_results), len(session.n17_results),
-        len(session.n25_results), len(session.i06_results),
+        "[RIVILE_API] Session %s DONE: status=%s total=%.1fs "
+        "| N08: %d/%.1fs | N17: %d/%.1fs | N25: %d/%.1fs | I06: %d/%.1fs "
+        "| requests=%d",
+        session.session_id, session.overall_status, _total,
+        len(session.n08_results), _t1 - _phase_start,
+        len(session.n17_results), _t2 - _t1,
+        len(session.n25_results), _t3 - _t2,
+        len(session.i06_results), _t4 - _t3,
+        session.total_requests,
     )
 
     return session
@@ -1052,10 +1097,15 @@ def _save_ref_log(api_key_obj, user, session_id: str, result: RivileApiResult):
         logger.exception("[RIVILE_API] Failed to save ref log: %s", e)
 
 
-def save_export_results(session: RivileExportSession, user, api_key_obj):
+def save_export_results(session: RivileExportSession, user, api_key_obj,
+                        export_session=None):
     """
-    Сохраняет результаты экспорта документов в APIExportLog + обновляет ScannedDocument.
-    Аналог save_export_result() из optimum_api.py.
+    Сохраняет результаты экспорта документов:
+      - APIExportLog (по одному на документ)
+      - APIExportArticleLog (N17 + N25 из сессии)
+      - ScannedDocument (rivile_api_status, rivile_api_last_try, rivile_api_kodas_po)
+
+    export_session: ExportSession instance (для FK), или None.
     """
     from ..models import APIExportLog, APIExportArticleLog, ScannedDocument
 
@@ -1064,19 +1114,39 @@ def save_export_results(session: RivileExportSession, user, api_key_obj):
     for doc_result in session.i06_results:
         inv_result = doc_result.api_result
 
+        # ─── Invoice (I06) статус ───
         if inv_result is None:
-            inv_status = "Error"
+            inv_status = "error"
             inv_error = session.infra_error or "No request sent"
-            inv_result_id = None
+            inv_rivile_id = ""
         else:
-            inv_status = "Success" if inv_result.success else "Error"
+            inv_status = "success" if inv_result.success else "error"
             inv_error = ""
             if inv_result.errors:
-                inv_error = "; ".join(f"{e['tag']}: {e['message']}" for e in inv_result.errors)
+                inv_error = "; ".join(
+                    f"{e['tag']}: {e['message']}" for e in inv_result.errors
+                )
             elif inv_result.error_message and not inv_result.success:
                 inv_error = inv_result.error_message
-            inv_result_id = inv_result.rivile_id or None
+            inv_rivile_id = inv_result.rivile_id or ""
 
+        # ─── Partner (N08) статус ───
+        n08_res = doc_result.n08_result
+        partner_status = ""
+        partner_error = ""
+        if n08_res is not None:
+            if n08_res.success:
+                partner_status = "success"
+            else:
+                partner_status = "error"
+                if n08_res.errors:
+                    partner_error = "; ".join(
+                        f"{e['tag']}: {e['message']}" for e in n08_res.errors
+                    )
+                elif n08_res.error_message:
+                    partner_error = n08_res.error_message
+
+        # ─── APIExportLog ───
         try:
             export_log = APIExportLog.objects.create(
                 user=user,
@@ -1085,42 +1155,53 @@ def save_export_results(session: RivileExportSession, user, api_key_obj):
                 status=doc_result.overall_status,
                 invoice_type="EDIT_I06_FULL",
                 invoice_status=inv_status,
-                invoice_result=None,
+                invoice_result=None,                      # IntegerField, Rivile ID — строка, не пишем
                 invoice_error=inv_error[:2000],
-                session=session.session_id,
+                partner_status=partner_status,
+                partner_error=partner_error[:2000],
+                session=export_session,                   # ExportSession instance или None
             )
 
-            # Сохраняем article logs (товары этого документа из n17_results)
-            # Для простоты берём все n17 из сессии — они общие
+            # ─── Article logs: N17 + N25 ───
             article_logs = []
-            for n17_res in session.n17_results:
+            for ref_res in session.n17_results + session.n25_results:
+                if ref_res.is_duplicate:
+                    a_status = "duplicate"         
+                elif ref_res.success:
+                    a_status = "success"            
+                else:
+                    a_status = "error"      
+
                 article_logs.append(APIExportArticleLog(
                     export_log=export_log,
-                    article_name="",
-                    article_code=n17_res.entity_code[:100],
-                    status="Duplicate" if n17_res.is_duplicate else (
-                        "Success" if n17_res.success else "Error"
-                    ),
+                    article_name=ref_res.method,                 # EDIT_N17 / EDIT_N25
+                    article_code=ref_res.entity_code[:100],
+                    status=a_status,
                     result=None,
-                    error=n17_res.error_message[:500] if not n17_res.success else "",
+                    error=ref_res.error_message[:500] if not ref_res.success else "",
                 ))
+
             if article_logs:
                 APIExportArticleLog.objects.bulk_create(article_logs)
 
         except Exception as e:
-            logger.exception("[RIVILE_API] Failed to save export log for doc=%s: %s",
-                             doc_result.doc_id, e)
+            logger.exception(
+                "[RIVILE_API] Failed to save export log for doc=%s: %s",
+                doc_result.doc_id, e,
+            )
 
-        # Обновляем ScannedDocument
+        # ─── Обновляем ScannedDocument ───
         update_fields = {
             "rivile_api_status": doc_result.overall_status,
             "rivile_api_last_try": now,
         }
-        if inv_result and inv_result.rivile_id:
-            update_fields["rivile_api_kodas_po"] = inv_result.rivile_id
+        if inv_rivile_id:
+            update_fields["rivile_api_kodas_po"] = inv_rivile_id
 
         try:
             ScannedDocument.objects.filter(pk=doc_result.doc_id).update(**update_fields)
         except Exception as e:
-            logger.exception("[RIVILE_API] Failed to update ScannedDocument %s: %s",
-                             doc_result.doc_id, e)
+            logger.exception(
+                "[RIVILE_API] Failed to update ScannedDocument %s: %s",
+                doc_result.doc_id, e,
+            )

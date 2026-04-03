@@ -37,7 +37,7 @@ const SCAN_TYPES = [
   { value: "detaliai", label: "Detaliai (su eilutėmis) – 1.3 kredito" },
 ];
 
-const API_EXPORT_PROGRAMS = new Set(["optimum", "dineta"]);
+const API_EXPORT_PROGRAMS = new Set(["optimum", "dineta", "rivile_gama_api"]);
 
 // YouTube video tutorials for each accounting program
 const EXPORT_TUTORIALS = {

@@ -22,7 +22,7 @@ from django.db import models
 from django.core.files.base import ContentFile
 from .tasks import process_uploaded_file_task 
 
-from .tasks import start_session_processing, export_to_optimum_task, export_to_dineta_task
+from .tasks import start_session_processing, export_to_optimum_task, export_to_dineta_task, export_to_rivile_gama_api_task
 
 
 from rest_framework.parsers import MultiPartParser, FormParser
@@ -972,51 +972,86 @@ def export_documents(request):
     # ========================= RIVILE GAMA API =========================
 
     elif export_type == "rivile_gama_api":
-        from .exports.rivile_gama_api import (
-            export_documents_to_rivile_api,
-            save_export_results,
-        )
-        from .models import RivileGamaAPIKey
+        from .models import RivileGamaAPIKey, ExportSession
 
-        # Определяем "свою" фирму из документов
-        # (buyer при pirkimas, seller при pardavimas)
-        first_doc = documents[0]
-        direction = first_doc.pirkimas_pardavimas or "pirkimas"
-        
-        if direction == "pirkimas":
-            own_company_code = (
-                first_doc.buyer_id or first_doc.buyer_vat_code or user.company_code
-            )
+        assign_random_prekes_kodai(documents)
+
+        all_docs = (pirkimai_docs or []) + (pardavimai_docs or [])
+        if not all_docs:
+            logger.warning("[EXP] RIVILE_GAMA_API no documents to export")
+            return Response({"error": "No documents to export"}, status=400)
+
+        # --- Определяем company_code для поиска API ключа ---
+        if source == "invoice":
+            # Išrašymas: одна фирма, данные из профиля
+            own_company_code = str(getattr(user, "company_code", "") or "").strip()
+        elif cp_key:
+            # Skaitmenizavimas multi: cp_key = своя фирма
+            cp = cp_key.strip()
+            own_company_code = cp.split(":", 1)[1].strip() if cp.lower().startswith("id:") else cp
         else:
-            own_company_code = (
-                first_doc.seller_id or first_doc.seller_vat_code or user.company_code
-            )
+            # Skaitmenizavimas single: fallback на user.company_code
+            own_company_code = str(getattr(user, "company_code", "") or "").strip()
 
-        # Ищем API ключ для этой фирмы
-        try:
-            api_key_obj = RivileGamaAPIKey.objects.get(
-                user=user,
-                company_code=own_company_code,
-                is_active=True,
-            )
-        except RivileGamaAPIKey.DoesNotExist:
+        logger.info(
+            "[EXP] RIVILE_GAMA_API source=%s cp_key=%r own_company=%s",
+            source, cp_key, own_company_code,
+        )
+
+        # --- Ищем API ключ ---
+        api_key_obj = (
+            RivileGamaAPIKey.objects
+            .filter(user=user, company_code=own_company_code, is_active=True)
+            .first()
+        )
+
+        # Fallback: если один ключ — используем его
+        if not api_key_obj:
+            active_keys = RivileGamaAPIKey.objects.filter(user=user, is_active=True)
+            if active_keys.count() == 1:
+                api_key_obj = active_keys.first()
+                logger.info(
+                    "[EXP] RIVILE_GAMA_API fallback to single key=%s (wanted=%s)",
+                    api_key_obj.company_code, own_company_code,
+                )
+
+        if not api_key_obj:
             return JsonResponse(
                 {"error": f"Rivile GAMA API raktas nerastas įmonei {own_company_code}. "
-                        "Pridėkite raktą Nustatymuose."},
+                          "Pridėkite raktą Nustatymuose."},
                 status=400,
             )
 
-        # Экспорт
-        session = export_documents_to_rivile_api(documents, user, api_key_obj)
-        save_export_results(session, user, api_key_obj)
+        doc_ids = [d.pk for d in all_docs]
 
-        return JsonResponse({
-            "status": session.overall_status,
-            "session_id": session.session_id,
-            "total_requests": session.total_requests,
-            "documents_exported": len(session.i06_results),
-        })
+        # --- ExportSession + Celery ---
+        session_obj = ExportSession.objects.create(
+            user=user,
+            program="rivile_gama_api",
+            stage=ExportSession.Stage.QUEUED,
+            total_documents=len(doc_ids),
+        )
+        session_obj.documents.set(doc_ids)
 
+        task = export_to_rivile_gama_api_task.delay(
+            session_obj.id,
+            api_key_obj.pk,
+            own_company_code,
+        )
+        session_obj.task_id = task.id
+        session_obj.save(update_fields=["task_id"])
+
+        logger.info(
+            "[EXP] RIVILE_GAMA_API session=%s task=%s docs=%d company=%s key=%s",
+            session_obj.pk, task.id, len(doc_ids), own_company_code, api_key_obj.company_code,
+        )
+
+        return Response({
+            "status": "ok",
+            "session_id": session_obj.pk,
+            "total_documents": len(doc_ids),
+            "message": "Export started",
+        }, status=202)
 
     # ========================= FINVALDA =========================
     elif export_type == 'finvalda':

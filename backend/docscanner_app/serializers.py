@@ -213,6 +213,8 @@ class ScannedDocumentListSerializer(serializers.ModelSerializer):
             'optimum_last_try_date',
             'dineta_api_status',
             'dineta_last_try_date',
+            "rivile_api_status",
+            "rivile_api_last_try",
             # ...и т.п., без тяжелых полей и line_items
         ]
 
@@ -2091,6 +2093,8 @@ class InvoiceDetailSerializer(serializers.ModelSerializer):
             "optimum_last_try_date",
             "dineta_api_status",
             "dineta_last_try_date",
+            "rivile_api_status",
+            "rivile_api_last_try",
             # PDF / отправка
             "pdf_file",
             "sent_at",
@@ -2130,6 +2134,8 @@ class InvoiceDetailSerializer(serializers.ModelSerializer):
             "optimum_last_try_date",
             "dineta_api_status",
             "dineta_last_try_date",
+            "rivile_api_status",
+            "rivile_last_try_date",
             "created_at",
             "updated_at",
         ]
