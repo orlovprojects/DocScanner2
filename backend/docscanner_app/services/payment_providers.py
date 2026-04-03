@@ -152,21 +152,23 @@ class MontonioProvider(BasePaymentProvider):
         return_url: str = "",
     ) -> PaymentLinkResult:
 
+        # expiresAt обязателен — если нет due_date, ставим +30 дней
+        expires = due_date or (datetime.utcnow() + timedelta(days=30))
+
         payload = {
             "amount": float(amount),
             "currency": currency,
-            "merchantReference": str(invoice_id),
             "description": description,
-            "notificationUrl": notification_url,
-            "isReusable": False,
-            "askAdditionalInfo": True,
             "locale": "lt",
-            "preferredCountry": "LT",
+            "expiresAt": expires.isoformat(),
+            "askAdditionalInfo": True,
+            "type": "one_time",
+            "merchantReference": str(invoice_id),
         }
-        if due_date:
-            payload["expiresAt"] = due_date.isoformat()
         if return_url:
             payload["returnUrl"] = return_url
+        if notification_url:
+            payload["notificationUrl"] = notification_url
 
         token = self._make_jwt(payload)
 
@@ -176,17 +178,24 @@ class MontonioProvider(BasePaymentProvider):
             headers={"Content-Type": "application/json"},
             timeout=15,
         )
-        resp.raise_for_status()
+
+        if resp.status_code >= 400:
+            logger.error(
+                "[Montonio] payment-link FAILED: status=%s body=%s",
+                resp.status_code, resp.text[:1000],
+            )
+            raise ValueError(f"Montonio: {resp.status_code} — {resp.text[:500]}")
+
         data = resp.json()
 
         logger.info(
             "Montonio payment link created: invoice=%s url=%s",
             invoice_id,
-            data.get("paymentUrl", data.get("url", ""))[:80],
+            data.get("url", data.get("paymentUrl", ""))[:80],
         )
 
         return PaymentLinkResult(
-            url=data.get("paymentUrl") or data.get("url", ""),
+            url=data.get("url") or data.get("paymentUrl", ""),
             provider_payment_id=data.get("uuid", ""),
             raw_response=data,
         )

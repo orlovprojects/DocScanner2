@@ -8349,6 +8349,12 @@ def connect_payment_provider(request):
         return Response({"connected": False, "error": error}, status=400)
 
     save_data = {**data, "environment": PAYMENT_ENV}
+    if provider_name == "montonio":
+        save_data["access_key"] = save_data.get("access_key", "").strip()
+        save_data["secret_key"] = save_data.get("secret_key", "").strip()
+    elif provider_name == "paysera":
+        save_data["project_id"] = save_data.get("project_id", "").strip()
+        save_data["sign_password"] = save_data.get("sign_password", "").strip()
 
     # Save credentials first
     try:
@@ -8551,13 +8557,13 @@ def _test_provider_connection(
 # ── Montonio ─────────────────────────────────────────────────
 
 def _test_montonio(data: dict) -> tuple[bool, str | None, list | None, dict | None]:
-    access_key = data.get("access_key", "")
-    secret_key = data.get("secret_key", "")
+    access_key = data.get("access_key", "").strip()
+    secret_key = data.get("secret_key", "").strip()
     base_url = MONTONIO_BASE_URLS.get(PAYMENT_ENV, MONTONIO_BASE_URLS["sandbox"])
 
     try:
         now = int(pytime.time())
-        payload = {"access_key": access_key, "iat": now, "exp": now + 600}
+        payload = {"accessKey": access_key, "iat": now, "exp": now + 600}
         token = jwt.encode(payload, secret_key, algorithm="HS256")
 
         url = f"{base_url}/stores/payment-methods"
@@ -8612,7 +8618,6 @@ def _test_montonio(data: dict) -> tuple[bool, str | None, list | None, dict | No
     except Exception as e:
         logger.exception("[Montonio] Test error")
         return False, f"Klaida jungiantis prie Montonio: {e}", None, {"exception": str(e)}
-
 
 # ── Paysera ──────────────────────────────────────────────────
 
