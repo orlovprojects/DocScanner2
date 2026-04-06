@@ -101,199 +101,202 @@ CONTENT_W = PAGE_W - 2 * MARGIN_H
 
 
 # ════════════════════════════════════════════════════════════
-# Styles
+# Styles — font sizes matched to InvoiceA4 React (px * 0.75 = pt)
 # ════════════════════════════════════════════════════════════
 
 def _styles():
     _register_fonts()
     return {
-        "doc_type": ParagraphStyle(
+        "doc_type": ParagraphStyle(         # Preview: 17px → 12.75pt
             "DocType",
             fontName="InvFontBold",
-            fontSize=14,
+            fontSize=13,
             textColor=C_TEXT,
-            leading=18,
+            leading=17,
             alignment=TA_CENTER,
         ),
         "doc_type_left": ParagraphStyle(
             "DocTypeLeft",
             fontName="InvFontBold",
-            fontSize=14,
+            fontSize=13,
             textColor=C_TEXT,
-            leading=18,
+            leading=17,
         ),
-        "doc_number": ParagraphStyle(
+        "doc_number": ParagraphStyle(       # Preview: 12px → 9pt
             "DocNumber",
             fontName="InvFontBold",
-            fontSize=10,
+            fontSize=9,
             textColor=C_TEXT_LIGHT,
-            leading=14,
+            leading=13,
             alignment=TA_CENTER,
         ),
         "doc_number_left": ParagraphStyle(
             "DocNumberLeft",
             fontName="InvFontBold",
-            fontSize=10,
+            fontSize=9,
             textColor=C_TEXT_LIGHT,
-            leading=14,
+            leading=13,
         ),
-        "order_number": ParagraphStyle(
+        "order_number": ParagraphStyle(     # Preview: 8.2px → 6.15pt
             "OrderNumber",
             fontName="InvFont",
-            fontSize=7.5,
+            fontSize=6.5,
             textColor=C_LABEL,
-            leading=10.5,
+            leading=9,
             alignment=TA_CENTER,
         ),
         "order_number_left": ParagraphStyle(
             "OrderNumberLeft",
             fontName="InvFont",
-            fontSize=7.5,
+            fontSize=6.5,
             textColor=C_LABEL,
-            leading=10.5,
+            leading=9,
         ),
-        "date_label": ParagraphStyle(
+        "date_label": ParagraphStyle(       # Preview: 8.8px → 6.6pt
             "DateLabel",
             fontName="InvFont",
-            fontSize=7.5,
+            fontSize=6.5,
             textColor=C_TEXT_LIGHT,
             alignment=TA_RIGHT,
-            leading=11,
+            leading=9.5,
         ),
-        "party_name": ParagraphStyle(
+        "party_name": ParagraphStyle(       # Preview: 12.5px → 9.375pt
             "PartyName",
             fontName="InvFontBold",
-            fontSize=10,
+            fontSize=9.5,
             textColor=C_TEXT,
-            leading=14,
+            leading=13,
             spaceAfter=1 * mm,
         ),
-        "party_info": ParagraphStyle(
+        "party_info": ParagraphStyle(       # Preview: 10.5px → 7.875pt ≈ 8pt
             "PartyInfo",
             fontName="InvFont",
             fontSize=8,
             textColor=C_TEXT,
             leading=12,
+            wordWrap='CJK',
         ),
-        "th": ParagraphStyle(
+        "th": ParagraphStyle(              # Preview: 8.8px → 6.6pt
             "TH",
             fontName="InvFontBold",
-            fontSize=7.5,
+            fontSize=6.5,
             textColor=C_TEXT_LIGHT,
-            leading=10,
+            leading=9,
             alignment=TA_CENTER,
         ),
         "th_left": ParagraphStyle(
             "THLeft",
             fontName="InvFontBold",
-            fontSize=7.5,
+            fontSize=6.5,
             textColor=C_TEXT_LIGHT,
-            leading=10,
+            leading=9,
         ),
         "th_right": ParagraphStyle(
             "THRight",
             fontName="InvFontBold",
-            fontSize=7.5,
+            fontSize=6.5,
             textColor=C_TEXT_LIGHT,
-            leading=10,
+            leading=9,
             alignment=TA_RIGHT,
         ),
-        "td": ParagraphStyle(
+        "td": ParagraphStyle(             # Preview: 10px → 7.5pt
             "TD",
             fontName="InvFont",
-            fontSize=8,
+            fontSize=7.5,
             textColor=C_TEXT,
-            leading=11,
+            leading=10.5,
+            wordWrap='CJK',
         ),
         "td_right": ParagraphStyle(
             "TDRight",
             fontName="InvFont",
-            fontSize=8,
+            fontSize=7.5,
             textColor=C_TEXT,
-            leading=11,
+            leading=10.5,
             alignment=TA_RIGHT,
         ),
         "td_center": ParagraphStyle(
             "TDCenter",
             fontName="InvFont",
-            fontSize=8,
+            fontSize=7.5,
             textColor=C_TEXT,
-            leading=11,
+            leading=10.5,
             alignment=TA_CENTER,
         ),
         "td_bold": ParagraphStyle(
             "TDBold",
             fontName="InvFontBold",
-            fontSize=8,
+            fontSize=7.5,
             textColor=C_TEXT,
-            leading=11,
+            leading=10.5,
             alignment=TA_RIGHT,
         ),
-        "total_label": ParagraphStyle(
+        "total_label": ParagraphStyle(     # Preview: 10.5px → 7.875pt
             "TotalLabel",
             fontName="InvFont",
-            fontSize=8.5,
+            fontSize=8,
             textColor=C_TEXT,
-            leading=13,
+            leading=12,
         ),
         "total_value": ParagraphStyle(
             "TotalValue",
             fontName="InvFontBold",
-            fontSize=8.5,
+            fontSize=8,
             textColor=C_TEXT,
-            leading=13,
+            leading=12,
             alignment=TA_RIGHT,
         ),
-        "total_indent_label": ParagraphStyle(
+        "total_indent_label": ParagraphStyle(  # Preview: 9.5px → 7.125pt
             "TotalIndentLabel",
             fontName="InvFont",
-            fontSize=7.5,
+            fontSize=7,
             textColor=C_TEXT_LIGHT,
-            leading=12,
+            leading=11,
         ),
         "total_indent_value": ParagraphStyle(
             "TotalIndentValue",
             fontName="InvFont",
-            fontSize=7.5,
+            fontSize=7,
             textColor=C_TEXT_LIGHT,
-            leading=12,
+            leading=11,
             alignment=TA_RIGHT,
         ),
-        "grand_label": ParagraphStyle(
+        "grand_label": ParagraphStyle(     # Preview bold total
             "GrandLabel",
             fontName="InvFontBold",
-            fontSize=9,
-            textColor=C_TEXT,
-            leading=14,
-        ),
-        "grand_value": ParagraphStyle(
-            "GrandValue",
-            fontName="InvFontBold",
-            fontSize=9,
-            textColor=C_TEXT,
-            leading=14,
-            alignment=TA_RIGHT,
-        ),
-        "note_title": ParagraphStyle(
-            "NoteTitle",
-            fontName="InvFontBold",
-            fontSize=7.5,
-            textColor=C_LABEL,
-            leading=11,
-        ),
-        "note_text": ParagraphStyle(
-            "NoteText",
-            fontName="InvFont",
             fontSize=8.5,
             textColor=C_TEXT,
             leading=13,
         ),
-        "words": ParagraphStyle(
-            "Words",
+        "grand_value": ParagraphStyle(
+            "GrandValue",
+            fontName="InvFontBold",
+            fontSize=8.5,
+            textColor=C_TEXT,
+            leading=13,
+            alignment=TA_RIGHT,
+        ),
+        "note_title": ParagraphStyle(      # Preview: 9.5px → 7.125pt
+            "NoteTitle",
+            fontName="InvFontBold",
+            fontSize=7,
+            textColor=C_LABEL,
+            leading=10,
+        ),
+        "note_text": ParagraphStyle(       # Preview: 10.5px → 7.875pt
+            "NoteText",
             fontName="InvFont",
             fontSize=8,
-            textColor=C_TEXT_LIGHT,
+            textColor=C_TEXT,
             leading=12,
+            wordWrap='CJK',
+        ),
+        "words": ParagraphStyle(           # Preview: 10px → 7.5pt
+            "Words",
+            fontName="InvFont",
+            fontSize=7.5,
+            textColor=C_TEXT_LIGHT,
+            leading=11,
         ),
     }
 
@@ -500,7 +503,7 @@ def _sum_in_words_lt(amount, currency="EUR"):
 
 
 # ════════════════════════════════════════════════════════════
-# Page numbering
+# Page numbering — footer font matched to preview (6.5px → 5pt)
 # ════════════════════════════════════════════════════════════
 
 class _PageCountCanvas(Canvas):
@@ -522,7 +525,7 @@ class _PageCountCanvas(Canvas):
 
     def _draw_page_number(self, page_count):
         self.saveState()
-        self.setFont("InvFont", 6.5)
+        self.setFont("InvFont", 5)
         self.setFillColor(C_FOOTER)
         text = f"Puslapis {self._pageNumber}/{page_count}"
         self.drawRightString(PAGE_W - MARGIN_H, 10 * mm, text)
@@ -543,20 +546,20 @@ class _WatermarkPageCountCanvas(_PageCountCanvas):
         self.saveState()
         y = 10 * mm
         text = "Sąskaita sugeneruota su"
-        self.setFont("InvFont", 6.5)
+        self.setFont("InvFont", 5)
         self.setFillColor(colors.HexColor("#999999"))
 
         from django.conf import settings as dj_settings
         logo_path = os.path.join(dj_settings.MEDIA_ROOT, "images", "dokskenas_logo_for_pdf.jpg")
 
         if os.path.exists(logo_path):
-            text_w = self.stringWidth(text, "InvFont", 6.5)
-            logo_h = 6.5 * mm
-            logo_w = 26 * mm
+            text_w = self.stringWidth(text, "InvFont", 5)
+            logo_h = 5 * mm
+            logo_w = 20 * mm
             self.drawString(MARGIN_H, y, text)
             self.drawImage(
                 logo_path,
-                MARGIN_H + text_w + 1 * mm, y - 1.8 * mm,
+                MARGIN_H + text_w + 1 * mm, y - 1.4 * mm,
                 logo_w, logo_h,
                 preserveAspectRatio=True,
                 anchor='sw',
@@ -593,38 +596,27 @@ def _separator():
 
 def _build_header(inv, logo_path, s):
     elements = []
-    payment_btn = None
     doc_title = TYPE_LABELS.get(inv.invoice_type, "SĄSKAITA FAKTŪRA")
     series_line = f"Serija {inv.document_series or ''} Nr. {inv.document_number or ''}"
- 
+
     right_lines = [f"Data: <b>{_format_date(inv.invoice_date)}</b>"]
     if inv.due_date:
         right_lines.append(f"Apmokėti iki: <b>{_format_date(inv.due_date)}</b>")
     right_content = [Paragraph(line, s["date_label"]) for line in right_lines]
- 
+
     # ── Logo ─────────────────────────────────────────────
     has_logo = False
     logo_el = None
     if logo_path:
         logo_el = _make_logo(logo_path)
         has_logo = logo_el is not None
- 
+
     if has_logo:
-        if payment_btn:
-            # 3 columns: [Logo] [Button →] [Dates →]
-            top_data = [[logo_el, payment_btn, right_content]]
-            top_table = Table(
-                top_data,
-                colWidths=[CONTENT_W * 0.40, CONTENT_W * 0.32, CONTENT_W * 0.28],
-            )
-        else:
-            # 2 columns: [Logo] [Dates →]
-            top_data = [[logo_el, right_content]]
-            top_table = Table(top_data, colWidths=[CONTENT_W * 0.5, CONTENT_W * 0.5])
- 
+        top_data = [[logo_el, right_content]]
+        top_table = Table(top_data, colWidths=[CONTENT_W * 0.5, CONTENT_W * 0.5])
+
         top_table.setStyle(TableStyle([
             ("VALIGN", (0, 0), (-1, -1), "TOP"),
-            ("ALIGN", (1, 0), (1, 0), "RIGHT"),
             ("ALIGN", (-1, 0), (-1, 0), "RIGHT"),
             ("LEFTPADDING", (0, 0), (-1, -1), 0),
             ("RIGHTPADDING", (0, 0), (-1, -1), 0),
@@ -633,10 +625,10 @@ def _build_header(inv, logo_path, s):
         ]))
         elements.append(top_table)
         elements.append(Spacer(1, 3 * mm))
- 
+
         elements.extend(_separator())
         elements.append(Spacer(1, 4 * mm))
- 
+
         # Centered title block
         elements.append(Paragraph(doc_title, s["doc_type"]))
         elements.append(Spacer(1, 1 * mm))
@@ -657,22 +649,12 @@ def _build_header(inv, logo_path, s):
             left_content.append(
                 Paragraph(f"Užsakymo Nr.: {inv.order_number}", s["order_number_left"])
             )
- 
-        if payment_btn:
-            # 3 columns: [Title] [Button →] [Dates →]
-            data = [[left_content, payment_btn, right_content]]
-            t = Table(
-                data,
-                colWidths=[CONTENT_W * 0.40, CONTENT_W * 0.32, CONTENT_W * 0.28],
-            )
-        else:
-            # 2 columns: [Title] [Dates →]
-            data = [[left_content, right_content]]
-            t = Table(data, colWidths=[CONTENT_W * 0.6, CONTENT_W * 0.4])
- 
+
+        data = [[left_content, right_content]]
+        t = Table(data, colWidths=[CONTENT_W * 0.6, CONTENT_W * 0.4])
+
         t.setStyle(TableStyle([
             ("VALIGN", (0, 0), (-1, -1), "TOP"),
-            ("ALIGN", (1, 0), (1, 0), "RIGHT"),
             ("ALIGN", (-1, 0), (-1, 0), "RIGHT"),
             ("LEFTPADDING", (0, 0), (-1, -1), 0),
             ("RIGHTPADDING", (0, 0), (-1, -1), 0),
@@ -683,7 +665,7 @@ def _build_header(inv, logo_path, s):
         elements.append(Spacer(1, 2 * mm))
         elements.extend(_separator())
         elements.append(Spacer(1, 5 * mm))
- 
+
     return elements
 
 
@@ -695,7 +677,7 @@ def _info_line(label, value, s):
 
 
 def _build_parties(inv, s):
-    def party_block(title, person_type, name, code, vat, address, phone, email, bank, iban, swift):
+    def party_block(title, person_type, name, code, vat, address, phone, email, bank, iban, swift, delivery_address="", extra_info=""):
         code_label = "Asmens / ind. veiklos kodas" if person_type == "fizinis" else "Įm. kodas"
 
         lines = [
@@ -704,9 +686,9 @@ def _build_parties(inv, s):
                 ParagraphStyle(
                     "PT",
                     fontName="InvFontBold",
-                    fontSize=7,
+                    fontSize=6.5,
                     textColor=C_LABEL,
-                    leading=10,
+                    leading=9,
                     spaceAfter=0.5 * mm,
                 ),
             ),
@@ -728,6 +710,21 @@ def _build_parties(inv, s):
             lines.append(_info_line("IBAN", iban, s))
         if swift:
             lines.append(_info_line("SWIFT", swift, s))
+        if delivery_address:
+            lines.append(_info_line("Pristatymo adresas", delivery_address, s))
+        if extra_info:
+            lines.append(Spacer(1, 1 * mm))
+            lines.append(Paragraph(
+                extra_info,
+                ParagraphStyle(
+                    "ExtraInfo",
+                    fontName="InvFont",
+                    fontSize=7,
+                    textColor=C_TEXT_LIGHT,
+                    leading=10,
+                    wordWrap='CJK',
+                ),
+            ))
         return lines
 
     seller = party_block(
@@ -742,6 +739,7 @@ def _build_parties(inv, s):
         inv.seller_bank_name,
         inv.seller_iban,
         inv.seller_swift,
+        extra_info=getattr(inv, "seller_extra_info", "") or "",
     )
     buyer = party_block(
         "PIRKĖJAS",
@@ -755,6 +753,8 @@ def _build_parties(inv, s):
         inv.buyer_bank_name,
         inv.buyer_iban,
         inv.buyer_swift,
+        delivery_address=getattr(inv, "buyer_delivery_address", "") or "",
+        extra_info=getattr(inv, "buyer_extra_info", "") or "",
     )
 
     t = Table([[seller, buyer]], colWidths=[CONTENT_W * 0.5, CONTENT_W * 0.5])
@@ -777,6 +777,15 @@ def _build_line_items(inv, s):
     has_code = any(li.prekes_kodas for li in lines)
     has_discount = any((li.discount_wo_vat or 0) > 0 for li in lines)
 
+    # Detect multiple VAT rates
+    vat_rates = set()
+    for li in lines:
+        vat_pct = _parse_num(li.vat_percent) if li.vat_percent is not None else (
+            _parse_num(inv.vat_percent or 21) if is_pvm else Decimal("0")
+        )
+        vat_rates.add(float(vat_pct))
+    multi_vat = is_pvm and len(vat_rates) > 1
+
     price_header = f"Kaina {currency}<br/>be PVM" if is_pvm else f"Kaina {currency}"
     sum_header = f"Suma {currency}<br/>be PVM" if is_pvm else f"Suma {currency}"
 
@@ -790,6 +799,8 @@ def _build_line_items(inv, s):
     if has_discount:
         headers.append(("Nuol.", "th_right", 16 * mm))
     headers.append((sum_header, "th_right", 24 * mm))
+    if multi_vat:
+        headers.append(("PVM %", "th_right", 14 * mm))
 
     min_name_w = 42 * mm
     min_code_w = 26 * mm if has_code else 0
@@ -848,6 +859,9 @@ def _build_line_items(inv, s):
         price = _parse_num(li.price)
         discount = _parse_num(li.discount_wo_vat or 0)
         net = max(Decimal("0"), qty * price - discount)
+        vat_pct = _parse_num(li.vat_percent) if li.vat_percent is not None else (
+            _parse_num(inv.vat_percent or 21) if is_pvm else Decimal("0")
+        )
 
         row = [Paragraph(str(idx), s["td_center"])]
 
@@ -867,6 +881,11 @@ def _build_line_items(inv, s):
             row.append(Paragraph(_fmt(discount) if discount > 0 else "", s["td_right"]))
 
         row.append(Paragraph(f"<b>{_fmt(net)}</b>", s["td_bold"]))
+
+        if multi_vat:
+            r = int(vat_pct) if vat_pct == int(vat_pct) else float(vat_pct)
+            row.append(Paragraph(f"{r}%", s["td_right"]))
+
         data.append(row)
 
     t = Table(data, colWidths=col_widths, repeatRows=1, splitByRow=1)
@@ -874,7 +893,7 @@ def _build_line_items(inv, s):
         ("BACKGROUND", (0, 0), (-1, 0), C_HEADER_BG),
         ("TEXTCOLOR", (0, 0), (-1, 0), C_TEXT_LIGHT),
         ("FONTNAME", (0, 0), (-1, 0), "InvFontBold"),
-        ("FONTSIZE", (0, 0), (-1, 0), 7.5),
+        ("FONTSIZE", (0, 0), (-1, 0), 6.5),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
         ("LINEBELOW", (0, 0), (-1, 0), 1.2, C_DIVIDER),
         ("LINEBELOW", (0, 1), (-1, -1), 0.5, C_BORDER),
@@ -1002,11 +1021,12 @@ def _build_totals(inv, s):
     if not left_parts:
         left_parts.append(Spacer(1, 1 * mm))
 
-    layout = Table([[left_parts, summary_table]], colWidths=[CONTENT_W - 75 * mm, 70 * mm])
+    layout = Table([[left_parts, summary_table]], colWidths=[CONTENT_W - 70 * mm, 70 * mm])
     layout.setStyle(TableStyle([
         ("VALIGN", (0, 0), (-1, -1), "TOP"),
         ("LEFTPADDING", (0, 0), (-1, -1), 0),
         ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+        ("RIGHTPADDING", (0, 0), (0, 0), 5 * mm),
         ("TOPPADDING", (0, 0), (-1, -1), 0),
         ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
     ]))
@@ -1025,9 +1045,9 @@ def _build_signatures(inv, s):
     value_style = ParagraphStyle(
         "SigValue",
         fontName="InvFont",
-        fontSize=8.5,
+        fontSize=8,
         textColor=C_TEXT,
-        leading=12,
+        leading=11,
     )
 
     left = [
@@ -1118,8 +1138,6 @@ def save_invoice_pdf(invoice):
             logger.info("[PDF] user=%s no InvSubscription found", invoice.user.email)
     except Exception as e:
         logger.error("[PDF] watermark check failed: %s", e)
-
-
 
 
 

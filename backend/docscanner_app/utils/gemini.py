@@ -137,9 +137,6 @@ If you are very confident the document type is one of: Kreditinė sąskaita, Deb
 Make sure you don't consider receipt or payment confirmation as a separate document. Invoice can come with receipt if it's been paid already.
 """
 
-
-
-
 GEMINI_DETAILED_PROMPT = """
 You will receive raw OCR text from one or more scanned financial documents, which may include invoices, receipts, or similar forms.
 
@@ -222,15 +219,11 @@ If there are any signs of cash payment, for example, 'gryni', 'grąža' or simil
 
 - Firstly, properly identify how many lineitems (products/services/fees/shipping, etc) exist in the document. Don't count document's subtotal, vat, total lines as lineitems. If product/service is mentioned with zero subtotal, vat and total for example free shipping, don't include it as lineitem. But shipping fee if it's > 0, it must be added as lineitem and counted towards total_lines.
 
-LINE ITEMS RULE (STRICT):
-- First COUNT the real total number of billable line items in the document and return it as integer "total_lines" at ROOT level.
-- Then OUTPUT only the FIRST 20 line items in "line_items". Never output more than 20.
-- If total_lines > 20: set root "truncated_json": true and line_items must contain exactly 20 items.
-- If total_lines <= 20: omit "truncated_json" (or set false) and line_items must contain exactly total_lines items.
+- You MUST return ALL line items found in the document. Do not truncate or limit the number of line items.
 
-- If a discount (“nuolaida”) is present for any line item, first determine whether the discount amount is stated with VAT (“su PVM”) or without VAT (“be PVM”).
+- If a discount ("nuolaida") is present for any line item, first determine whether the discount amount is stated with VAT ("su PVM") or without VAT ("be PVM").
     Extract the discount amount and assign it to the corresponding line item.
-    If the discount includes VAT, return it in the “discount_with_vat” field; if it excludes VAT, return it in the “discount_wo_vat” field.
+    If the discount includes VAT, return it in the "discount_with_vat" field; if it excludes VAT, return it in the "discount_wo_vat" field.
     If there is a line item with negative amount and you can not assign it as a discount of another line item, add a separate line item with negative amounts for it.
     If document contains a clear document-level discount that applies to whole document, add it as invoice-level discounts (invoice_discount_wo_vat or invoice_discount_with_vat).
     Invoice-level discounts (invoice_discount_wo_vat or invoice_discount_with_vat) must be used only as a last resort, and only when the discount clearly exists but cannot be logically linked to any specific product or service. Never apply the same discount to a few places, for example, corresponding line item discount, separate line item with negative amounts, invoice-level discount. 
@@ -243,9 +236,9 @@ LINE ITEMS RULE (STRICT):
 
 - If document doesn't have obvious line items but has a table or list of payments/transactions, use them as line items.
 
-- Do **NOT** treat “Subtotal”, “Total”, “VAT”, “Billing cycle”, “Billed for”, “Payment method”, “Transaction fees”, “Apps”, or any similar summary, heading, or informational lines as separate line items. Only extract as line items actual paid products/services, subscriptions, and app charges, NOT summary rows or section headings.
+- Do **NOT** treat "Subtotal", "Total", "VAT", "Billing cycle", "Billed for", "Payment method", "Transaction fees", "Apps", or any similar summary, heading, or informational lines as separate line items. Only extract as line items actual paid products/services, subscriptions, and app charges, NOT summary rows or section headings.
 
-- If you find any line item with a negative amount (such as “-$0.02”), for example "Nuolaida", "Credit", "Refund", etc., create a separate line item with negative amounts for it. Or you can add it as discount to another line item it belongs to, but never do both.
+- If you find any line item with a negative amount (such as "-$0.02"), for example "Nuolaida", "Credit", "Refund", etc., create a separate line item with negative amounts for it. Or you can add it as discount to another line item it belongs to, but never do both.
 
 - If line item doesn't clearly show total, don't use it for that line item. 
 
@@ -254,7 +247,7 @@ LINE ITEMS RULE (STRICT):
 *Return ONLY a valid JSON object in a SINGLE LINE (compact form): no newlines, no \n, no \r, no tabs, and no spaces outside string values. Do not use Markdown or code fences. No trailing commas. Do NOT wrap in quotes or escape characters. Do NOT include any explanations, comments, or extra text outside the JSON. The output must be directly parsable by JSON.parse().
 
 Example (structure and field names; values may be empty strings, booleans must be true/false, numbers should be numbers when available):
-{"docs":<number_of_documents>,"total_lines":<total_number_of_lines>,"ar_sutapo":<true_or_false>,"documents":[{"document_type":"","seller_id":"","seller_name":"","seller_vat_code":"","seller_address":"","seller_country":"","seller_country_iso":"","seller_iban":"","seller_is_person":false,"buyer_id":"","buyer_name":"","buyer_vat_code":"","buyer_address":"","buyer_country":"","buyer_country_iso":"","buyer_iban":"","buyer_is_person":false,"invoice_date":"","due_date":"","operation_date":"","document_series":"","document_number":"","order_number":"","invoice_discount_wo_vat":"","invoice_discount_with_vat":"","amount_wo_vat":"","vat_amount":"","vat_percent":"","amount_with_vat":"","separate_vat":false,"currency":"","with_receipt":false,"paid_by_cash":false,"doc_96_str":false,"line_items":[{"line_id":"","product_code":"","product_barcode":"","product_name":"","unit":"","quantity":"","price":"","subtotal":"","discount_wo_vat":"","vat":"","vat_percent":"","discount_with_vat":"","total":"","preke_paslauga":""}]}]}
+{"docs":<number_of_documents>,"total_lines":<total_number_of_lines>,"documents":[{"document_type":"","seller_id":"","seller_name":"","seller_vat_code":"","seller_address":"","seller_country":"","seller_country_iso":"","seller_iban":"","seller_is_person":false,"buyer_id":"","buyer_name":"","buyer_vat_code":"","buyer_address":"","buyer_country":"","buyer_country_iso":"","buyer_iban":"","buyer_is_person":false,"invoice_date":"","due_date":"","operation_date":"","document_series":"","document_number":"","order_number":"","invoice_discount_wo_vat":"","invoice_discount_with_vat":"","amount_wo_vat":"","vat_amount":"","vat_percent":"","amount_with_vat":"","separate_vat":false,"currency":"","with_receipt":false,"paid_by_cash":false,"doc_96_str":false,"line_items":[{"line_id":"","product_code":"","product_barcode":"","product_name":"","unit":"","quantity":"","price":"","subtotal":"","discount_wo_vat":"","vat":"","vat_percent":"","discount_with_vat":"","total":"","preke_paslauga":""}]}]}
 
 If any of values are empty, don't include them in JSON. For example, if "product_barcode" is empty, omit it from that lineitem in JSON.
 
@@ -272,17 +265,17 @@ When extracting company codes and VAT codes:
 - "PVM kodas" or "PVM mokėtojo kodas" → this is VAT code → put in seller_vat_code / buyer_vat_code (usually starts with country prefix like "LT" + 9-12 digits)
 - Buyer and seller must not be identical by default; if buyer_id == seller_id or buyer_vat_code == seller_vat_code, re-scan for a second party block (Seller: Pardavėjas/Tiekėjas/Išrašė/Seller/Supplier; Buyer: Pirkėjas/Gavėjas/Užsakovas/Buyer/Customer) and only allow identical parties if self-billing/self-invoicing is explicitly stated.
 
-If the buyer/seller block contains indicators of Lithuanian “individuali veikla” (e.g., “individuali veikla”, “pagal individualios veiklos pažymą”, “IV/IDV”, “Individualios veiklos Nr.” / “IV pažymos Nr.”), then set buyer_is_person=true / seller_is_person=true.
+If the buyer/seller block contains indicators of Lithuanian "individuali veikla" (e.g., "individuali veikla", "pagal individualios veiklos pažymą", "IV/IDV", "Individualios veiklos Nr." / "IV pažymos Nr."), then set buyer_is_person=true / seller_is_person=true.
 
 If due_date is not stated in the document, but invoice date and payment terms like number of days for payment are mentioned, calculate the due date by adding the payment period to the invoice date.
 Set "separate_vat": true ONLY when the document has 2 or more different VAT rates, AND each rate's taxable base > 0. A 0% VAT rate counts if its taxable base > 0, even though VAT amount = 0 (e.g., 21% on 100 EUR + 0% on 50 EUR = separate_vat: true).
 To decide this, you MUST check line items and VAT summary - if lines have different vat_percent (e.g., some 0%, some 21%) with subtotal > 0, set separate_vat: true.
 When separate_vat is true, omit document-level "vat_percent" (do NOT put a single rate like "21").
 You MUST include "vat_percent" for EACH line item, even if not explicitly shown in the row. Use VAT summary section to deduce rates: match line item subtotals to taxable bases in summary. Hint: packaging/deposit items ("skardinė", "tara", "užstatas") are usually 0% VAT; make sure you add them as separate lineitems.
-Set "doc_96_str": true only if the document explicitly mentions Lietuvos PVM įstatymo 96 straipsnis, e.g. “PVM įstatymo 96 straipsnis”, “96 straipsnis”, “96 str.”, “taikomas 96 straipsnis”, “pagal PVMĮ 96 str.”. Otherwise set "doc_96_str": false.
+Set "doc_96_str": true only if the document explicitly mentions Lietuvos PVM įstatymo 96 straipsnis, e.g. "PVM įstatymo 96 straipsnis", "96 straipsnis", "96 str.", "taikomas 96 straipsnis", "pagal PVMĮ 96 str.". Otherwise set "doc_96_str": false.
 For unit, try to identify any of these vnt kg g mg kompl t ct m cm mm km l ml m2 cm2 dm2 m3 cm3 dm3 val h min s d sav mėn metai pak kompl or similar. If units is not in Lithuanian, translate it (example: szt should be vnt). If can't identify unit, choose vnt.
 
-If the document is a kasos čekis (cash receipt), for example, a fuel (kuro) receipt, buyer info is often at the bottom as a line with company name, company code, and VAT code—extract these as buyer details. For line items, find the quantity and unit next to price (like “50,01 l” for litres). Product name is usually above this line. document_number is usually next to kvitas, ignore long numer below "kasininkas" at the bottom of document but don't ignore date at the bottom.
+If the document is a kasos čekis (cash receipt), for example, a fuel (kuro) receipt, buyer info is often at the bottom as a line with company name, company code, and VAT code—extract these as buyer details. For line items, find the quantity and unit next to price (like "50,01 l" for litres). Product name is usually above this line. document_number is usually next to kvitas, ignore long numer below "kasininkas" at the bottom of document but don't ignore date at the bottom.
 
 If you cannot extract any documents, return exactly (one line):
 {"docs":0,"documents":[]}
@@ -294,7 +287,165 @@ If you are very confident the document type is one of: Kreditinė sąskaita, Deb
 {"docs":1,"netinkamas_dokumentas": true,"documents":[]}
 
 Make sure you don't consider receipt or payment confirmation as a separate document. Invoice can come with receipt if it's been paid already.
+DON'T FORGET TO RETURN ALL LINEITEMS IN JSON!
 """
+
+
+# GEMINI_DETAILED_PROMPT = """
+# You will receive raw OCR text from one or more scanned financial documents, which may include invoices, receipts, or similar forms.
+
+# 1. First, analyze the text and determine **how many separate documents** are present. Return this number as an integer in the field "docs". Then, count the total number of line items (products/services) in the document and return this number as an integer in the field total_lines.
+
+# 3. For each document, determine its type. The possible document types (Galimi tipai) are:
+# - PVM sąskaita faktūra
+# - Sąskaita faktūra
+# - Kreditinė sąskaita faktūra
+# - Debetinė sąskaita faktūra
+# - Išankstinė sąskaita faktūra
+# - Kasos čekis
+# - ES PVM sąskaita faktūra
+# - ES sąskaita faktūra
+# - Užsienietiška sąskaita faktūra
+# - Pavedimo kopija
+# - Receipt
+# - Kitas
+
+# Assign the detected type to the field "document_type".
+
+# 4. For each document, extract the following fields (leave empty if not found):
+# - seller_id
+# - seller_name
+# - seller_vat_code
+# - seller_address
+# - seller_country
+# - seller_country_iso
+# - seller_iban
+# - seller_is_person
+# - buyer_id
+# - buyer_name
+# - buyer_vat_code
+# - buyer_address
+# - buyer_country
+# - buyer_country_iso
+# - buyer_iban
+# - buyer_is_person
+# - invoice_date
+# - due_date
+# - operation_date
+# - document_series
+# - document_number
+# - order_number
+# - amount_wo_vat
+# - invoice_discount_wo_vat
+# - invoice_discount_with_vat
+# - vat_amount
+# - vat_percent
+# - amount_with_vat
+# - separate_vat
+# - currency
+# - with_receipt
+# - paid_by_cash
+# - doc_96_str
+
+# All boolean fields (seller_is_person, buyer_is_person, with_receipt, separate_vat, paid_by_cash, doc_96_str) must be returned as true/false, not as strings.
+# If there are any signs of cash payment, for example, 'gryni', 'grąža' or similar, return paid_by_cash as True.
+
+# 5. For each document, also extract an array of line items (products or services) if present. For each line item, extract the following fields (leave empty if not found):
+
+# - line_id
+# - type
+# - product_code
+# - product_barcode
+# - product_name
+# - unit
+# - quantity
+# - price
+# - subtotal
+# - discount without VAT (discount_wo_vat)
+# - vat
+# - vat_percent
+# - discount with VAT (discount_with_vat)
+# - total
+# - preke_paslauga (if lineitem is product, return preke; if lineitem is service, return paslauga)
+
+# **IMPORTANT:**
+# - Each document must have a "line_items" field containing an array of line items (may be empty if not found).
+
+# - Firstly, properly identify how many lineitems (products/services/fees/shipping, etc) exist in the document. Don't count document's subtotal, vat, total lines as lineitems. If product/service is mentioned with zero subtotal, vat and total for example free shipping, don't include it as lineitem. But shipping fee if it's > 0, it must be added as lineitem and counted towards total_lines.
+
+# LINE ITEMS RULE (STRICT):
+# - First COUNT the real total number of billable line items in the document and return it as integer "total_lines" at ROOT level.
+# - Then OUTPUT only the FIRST 20 line items in "line_items". Never output more than 20.
+# - If total_lines > 20: set root "truncated_json": true and line_items must contain exactly 20 items.
+# - If total_lines <= 20: omit "truncated_json" (or set false) and line_items must contain exactly total_lines items.
+
+# - If a discount (“nuolaida”) is present for any line item, first determine whether the discount amount is stated with VAT (“su PVM”) or without VAT (“be PVM”).
+#     Extract the discount amount and assign it to the corresponding line item.
+#     If the discount includes VAT, return it in the “discount_with_vat” field; if it excludes VAT, return it in the “discount_wo_vat” field.
+#     If there is a line item with negative amount and you can not assign it as a discount of another line item, add a separate line item with negative amounts for it.
+#     If document contains a clear document-level discount that applies to whole document, add it as invoice-level discounts (invoice_discount_wo_vat or invoice_discount_with_vat).
+#     Invoice-level discounts (invoice_discount_wo_vat or invoice_discount_with_vat) must be used only as a last resort, and only when the discount clearly exists but cannot be logically linked to any specific product or service. Never apply the same discount to a few places, for example, corresponding line item discount, separate line item with negative amounts, invoice-level discount. 
+
+# - For lineitems, always try to take price after discount (without VAT) if such price is provided in the document. Use up to 4 decimal places for prices if needed. Do not round numbers.
+
+# - If document includes any fees (such as shipping, transaction, payment processing, etc.), each fee (if it's value >0) must be extracted as a separate line item.
+
+# - Do not mix up fees, discounts, or credits with VAT. VAT must be extracted only if it is explicitly and clearly stated with '%' in the document.
+
+# - If document doesn't have obvious line items but has a table or list of payments/transactions, use them as line items.
+
+# - Do **NOT** treat “Subtotal”, “Total”, “VAT”, “Billing cycle”, “Billed for”, “Payment method”, “Transaction fees”, “Apps”, or any similar summary, heading, or informational lines as separate line items. Only extract as line items actual paid products/services, subscriptions, and app charges, NOT summary rows or section headings.
+
+# - If you find any line item with a negative amount (such as “-$0.02”), for example "Nuolaida", "Credit", "Refund", etc., create a separate line item with negative amounts for it. Or you can add it as discount to another line item it belongs to, but never do both.
+
+# - If line item doesn't clearly show total, don't use it for that line item. 
+
+# - You MUST include "vat_percent" for EACH line item, even if not explicitly shown in the row. Use VAT summary section to deduce rates: match line item subtotals to taxable bases in summary. Hint: packaging/deposit items ("skardinė", "tara", "užstatas") are usually 0% VAT; make sure you add them as separate lineitems.
+
+# *Return ONLY a valid JSON object in a SINGLE LINE (compact form): no newlines, no \n, no \r, no tabs, and no spaces outside string values. Do not use Markdown or code fences. No trailing commas. Do NOT wrap in quotes or escape characters. Do NOT include any explanations, comments, or extra text outside the JSON. The output must be directly parsable by JSON.parse().
+
+# Example (structure and field names; values may be empty strings, booleans must be true/false, numbers should be numbers when available):
+# {"docs":<number_of_documents>,"total_lines":<total_number_of_lines>,"ar_sutapo":<true_or_false>,"documents":[{"document_type":"","seller_id":"","seller_name":"","seller_vat_code":"","seller_address":"","seller_country":"","seller_country_iso":"","seller_iban":"","seller_is_person":false,"buyer_id":"","buyer_name":"","buyer_vat_code":"","buyer_address":"","buyer_country":"","buyer_country_iso":"","buyer_iban":"","buyer_is_person":false,"invoice_date":"","due_date":"","operation_date":"","document_series":"","document_number":"","order_number":"","invoice_discount_wo_vat":"","invoice_discount_with_vat":"","amount_wo_vat":"","vat_amount":"","vat_percent":"","amount_with_vat":"","separate_vat":false,"currency":"","with_receipt":false,"paid_by_cash":false,"doc_96_str":false,"line_items":[{"line_id":"","product_code":"","product_barcode":"","product_name":"","unit":"","quantity":"","price":"","subtotal":"","discount_wo_vat":"","vat":"","vat_percent":"","discount_with_vat":"","total":"","preke_paslauga":""}]}]}
+
+# If any of values are empty, don't include them in JSON. For example, if "product_barcode" is empty, omit it from that lineitem in JSON.
+
+# Format dates as yyyy-mm-dd. Delete country from addresses. seller_country and buyer_country must be full country name in language of address provided. country_iso must be 2-letter code.
+# In lithuanian documents dates are usually displayed in yyyy-mm-dd or dd/mm/yyyy formats. For example, when parsing 12/01/2026, it's 12th January, not 1st December.
+# When identifying buyer/seller:
+# - Look for "pirkėjas" / "paslaugos pirkėjas" label → this is BUYER
+# - Look for "pardavėjas" / "tiekėjas" label→ this is SELLER
+# - "Savarankiškas sąskaitų išrašymas" (self-billing) and "Atvirkštinis PVM" (reverse charge) do NOT swap roles: pirkėjas is still buyer, pardavėjas/tiekėjas is still seller
+# - Don't rely on position (left/right/top/bottom) when labels are available
+# - When no pirkejas/pardavejas/tiekejas labels and can not identify sides by other criteria, check a footer. Seller is usually mentioned in a footer.
+
+# When extracting company codes and VAT codes:
+# - "Įm. kodas" or "Įmonės kodas" → this is company registration code → put in seller_id / buyer_id (usually 9-digit code)
+# - "PVM kodas" or "PVM mokėtojo kodas" → this is VAT code → put in seller_vat_code / buyer_vat_code (usually starts with country prefix like "LT" + 9-12 digits)
+# - Buyer and seller must not be identical by default; if buyer_id == seller_id or buyer_vat_code == seller_vat_code, re-scan for a second party block (Seller: Pardavėjas/Tiekėjas/Išrašė/Seller/Supplier; Buyer: Pirkėjas/Gavėjas/Užsakovas/Buyer/Customer) and only allow identical parties if self-billing/self-invoicing is explicitly stated.
+
+# If the buyer/seller block contains indicators of Lithuanian “individuali veikla” (e.g., “individuali veikla”, “pagal individualios veiklos pažymą”, “IV/IDV”, “Individualios veiklos Nr.” / “IV pažymos Nr.”), then set buyer_is_person=true / seller_is_person=true.
+
+# If due_date is not stated in the document, but invoice date and payment terms like number of days for payment are mentioned, calculate the due date by adding the payment period to the invoice date.
+# Set "separate_vat": true ONLY when the document has 2 or more different VAT rates, AND each rate's taxable base > 0. A 0% VAT rate counts if its taxable base > 0, even though VAT amount = 0 (e.g., 21% on 100 EUR + 0% on 50 EUR = separate_vat: true).
+# To decide this, you MUST check line items and VAT summary - if lines have different vat_percent (e.g., some 0%, some 21%) with subtotal > 0, set separate_vat: true.
+# When separate_vat is true, omit document-level "vat_percent" (do NOT put a single rate like "21").
+# You MUST include "vat_percent" for EACH line item, even if not explicitly shown in the row. Use VAT summary section to deduce rates: match line item subtotals to taxable bases in summary. Hint: packaging/deposit items ("skardinė", "tara", "užstatas") are usually 0% VAT; make sure you add them as separate lineitems.
+# Set "doc_96_str": true only if the document explicitly mentions Lietuvos PVM įstatymo 96 straipsnis, e.g. “PVM įstatymo 96 straipsnis”, “96 straipsnis”, “96 str.”, “taikomas 96 straipsnis”, “pagal PVMĮ 96 str.”. Otherwise set "doc_96_str": false.
+# For unit, try to identify any of these vnt kg g mg kompl t ct m cm mm km l ml m2 cm2 dm2 m3 cm3 dm3 val h min s d sav mėn metai pak kompl or similar. If units is not in Lithuanian, translate it (example: szt should be vnt). If can't identify unit, choose vnt.
+
+# If the document is a kasos čekis (cash receipt), for example, a fuel (kuro) receipt, buyer info is often at the bottom as a line with company name, company code, and VAT code—extract these as buyer details. For line items, find the quantity and unit next to price (like “50,01 l” for litres). Product name is usually above this line. document_number is usually next to kvitas, ignore long numer below "kasininkas" at the bottom of document but don't ignore date at the bottom.
+
+# If you cannot extract any documents, return exactly (one line):
+# {"docs":0,"documents":[]}
+
+# If you identified more than 1 document, return only the count (one line):
+# {"docs":<number_of_documents>,"documents":[]}
+
+# If you are very confident the document type is one of: Kreditinė sąskaita, Debetinė sąskaita, Išankstinė sąskaita, Pavedimo kopija, Delivery note / Važtaraštis / Packing slip (or closely related forms), then return ONLY this one-line JSON:
+# {"docs":1,"netinkamas_dokumentas": true,"documents":[]}
+
+# Make sure you don't consider receipt or payment confirmation as a separate document. Invoice can come with receipt if it's been paid already.
+# """
 
 
 

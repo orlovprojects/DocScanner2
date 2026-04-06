@@ -33,6 +33,8 @@ from .utils.gemini import (
     repair_truncated_json_with_gemini_lite,
     request_full_json_with_gemini_lite,
 )
+from .utils.mercury import ask_mercury_with_retry
+
 from .utils.grok import (
     ask_grok_with_retry,
     repair_truncated_json_with_grok,
@@ -41,6 +43,7 @@ from .utils.grok import (
 from .utils.mimo import (
     ask_mimo_with_retry,
 )
+from .utils.novita import ask_novita_with_retry
 
 from .utils.similarity import calculate_max_similarity_percent
 from .utils.save_document import update_scanned_document, _apply_sumiskai_defaults_from_user
@@ -296,56 +299,70 @@ def _log_t(label: str, t0: float):
     logger.info(f"[TIME] {label}: {time.perf_counter() - t0:.2f}s")
 
 
+
 def ask_llm_with_fallback(raw_text: str, scan_type: str, logger):
     """
-    1) Gemini 2.5 Flash
-    2) если пусто/ошибка — Gemini 2.5 Flash-Lite
-    3) если снова пусто/ошибка — GPT
+    Routing:
+    - Если detaliai И текст > 5000 chars → primary: gemini-3.1-flash-lite-preview
+    - Иначе → primary: gemini-2.5-flash
+    - Secondary всегда: gemini-3.1-flash-lite-preview (кроме случая когда он уже primary, тогда gemini-2.5-flash-lite)
+    - Final fallback: GPT
     """
     try:
         gemini_prompt = GEMINI_DETAILED_PROMPT if scan_type == "detaliai" else GEMINI_DEFAULT_PROMPT
     except NameError:
         gemini_prompt = DETAILED_PROMPT if scan_type == "detaliai" else DEFAULT_PROMPT
 
-    primary_model   = "gemini-2.5-flash"
-    # primary_model   = "gemini-2.5-flash"
-    secondary_model = "gemini-2.5-flash-lite"   # альтернативно: "gemini-flash-lite-latest"
+    text_len = len(raw_text or "")
+    use_31_as_primary = (scan_type == "detaliai" and text_len > 5000)
 
-    # 1) Flash
+    if use_31_as_primary:
+        primary_model   = "gemini-3.1-flash-lite-preview"
+        secondary_model = "gemini-2.5-flash-lite"
+    else:
+        primary_model   = "gemini-2.5-flash"
+        secondary_model = "gemini-3.1-flash-lite-preview"
+
+    logger.info(
+        "[LLM] Routing: scan_type=%s text_len=%d → primary=%s secondary=%s",
+        scan_type, text_len, primary_model, secondary_model,
+    )
+
+    # 1) Primary
     try:
         t0 = _t()
-        logger.info(f"[LLM] Try Gemini primary model={primary_model}")
+        logger.info(f"[LLM] Try primary model={primary_model}")
         resp = ask_gemini_with_retry(
             text=raw_text,
             prompt=gemini_prompt,
             model=primary_model,
             logger=logger,
         )
-        _log_t("LLM (Gemini primary)", t0)
-        logger.info(f"[LLM] Gemini primary OK: len={len(resp or '')} preview={repr((resp or '')[:200])}")
+        _log_t("LLM (primary)", t0)
+        logger.info(f"[LLM] Primary OK: len={len(resp or '')} preview={repr((resp or '')[:200])}")
         if resp and resp.strip():
             return resp, primary_model
-        logger.warning("[LLM] Gemini primary returned empty → try secondary")
+        logger.warning("[LLM] Primary returned empty → try secondary")
     except Exception as e:
-        logger.warning(f"[LLM] Gemini primary failed: {e} → try secondary")
+        logger.warning(f"[LLM] Primary failed: {e} → try secondary")
 
-    # 2) Flash-Lite
+    # 2) Secondary
     try:
         t0 = _t()
-        logger.info(f"[LLM] Try Gemini secondary model={secondary_model}")
+        logger.info(f"[LLM] Try secondary model={secondary_model}")
         resp2 = ask_gemini_with_retry(
             text=raw_text,
             prompt=gemini_prompt,
             model=secondary_model,
             logger=logger,
         )
-        _log_t("LLM (Gemini secondary)", t0)
-        logger.info(f"[LLM] Gemini secondary OK: len={len(resp2 or '')} preview={repr((resp2 or '')[:200])}")
+        _log_t("LLM (secondary)", t0)
+        logger.info(f"[LLM] Secondary OK: len={len(resp2 or '')} preview={repr((resp2 or '')[:200])}")
         if resp2 and resp2.strip():
             return resp2, secondary_model
-        logger.warning("[LLM] Gemini secondary returned empty → fallback to GPT")
+        logger.warning("[LLM] Secondary returned empty → fallback to GPT")
     except Exception as e:
-        logger.warning(f"[LLM] Gemini secondary failed: {e} → fallback to GPT")
+        logger.warning(f"[LLM] Secondary failed: {e} → fallback to GPT")
 
     # 3) GPT
     gpt_prompt = DETAILED_PROMPT if scan_type == "detaliai" else DEFAULT_PROMPT

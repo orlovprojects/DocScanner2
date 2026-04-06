@@ -23,7 +23,6 @@ import {
   Check as CheckIcon,
 } from '@mui/icons-material';
 import { invoicingApi } from '../api/invoicingApi';
-// ── Changed: PaginatedInvoice instead of InvoiceA4, shared print hook ──
 import { PaginatedInvoice, usePrintInvoice } from '../components/InvoicePreview';
 
 // Helpers
@@ -186,9 +185,12 @@ const SmallMeta = ({ label, value, copyable = false }) => {
   );
 };
 
+// ── Changed: measures actual content height for correct scaling on multi-page ──
 const InvoicePreviewWrapper = ({ children }) => {
   const containerRef = useRef(null);
+  const contentRef = useRef(null);
   const [scale, setScale] = useState(1);
+  const [contentHeight, setContentHeight] = useState(1123);
 
   useEffect(() => {
     const updateScale = () => {
@@ -201,6 +203,18 @@ const InvoicePreviewWrapper = ({ children }) => {
     updateScale();
     window.addEventListener('resize', updateScale);
     return () => window.removeEventListener('resize', updateScale);
+  }, []);
+
+  // Measure actual content height after render (handles multi-page)
+  useEffect(() => {
+    if (!contentRef.current) return;
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        setContentHeight(entry.contentRect.height);
+      }
+    });
+    observer.observe(contentRef.current);
+    return () => observer.disconnect();
   }, []);
 
   return (
@@ -216,11 +230,14 @@ const InvoicePreviewWrapper = ({ children }) => {
         overflow: 'hidden',
       }}
     >
-      <Box sx={{
-        transformOrigin: 'top center',
-        transform: scale < 1 ? `scale(${scale})` : 'none',
-        mb: scale < 1 ? `${-(1 - scale) * 1123}px` : 0,
-      }}>
+      <Box
+        ref={contentRef}
+        sx={{
+          transformOrigin: 'top center',
+          transform: scale < 1 ? `scale(${scale})` : 'none',
+          mb: scale < 1 ? `${-(1 - scale) * contentHeight}px` : 0,
+        }}
+      >
         {children}
       </Box>
     </Box>
@@ -239,7 +256,6 @@ const InvoicePublicPage = () => {
   const [pdfLoading, setPdfLoading] = useState(false);
   const [snack, setSnack] = useState({ open: false, msg: '' });
 
-  // ── Changed: shared print hook (handles multi-page CSS break-after) ──
   const handlePrint = usePrintInvoice(printRef, invoice);
 
   useEffect(() => {
@@ -327,11 +343,6 @@ const InvoicePublicPage = () => {
   }
 
   if (!invoice) return null;
-
-  const invoiceForPreview = {
-    ...invoice,
-    payment_link_url: '',
-  };
 
   return (
     <Box
@@ -716,7 +727,7 @@ const InvoicePublicPage = () => {
         </Box>
       </Box>
 
-      {/* ── Changed: PaginatedInvoice instead of InvoiceA4 ── */}
+      {/* ── Invoice preview (paginated, matches PDF layout) ── */}
       <InvoicePreviewWrapper>
         <Box
           sx={{
@@ -730,7 +741,7 @@ const InvoicePublicPage = () => {
         >
           <PaginatedInvoice
             ref={printRef}
-            invoice={invoiceForPreview}
+            invoice={invoice}
             logoUrl={invoice.logo_url}
             watermark={invoice.show_watermark}
           />
@@ -770,8 +781,6 @@ const InvoicePublicPage = () => {
 };
 
 export default InvoicePublicPage;
-
-
 
 
 
