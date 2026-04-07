@@ -148,6 +148,18 @@ def generate_invoice_from_recurring(recurring: RecurringInvoice) -> Invoice:
                         "status", "pvm_kodas",
                     ])
 
+            # 5.5. Payment link
+            if recurring.payment_link_provider and invoice.status == "issued":
+                try:
+                    from ..services.payment_link_service import generate_payment_link
+                    generate_payment_link(invoice, recurring.payment_link_provider)
+                except Exception as e:
+                    import logging
+                    logging.getLogger("docscanner_app").warning(
+                        "Payment link generation failed for invoice %d (recurring %d): %s",
+                        invoice.id, recurring.id, e,
+                    )
+
             # 6. Auto-send
             if recurring.auto_send and recurring.send_to_email and invoice.status == "issued":
                 try:

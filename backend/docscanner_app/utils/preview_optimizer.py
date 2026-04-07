@@ -17,12 +17,23 @@ PREVIEW_MAX_SIZE = 200_000
 PREVIEW_MIN_QUALITY = 40
 PREVIEW_START_QUALITY = 75
 
+PREVIEW_MIN_SHORT_SIDE = 1000
+
 def _resize_for_preview(img: Image.Image, max_width: int, max_height: int) -> Image.Image:
     w, h = img.size
     if w <= max_width and h <= max_height:
         return img
     scale = min(max_width / w, max_height / h)
     new_w, new_h = int(w * scale), int(h * scale)
+    # Не сжимаем если короткая сторона станет меньше 1000px
+    short_side = min(new_w, new_h)
+    if short_side < PREVIEW_MIN_SHORT_SIDE:
+        # Пересчитываем scale чтобы короткая сторона = 1000
+        current_short = min(w, h)
+        if current_short <= PREVIEW_MIN_SHORT_SIDE:
+            return img  # оригинал и так мелкий, не трогаем
+        scale = PREVIEW_MIN_SHORT_SIDE / current_short
+        new_w, new_h = int(w * scale), int(h * scale)
     return img.resize((new_w, new_h), Image.LANCZOS)
 
 def _save_as_jpeg_bytes(img: Image.Image, quality: int) -> bytes:

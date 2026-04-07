@@ -2553,6 +2553,9 @@ class RecurringInvoice(models.Model):
     auto_create_sf_on_paid = models.BooleanField(default=False)
     auto_sf_series = models.CharField(max_length=50, blank=True, default="")
     auto_sf_send = models.BooleanField(default=False)
+    payment_link_provider = models.CharField(
+        max_length=50, blank=True, default=""
+    )
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

@@ -807,7 +807,7 @@ def process_uploaded_file_task(self, user_id, doc_id, scan_type):
             pass
         logger.info("[TASK] GCV OCR mode=%s, line_collision=%.1f", ocr_mode, line_collision)
 
-        need_enhanced_ocr = (ocr_mode == "FULLTEXT") or (line_collision > 10)
+        need_enhanced_ocr = (ocr_mode == "FULLTEXT") or (line_collision > 22)
 
         if need_enhanced_ocr and data:
             t_m = _t()

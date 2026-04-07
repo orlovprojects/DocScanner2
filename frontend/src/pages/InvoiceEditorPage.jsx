@@ -1050,6 +1050,9 @@ const InvoiceEditorPage = () => {
         if (data.buyer_extra_info) setShowBuyerExtra(true);
         if (data.seller_extra_info) setShowSellerExtra(true);
         if (data.order_number) setShowOrderNumber(true);
+        if (data.payment_link_provider) {
+          setPaymentLink({ enabled: true, provider: data.payment_link_provider });
+        }
         prevTypeRef.current = data.invoice_type || 'pvm_saskaita';
         if (data.document_series) {
           fetchNextNumber(data.document_series, data.invoice_type || 'pvm_saskaita');
@@ -1608,6 +1611,7 @@ const InvoiceEditorPage = () => {
     auto_create_sf_on_paid: form.invoice_type === 'isankstine' ? form.auto_create_sf_on_paid : false,
     auto_sf_series: form.auto_create_sf_on_paid ? form.auto_sf_series : '',
     auto_sf_send: form.auto_create_sf_on_paid ? form.auto_sf_send : false,
+    payment_link_provider: paymentLink.enabled ? paymentLink.provider : '',
     seller_type: form.seller_type,
     seller_name: form.seller_name, seller_id: form.seller_id,
     seller_vat_code: form.seller_vat_code,

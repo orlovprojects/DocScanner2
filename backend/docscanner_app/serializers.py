@@ -2694,7 +2694,8 @@ class RecurringInvoiceDetailSerializer(serializers.ModelSerializer):
             "day_of_month", "weekday",
             "payment_term_days", "max_count",
             # Автодействия
-            "auto_issue", "auto_send", "send_to_email",
+            "auto_issue", "auto_send", "send_to_email", "send_payment_reminders", "auto_create_sf_on_paid", "auto_sf_series", "auto_sf_send",
+            "payment_link_provider",
             # Seller
             "seller_counterparty", "seller_name", "seller_id",
             "seller_vat_code", "seller_address",
@@ -2710,7 +2711,6 @@ class RecurringInvoiceDetailSerializer(serializers.ModelSerializer):
             "buyer_bank_name", "buyer_iban", "buyer_swift",
             "buyer_is_person", "buyer_extra_info",
             "buyer_delivery_address",
-            "send_payment_reminders", "auto_create_sf_on_paid", "auto_sf_series", "auto_sf_send",
             # Подписи
             "issued_by", "received_by",
             # Служебные
@@ -2738,7 +2738,8 @@ class RecurringInvoiceWriteSerializer(serializers.ModelSerializer):
             "first_day_of_month", "last_day_of_month",
             "payment_term_days", "max_count",
             # Автодействия
-            "auto_issue", "auto_send", "send_to_email",
+            "auto_issue", "auto_send", "send_to_email", "send_payment_reminders", "auto_create_sf_on_paid", "auto_sf_series", "auto_sf_send",
+            "payment_link_provider",
             # Seller
             "seller_type",
             "seller_counterparty", "seller_name", "seller_id",
@@ -2755,7 +2756,6 @@ class RecurringInvoiceWriteSerializer(serializers.ModelSerializer):
             "buyer_phone", "buyer_email",
             "buyer_bank_name", "buyer_iban", "buyer_swift",
             "buyer_extra_info", "buyer_delivery_address",
-            "send_payment_reminders", "auto_create_sf_on_paid", "auto_sf_series", "auto_sf_send",
             # Подписи
             "issued_by", "received_by",
             # Line items
