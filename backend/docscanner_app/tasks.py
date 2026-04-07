@@ -797,6 +797,48 @@ def process_uploaded_file_task(self, user_id, doc_id, scan_type):
         logger.info("[TASK] OCR lengths: raw=%s, glued=%s",
                     len(raw_json_for_db or ""), len(glued_text_for_db or ""))
 
+        ocr_mode = "UNKNOWN"
+        line_collision = 0.0
+        try:
+            _meta = json.loads(gcv_raw_json or "{}").get("meta", {})
+            ocr_mode = _meta.get("mode", "UNKNOWN")
+            line_collision = float(_meta.get("metrics", {}).get("line_collision_ratio", 0))
+        except Exception:
+            pass
+        logger.info("[TASK] GCV OCR mode=%s, line_collision=%.1f", ocr_mode, line_collision)
+
+        need_enhanced_ocr = (ocr_mode == "FULLTEXT") or (line_collision > 10)
+
+        if need_enhanced_ocr and data:
+            t_m = _t()
+            try:
+                from .utils.enhanced_ocr import get_enhanced_ocr_text
+                enhanced_text, enhanced_err = get_enhanced_ocr_text(
+                    data, original_filename, logger
+                )
+                _log_t("OCR (Enhanced Gemini)", t_m)
+
+                if enhanced_text and not enhanced_err:
+                    doc.enhanced_ocr_text = enhanced_text
+                    doc.enhanced_ocr_source = "gemini-flash-lite-latest"
+                    doc.save(update_fields=["enhanced_ocr_text", "enhanced_ocr_source"])
+
+                    glued_text_for_db = enhanced_text
+                    logger.info(
+                        "[TASK] Using enhanced OCR (gemini-flash-lite) for LLM (len=%d)",
+                        len(enhanced_text),
+                    )
+                else:
+                    logger.warning(
+                        "[TASK] Enhanced OCR failed: %s — using GCV text",
+                        enhanced_err,
+                    )
+            except Exception as e:
+                _log_t("OCR (Enhanced Gemini, failed)", t_m)
+                logger.warning("[TASK] Enhanced OCR exception: %s", e)
+        else:
+            logger.info("[TASK] No enhanced OCR needed: mode=%s collision=%.1f", ocr_mode, line_collision)
+
         # 7) Ранний reject по типу документа (по склеенному тексту)
         t0 = _t()
         found_type = detect_doc_type(glued_text_for_db or "")
@@ -806,7 +848,7 @@ def process_uploaded_file_task(self, user_id, doc_id, scan_type):
             doc.status = 'rejected'
             doc.error_message = f"Potenciali {found_type}"
             doc.raw_text = raw_json_for_db
-            doc.glued_raw_text = glued_text_for_db
+            doc.glued_raw_text = gcv_joined_text
             doc.preview_url = preview_url
             doc.save(update_fields=['status', 'error_message', 'raw_text', 'glued_raw_text', 'preview_url'])
             _settle_and_finish_if_session(doc)
@@ -817,8 +859,8 @@ def process_uploaded_file_task(self, user_id, doc_id, scan_type):
 
         # 8) Сохранить OCR результаты
         t0 = _t()
-        doc.raw_text = raw_json_for_db          # JSON параграфов с bbox ИЛИ plain text (если Gemini fallback)
-        doc.glued_raw_text = glued_text_for_db  # построчный «склеенный» текст
+        doc.raw_text = raw_json_for_db
+        doc.glued_raw_text = gcv_joined_text   
         doc.preview_url = preview_url
         doc.save(update_fields=['raw_text', 'glued_raw_text', 'preview_url'])
         _log_t("Save OCR results", t0)

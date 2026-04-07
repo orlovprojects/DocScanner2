@@ -276,6 +276,19 @@ class MontonioProvider(BasePaymentProvider):
 # Paysera
 # ────────────────────────────────────────────────────────────
 
+def _clean_payer_name(first_name: str, last_name: str) -> str:
+    """Filter out Paysera sandbox placeholder names."""
+    placeholders = {"name", "last name", "test", ""}
+    fn = first_name.strip()
+    ln = last_name.strip()
+    if fn.lower() in placeholders and ln.lower() in placeholders:
+        return ""
+    if fn.lower() in placeholders:
+        fn = ""
+    if ln.lower() in placeholders:
+        ln = ""
+    return f"{fn} {ln}".strip()
+
 class PayseraProvider(BasePaymentProvider):
     """
     Paysera payment links (libwebtopay protocol).
@@ -408,7 +421,7 @@ class PayseraProvider(BasePaymentProvider):
             merchant_reference=first("orderid"),
             amount=Decimal(first("amount", "0")) / 100,
             currency=first("currency", "EUR"),
-            payer_name=f"{first('name')} {first('surename')}".strip(),
+            payer_name=_clean_payer_name(first('name'), first('surename')),
             payer_email=first("p_email"),
             raw_data=dict(params),
         )

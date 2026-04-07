@@ -729,7 +729,7 @@ const InvoicePreviewDialog = ({ open, onClose, invoiceId, invoiceData }) => {
           <Typography sx={{ fontWeight: 700, fontSize: 16 }}>{fullNum || 'Peržiūra'}</Typography>
           <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
             <Button size="small" startIcon={<PrintIcon />} onClick={handlePrint} variant="outlined" disabled={!invoice}>Spausdinti</Button>
-            <Button size="small" startIcon={pdfLoading ? <CircularProgress size={16} /> : <DownloadIcon />} onClick={handleDownloadPdf} variant="contained" disabled={pdfLoading || !invoice}>Parsisiųsti PDF</Button>
+            <Button size="small" startIcon={pdfLoading ? <CircularProgress size={16} /> : <DownloadIcon />} onClick={handleDownloadPdf} variant="contained" disabled={pdfLoading || !invoice}>Atsisiųsti PDF</Button>
             <IconButton onClick={onClose} size="small"><CloseIcon /></IconButton>
           </Box>
         </Box>

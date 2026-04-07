@@ -924,6 +924,11 @@ const InvoiceEditorPage = () => {
         if (data.buyer_extra_info) setShowBuyerExtra(true);
         if (data.seller_extra_info) setShowSellerExtra(true);
         if (data.order_number) setShowOrderNumber(true);
+
+        if (data.payment_link_provider && data.payment_link_url) {
+          setPaymentLink({ enabled: true, provider: data.payment_link_provider });
+        }
+
         if (parseFloat(data.invoice_discount_wo_vat || 0) > 0) {
           setShowTotalDiscount(true);
           setTotalDiscountValue(String(data.invoice_discount_wo_vat));
@@ -1306,6 +1311,11 @@ const InvoiceEditorPage = () => {
         if (data.buyer_extra_info) setShowBuyerExtra(true);
         if (data.seller_extra_info) setShowSellerExtra(true);
         if (data.order_number) setShowOrderNumber(true);
+
+        if (data.payment_link_provider && data.payment_link_url) {
+          setPaymentLink({ enabled: true, provider: data.payment_link_provider });
+        }
+
         originalNumberRef.current = data.document_number || '';
         prevTypeRef.current = data.invoice_type || 'pvm_saskaita';
         if (data.note) {

@@ -205,6 +205,8 @@ class ScannedDocument(models.Model):
     glued_raw_text = models.TextField(blank=True, null=True)
     gpt_raw_json = models.JSONField(blank=True, null=True)
     structured_json = models.JSONField(blank=True, null=True)
+    enhanced_ocr_text = models.TextField(blank=True, null=True)
+    enhanced_ocr_source = models.CharField(max_length=50, blank=True, null=True)
 
     # Поля из структурированных данных (для фильтрации/поиска)
     document_type = models.CharField(max_length=100, blank=True, null=True)
