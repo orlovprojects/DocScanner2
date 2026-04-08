@@ -1243,7 +1243,7 @@ def export_pardavimai_group_to_rivile(documents, user, own_company_code=None):
         logger.info("[RIVILE:I06] doc=%s dir=pardavimas KODAS_KS=%r DOK_NR=%r CUR=%s merge_vat=%s",
                     getattr(doc, "pk", None), buyer_code, dok_num, currency, merge_vat)
 
-        ET.SubElement(i06, "I06_DOK_REG").text    = rivile_str(getattr(doc, 'document_number', '') or '')
+        ET.SubElement(i06, "I06_DOK_REG").text = rivile_str(dok_num)
         ET.SubElement(i06, "I06_APRASYMAS1").text = rivile_str(getattr(doc, 'preview_url', '') or '')
 
         _apply_header_extras(i06, user, direction="pardavimas", own_company_code=own_company_code)

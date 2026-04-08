@@ -120,6 +120,8 @@ When separate_vat is true, omit document-level "vat_percent" (do NOT put a singl
 
 Set "doc_96_str": true only if the document explicitly mentions Lietuvos PVM įstatymo 96 straipsnis, e.g. “PVM įstatymo 96 straipsnis”, “96 straipsnis”, “96 str.”, “taikomas 96 straipsnis”, “pagal PVMĮ 96 str.”. Otherwise set "doc_96_str": false.
 
+If the document displays amounts in multiple currencies, always extract the EUR amounts if available.
+
 If there are any signs of cash payment, for example, 'gryni', 'grąža' or similar, return paid_by_cash as True.
 
 If the document is a kasos čekis (cash receipt), for example, a fuel (kuro) receipt, buyer info is often at the bottom as a line with company name, company code, and VAT code—extract these as buyer details. For line items, find the quantity and unit next to price (like “50,01 l” for litres). Product name is usually above this line. document_number is usually next to kvitas, ignore long numer below "kasininkas" at the bottom of document but don't ignore date at the bottom.
@@ -273,6 +275,7 @@ To decide this, you MUST check line items and VAT summary - if lines have differ
 When separate_vat is true, omit document-level "vat_percent" (do NOT put a single rate like "21").
 You MUST include "vat_percent" for EACH line item, even if not explicitly shown in the row. Use VAT summary section to deduce rates: match line item subtotals to taxable bases in summary. Hint: packaging/deposit items ("skardinė", "tara", "užstatas") are usually 0% VAT; make sure you add them as separate lineitems.
 Set "doc_96_str": true only if the document explicitly mentions Lietuvos PVM įstatymo 96 straipsnis, e.g. "PVM įstatymo 96 straipsnis", "96 straipsnis", "96 str.", "taikomas 96 straipsnis", "pagal PVMĮ 96 str.". Otherwise set "doc_96_str": false.
+If the document displays amounts in multiple currencies, always extract the EUR amounts if available.
 For unit, try to identify any of these vnt kg g mg kompl t ct m cm mm km l ml m2 cm2 dm2 m3 cm3 dm3 val h min s d sav mėn metai pak kompl or similar. If units is not in Lithuanian, translate it (example: szt should be vnt). If can't identify unit, choose vnt.
 
 If the document is a kasos čekis (cash receipt), for example, a fuel (kuro) receipt, buyer info is often at the bottom as a line with company name, company code, and VAT code—extract these as buyer details. For line items, find the quantity and unit next to price (like "50,01 l" for litres). Product name is usually above this line. document_number is usually next to kvitas, ignore long numer below "kasininkas" at the bottom of document but don't ignore date at the bottom.
