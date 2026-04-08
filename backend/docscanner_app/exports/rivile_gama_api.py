@@ -598,10 +598,7 @@ def build_i06_full_payload(doc, direction: str, user=None, merge_vat: bool = Fal
         i06["I06_VAL_POZ"] = "0"
 
     # DOK_REG
-    if direction == "pirkimas":
-        i06["I06_DOK_REG"] = dok_num
-    else:
-        i06["I06_DOK_REG"] = _s(getattr(doc, "document_number", ""))
+    i06["I06_DOK_REG"] = dok_num
 
     # NUORODA (preview_url)
     preview_url = _s(getattr(doc, "preview_url", ""))

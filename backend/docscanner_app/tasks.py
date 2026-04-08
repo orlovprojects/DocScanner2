@@ -3900,8 +3900,47 @@ def monitor_stuck_sessions():
 
 
 
+# ══════════════════════════════════════════════════════════
+#  Fetch LT companies + addresses -> import to Company model
+# ══════════════════════════════════════════════════════════
 
+@shared_task
+def sync_lt_companies_weekly():
+    """Weekly sync: companies (incremental) + addresses."""
+    logger.info("sync_lt_companies_weekly: start")
+    results = []
+    errors = []
 
+    try:
+        result1 = sync_companies_from_vmi(full=False)
+        results.append(result1)
+    except Exception as e:
+        logger.error(f"sync_lt_companies_weekly: companies error: {e}")
+        errors.append(f"Companies: {e}")
+
+    try:
+        result2 = sync_addresses_from_jar()
+        results.append(result2)
+    except Exception as e:
+        logger.error(f"sync_lt_companies_weekly: addresses error: {e}")
+        errors.append(f"Addresses: {e}")
+
+    # Telegram notification
+    if errors:
+        msg = (
+            "<b>LT Companies Sync FAILED</b>\n\n"
+            + "\n".join(f"✅ {r}" for r in results)
+            + ("\n" if results else "")
+            + "\n".join(f"❌ {e}" for e in errors)
+        )
+    else:
+        msg = (
+            "<b>LT Companies Sync OK</b>\n\n"
+            + "\n".join(f"✅ {r}" for r in results)
+        )
+
+    _send_telegram(msg)
+    logger.info("sync_lt_companies_weekly: done")
 
 
 

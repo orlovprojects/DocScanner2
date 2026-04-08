@@ -13,7 +13,7 @@ logger = logging.getLogger("docscanner_app")
 PROGRAM_TO_FIELD = {
     "rivile":          "rivile_gama_extra_fields",
     "rivile_erp":      "rivile_erp_extra_fields",
-    "rivile_gama_api": "rivile_gama_api_extra_fields",
+    "rivile_gama_api": "rivile_gama_extra_fields",
     "butent":          "butent_extra_fields",
     "finvalda":        "finvalda_extra_fields",
     "centas":          "centas_extra_fields",

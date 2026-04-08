@@ -39,6 +39,10 @@ app.conf.beat_schedule = {
         'task': 'docscanner_app.tasks.monitor_stuck_sessions',
         'schedule': crontab(minute='*/15'),
     },
+    'sync-lt-companies-weekly': {
+        'task': 'docscanner_app.services.sync_lt_companies.sync_lt_companies_weekly',
+        'schedule': crontab(hour=5, minute=0, day_of_week=1),
+    },
 }
 
 

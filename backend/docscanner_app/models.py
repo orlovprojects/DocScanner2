@@ -834,27 +834,30 @@ class CurrencyRate(models.Model):
 
 
 class Company(models.Model):
-    im_kodas     = models.CharField(max_length=16, db_index=True, blank=True, null=True)   # Идентификационный код фирмы
+    im_kodas     = models.CharField(max_length=16, unique=True, blank=True, null=True)     # Идентификационный код фирмы
     pavadinimas  = models.CharField(max_length=255, db_index=True, blank=True, null=True)  # Название фирмы
+    normalized_pavadinimas = models.CharField(max_length=255, db_index=True, blank=True, null=True)
     ireg_data    = models.DateField(null=True, blank=True)          # Дата регистрации
     isreg_data   = models.DateField(null=True, blank=True)          # Дата закрытия (если есть)
     tipas        = models.CharField(max_length=64, blank=True, null=True)      # Тип организации
     pvm_kodas    = models.CharField(max_length=32, blank=True, null=True)      # PVM/VAT код
     pvm_ireg     = models.DateField(null=True, blank=True)          # Дата регистрации PVM
     pvm_isreg    = models.DateField(null=True, blank=True)          # Дата снятия с PVM
+    adresas      = models.CharField(max_length=512, blank=True, null=True, verbose_name="Adresas")
+    aob_kodas    = models.IntegerField(blank=True, null=True, db_index=True)
+    last_synced_at = models.DateTimeField(blank=True, null=True)
 
     class Meta:
         indexes = [
-            models.Index(fields=["im_kodas"]),
             models.Index(fields=["pavadinimas"]),
             models.Index(fields=["pvm_kodas"]),
+            models.Index(fields=["normalized_pavadinimas"]),
         ]
         verbose_name = "Company"
         verbose_name_plural = "Company"
 
     def __str__(self):
         return f"{self.pavadinimas} ({self.im_kodas})"
-    
 
 
 class AdClick(models.Model):

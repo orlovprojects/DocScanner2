@@ -37,7 +37,7 @@ const SELECT_FIELDS = {
 const PROGRAM_TO_KEY = {
   rivile: "rivile",
   rivile_erp: "rivile_erp",
-  rivile_gama: "rivile_gama",
+  rivile_gama: "rivile",
   rivile_gama_api: "rivile_gama_api",
   butent: "butent",
   finvalda: "finvalda",
@@ -59,7 +59,7 @@ const PROGRAM_FIELDS_CONFIG = {
     description: "Čia gali nurodyti numatytuosius žurnalo, padalinio ir objekto kodus Rivilė ERP sistemai atskirai pirkimams ir pardavimams.",
     sections: [
       {
-        title: "Pirkimas",
+        title: "Pirkimams",
         fields: [
           { key: "pirkimas_zurnalo_kodas", label: "Žurnalo kodas" },
           { key: "pirkimas_padalinio_kodas", label: "Padalinio kodas" },
@@ -67,7 +67,7 @@ const PROGRAM_FIELDS_CONFIG = {
         ],
       },
       {
-        title: "Pardavimas",
+        title: "Pardavimams",
         fields: [
           { key: "pardavimas_zurnalo_kodas", label: "Žurnalo kodas" },
           { key: "pardavimas_padalinio_kodas", label: "Padalinio kodas" },
@@ -81,7 +81,7 @@ const PROGRAM_FIELDS_CONFIG = {
     description: "Čia gali nurodyti numatytuosius padalinio, objekto, serijos ir kitus laukus Rivilė Gama programai.",
     sections: [
       {
-        title: "Pirkimas",
+        title: "Pirkimams",
         fields: [
           { key: "pirkimas_padalinys", label: "Padalinys" },
           { key: "pirkimas_objektas", label: "Objektas" },
@@ -99,7 +99,7 @@ const PROGRAM_FIELDS_CONFIG = {
         ],
       },
       {
-        title: "Pardavimas",
+        title: "Pardavimams",
         fields: [
           { key: "pardavimas_padalinys", label: "Padalinys" },
           { key: "pardavimas_objektas", label: "Objektas" },
@@ -123,14 +123,14 @@ const PROGRAM_FIELDS_CONFIG = {
     description: "Nurodykite numatytuosius sandėlio ir operacijos kodus pirkimams ir pardavimams.",
     sections: [
       {
-        title: "Pirkimas",
+        title: "Pirkimams",
         fields: [
           { key: "pirkimas_sandelis", label: "Sandėlis" },
           { key: "pirkimas_operacija", label: "Operacija" },
         ],
       },
       {
-        title: "Pardavimas",
+        title: "Pardavimams",
         fields: [
           { key: "pardavimas_sandelis", label: "Sandėlis" },
           { key: "pardavimas_operacija", label: "Operacija" },
@@ -143,7 +143,7 @@ const PROGRAM_FIELDS_CONFIG = {
     description: "Nurodykite numatytuosius sandėlio, tipo ir žurnalo kodus pirkimams ir pardavimams.",
     sections: [
       {
-        title: "Pirkimas",
+        title: "Pirkimams",
         fields: [
           { key: "pirkimas_sandelis", label: "Sandėlis" },
           { key: "pirkimas_zurnalas", label: "Žurnalas" },
@@ -153,7 +153,7 @@ const PROGRAM_FIELDS_CONFIG = {
         ],
       },
       {
-        title: "Pardavimas",
+        title: "Pardavimams",
         fields: [
           { key: "pardavimas_sandelis", label: "Sandėlis" },
           { key: "pardavimas_zurnalas", label: "Žurnalas" },
@@ -169,14 +169,14 @@ const PROGRAM_FIELDS_CONFIG = {
     description: "Nurodykite numatytuosius sandėlio ir kaštų centro laukus pirkimams ir pardavimams.",
     sections: [
       {
-        title: "Pirkimas",
+        title: "Pirkimams",
         fields: [
           { key: "pirkimas_sandelis", label: "Sandėlis" },
           { key: "pirkimas_kastu_centras", label: "Kaštų centras" },
         ],
       },
       {
-        title: "Pardavimas",
+        title: "Pardavimams",
         fields: [
           { key: "pardavimas_sandelis", label: "Sandėlis" },
           { key: "pardavimas_kastu_centras", label: "Kaštų centras" },
@@ -189,7 +189,7 @@ const PROGRAM_FIELDS_CONFIG = {
     description: "Nurodykite numatytuosius sandėlio ir kitus laukus pirkimams ir pardavimams.",
     sections: [
       {
-        title: "Pirkimas",
+        title: "Pirkimams",
         fields: [
           { key: "pirk_sandelio_kodas", label: "Sandėlio kodas" },
           { key: "pirk_projekto_kodas", label: "Projekto kodas" },
@@ -198,7 +198,7 @@ const PROGRAM_FIELDS_CONFIG = {
         ],
       },
       {
-        title: "Pardavimas",
+        title: "Pardavimams",
         fields: [
           { key: "pard_sandelio_kodas", label: "Sandėlio kodas" },
           { key: "pard_projekto_kodas", label: "Projekto kodas" },
@@ -213,11 +213,11 @@ const PROGRAM_FIELDS_CONFIG = {
     description: "Nurodykite numatytuosius sandėlio laukus pirkimams ir pardavimams.",
     sections: [
       {
-        title: "Pirkimas",
+        title: "Pirkimams",
         fields: [{ key: "pirk_sandelio_kodas", label: "Sandėlio kodas" }],
       },
       {
-        title: "Pardavimas",
+        title: "Pardavimams",
         fields: [{ key: "pard_sandelio_kodas", label: "Sandėlio kodas" }],
       },
     ],
@@ -227,7 +227,7 @@ const PROGRAM_FIELDS_CONFIG = {
     description: "Nurodykite numatytuosius laukus pirkimams ir pardavimams.",
     sections: [
       {
-        title: "Pirkimas",
+        title: "Pirkimams",
         fields: [
           { key: "pirk_prekes_tipas", label: "Prekės tipas" },
           { key: "pirk_prekes_grupe", label: "Prekės grupė" },
@@ -239,7 +239,7 @@ const PROGRAM_FIELDS_CONFIG = {
         ],
       },
       {
-        title: "Pardavimas",
+        title: "Pardavimams",
         fields: [
           { key: "pard_prekes_tipas", label: "Prekės tipas" },
           { key: "pard_prekes_grupe", label: "Prekės grupė" },
@@ -257,7 +257,7 @@ const PROGRAM_FIELDS_CONFIG = {
     description: "Nurodykite numatytuosius filialo, padalinio, objekto ir atsakingų asmenų laukus.",
     sections: [
       {
-        title: "Pirkimas",
+        title: "Pirkimams",
         fields: [
           { key: "pirkimas_filialas", label: "Filialas" },
           { key: "pirkimas_padalinys", label: "Padalinys" },
@@ -267,7 +267,7 @@ const PROGRAM_FIELDS_CONFIG = {
         ],
       },
       {
-        title: "Pardavimas",
+        title: "Pardavimams",
         fields: [
           { key: "pardavimas_filialas", label: "Filialas" },
           { key: "pardavimas_padalinys", label: "Padalinys" },
@@ -283,7 +283,7 @@ const PROGRAM_FIELDS_CONFIG = {
     description: "Nurodykite numatytuosius sandėlio, korespondencijos schemos ir projekto kodus.",
     sections: [
       {
-        title: "Pirkimas",
+        title: "Pirkimams",
         fields: [
           { key: "pirkimas_sandelis", label: "Sandėlis" },
           { key: "pirkimas_korespondencija", label: "Korespondencijos schema" },
@@ -291,7 +291,7 @@ const PROGRAM_FIELDS_CONFIG = {
         ],
       },
       {
-        title: "Pardavimas",
+        title: "Pardavimams",
         fields: [
           { key: "pardavimas_sandelis", label: "Sandėlis" },
           { key: "pardavimas_korespondencija", label: "Korespondencijos schema" },
@@ -305,7 +305,7 @@ const PROGRAM_FIELDS_CONFIG = {
     description: "Nurodykite numatytuosius sandėlio ir objekto laukus pirkimams ir pardavimams.",
     sections: [
       {
-        title: "Pirkimas",
+        title: "Pirkimams",
         fields: [
           { key: "pirkimas_prekes_grupe", label: "Prekės grupė" },
           { key: "pirkimas_sandelis", label: "Sandėlis" },
@@ -314,7 +314,7 @@ const PROGRAM_FIELDS_CONFIG = {
         ],
       },
       {
-        title: "Pardavimas",
+        title: "Pardavimams",
         fields: [
           { key: "pardavimas_prekes_grupe", label: "Prekės grupė" },
           { key: "pardavimas_sandelis", label: "Sandėlis" },
@@ -329,7 +329,7 @@ const PROGRAM_FIELDS_CONFIG = {
     description: "Nurodykite numatytuosius sandėlio ir grupės laukus pirkimams ir pardavimams.",
     sections: [
       {
-        title: "Pirkimas",
+        title: "Pirkimams",
         fields: [
           { key: "pirkimas_grupe", label: "Prekės grupė" },
           { key: "pirkimas_sandelis", label: "Sandėlio kodas" },
@@ -337,7 +337,7 @@ const PROGRAM_FIELDS_CONFIG = {
         ],
       },
       {
-        title: "Pardavimas",
+        title: "Pardavimams",
         fields: [
           { key: "pardavimas_grupe", label: "Prekės grupė" },
           { key: "pardavimas_sandelis", label: "Sandėlio kodas" },
