@@ -3719,17 +3719,35 @@ def monitor_stuck_sessions():
     alerts = []
     fixes = []
 
-    # ─── 1. uploading > 1 час ───
+    # ─── 1. uploading > 2 часа — авто-фейл ───
     stuck_uploading = UploadSession.objects.filter(
         stage="uploading",
-        updated_at__lt=now - timedelta(hours=1),
+        updated_at__lt=now - timedelta(hours=2),
     )
-    if stuck_uploading.exists():
-        ids = list(stuck_uploading.values_list("id", flat=True)[:5])
-        alerts.append(
-            f"📤 Stuck uploading: {stuck_uploading.count()}\n"
-            f"{ids}"
-        )
+    for s in stuck_uploading:
+        try:
+            with transaction.atomic():
+                ss = UploadSession.objects.select_for_update().get(id=s.id)
+                if ss.stage != "uploading":
+                    continue
+                ss.stage = "failed"
+                ss.error_message = "Automatiškai atšaukta (neužbaigtas įkėlimas)"
+                ss.save(update_fields=["stage", "error_message", "updated_at"])
+
+                failed_count = ScannedDocument.objects.filter(
+                    upload_session=ss,
+                    status__in=["pending", "processing"],
+                ).update(status="rejected", error_message="Neužbaigtas įkėlimas")
+
+            fixes.append(
+                f"🗑 Session <code>{str(s.id)[:8]}</code> → failed\n"
+                f"   uploading >2h, {failed_count} docs rejected, user_id={s.user_id}"
+            )
+        except Exception as e:
+            alerts.append(
+                f"📤 Session <code>{str(s.id)[:8]}</code> stuck uploading >2h\n"
+                f"   fix failed: {str(e)[:200]}"
+            )
 
     # ─── 2. processing > 30 мин — WATCHDOG ───
     stuck_processing = UploadSession.objects.filter(

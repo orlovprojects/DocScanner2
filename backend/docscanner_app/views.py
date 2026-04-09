@@ -667,6 +667,8 @@ def export_documents(request):
 
         documents = pardavimai_docs
 
+        cp_key = "__israsymas__"
+
         logger.info(
             "[EXP] INVOICE source: %d invoices for export_type=%s",
             len(adapted), export_type,
@@ -5048,7 +5050,7 @@ def web_mobile_inbox_promote(request):
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
 def retry_blocked_session(request, session_id):
-    """POST /api/web/sessions/<id>/retry/ — повтор после пополнения кредитов"""
+    """POST /api/web/sessions/<id>/retry/"""
     try:
         session = UploadSession.objects.get(id=session_id, user=request.user)
     except UploadSession.DoesNotExist:
@@ -5057,15 +5059,15 @@ def retry_blocked_session(request, session_id):
     if session.stage != "blocked":
         return Response({"error": "Session is not blocked"}, status=400)
 
-    # Сбрасываем rejected docs обратно в pending
+    # Reset rejected docs back to pending
     ScannedDocument.objects.filter(
         upload_session=session,
         status="rejected",
         error_message="Nepakanka kreditų",
     ).update(status="pending", error_message=None)
 
-    # Сбрасываем счётчики сессии
-    session.stage = "uploading"
+    # Reset counters, go straight to credit_check (NOT uploading)
+    session.stage = "credit_check"
     session.error_message = ""
     session.processed_items = 0
     session.done_items = 0
@@ -5075,8 +5077,18 @@ def retry_blocked_session(request, session_id):
         "processed_items", "done_items", "failed_items", "updated_at",
     ])
 
-    # Заново проверяем кредиты
-    session = reserve_and_queue(str(session.id), request.user.id)
+    try:
+        session = reserve_and_queue(str(session.id), request.user.id)
+    except Exception as e:
+        logger.error("[RETRY] reserve_and_queue failed for session %s: %s", session.id, e)
+        session.stage = "blocked"
+        session.error_message = f"Klaida bandant pakartoti: {str(e)[:200]}"
+        session.save(update_fields=["stage", "error_message", "updated_at"])
+        return Response({
+            "id": str(session.id),
+            "stage": session.stage,
+            "error_message": session.error_message,
+        }, status=500)
 
     if session.stage == "processing":
         start_session_processing.delay(str(session.id))
@@ -5323,6 +5335,16 @@ def get_user_counterparties(request):
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
 def create_session(request):
+    stuck = UploadSession.objects.filter(
+        user=request.user,
+        stage__in=["blocked", "uploading"],
+    ).exists()
+    if stuck:
+        return Response({
+            "error": "BLOCKED_SESSION_EXISTS",
+            "detail": "Turite neužbaigtą užduotį. Papildykite kreditus ir spauskite PAKARTOTI arba panaikinkite užduotį.",
+        }, status=409)
+
     scan_type = (request.data.get("scan_type") or "sumiskai").strip()
     client_total_files = int(request.data.get("client_total_files") or 0)
 
@@ -9828,7 +9850,7 @@ def _ensure_nested(data):
         return {}
 
     # Уже nested
-    if "__all__" in data:
+    if "__all__" in data or "__israsymas__" in data:
         return data
 
     # Проверяем: если есть ключи с "_" — это плоский формат

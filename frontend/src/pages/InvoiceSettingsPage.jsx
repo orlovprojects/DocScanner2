@@ -16,6 +16,7 @@ import PaymentProvidersSection from '../components/PaymentProvidersSection';
 import AccountingProgramBlock from '../components/AccountingProgramBlock';
 import { useInvSubscription } from '../contexts/InvSubscriptionContext';
 import LockIcon from '@mui/icons-material/Lock';
+import InvoiceExtraFields from '../components/InvoiceExtraFields';
 
 
 
@@ -33,6 +34,7 @@ const InvoiceSettingsPage = () => {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [snack, setSnack] = useState({ open: false, msg: '', severity: 'success' });
+  const [accountingProgram, setAccountingProgram] = useState("");
 
   // Logo
   const [logoPreview, setLogoPreview] = useState(null);
@@ -63,6 +65,10 @@ const InvoiceSettingsPage = () => {
       } finally {
         setLoading(false);
       }
+      try {
+        const { data: profile } = await api.get('/profile/', { withCredentials: true });
+        setAccountingProgram(profile.default_accounting_program || "");
+      } catch {}
     })();
   }, []);
 
@@ -215,8 +221,10 @@ const InvoiceSettingsPage = () => {
         {/* ─── 2. Buhalterinė programa ir papildomi laukai ─── */}
         <Box sx={secSx}>
           <Typography sx={{ ...titleSx, color: P.primary }}>Buhalterinė programa</Typography>
-          <AccountingProgramBlock />
+          <AccountingProgramBlock onProgramChange={setAccountingProgram} />
+          <InvoiceExtraFields program={accountingProgram} />
         </Box>
+
 
         {/* ─── 3. Pardavėjo duomenys ─── */}
         <Box sx={secSx}>

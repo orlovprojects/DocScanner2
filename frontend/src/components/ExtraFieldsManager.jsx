@@ -980,7 +980,7 @@ export default function ExtraFieldsManager({ program }) {
       ) : (
         <>
           <Stack spacing={1.5}>
-            {profiles.map((p) => (
+            {profiles.filter(p => p.company_code !== "__israsymas__").map((p) => (
               <ProfileCard key={p.company_code} profile={p} programKey={programKey}
                 onEdit={handleEdit} onDelete={handleDelete} />
             ))}

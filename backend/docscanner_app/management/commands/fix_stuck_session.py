@@ -51,8 +51,8 @@ class Command(BaseCommand):
     def _fail(self, sid, msg):
         s = UploadSession.objects.get(id__startswith=sid)
         failed_docs = ScannedDocument.objects.filter(upload_session=s).update(
-            status="error", error_message=msg
+            status="rejected", error_message=msg
         )
         s.stage = "failed"
         s.save(update_fields=["stage", "updated_at"])
-        self.stdout.write(f"Failed session {str(s.id)[:8]}, {failed_docs} docs marked error")
+        self.stdout.write(f"Failed session {str(s.id)[:8]}, {failed_docs} docs marked rejected")

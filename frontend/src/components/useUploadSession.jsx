@@ -362,10 +362,23 @@ export function useUploadSession({ onUploadComplete, onError }) {
     try {
       // 1. Create session
       console.log("=== UPLOAD SESSION START ===");
-      const { data: session } = await api.post("/sessions/create/", {
-        scan_type: scanType,
-        client_total_files: validFiles.length,
-      });
+      let session;
+      try {
+        const { data } = await api.post("/sessions/create/", {
+          scan_type: scanType,
+          client_total_files: validFiles.length,
+        });
+        session = data;
+      } catch (e) {
+        if (e?.response?.status === 409) {
+          const msg = e?.response?.data?.detail || "Turite neužbaigtą užduotį. Papildykite kreditus ir spauskite PAKARTOTI arba panaikinkite užduotį.";
+          setError(msg);
+          onError?.(msg);
+          setIsUploading(false);
+          return;
+        }
+        throw e;
+      }
       console.log(`Session created: ${session.id}`);
 
       const sid = session.id;
