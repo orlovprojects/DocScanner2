@@ -8,12 +8,10 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
-        # 1. Удаляем старый индекс через SQL
         migrations.RunSQL(
             sql='DROP INDEX IF EXISTS "docscanner__documen_504cef_idx";',
             reverse_sql=migrations.RunSQL.noop,
         ),
-        # 2. Дропаем FK constraint, Django state: rename + alter
         migrations.SeparateDatabaseAndState(
             state_operations=[
                 migrations.RenameField(
@@ -30,20 +28,23 @@ class Migration(migrations.Migration):
                         help_text="ScannedDocument arba Invoice ID",
                     ),
                 ),
+                migrations.AddIndex(
+                    model_name="apiexportlog",
+                    index=models.Index(
+                        fields=["document_id", "program", "-created_at"],
+                        name="idx_explog_doc_prog",
+                    ),
+                ),
             ],
             database_operations=[
                 migrations.RunSQL(
                     sql="ALTER TABLE docscanner_app_apiexportlog DROP CONSTRAINT IF EXISTS docscanner_app_apiex_document_id_4d8f1a5a_fk_docscanne;",
                     reverse_sql=migrations.RunSQL.noop,
                 ),
+                migrations.RunSQL(
+                    sql='CREATE INDEX IF NOT EXISTS "idx_explog_doc_prog" ON "docscanner_app_apiexportlog" ("document_id", "program", "created_at" DESC);',
+                    reverse_sql=migrations.RunSQL.noop,
+                ),
             ],
-        ),
-        # 3. Новый индекс
-        migrations.AddIndex(
-            model_name="apiexportlog",
-            index=models.Index(
-                fields=["document_id", "program", "-created_at"],
-                name="idx_explog_doc_prog",
-            ),
         ),
     ]
