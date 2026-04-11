@@ -37,6 +37,8 @@ def _get_xlsx_rows(file, required_fields):
     # 4) rows -> dict su normalizuotais raktai
     rows = []
     for row in ws.iter_rows(min_row=2, values_only=True):
+        if not any(v is not None for v in row):
+            continue
         d = {}
         for i, val in enumerate(row[:len(norm_headers)]):
             key = norm_headers[i]
@@ -154,43 +156,69 @@ def import_products_from_xlsx(user, file):
     return {"imported": imported, "processed": total}
 
 
+def _norm_fizinis_asmuo(value) -> bool:
+    if value is None:
+        return False
+    s = str(value).strip().lower()
+    return s in ("taip", "true", "1", "yes", "t")
+
+
 def import_clients_from_xlsx(user, file):
-    """
-    Importuoja klientus iš XLSX.
-    Palaiko antraštes su žvaigždutėmis: 'imones_pavadinimas*' / 'imones_kodas*'
-    (per normalizaciją jos tampa 'imones_pavadinimas' / 'imones_kodas').
-    """
     imported = 0
-    total = 0
+    skipped = 0
+    errors = []
     try:
-        rows = _get_xlsx_rows(file, required_fields=["imones_kodas", "imones_pavadinimas"])
+        rows = _get_xlsx_rows(file, required_fields=["kodas", "pavadinimas"])
     except Exception as e:
         return {"error": str(e)}
 
+    seen_codes = set()
+
     with transaction.atomic():
-        for data in rows:
-            total += 1
-            name = (data.get('imones_pavadinimas') or '').strip()
-            code = (data.get('imones_kodas') or '').strip()
+        for row_num, data in enumerate(rows, start=2):
+            name = (data.get('pavadinimas') or '').strip()
+            code = (data.get('kodas') or '').strip()
 
             if not (code or name):
                 continue
 
-            # dublikatai pagal įmonės kodą (jei yra)
+            # дубликат внутри файла
+            if code and code in seen_codes:
+                skipped += 1
+                errors.append(f"Eilute {row_num}: kodas '{code}' kartojasi faile")
+                continue
+            if code:
+                seen_codes.add(code)
+
+            # дубликат в БД
             if code and ClientAutocomplete.objects.filter(user=user, imones_kodas=code).exists():
+                skipped += 1
+                errors.append(f"Eilute {row_num}: kodas '{code}' jau egzistuoja")
                 continue
 
-            ClientAutocomplete.objects.create(
-                user=user,
-                kodas_programoje=(data.get('kodas_buh_programoje') or '').strip(),
-                imones_kodas=code,
-                pavadinimas=name,
-                pvm_kodas=(data.get('imones_pvm_kodas') or '').strip(),
-                ibans=(data.get('imones_iban') or '').strip(),           # svarbu: 'iban' -> lowercase
-                address=(data.get('imones_adresas') or '').strip(),
-                country_iso=(data.get('imones_salies_kodas') or '').strip().upper(),
-            )
-            imported += 1
+            country = (data.get('salies_kodas') or '').strip().upper()
+            if len(country) != 2 or not country.isalpha():
+                country = "LT"
 
-    return {"imported": imported, "processed": total}
+            try:
+                ClientAutocomplete.objects.create(
+                    user=user,
+                    imones_kodas=code,
+                    pavadinimas=name,
+                    is_person=_norm_fizinis_asmuo(data.get('fizinis_asmuo')),
+                    pvm_kodas=(data.get('pvm_kodas') or '').strip(),
+                    ibans=(data.get('iban') or '').strip(),
+                    address=(data.get('adresas') or '').strip(),
+                    country_iso=country,
+                )
+                imported += 1
+            except Exception as e:
+                errors.append(f"Eilute {row_num}: {str(e)}")
+
+    return {
+        "imported": imported,
+        "skipped": skipped,
+        "processed": len(rows),
+        "errors": errors,
+    }
 

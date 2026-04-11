@@ -715,8 +715,8 @@ def export_documents(request):
                 cp = cp_key.strip().lower()
                 if cp.startswith("id:"):
                     cp_id = cp.split("id:", 1)[1].strip()
-                    if cp_id.isdigit():
-                        qs = qs.filter(Q(seller_id=int(cp_id)) | Q(buyer_id=int(cp_id)))
+                    if cp_id:
+                        qs = qs.filter(Q(seller_id=cp_id) | Q(buyer_id=cp_id))
                 else:
                     qs = qs.filter(
                         Q(seller_vat_code__iexact=cp) |
@@ -974,7 +974,8 @@ def export_documents(request):
     # ========================= RIVILE GAMA API =========================
 
     elif export_type == "rivile_gama_api":
-        from .models import RivileGamaAPIKey, ExportSession
+        from .models import ExportSession
+        from .utils.api_key_resolver import resolve_api_key
 
         assign_random_prekes_kodai(documents)
 
@@ -985,14 +986,11 @@ def export_documents(request):
 
         # --- Определяем company_code для поиска API ключа ---
         if source == "invoice":
-            # Išrašymas: одна фирма, данные из профиля
-            own_company_code = str(getattr(user, "company_code", "") or "").strip()
+            own_company_code = "__israsymas__"
         elif cp_key:
-            # Skaitmenizavimas multi: cp_key = своя фирма
             cp = cp_key.strip()
             own_company_code = cp.split(":", 1)[1].strip() if cp.lower().startswith("id:") else cp
         else:
-            # Skaitmenizavimas single: fallback на user.company_code
             own_company_code = str(getattr(user, "company_code", "") or "").strip()
 
         logger.info(
@@ -1001,21 +999,10 @@ def export_documents(request):
         )
 
         # --- Ищем API ключ ---
-        api_key_obj = (
-            RivileGamaAPIKey.objects
-            .filter(user=user, company_code=own_company_code, is_active=True)
-            .first()
-        )
-
-        # Fallback: если один ключ — используем его
-        if not api_key_obj:
-            active_keys = RivileGamaAPIKey.objects.filter(user=user, is_active=True)
-            if active_keys.count() == 1:
-                api_key_obj = active_keys.first()
-                logger.info(
-                    "[EXP] RIVILE_GAMA_API fallback to single key=%s (wanted=%s)",
-                    api_key_obj.company_code, own_company_code,
-                )
+        if source == "invoice":
+            api_key_obj = resolve_api_key(user, "rivile_gama_api", own_company_code, strict=True)
+        else:
+            api_key_obj = resolve_api_key(user, "rivile_gama_api", own_company_code)
 
         if not api_key_obj:
             return JsonResponse(
@@ -1033,7 +1020,10 @@ def export_documents(request):
             stage=ExportSession.Stage.QUEUED,
             total_documents=len(doc_ids),
         )
-        session_obj.documents.set(doc_ids)
+        if source == "invoice":
+            session_obj.invoice_documents.set(doc_ids)
+        else:
+            session_obj.documents.set(doc_ids)
 
         task = export_to_rivile_gama_api_task.delay(
             session_obj.id,
@@ -1912,22 +1902,37 @@ def export_documents(request):
         logger.info("[EXP] OPTIMUM API export started")
         assign_random_prekes_kodai(documents)
 
-        # Проверяем ключ
-        opt_settings = getattr(request.user, "optimum_settings", {}) or {}
-        enc_key = opt_settings.get("key") or ""
-        if not enc_key:
-            logger.warning("[EXP] OPTIMUM key missing")
-            return Response({"error": "Optimum key is missing"}, status=400)
+        from docscanner_app.models import ExportSession
+        from .utils.api_key_resolver import resolve_api_key
 
         all_docs = (pirkimai_docs or []) + (pardavimai_docs or [])
         if not all_docs:
             logger.warning("[EXP] OPTIMUM no documents to export")
             return Response({"error": "No documents to export"}, status=400)
 
+        # --- Определяем company_code для поиска API ключа ---
+        if source == "invoice":
+            opt_company = "__israsymas__"
+        elif cp_key:
+            cp = cp_key.strip()
+            opt_company = cp.split(":", 1)[1].strip() if cp.lower().startswith("id:") else cp
+        else:
+            opt_company = str(getattr(user, "company_code", "") or "").strip()
+
+        if source == "invoice":
+            api_key_obj = resolve_api_key(user, "optimum", opt_company, strict=True)
+        else:
+            api_key_obj = resolve_api_key(user, "optimum", opt_company)
+        if not api_key_obj:
+            logger.warning("[EXP] OPTIMUM key missing for company=%s", opt_company)
+            return Response(
+                {"error": f"Optimum API raktas nerastas įmonei {opt_company}. "
+                          "Pridėkite raktą Nustatymuose."},
+                status=400,
+            )
+
         doc_ids = [d.pk for d in all_docs]
 
-        # Создаём ExportSession
-        from docscanner_app.models import ExportSession
         session = ExportSession.objects.create(
             user=request.user,
             program='optimum',
@@ -1936,54 +1941,59 @@ def export_documents(request):
         )
         session.documents.set(doc_ids)
 
-        # Запускаем Celery task
-        task = export_to_optimum_task.delay(session.id)
+        task = export_to_optimum_task.delay(session.id, api_key_obj.pk)
         session.task_id = task.id
         session.save(update_fields=["task_id"])
 
         logger.info(
-            "[EXP] OPTIMUM session=%s task=%s docs=%d",
-            session.pk, task.id, len(doc_ids),
+            "[EXP] OPTIMUM session=%s task=%s docs=%d company=%s key=%s",
+            session.pk, task.id, len(doc_ids), opt_company, api_key_obj.pk,
         )
 
-        # Не помечаем как exported здесь — это сделает task после успешной отправки
-        # Не ставим export_success = True чтобы universal finalize не менял статусы
         return Response({
             "status": "ok",
             "session_id": session.pk,
             "total_documents": len(doc_ids),
             "message": "Export started",
         }, status=202)
-    
+
 
     # ========================= DINETA (API) =========================
     elif export_type == 'dineta':
         logger.info("[EXP] DINETA API export started")
         assign_random_prekes_kodai(documents)
 
-        # Проверяем настройки
-        dineta_settings = getattr(request.user, "dineta_settings", {}) or {}
-        if not all([
-            dineta_settings.get("server"),
-            dineta_settings.get("client"),
-            dineta_settings.get("username"),
-            dineta_settings.get("password"),
-        ]):
-            logger.warning("[EXP] DINETA settings incomplete")
-            return Response(
-                {"error": "Dineta nustatymai neužpildyti"},
-                status=400,
-            )
+        from docscanner_app.models import ExportSession
+        from .utils.api_key_resolver import resolve_api_key
 
         all_docs = (pirkimai_docs or []) + (pardavimai_docs or [])
         if not all_docs:
             logger.warning("[EXP] DINETA no documents to export")
             return Response({"error": "No documents to export"}, status=400)
 
+        # --- Определяем company_code для поиска API ключа ---
+        if source == "invoice":
+            din_company = "__israsymas__"
+        elif cp_key:
+            cp = cp_key.strip()
+            din_company = cp.split(":", 1)[1].strip() if cp.lower().startswith("id:") else cp
+        else:
+            din_company = str(getattr(user, "company_code", "") or "").strip()
+
+        if source == "invoice":
+            api_key_obj = resolve_api_key(user, "dineta", din_company, strict=True)
+        else:
+            api_key_obj = resolve_api_key(user, "dineta", din_company)
+        if not api_key_obj:
+            logger.warning("[EXP] DINETA key missing for company=%s", din_company)
+            return Response(
+                {"error": f"Dineta API raktas nerastas įmonei {din_company}. "
+                          "Pridėkite raktą Nustatymuose."},
+                status=400,
+            )
+
         doc_ids = [d.pk for d in all_docs]
 
-        # Создаём ExportSession
-        from docscanner_app.models import ExportSession
         session = ExportSession.objects.create(
             user=request.user,
             program='dineta',
@@ -1992,14 +2002,13 @@ def export_documents(request):
         )
         session.documents.set(doc_ids)
 
-        # Запускаем Celery task
-        task = export_to_dineta_task.delay(session.id)
+        task = export_to_dineta_task.delay(session.id, api_key_obj.pk)
         session.task_id = task.id
         session.save(update_fields=["task_id"])
 
         logger.info(
-            "[EXP] DINETA session=%s task=%s docs=%d",
-            session.pk, task.id, len(doc_ids),
+            "[EXP] DINETA session=%s task=%s docs=%d company=%s key=%s",
+            session.pk, task.id, len(doc_ids), din_company, api_key_obj.pk,
         )
 
         return Response({
@@ -2008,7 +2017,6 @@ def export_documents(request):
             "total_documents": len(doc_ids),
             "message": "Export started",
         }, status=202)
-
 
 
     else:
@@ -2470,8 +2478,8 @@ def get_user_documents(request):
             cp = cp.strip().lower()
             if cp.startswith("id:"):
                 cp_id = cp.split("id:", 1)[1].strip()
-                if cp_id.isdigit():
-                    qs = qs.filter(Q(seller_id=int(cp_id)) | Q(buyer_id=int(cp_id)))
+                if cp_id:
+                    qs = qs.filter(Q(seller_id=cp_id) | Q(buyer_id=cp_id))
             else:
                 qs = qs.filter(
                     Q(seller_vat_code__iexact=cp) |
@@ -2886,8 +2894,8 @@ def update_scanned_document_extra_fields(request, pk):
         return Response({'error': 'Dokumentas nerastas'}, status=404)
 
     ALLOWED_FIELDS = [
-        'buyer_id', 'buyer_name', 'buyer_vat_code', 'buyer_iban', 'buyer_address', 'buyer_country_iso',
-        'seller_id', 'seller_name', 'seller_vat_code', 'seller_iban', 'seller_address', 'seller_country_iso',
+        'buyer_id', 'buyer_name', 'buyer_vat_code', 'buyer_iban', 'buyer_address', 'buyer_country_iso', 'buyer_is_person',
+        'seller_id', 'seller_name', 'seller_vat_code', 'seller_iban', 'seller_address', 'seller_country_iso', 'seller_is_person',
         'prekes_kodas', 'prekes_barkodas', 'prekes_pavadinimas', 'preke_paslauga',
         'vat_percent', 'scan_type', 'doc_96_str',
     ]
@@ -3129,279 +3137,6 @@ def update_scanned_document_extra_fields(request, pk):
         log.error("pk=%s: validation error: %s", pk, str(e))
 
     return Response(ScannedDocumentSerializer(doc).data)
-# @api_view(['PATCH'])
-# @permission_classes([IsAuthenticated])
-# def update_scanned_document_extra_fields(request, pk):
-#     import logging
-#     from django.db import transaction
-#     from .models import ScannedDocument, LineItem
-#     from .serializers import ScannedDocumentSerializer
-#     from .utils.pirkimas_pardavimas import determine_pirkimas_pardavimas
-#     from .validators.vat_klas import auto_select_pvm_code
-#     from .utils.save_document import _apply_sumiskai_defaults_from_user
-#     from .validators.required_fields_checker import check_required_fields_for_export  # ДОБАВИТЬ
-
-#     log = logging.getLogger("docscanner_app.api.update_extra_fields")
-
-#     doc = ScannedDocument.objects.filter(pk=pk, user=request.user).first()
-#     if not doc:
-#         log.warning("PATCH extra_fields pk=%s: document not found for user=%s", pk, request.user.id)
-#         return Response({'error': 'Dokumentas nerastas'}, status=404)
-
-#     ALLOWED_FIELDS = [
-#         'buyer_id', 'buyer_name', 'buyer_vat_code', 'buyer_iban', 'buyer_address', 'buyer_country_iso',
-#         'seller_id', 'seller_name', 'seller_vat_code', 'seller_iban', 'seller_address', 'seller_country_iso',
-#         'prekes_kodas', 'prekes_barkodas', 'prekes_pavadinimas', 'preke_paslauga',
-#         'vat_percent', 'scan_type', 'doc_96_str',
-#     ]
-
-#     # helpers
-#     # def _is_cleared(prefix: str) -> bool:
-#     #     keys = [
-#     #         f"{prefix}_name", f"{prefix}_id", f"{prefix}_vat_code",
-#     #         f"{prefix}_iban", f"{prefix}_address", f"{prefix}_country_iso",
-#     #     ]
-#     #     touched = any(k in request.data for k in keys)
-#     #     if not touched:
-#     #         return False
-#     #     return all(not str(request.data.get(k) or "").strip() for k in keys)
-
-#     def _is_cleared(prefix: str) -> bool:
-#         keys = [
-#             f"{prefix}_name", f"{prefix}_id", f"{prefix}_vat_code",
-#             f"{prefix}_iban", f"{prefix}_address", f"{prefix}_country_iso",
-#         ]
-#         provided = [k for k in keys if k in request.data]  # только реально присланные
-#         if not provided:
-#             return False
-#         return all(not str(request.data.get(k) or "").strip() for k in provided)
-
-#     def _to_bool_allow(x):
-#         if x is None: return None
-#         if isinstance(x, bool): return x
-#         s = str(x).strip().lower()
-#         if s in {"0","false","no","ne","off"}: return False
-#         if s in {"1","true","taip","yes","on"}: return True
-#         return None
-
-#     def _normalize_ps(v):
-#         if v is None: return None
-#         if isinstance(v, int): return v if v in (1,2,3,4) else None
-#         s = str(v).strip()
-#         return int(s) if s.isdigit() and int(s) in (1,2,3,4) else None
-
-#     def _normalize_vat_percent(v):
-#         if v is None: return None
-#         try:
-#             from decimal import Decimal
-#             if isinstance(v, Decimal): return float(v)
-#             s = str(v).strip().replace(",", ".")
-#             if not s: return None
-#             if s.endswith("%"): s = s[:-1]
-#             return float(Decimal(s))
-#         except Exception:
-#             return None
-
-#     def _nz(s):
-#         if s is None: return None
-#         s2 = str(s).strip()
-#         return s2 if s2 else None
-
-#     # применяем входные изменения (сыро), логируем
-#     fields_to_update = []
-#     for field in ALLOWED_FIELDS:
-#         if field in request.data:
-#             old_val = getattr(doc, field, None)
-#             new_val = request.data[field]
-#             setattr(doc, field, new_val)
-#             fields_to_update.append(field)
-#             if str(old_val) != str(new_val):
-#                 log.info("pk=%s: field %s changed: %r -> %r", pk, field, old_val, new_val)
-
-#     buyer_cleared = _is_cleared("buyer")
-#     seller_cleared = _is_cleared("seller")
-#     if buyer_cleared or seller_cleared:
-#         log.info("pk=%s: clear detected: buyer_cleared=%s seller_cleared=%s", pk, buyer_cleared, seller_cleared)
-
-#     apply_defaults_req = _to_bool_allow(request.data.get("apply_defaults", None))
-#     log.info("pk=%s: apply_defaults_req=%r", pk, apply_defaults_req)
-
-#     with transaction.atomic():
-#         # 0) Сохранить присланные поля
-#         if fields_to_update:
-#             doc.save(update_fields=fields_to_update)
-
-#         # 1) Пересчитать pirkimas/pardavimas
-#         doc_struct = {
-#             "seller_id": doc.seller_id,
-#             "seller_vat_code": doc.seller_vat_code,
-#             "seller_name": doc.seller_name,
-#             "buyer_id": doc.buyer_id,
-#             "buyer_vat_code": doc.buyer_vat_code,
-#             "buyer_name": doc.buyer_name,
-#         }
-#         doc.pirkimas_pardavimas = determine_pirkimas_pardavimas(doc_struct, request.user)
-#         log.info("pk=%s: pirkimas_pardavimas=%r", pk, doc.pirkimas_pardavimas)
-
-#         # 1.1) Флаги наличия VAT кода
-#         buyer_has_vat_code = bool((doc.buyer_vat_code or "").strip())
-#         seller_has_vat_code = bool((doc.seller_vat_code or "").strip())
-#         if hasattr(doc, "buyer_has_vat_code"):
-#             doc.buyer_has_vat_code = buyer_has_vat_code
-#         if hasattr(doc, "seller_has_vat_code"):
-#             doc.seller_has_vat_code = seller_has_vat_code
-#         log.info("pk=%s: buyer_has_vat_code=%s seller_has_vat_code=%s", pk, buyer_has_vat_code, seller_has_vat_code)
-
-#         # 1.2) ЕСЛИ очищаем buyer/seller — чистим товарные поля и PVM И ВЫХОДИМ РАНО
-#         if buyer_cleared or seller_cleared:
-#             doc.prekes_pavadinimas = ""
-#             doc.prekes_kodas = ""
-#             doc.prekes_barkodas = ""
-#             doc.preke_paslauga = ""
-#             doc.pvm_kodas = None
-#             update_fields_now = ["prekes_pavadinimas","prekes_kodas","prekes_barkodas","preke_paslauga","pvm_kodas","pirkimas_pardavimas"]
-
-#             if hasattr(doc, "buyer_has_vat_code"): update_fields_now.append("buyer_has_vat_code")
-#             if hasattr(doc, "seller_has_vat_code"): update_fields_now.append("seller_has_vat_code")
-
-#             if (doc.scan_type or "").strip().lower() == "detaliai":
-#                 cleared = LineItem.objects.filter(document=doc).update(pvm_kodas=None)
-#                 log.info("pk=%s: cleared LineItem.pvm_kodas for %d items", pk, cleared)
-
-#             doc.save(update_fields=update_fields_now)
-            
-#             # ============ ДОБАВИТЬ ВАЛИДАЦИЮ ПЕРЕД РАННИМ ВОЗВРАТОМ ============
-#             try:
-#                 is_valid = check_required_fields_for_export(doc)
-#                 doc.ready_for_export = is_valid
-#                 doc.save(update_fields=['ready_for_export'])
-#                 log.info("pk=%s: validated after clear, ready_for_export=%s", pk, is_valid)
-#             except Exception as e:
-#                 log.error("pk=%s: validation error after clear: %s", pk, str(e))
-#             # ====================================================================
-            
-#             log.info("pk=%s: PVM cleared due to party clear, early return", pk)
-#             return Response(ScannedDocumentSerializer(doc).data)
-
-#         # 2) Применить дефолты (sumiskai, если разрешено)
-#         scan_type = (doc.scan_type or "").strip().lower()
-#         allow_defaults = (scan_type == "sumiskai" and (apply_defaults_req is None or apply_defaults_req is True))
-#         if allow_defaults:
-#             changed = _apply_sumiskai_defaults_from_user(doc, request.user)
-#             log.info("pk=%s: defaults applied=%s", pk, changed)
-#             if changed:
-#                 doc.save(update_fields=["prekes_pavadinimas","prekes_kodas","prekes_barkodas","preke_paslauga"])
-
-#         # 3) Нормализованные данные для расчёта
-#         buyer_iso = _nz(doc.buyer_country_iso)
-#         seller_iso = _nz(doc.seller_country_iso)
-#         doc_vat_norm = _normalize_vat_percent(doc.vat_percent)
-#         doc_ps = _normalize_ps(doc.preke_paslauga)
-
-#         log.info("pk=%s: buyer_iso=%r seller_iso=%r vat_percent_norm=%r preke_paslauga_norm=%r",
-#                  pk, buyer_iso, seller_iso, doc_vat_norm, doc_ps)
-
-#         # требуем страны/направление только если 0%
-#         need_countries_doc = (doc_vat_norm == 0.0)
-#         missing_crit = need_countries_doc and (
-#             doc.pirkimas_pardavimas not in ("pirkimas", "pardavimas") or not (buyer_iso and seller_iso)
-#         )
-#         log.info("pk=%s: need_countries_doc=%s missing_crit=%s", pk, need_countries_doc, missing_crit)
-
-#         # 4) Пересчёт PVM
-#         if scan_type == "detaliai":
-#             items = list(LineItem.objects.filter(document=doc))
-#             pvm_codes = set()
-#             vat_percents = set()
-#             log.info("pk=%s: recalc items count=%d", pk, len(items))
-
-#             for item in items:
-#                 item_vat = item.vat_percent if item.vat_percent is not None else doc.vat_percent
-#                 item_vat_norm = _normalize_vat_percent(item_vat)
-#                 item_ps = _normalize_ps(item.preke_paslauga)
-#                 if item_ps is None:
-#                     item_ps = doc_ps
-
-#                 item_pvm = auto_select_pvm_code(
-#                     pirkimas_pardavimas=doc.pirkimas_pardavimas,
-#                     buyer_country_iso=buyer_iso,
-#                     seller_country_iso=seller_iso,
-#                     preke_paslauga=item_ps,
-#                     vat_percent=item_vat_norm,
-#                     separate_vat=bool(doc.separate_vat),
-#                     buyer_has_vat_code=buyer_has_vat_code,
-#                     seller_has_vat_code=seller_has_vat_code,
-#                     doc_96_str=bool(getattr(doc, "doc_96_str", False)),
-#                 )
-
-#                 old = item.pvm_kodas
-#                 item.pvm_kodas = item_pvm
-#                 item.save(update_fields=["pvm_kodas"])
-#                 log.info("pk=%s: item[%s] vat=%r ps=%r -> pvm %r (was %r)",
-#                          pk, item.id, item_vat_norm, item_ps, item_pvm, old)
-
-#                 if item_pvm is not None: pvm_codes.add(item_pvm)
-#                 if item_vat_norm is not None: vat_percents.add(item_vat_norm)
-
-#             if bool(doc.separate_vat):
-#                 doc.pvm_kodas = "Keli skirtingi PVM"
-#                 doc.vat_percent = None
-#                 log.info("pk=%s: separate_vat=True -> doc.pvm_kodas='Keli skirtingi PVM'", pk)
-#             else:
-#                 if len(pvm_codes) == 1 and len(vat_percents) == 1:
-#                     doc.pvm_kodas = next(iter(pvm_codes))
-#                     doc.vat_percent = next(iter(vat_percents))
-#                     log.info("pk=%s: unified items -> doc.pvm_kodas=%r vat_percent=%r",
-#                              pk, doc.pvm_kodas, doc.vat_percent)
-#                 else:
-#                     doc.pvm_kodas = ""
-#                     doc.vat_percent = None
-#                     log.info("pk=%s: heterogeneous items -> doc.pvm_kodas cleared", pk)
-
-#         else:
-#             # sumiskai / detaliai без строк — документный расчёт
-#             doc_pvm = auto_select_pvm_code(
-#                 pirkimas_pardavimas=doc.pirkimas_pardavimas,
-#                 buyer_country_iso=buyer_iso,
-#                 seller_country_iso=seller_iso,
-#                 preke_paslauga=doc_ps,
-#                 vat_percent=doc_vat_norm,
-#                 separate_vat=bool(doc.separate_vat),
-#                 buyer_has_vat_code=buyer_has_vat_code,
-#                 seller_has_vat_code=seller_has_vat_code,
-#                 doc_96_str=bool(getattr(doc, "doc_96_str", False)),
-#             )
-#             old_doc_pvm = doc.pvm_kodas
-#             doc.pvm_kodas = doc_pvm
-#             log.info("pk=%s: doc-level recalc -> pvm %r (was %r)", pk, doc_pvm, old_doc_pvm)
-
-#         # 5) Сохранить
-#         update_set = {"pirkimas_pardavimas","pvm_kodas","vat_percent"}
-#         if hasattr(doc, "buyer_has_vat_code"): update_set.add("buyer_has_vat_code")
-#         if hasattr(doc, "seller_has_vat_code"): update_set.add("seller_has_vat_code")
-
-#         doc.save(update_fields=list(update_set))
-#         log.info("pk=%s: saved fields=%s", pk, sorted(update_set))
-
-#     # ============ ДОБАВИТЬ ВАЛИДАЦИЮ В КОНЦЕ ============
-#     try:
-#         # Проверяем изменились ли поля buyer/seller
-#         buyer_seller_changed = any(
-#             k.startswith(('buyer_', 'seller_')) 
-#             for k in request.data.keys()
-#         )
-        
-#         if buyer_seller_changed:
-#             is_valid = check_required_fields_for_export(doc)
-#             doc.ready_for_export = is_valid
-#             doc.save(update_fields=['ready_for_export'])
-#             log.info("pk=%s: validated after update, ready_for_export=%s", pk, is_valid)
-#     except Exception as e:
-#         log.error("pk=%s: validation error: %s", pk, str(e))
-#     # =====================================================
-
-#     return Response(ScannedDocumentSerializer(doc).data)
-
 
 
 
@@ -3537,10 +3272,10 @@ def autocomplete_clients(request):
             "pavadinimas": c.pavadinimas,
             "imones_kodas": c.imones_kodas,
             "pvm_kodas": c.pvm_kodas,
-            "company_address": c.address,
-            "company_country_iso": c.country_iso,
-            "company_iban": c.ibans,
-            # нужные поля
+            "address": c.address,
+            "country_iso": c.country_iso,
+            "ibans": c.ibans,
+            "is_person": c.is_person,
         }
         for c in qs
     ]
@@ -5951,6 +5686,7 @@ def export_sessions_active(request):
                 "started_at": s.started_at.isoformat() if s.started_at else None,
                 "finished_at": s.finished_at.isoformat() if s.finished_at else None,
                 "total_time_seconds": s.total_time_seconds,
+                "has_invoices": s.invoice_documents.exists(),
             }
             for s in sessions
         ]
@@ -10009,3 +9745,322 @@ def admin_all_recurring_invoices(request):
 # ════════════════════════════════════════════════════════════
 # END ─── Dlia ADMIN israsymas ───
 # ════════════════════════════════════════════════════════════
+
+
+
+# ═══════════════════════════════════════════════════
+# Funkcii sviazany s exportom po API
+# ═══════════════════════════════════════════════════
+
+"""
+Views for APIProviderKey — универсальный CRUD + verify.
+
+URL pattern:
+  /api/settings/api-keys/<provider>/          — GET list, POST create
+  /api/settings/api-keys/<provider>/<pk>/     — GET detail, PATCH update, DELETE
+  /api/settings/api-keys/<provider>/<pk>/verify/ — POST verify
+
+Добавить в docscanner_app/views.py (или отдельный файл).
+"""
+
+import logging
+from rest_framework import status
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+
+logger = logging.getLogger("docscanner_app")
+
+VALID_PROVIDERS = {"rivile_gama_api", "dineta", "optimum"}
+
+
+def _verify_key(provider, credentials):
+    """
+    Проверяет credentials для конкретного провайдера.
+    Возвращает (success: bool, error: str).
+    """
+    try:
+        if provider == "rivile_gama_api":
+            from docscanner_app.exports.rivile_gama_api import verify_api_key
+            result = verify_api_key(credentials.get("api_key", ""))
+            if result.success:
+                return True, ""
+            return False, result.error_message or "API raktas neteisingas."
+
+        elif provider == "dineta":
+            from docscanner_app.exports.dineta import (
+                dineta_hello, parse_dineta_url, build_api_base_url, build_auth_header,
+            )
+            from docscanner_app.utils.password_encryption import decrypt_password
+
+            url = credentials.get("url", "")
+            username = credentials.get("username", "")
+            password = credentials.get("password", "")
+
+            server, client = parse_dineta_url(url)
+            dineta_hello(
+                server=server,
+                client=client,
+                username=username,
+                password=password,
+            )
+            return True, ""
+
+        elif provider == "optimum":
+            from docscanner_app.exports.optimum import optimum_hello
+            optimum_hello(credentials.get("api_key", ""))
+            return True, ""
+
+    except Exception as e:
+        return False, str(e) or f"{provider}: klaida"
+
+    return False, "Nežinomas teikėjas."
+
+
+@api_view(["GET", "POST"])
+@permission_classes([IsAuthenticated])
+def api_provider_keys_list(request, provider):
+    """
+    GET  — список ключей для провайдера.
+    POST — создать новый ключ.
+    """
+    from docscanner_app.models import APIProviderKey
+
+    if provider not in VALID_PROVIDERS:
+        return Response(
+            {"detail": f"Nežinomas teikėjas: {provider}"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    user = request.user
+
+    # ─── GET ───
+    if request.method == "GET":
+        keys = APIProviderKey.objects.filter(user=user, provider=provider)
+        data = []
+        for k in keys:
+            data.append({
+                "id": k.pk,
+                "provider": k.provider,
+                "label": k.label,
+                "company_code": k.company_code,
+                "key_suffix": k.key_suffix,
+                "is_active": k.is_active,
+                "use_for_all": k.use_for_all,
+                "verified_at": k.verified_at,
+                "last_ok": k.last_ok,
+                "last_error": k.last_error,
+                "created_at": k.created_at,
+            })
+        return Response(data)
+
+    # ─── POST (create) ───
+    body = request.data or {}
+    use_for_all = bool(body.get("use_for_all", False))
+    company_code = "__all__" if use_for_all else (body.get("company_code") or "").strip()
+    label = (body.get("label") or "").strip()
+
+    if not company_code:
+        return Response(
+            {"detail": "Įmonės kodas yra privalomas."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    # Проверка дубликата
+    if APIProviderKey.objects.filter(user=user, provider=provider, company_code=company_code).exists():
+        if company_code == "__all__":
+            return Response(
+                {"detail": "Bendras raktas \"Visoms įmonėms\" jau egzistuoja. Redaguokite esamą profilį arba ištrinkite ir sukurkite naują."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return Response(
+            {"detail": f"Raktas įmonei '{company_code}' jau egzistuoja. Redaguokite esamą profilį arba ištrinkite ir sukurkite naują."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    # Собираем credentials
+    creds = _extract_credentials(body, provider)
+    if not creds:
+        return Response(
+            {"detail": "Prisijungimo duomenys yra privalomi."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    # Валидация credentials
+    missing = _validate_credentials(creds, provider)
+    if missing:
+        return Response(
+            {"detail": f"Trūksta laukų: {', '.join(missing)}"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    # Создаём
+    key_obj = APIProviderKey(
+        user=user,
+        provider=provider,
+        label=label,
+        company_code=company_code,
+        use_for_all=use_for_all,
+    )
+    key_obj.set_credentials(creds)
+    key_obj.save()
+
+    # Верифицируем
+    success, error = _verify_key(provider, creds)
+    key_obj.mark_verified(success, error)
+
+    logger.info(
+        "[API_KEYS] Created %s key=%s company=%s verified=%s",
+        provider, key_obj.pk, company_code, success,
+    )
+
+    return Response(_serialize_key(key_obj), status=status.HTTP_201_CREATED)
+
+
+@api_view(["GET", "PATCH", "DELETE"])
+@permission_classes([IsAuthenticated])
+def api_provider_keys_detail(request, provider, pk):
+    """
+    GET    — детали одного ключа.
+    PATCH  — обновить (label, company_code, credentials, is_active, use_for_all).
+    DELETE — удалить.
+    """
+    from docscanner_app.models import APIProviderKey
+
+    if provider not in VALID_PROVIDERS:
+        return Response(
+            {"detail": f"Nežinomas teikėjas: {provider}"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    try:
+        key_obj = APIProviderKey.objects.get(pk=pk, user=request.user, provider=provider)
+    except APIProviderKey.DoesNotExist:
+        return Response({"detail": "Nerastas."}, status=status.HTTP_404_NOT_FOUND)
+
+    # ─── GET ───
+    if request.method == "GET":
+        return Response(_serialize_key(key_obj))
+
+    # ─── DELETE ───
+    if request.method == "DELETE":
+        key_obj.delete()
+        logger.info("[API_KEYS] Deleted %s key=%s", provider, pk)
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+    # ─── PATCH ───
+    body = request.data or {}
+
+    if "label" in body:
+        key_obj.label = (body["label"] or "").strip()
+
+    if "company_code" in body:
+        new_code = (body["company_code"] or "").strip()
+        if new_code and new_code != key_obj.company_code:
+            # Проверка дубликата
+            if APIProviderKey.objects.filter(
+                user=request.user, provider=provider, company_code=new_code
+            ).exclude(pk=pk).exists():
+                return Response(
+                    {"detail": f"Raktas įmonei '{new_code}' jau egzistuoja."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            key_obj.company_code = new_code
+
+    if "is_active" in body:
+        key_obj.is_active = bool(body["is_active"])
+
+    if "use_for_all" in body:
+        key_obj.use_for_all = bool(body["use_for_all"])
+        if key_obj.use_for_all:
+            key_obj.company_code = "__all__"
+
+    # Credentials update (только непустые поля)
+    creds_update = _extract_credentials(body, provider)
+    if creds_update and any(v.strip() for v in creds_update.values()):
+        existing_creds = key_obj.get_credentials()
+        for k, v in creds_update.items():
+            if v.strip():
+                existing_creds[k] = v.strip()
+        key_obj.set_credentials(existing_creds)
+
+    key_obj.save()
+
+    logger.info("[API_KEYS] Updated %s key=%s", provider, pk)
+    return Response(_serialize_key(key_obj))
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def api_provider_keys_verify(request, provider, pk):
+    """
+    POST — проверить существующий ключ.
+    """
+    from docscanner_app.models import APIProviderKey
+
+    if provider not in VALID_PROVIDERS:
+        return Response(
+            {"detail": f"Nežinomas teikėjas: {provider}"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    try:
+        key_obj = APIProviderKey.objects.get(pk=pk, user=request.user, provider=provider)
+    except APIProviderKey.DoesNotExist:
+        return Response({"detail": "Nerastas."}, status=status.HTTP_404_NOT_FOUND)
+
+    creds = key_obj.get_credentials()
+    success, error = _verify_key(provider, creds)
+    key_obj.mark_verified(success, error)
+
+    logger.info("[API_KEYS] Verify %s key=%s success=%s", provider, pk, success)
+    return Response(_serialize_key(key_obj))
+
+
+# ═══════════════════════════════════════════════════
+# Helpers
+# ═══════════════════════════════════════════════════
+
+PROVIDER_CRED_FIELDS = {
+    "rivile_gama_api": ["api_key"],
+    "dineta": ["url", "username", "password"],
+    "optimum": ["api_key"],
+}
+
+
+def _extract_credentials(body, provider):
+    """Извлекает credential поля из request body."""
+    fields = PROVIDER_CRED_FIELDS.get(provider, [])
+    creds = {}
+    for f in fields:
+        val = body.get(f)
+        if val is not None:
+            creds[f] = str(val)
+    return creds
+
+
+def _validate_credentials(creds, provider):
+    """Возвращает список отсутствующих обязательных полей."""
+    fields = PROVIDER_CRED_FIELDS.get(provider, [])
+    return [f for f in fields if not (creds.get(f) or "").strip()]
+
+
+def _serialize_key(key_obj):
+    """Сериализует APIProviderKey в dict для Response."""
+    return {
+        "id": key_obj.pk,
+        "provider": key_obj.provider,
+        "label": key_obj.label,
+        "company_code": key_obj.company_code,
+        "key_suffix": key_obj.key_suffix,
+        "is_active": key_obj.is_active,
+        "use_for_all": key_obj.use_for_all,
+        "verified_at": key_obj.verified_at,
+        "last_ok": key_obj.last_ok,
+        "last_error": key_obj.last_error,
+        "created_at": key_obj.created_at,
+    }
+
+# ═══════════════════════════════════════════════════
+# END - Funkcii sviazany s exportom po API
+# ═══════════════════════════════════════════════════

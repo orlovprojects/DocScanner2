@@ -2865,13 +2865,15 @@ import EditIcon from '@mui/icons-material/Edit';
 import HelpOutlineIcon from "@mui/icons-material/HelpOutline";
 import DeleteOutlineIcon from "@mui/icons-material/DeleteOutline";
 import Autocomplete from "@mui/material/Autocomplete";
+import PlayCircleIcon from "@mui/icons-material/PlayCircle";
+import CloseIcon from "@mui/icons-material/Close";
+import { Dialog, DialogTitle, DialogContent } from "@mui/material";
 import { api } from "../api/endpoints";
 import { COUNTRY_OPTIONS } from "../page_elements/Countries";
 import { ACCOUNTING_PROGRAMS } from "../page_elements/AccountingPrograms";
-import { AccountingProgramExtraSettings } from "../page_elements/AccountingProgramExtraSettings";
 import { Helmet } from "react-helmet";
 import CloudIntegrationSettings from '../components/CloudIntegrationSettings';
-import RivileGamaAPIKeys from "../components/RivileGamaAPIKeys";
+import APIProviderKeys from "../components/APIProviderKeys";
 import ExtraFieldsManager from '../components/ExtraFieldsManager';
 
 
@@ -2900,10 +2902,11 @@ const PREKES_ASSEMBLY_OPTIONS = [
 ];
 
 /** ===== Reusable: import tab for XLSX ===== */
-function ImportTab({ label, url, templateFileName }) {
+function ImportTab({ label, url, templateFileName, videoUrl }) {
   const [file, setFile] = useState(null);
   const [result, setResult] = useState(null);
   const [error,   setError] = useState(null);
+  const [videoOpen, setVideoOpen] = useState(false);
   const inputRef  = React.useRef(null);
 
   const handleFile = (e) => {
@@ -2951,11 +2954,28 @@ function ImportTab({ label, url, templateFileName }) {
   };
 
   const handleDownloadTemplate = () =>
-    window.open(`/templates/${templateFileName || "imones_sablonas.xlsx"}`, "_blank");
+    window.open(`/templates/${templateFileName || "klientu_sablonas.xlsx"}`, "_blank");
 
   return (
     <Paper sx={{ p: 2, mb: 2 }}>
-      <Typography gutterBottom variant="subtitle1">{label}</Typography>
+      <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 1 }}>
+        <Typography variant="subtitle1">{label}</Typography>
+        {videoUrl && (
+          <Typography
+            component="span"
+            variant="caption"
+            onClick={() => setVideoOpen(true)}
+            sx={{
+              display: "flex", alignItems: "center", gap: 0.5,
+              color: "text.secondary", textDecoration: "none", cursor: "pointer",
+              fontWeight: 600, "&:hover": { textDecoration: "underline" },
+            }}
+          >
+            <PlayCircleIcon sx={{ fontSize: 20, color: "error.main" }} />
+            Video instrukcija
+          </Typography>
+        )}
+      </Box>
 
       <Stack direction="row" spacing={2} alignItems="center" sx={{ mb: 2 }}>
         <Button variant="outlined" component="label">
@@ -2978,6 +2998,29 @@ function ImportTab({ label, url, templateFileName }) {
         </Alert>
       )}
       {error && <Alert severity="error" sx={{ mt: 2 }}>{error}</Alert>}
+
+      {videoUrl && (
+        <Dialog open={videoOpen} onClose={() => setVideoOpen(false)} maxWidth="md" fullWidth disableScrollLock>
+          <DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            Video instrukcija
+            <IconButton size="small" onClick={() => setVideoOpen(false)}>
+              <CloseIcon fontSize="small" />
+            </IconButton>
+          </DialogTitle>
+          <DialogContent sx={{ p: 0 }}>
+            <Box sx={{ position: "relative", paddingTop: "56.25%", width: "100%" }}>
+              <Box
+                component="iframe"
+                src={videoOpen ? videoUrl : ""}
+                title="Video instrukcija"
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                allowFullScreen
+                sx={{ position: "absolute", top: 0, left: 0, width: "100%", height: "100%", border: "none", borderRadius: 2 }}
+              />
+            </Box>
+          </DialogContent>
+        </Dialog>
+      )}
     </Paper>
   );
 }
@@ -3312,34 +3355,6 @@ export default function NustatymaiPage() {
   const [savingCompany, setSavingCompany] = useState(false);
   const [successCompany, setSuccessCompany] = useState(false);
   const [companyError, setCompanyError] = useState("");
-  const [dinetaSettings, setDinetaSettings] = useState({
-      url: "",
-      username: "",
-      password: "",
-  });
-  const [dinetaLoading, setDinetaLoading] = useState(false);
-  const [dinetaSaving, setDinetaSaving] = useState(false);
-  const [dinetaSuccess, setDinetaSuccess] = useState(false);
-  const [dinetaError, setDinetaError] = useState("");
-
-  // --- Optimum ---
-  const [optimumSettings, setOptimumSettings] = useState({ key: "" });
-  const [optimumSaving, setOptimumSaving] = useState(false);
-  const [optimumSuccess, setOptimumSuccess] = useState(false);
-  const [optimumError, setOptimumError] = useState("");
-
-  // meta iš backend (key niekada nelaikom)
-  const [optimumMeta, setOptimumMeta] = useState({
-    has_key: false,
-    key_suffix: "",
-    verified_at: null,
-    last_ok: null,
-    last_error_at: null,
-    last_error: "",
-  });
-  const [optimumTesting, setOptimumTesting] = useState(false);
-  const [optimumDeleting, setOptimumDeleting] = useState(false);
-  const [showOptimumKeyInput, setShowOptimumKeyInput] = useState(false);
 
   // ---- DokSkenas mobile keys ----
   const [mobileKeys, setMobileKeys] = useState([]); // sąrašas visų kvietimų / raktų
@@ -3603,6 +3618,7 @@ export default function NustatymaiPage() {
   const [touchedDefaults, setTouchedDefaults] = useState(false);
 
   const [copiedPvm, setCopiedPvm] = useState(false);
+  const [autoVideoOpen, setAutoVideoOpen] = useState(false);
   const handleCopyPvm = async () => {
     try {
       await navigator.clipboard.writeText(PVM_COPY_TEXT);
@@ -3861,36 +3877,6 @@ export default function NustatymaiPage() {
   }, [loadMobileKeys]);
 
 
-
-  useEffect(() => {
-    if (program !== "dineta") return;
-
-    setDinetaLoading(true);
-    setDinetaError("");
-    api
-      .get("/settings/dineta/", { withCredentials: true })
-      .then(({ data }) => {
-          setDinetaSettings((prev) => ({
-            ...prev,
-            url:     data?.url     || "",
-            username:data?.username || "",
-            password: data?.password || "",
-          }));
-      })
-      .catch((err) => {
-        console.error("Failed to load Dineta settings:", err);
-        // при желании можно показать ошибку
-      })
-      .finally(() => setDinetaLoading(false));
-  }, [program]);
-
-
-  useEffect(() => {
-    if (program !== "optimum") return;
-    refreshOptimumMeta();
-  }, [program]);
-
-
   useEffect(() => {
     setRuleForm(prev => {
       if (program !== "rivile" && prev.result_tipas === "Kodas") {
@@ -4050,175 +4036,6 @@ export default function NustatymaiPage() {
       setErrorDefaults(e?.response?.data?.detail || "Nepavyko išsaugoti numatytųjų reikšmių.");
     } finally {
       setSavingDefaults(false);
-    }
-  };
-
-
-  const saveDinetaSettings = async () => {
-    setDinetaSaving(true);
-    setDinetaError("");
-    setDinetaSuccess(false);
-
-  const { url, username, password } = dinetaSettings;
-
-  if (!url.trim() || !username.trim() || !password) {
-      setDinetaError("Visi API laukai yra privalomi.");
-      setDinetaSaving(false);
-      return;
-  }
-
-  try {
-      const { data: resData } = await api.put(
-        "/settings/dineta/",
-        { url, username, password },
-        { withCredentials: true }
-      );
-
-      // Обновляем поля из ответа (password придёт как "••••••••")
-      setDinetaSettings((prev) => ({
-        ...prev,
-        url: resData?.url || prev.url,
-        username: resData?.username || prev.username,
-        password: resData?.password || "••••••••",
-      }));
-
-      // Проверка подключения
-      if (resData?.connection_status === "warning") {
-        setDinetaError(resData.connection_message || "Prisijungimo patikrinimas nepavyko.");
-      }
-
-      setDinetaSuccess(true);
-      setTimeout(() => setDinetaSuccess(false), 3000);
-    } catch (e) {
-      const data = e?.response?.data;
-      let msg =
-        data?.detail ||
-        data?.non_field_errors ||
-        data?.error ||
-        "Nepavyko išsaugoti Dineta nustatymų.";
-      if (typeof msg === "object") {
-        try {
-          msg = JSON.stringify(msg);
-        } catch {
-          msg = "Nepavyko išsaugoti Dineta nustatymų.";
-        }
-      }
-      setDinetaError(msg);
-    } finally {
-      setDinetaSaving(false);
-    }
-  };
-
-
-  const refreshOptimumMeta = async () => {
-      try {
-        const { data } = await api.get("/settings/optimum/", { withCredentials: true });
-        setOptimumMeta({
-          has_key: !!data?.has_key,
-          key_suffix: data?.key_suffix ?? "",
-          verified_at: data?.verified_at ?? null,
-          last_ok: data?.last_ok ?? null,
-          last_error_at: data?.last_error_at ?? null,
-          last_error: data?.last_error ?? "",
-        });
-      } catch (err) {
-        console.warn("Failed to refresh optimum meta:", err);
-      }
-    };
-
-const saveOptimumSettings = async () => {
-    setOptimumSaving(true);
-    setOptimumError("");
-    setOptimumSuccess(false);
-
-    const key = (optimumSettings.key || "").trim();
-    if (!key) {
-      setOptimumError("API Key yra privalomas.");
-      setOptimumSaving(false);
-      return;
-    }
-
-    try {
-      const { data } = await api.put("/settings/optimum/", { key }, { withCredentials: true });
-
-      setOptimumSettings({ key: "" });
-      setOptimumMeta({
-        has_key: !!data?.has_key,
-        key_suffix: data?.key_suffix ?? "",
-        verified_at: data?.verified_at ?? null,
-        last_ok: data?.last_ok ?? null,
-        last_error_at: data?.last_error_at ?? null,
-        last_error: data?.last_error ?? "",
-      });
-      setShowOptimumKeyInput(false);
-      setOptimumSuccess(true);
-      setTimeout(() => setOptimumSuccess(false), 2500);
-    } catch (e) {
-      const data = e?.response?.data;
-      let msg = data?.detail || data?.last_error || "Nepavyko patikrinti Optimum API Key.";
-      if (typeof msg === "object") {
-        try { msg = JSON.stringify(msg); } catch { msg = "Nepavyko patikrinti Optimum API Key."; }
-      }
-      setOptimumError(String(msg));
-      await refreshOptimumMeta();
-    } finally {
-      setOptimumSaving(false);
-    }
-  };
-
-  const testOptimumKey = async () => {
-    setOptimumTesting(true);
-    setOptimumError("");
-    setOptimumSuccess(false);
-
-    try {
-      const { data } = await api.post("/settings/optimum/", {}, { withCredentials: true });
-      setOptimumMeta({
-        has_key: !!data?.has_key,
-        key_suffix: data?.key_suffix ?? "",
-        verified_at: data?.verified_at ?? null,
-        last_ok: data?.last_ok ?? null,
-        last_error_at: data?.last_error_at ?? null,
-        last_error: data?.last_error ?? "",
-      });
-      setOptimumSuccess(true);
-      setTimeout(() => setOptimumSuccess(false), 2500);
-    } catch (e) {
-      const data = e?.response?.data;
-      let msg = data?.detail || data?.last_error || "Nepavyko patikrinti Optimum API Key.";
-      if (typeof msg === "object") {
-        try { msg = JSON.stringify(msg); } catch { msg = "Nepavyko patikrinti."; }
-      }
-      setOptimumError(String(msg));
-      await refreshOptimumMeta();
-    } finally {
-      setOptimumTesting(false);
-    }
-  };
-
-  const deleteOptimumKey = async () => {
-    if (!window.confirm("Ar tikrai norite ištrinti Optimum API raktą?")) return;
-    setOptimumDeleting(true);
-    setOptimumError("");
-    setOptimumSuccess(false);
-
-    try {
-      await api.delete("/settings/optimum/", { withCredentials: true });
-      setOptimumMeta({
-        has_key: false,
-        key_suffix: "",
-        verified_at: null,
-        last_ok: null,
-        last_error_at: null,
-        last_error: "",
-      });
-      setShowOptimumKeyInput(false);
-      setOptimumSettings({ key: "" });
-    } catch (e) {
-      const data = e?.response?.data;
-      setOptimumError(data?.detail || "Nepavyko ištrinti rakto.");
-    } finally {
-      setOptimumDeleting(false);
     }
   };
 
@@ -4818,21 +4635,6 @@ const saveOptimumSettings = async () => {
     }
   };
 
-  const fixDeltaKey = "fix_delta";
-  const isFixDeltaEnabled = Boolean(extraSettings && extraSettings[fixDeltaKey] === 1);
-  const toggleFixDelta = async (e) => {
-    const checked = e.target.checked;
-    const next = { ...(extraSettings || {}) };
-    if (checked) next[fixDeltaKey] = 1; else if (fixDeltaKey in next) delete next[fixDeltaKey];
-    setExtraSettings(next);
-    try {
-      await api.patch("/profile/", { extra_settings: next }, { withCredentials: true });
-    } catch {
-      setExtraSettings(extraSettings || {});
-      alert("Nepavyko išsaugoti papildomų nustatymų.");
-    }
-  };
-
   const exportMergeVatKey = "merge_vat";
   const isExportMergeVat = Boolean(
     extraSettings && Object.prototype.hasOwnProperty.call(extraSettings, exportMergeVatKey)
@@ -5183,401 +4985,35 @@ const saveOptimumSettings = async () => {
         </Box>
       )}
 
-      {program === "dineta" && (
-        <Paper sx={{ p: 3, mb: 3 }}>
-          <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 2 }}>
-            <Typography variant="h6" sx={{ fontWeight: 600 }}>
-              Dineta API sąsajos nustatymai
-            </Typography>
-            <Tooltip
-              arrow
-              enterTouchDelay={0}
-              leaveTouchDelay={4000}
-              title="Čia suvedami duomenys, naudojami jungiantis prie Dineta API (serveris, klientas ir naudotojas)."
-            >
-              <HelpOutlineIcon fontSize="small" sx={{ color: "text.secondary" }} />
-            </Tooltip>
-          </Box>
-
-          <Grid2 container spacing={2}>
-            <Grid2 size={{ xs: 12 }}>
-              <TextField
-                label="Dineta nuoroda (pvz. https://lt4.dineta.eu/dokskenas/login.php)"
-                value={dinetaSettings.url}
-                onChange={(e) =>
-                  setDinetaSettings((prev) => ({ ...prev, url: e.target.value }))
-                }
-                fullWidth
-                required
-                disabled={dinetaLoading || dinetaSaving}
-                placeholder="https://lt4.dineta.eu/dokskenas/"
-                helperText="Nukopijuokite nuorodą iš savo Dineta.web naršyklės adreso juostos"
-              />
-            </Grid2>
-
-            <Grid2 size={{ xs: 12, md: 6 }}>
-              <TextField
-                label="API naudotojo vardas"
-                value={dinetaSettings.username}
-                onChange={(e) =>
-                  setDinetaSettings((prev) => ({ ...prev, username: e.target.value }))
-                }
-                fullWidth
-                required
-                disabled={dinetaLoading || dinetaSaving}
-              />
-            </Grid2>
-            <Grid2 size={{ xs: 12, md: 6 }}>
-              <TextField
-                label="API slaptažodis"
-                type="password"
-                value={dinetaSettings.password}
-                onChange={(e) =>
-                  setDinetaSettings((prev) => ({ ...prev, password: e.target.value }))
-                }
-                onFocus={(e) => {
-                  if (e.target.value === "••••••••") {
-                    setDinetaSettings((prev) => ({ ...prev, password: "" }));
-                  }
-                }}
-                onBlur={(e) => {
-                  if (!e.target.value) {
-                    setDinetaSettings((prev) => ({ ...prev, password: "••••••••" }));
-                  }
-                }}
-                fullWidth
-                required
-                disabled={dinetaLoading || dinetaSaving}
-              />
-            </Grid2>
-          </Grid2>
-
-          <Box sx={{ mt: 2, display: "flex", alignItems: "center", gap: 2 }}>
-            <Button
-              variant="contained"
-              onClick={saveDinetaSettings}
-              disabled={dinetaSaving || dinetaLoading}
-            >
-              Išsaugoti API nustatymus
-            </Button>
-            {dinetaLoading && (
-              <Typography variant="body2" sx={{ color: "text.secondary" }}>
-                Kraunama...
-              </Typography>
-            )}
-          </Box>
-
-          {dinetaError && (
-            <Alert severity={dinetaSuccess ? "warning" : "error"} sx={{ mt: 2 }}>
-              {dinetaError}
-            </Alert>
-          )}
-          {dinetaSuccess && (
-            <Alert severity="success" sx={{ mt: 2 }}>
-              Dineta nustatymai išsaugoti!
-            </Alert>
-          )}
-        </Paper>
+      {["rivile_gama_api", "dineta", "optimum"].includes(program) && (
+        <APIProviderKeys provider={program} />
       )}
 
-      {program === "optimum" && (
-        <Paper sx={{ p: 3, mb: 3 }}>
-          <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 2 }}>
-            <Typography variant="h6" sx={{ fontWeight: 600 }}>
-              Optimum API sąsajos nustatymai
-            </Typography>
-            <Tooltip
-              arrow enterTouchDelay={0} leaveTouchDelay={4000}
-              title="Įveskite Optimum API Key, kurį rasite savo Optimum programoje (Pagalba -> API raktas). API raktas bus naudojamas autentifikacijai su jūsų Optimum duomenų baze."
-            >
-              <HelpOutlineIcon fontSize="small" sx={{ color: "text.secondary" }} />
-            </Tooltip>
-          </Box>
-
-          {/* Raktas jau išsaugotas — rodyti maskuotą raktą + veiksmus */}
-          {optimumMeta.has_key && !showOptimumKeyInput ? (
-            <Box>
-              <Box sx={{ display: "flex", alignItems: "center", gap: 2, mb: 2, flexWrap: "wrap" }}>
-                <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-                  <Typography variant="body2" sx={{ color: "text.secondary" }}>API raktas:</Typography>
-                  <Typography variant="body1" sx={{ fontFamily: "monospace", fontWeight: 600 }}>
-                    {"••••••••" + (optimumMeta.key_suffix || "****")}
-                  </Typography>
-                </Box>
-
-                <Chip
-                  size="small"
-                  label={
-                    optimumMeta.last_ok === true
-                      ? "Patikrintas ✓"
-                      : optimumMeta.last_ok === false
-                      ? "Klaida ✗"
-                      : "Nepatikrintas"
-                  }
-                  sx={{
-                    fontWeight: 600,
-                    backgroundColor:
-                      optimumMeta.last_ok === true
-                        ? alpha("#4caf50", 0.1)
-                        : optimumMeta.last_ok === false
-                        ? alpha("#f44336", 0.1)
-                        : alpha("#ff9800", 0.1),
-                    color:
-                      optimumMeta.last_ok === true
-                        ? "success.dark"
-                        : optimumMeta.last_ok === false
-                        ? "error.dark"
-                        : "warning.dark",
-                    border: "1px solid",
-                    borderColor:
-                      optimumMeta.last_ok === true
-                        ? "success.main"
-                        : optimumMeta.last_ok === false
-                        ? "error.main"
-                        : "warning.main",
-                  }}
-                />
-              </Box>
-
-              {optimumMeta.verified_at && (
-                <Typography variant="caption" sx={{ color: "text.secondary", display: "block", mb: 2 }}>
-                  Paskutinis patikrinimas: {new Date(optimumMeta.verified_at).toLocaleString("lt-LT")}
-                </Typography>
-              )}
-
-              {optimumMeta.last_ok === false && optimumMeta.last_error && (
-                <Alert severity="error" sx={{ mb: 2 }}>{optimumMeta.last_error}</Alert>
-              )}
-
-              <Stack direction="row" spacing={2} sx={{ flexWrap: "wrap" }}>
-                <Button
-                  variant="outlined"
-                  onClick={testOptimumKey}
-                  disabled={optimumTesting || optimumDeleting}
-                >
-                  {optimumTesting ? "Tikrinama..." : "Patikrinti API"}
-                </Button>
-                <Button
-                  variant="outlined"
-                  onClick={() => {
-                    setShowOptimumKeyInput(true);
-                    setOptimumError("");
-                    setOptimumSuccess(false);
-                  }}
-                  disabled={optimumTesting || optimumDeleting}
-                >
-                  Pakeisti raktą
-                </Button>
-                <Button
-                  variant="outlined"
-                  color="error"
-                  onClick={deleteOptimumKey}
-                  disabled={optimumTesting || optimumDeleting}
-                  startIcon={<DeleteOutlineIcon />}
-                >
-                  {optimumDeleting ? "Trinama..." : "Ištrinti"}
-                </Button>
-              </Stack>
-            </Box>
-          ) : (
-            /* Rakto nėra arba keičiamas — rodyti įvedimo lauką */
-            <Box>
-              <Grid2 container spacing={2}>
-                <Grid2 size={{ xs: 12, md: 8 }}>
-                  <TextField
-                    label="API Key"
-                    value={optimumSettings.key}
-                    onChange={(e) => {
-                      setOptimumSettings((prev) => ({ ...prev, key: e.target.value }));
-                      setOptimumSuccess(false);
-                      setOptimumError("");
-                    }}
-                    fullWidth
-                    required
-                    disabled={optimumSaving}
-                    placeholder="Įveskite Optimum API raktą"
-                  />
-                </Grid2>
-              </Grid2>
-
-              <Stack direction="row" spacing={2} sx={{ mt: 2 }}>
-                <Button
-                  variant="contained"
-                  onClick={saveOptimumSettings}
-                  disabled={optimumSaving}
-                >
-                  {optimumSaving ? "Tikrinama..." : "Išsaugoti ir patikrinti"}
-                </Button>
-                {showOptimumKeyInput && optimumMeta.has_key && (
-                  <Button
-                    variant="outlined"
-                    onClick={() => {
-                      setShowOptimumKeyInput(false);
-                      setOptimumSettings({ key: "" });
-                      setOptimumError("");
-                    }}
-                  >
-                    Atšaukti
-                  </Button>
-                )}
-              </Stack>
-            </Box>
-          )}
-
-          {optimumError && <Alert severity="error" sx={{ mt: 2 }}>{optimumError}</Alert>}
-          {optimumSuccess && (
-            <Alert severity="success" sx={{ mt: 2 }}>
-              Optimum API raktas patikrintas sėkmingai!
-            </Alert>
-          )}
-        </Paper>
-      )}
-
-      {program === "rivile_gama_api" && <RivileGamaAPIKeys />}
-
-
-      {/* <AccountingProgramExtraSettings
-        program={program}
-
-        prekesAssemblyPirkimas={prekesAssemblyPirkimas}
-        prekesAssemblyPardavimas={prekesAssemblyPardavimas}
-        paslaugosAssemblyPirkimas={paslaugosAssemblyPirkimas}
-        paslaugosAssemblyPardavimas={paslaugosAssemblyPardavimas}
-        savingPrekesAssembly={savingPrekesAssembly}
-        successPrekesAssembly={successPrekesAssembly}
-        onChangePrekesAssemblyPirkimas={handlePrekesAssemblyPirkimasChange}
-        onChangePrekesAssemblyPardavimas={handlePrekesAssemblyPardavimasChange}
-        onChangePaslaugosAssemblyPirkimas={handlePaslaugosAssemblyPirkimasChange}
-        onChangePaslaugosAssemblyPardavimas={handlePaslaugosAssemblyPardavimasChange}
-
-        // Rivilė ERP
-        rivileErpFields={rivileErpFields}
-        setRivileErpFields={setRivileErpFields}
-        savingRivileErp={savingRivileErp}
-        successRivileErp={successRivileErp}
-        errorRivileErp={errorRivileErp}
-        onSaveRivileErp={saveRivileErpFields}
-        // Rivilė Gama
-        rivileGamaFields={rivileGamaFields}
-        setRivileGamaFields={setRivileGamaFields}
-        savingRivileGama={savingRivileGama}
-        successRivileGama={successRivileGama}
-        errorRivileGama={errorRivileGama}
-        onSaveRivileGama={saveRivileGamaFields}
-        // Butent
-        butentFields={butentFields}
-        setButentFields={setButentFields}
-        savingButent={savingButent}
-        successButent={successButent}
-        errorButent={errorButent}
-        onSaveButent={saveButentFields}
-        // Finvalda
-        finvaldaFields={finvaldaFields}
-        setFinvaldaFields={setFinvaldaFields}
-        savingFinvalda={savingFinvalda}
-        successFinvalda={successFinvalda}
-        errorFinvalda={errorFinvalda}
-        onSaveFinvalda={saveFinvaldaFields}
-        // Centas
-        centasFields={centasFields}
-        setCentasFields={setCentasFields}
-        savingCentas={savingCentas}
-        successCentas={successCentas}
-        errorCentas={errorCentas}
-        onSaveCentas={saveCentasFields}
-        // Pragma4
-        pragma4Fields={pragma4Fields}
-        setPragma4Fields={setPragma4Fields}
-        savingPragma4={savingPragma4}
-        successPragma4={successPragma4}
-        errorPragma4={errorPragma4}
-        onSavePragma4={savePragma4Fields}
-        // Dineta
-        dinetaFields={dinetaFields}
-        setDinetaFields={setDinetaFields}
-        savingDineta={savingDineta}
-        successDineta={successDineta}
-        errorDineta={errorDineta}
-        onSaveDineta={saveDinetaFields}
-        // Optimum
-        optimumFields={optimumFields}
-        setOptimumFields={setOptimumFields}
-        savingOptimum={savingOptimum}
-        successOptimum={successOptimum}
-        errorOptimum={errorOptimum}
-        onSaveOptimum={saveOptimumFields}
-        // Debetas
-        debetasFields={debetasFields}
-        setDebetasFields={setDebetasFields}
-        savingDebetas={savingDebetas}
-        successDebetas={successDebetas}
-        errorDebetas={errorDebetas}
-        onSaveDebetas={saveDebetasFields}
-        // Pragma 3
-        pragma3Fields={pragma3Fields}
-        setPragma3Fields={setPragma3Fields}
-        savingPragma3={savingPragma3}
-        successPragma3={successPragma3}
-        errorPragma3={errorPragma3}
-        onSavePragma3={savePragma3Fields}
-        // SitePro
-        siteProFields={siteProFields}
-        setSiteProFields={setSiteProFields}
-        savingSitePro={savingSitePro}
-        successSitePro={successSitePro}
-        errorSitePro={errorSitePro}
-        onSaveSitePro={saveSiteProFields}
-        // Agnum
-        agnumFields={agnumFields}
-        setAgnumFields={setAgnumFields}
-        savingAgnum={savingAgnum}
-        successAgnum={successAgnum}
-        errorAgnum={errorAgnum}
-        onSaveAgnum={saveAgnumFields}
-      /> */}
-      <ExtraFieldsManager program={program} />
+      <ExtraFieldsManager program={program} videoUrl="https://www.youtube.com/embed/_AuMdOP66bE" />
 
 
       {/* 3. Papildomi nustatymai */}
       <Paper sx={{ p: 3, mb: 3, mt: 5 }}>
         <Typography variant="h6" sx={{ mb: 3, fontWeight: 600 }}>Papildomi nustatymai</Typography>
         <Stack spacing={1}>
-          <FormControlLabel
-            control={<Switch checked={isOpDateFromDoc} onChange={toggleOpDateFromDoc} />}
-            label="Operacijos datą imti iš sąskaitos datos"
-          />
-          <FormControlLabel
-            control={<Switch checked={isFixDeltaEnabled} onChange={toggleFixDelta} />}
-            label={
-              <Box sx={{ display: "inline-flex", alignItems: "center", gap: 0.5 }}>
-                <span>Taisyti dokumento sumas kai skiriasi &lt;0,20</span>
-                <Tooltip
-                  arrow
-                  enterTouchDelay={0}
-                  leaveTouchDelay={4000}
-                  title="Sistema pataisys dokumento sumas, kai jos skiriasi nuo eilučių sumų iki 0,20. Pvz. dėl apvalinimų eilučių ir dokumento sumos gali skirtis ir apskaitos programos tokius dokumentus atmes."
-                >
-                  <HelpOutlineIcon fontSize="small" sx={{ color: "text.secondary" }} />
-                </Tooltip>
-              </Box>
-            }
-          />
-          <FormControlLabel
-            control={<Switch checked={isExportMergeVat} onChange={toggleExportMergeVat} />}
-            label={
-              <Box sx={{ display: "inline-flex", alignItems: "center", gap: 0.5 }}>
-                <span>Neišskirti PVM eksportuojant</span>
-                <Tooltip
-                  arrow
-                  enterTouchDelay={0}
-                  leaveTouchDelay={4000}
-                  title="Eksportuojant duomenis nebus išskiriami PVM suma ir PVM klasifikatorius. Tinka ne PVM mokėtojų apskaitai, kai reikalingos tik bendros sumos."
-                >
-                  <HelpOutlineIcon fontSize="small" sx={{ color: "text.secondary" }} />
-                </Tooltip>
-              </Box>
-            }
-          />
+          <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+            <Switch checked={isOpDateFromDoc} onChange={toggleOpDateFromDoc} />
+            <Typography variant="body2">Operacijos datą imti iš sąskaitos datos</Typography>
+          </Box>
+          <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+            <Switch checked={isExportMergeVat} onChange={toggleExportMergeVat} />
+            <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
+              <Typography variant="body2">Neišskirti PVM eksportuojant</Typography>
+              <Tooltip
+                arrow
+                enterTouchDelay={0}
+                leaveTouchDelay={4000}
+                title="Eksportuojant duomenis nebus išskiriami PVM suma ir PVM klasifikatorius. Tinka ne PVM mokėtojų apskaitai, kai reikalingos tik bendros sumos."
+              >
+                <HelpOutlineIcon fontSize="small" sx={{ color: "text.secondary" }} />
+              </Tooltip>
+            </Box>
+          </Box>
         </Stack>
 
         {program === "rivile" && (
@@ -5651,13 +5087,26 @@ const saveOptimumSettings = async () => {
           <ImportTab label="Importuoti prekes iš Excel" url="/data/import-products/" templateFileName="prekes_sablonas.xlsx" />
         )}
         {importTab === 1 && (
-          <ImportTab label="Importuoti įmones iš Excel" url="/data/import-clients/" templateFileName="imones_sablonas.xlsx" />
+          <ImportTab label="Importuoti įmones iš Excel" url="/data/import-clients/" templateFileName="klientu_sablonas.xlsx" videoUrl="https://www.youtube.com/embed/15v1CgS0Eaw" />
         )}
       </Box>
 
 
       <Box mb={3}>
-        <Typography variant="h4" sx={{ mt: 10, fontWeight: 600 }}>Automatizacijos</Typography>
+        <Box sx={{ display: "flex", alignItems: "center", gap: 2, mt: 10 }}>
+          <Typography variant="h4" sx={{ fontWeight: 600 }}>Automatizacijos</Typography>
+          <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
+            <PlayCircleIcon sx={{ fontSize: 20, color: "error.main" }} />
+            <Typography
+              variant="caption"
+              color="text.secondary"
+              sx={{ textDecoration: "none", cursor: "pointer", fontWeight: 600, "&:hover": { textDecoration: "underline" } }}
+              onClick={() => setAutoVideoOpen(true)}
+            >
+              Video instrukcija
+            </Typography>
+          </Box>
+        </Box>
       </Box>
 
       {/* 5. Defaults for sumiskai (Detaliai-like) */}
@@ -5667,7 +5116,7 @@ const saveOptimumSettings = async () => {
             Numatytosios reikšmės (skaitmenizuojant sumiškai)
           </Typography>
           <Tooltip
-            title="Skaitmenizuojant SUMIŠKAI, jei bus įvykdyta jūsų nustatyta sąlyga t.y. dokumente suras jūsų nustatyą pirkėją/pardavėją, sistema automatiškai priskirs jūsų nustatytas pajamų/išlaidų reikšmės."
+            title="Skaitmenizuojant SUMIŠKAI, jei bus įvykdyta jūsų nustatyta sąlyga t.y. dokumente suras jūsų nustatytą pirkėją/pardavėją, sistema automatiškai priskirs jūsų nustatytas pajamų/išlaidų reikšmės."
             arrow
             enterTouchDelay={0}
             leaveTouchDelay={4000}
@@ -6622,11 +6071,11 @@ const saveOptimumSettings = async () => {
           )}
         </Box>
       </Paper>
-      <Box mb={3}>
+      {/* <Box mb={3}>
         <Typography variant="h4" sx={{ mt: 10, fontWeight: 600 }}>Pakvietimai</Typography>
-      </Box>
+      </Box> */}
       {/* --- DokSkenas mobile app --- */}
-      <Paper sx={{ p: 3, mt: 3, mb: 4 }}>
+      {/* <Paper sx={{ p: 3, mt: 3, mb: 4 }}>
         <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 2, mb: 1 }}>
           <Typography variant="h6" sx={{ fontWeight: 500 }}>
             Kvietimai naudotis DokSkeno mobiliąja programėle
@@ -6640,7 +6089,6 @@ const saveOptimumSettings = async () => {
           Gavėjas gaus el. laišką su nuoroda parsisiųsti mobiliąja programėle, kuri jau bus priskirta prie jūsų DokSkeno paskyros.
         </Typography>
 
-        {/* Forma naujam kvietimui */}
         <Box sx={{ mb: 2 }}>
           <Typography variant="subtitle2" sx={{ mb: 1 }}>
             Naujas kvietimas
@@ -6693,7 +6141,6 @@ const saveOptimumSettings = async () => {
           )}
         </Box>
 
-        {/* Sąrašas sukurtų kvietimų / raktų */}
         <Box sx={{ mt: 5 }}>
           <Typography variant="subtitle2" sx={{ mb: 1, fontWeight: 600, }}>
             Sukurti raktai
@@ -6705,7 +6152,6 @@ const saveOptimumSettings = async () => {
             </Typography>
           ) : (
             <>
-              {/* Desktop / tablet – lentelė */}
               <Box sx={{ display: { xs: "none", md: "block" } }}>
                 <Table size="small">
                   <TableHead>
@@ -6749,7 +6195,6 @@ const saveOptimumSettings = async () => {
                 </Table>
               </Box>
 
-              {/* Mobile – kortelės, kad būtų patogiau naudoti pirštais */}
               <Stack
                 spacing={1.5}
                 sx={{ mt: 1, display: { xs: "flex", md: "none" } }}
@@ -6833,12 +6278,33 @@ const saveOptimumSettings = async () => {
             </>
           )}
         </Box>
-      </Paper>
+      </Paper> */}
       {/* ─── Cloud Integration ─── */}
       <Box mb={3}>
         <Typography variant="h4" sx={{ mt: 10, fontWeight: 600 }}>Google Drive / Dropbox integracija</Typography>
       </Box>
       <CloudIntegrationSettings />
+
+      <Dialog open={autoVideoOpen} onClose={() => setAutoVideoOpen(false)} maxWidth="md" fullWidth disableScrollLock>
+        <DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          Video instrukcija
+          <IconButton size="small" onClick={() => setAutoVideoOpen(false)}>
+            <CloseIcon fontSize="small" />
+          </IconButton>
+        </DialogTitle>
+        <DialogContent>
+          <Box sx={{ position: "relative", paddingTop: "56.25%", width: "100%" }}>
+            <Box
+              component="iframe"
+              src={autoVideoOpen ? "https://www.youtube.com/embed/MftJl0_4jOE?si=11ugrRDWgmDUWz49" : ""}
+              title="Video instrukcija"
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+              allowFullScreen
+              sx={{ position: "absolute", top: 0, left: 0, width: "100%", height: "100%", border: "none", borderRadius: 2 }}
+            />
+          </Box>
+        </DialogContent>
+      </Dialog>
     </Box>
   );
 }

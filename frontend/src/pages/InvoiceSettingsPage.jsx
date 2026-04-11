@@ -17,6 +17,7 @@ import AccountingProgramBlock from '../components/AccountingProgramBlock';
 import { useInvSubscription } from '../contexts/InvSubscriptionContext';
 import LockIcon from '@mui/icons-material/Lock';
 import InvoiceExtraFields from '../components/InvoiceExtraFields';
+import APIProviderKeys from "../components/APIProviderKeys";
 
 
 
@@ -222,6 +223,9 @@ const InvoiceSettingsPage = () => {
         <Box sx={secSx}>
           <Typography sx={{ ...titleSx, color: P.primary }}>Buhalterinė programa</Typography>
           <AccountingProgramBlock onProgramChange={setAccountingProgram} />
+          {["rivile_gama_api", "dineta", "optimum"].includes(accountingProgram) && (
+            <APIProviderKeys provider={accountingProgram} mode="israsymas" />
+          )}
           <InvoiceExtraFields program={accountingProgram} />
         </Box>
 

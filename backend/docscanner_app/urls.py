@@ -52,6 +52,9 @@ from .views import (
     extra_fields_list,
     extra_fields_detail,
     extra_fields_check_duplicate,
+    api_provider_keys_list,
+    api_provider_keys_detail,
+    api_provider_keys_verify,
 )
 from .views import (
     counterparty_list_create,
@@ -208,6 +211,10 @@ urlpatterns = [
     path('settings/rivile-gama-api/keys/', RivileGamaAPIKeyListCreateView.as_view()),
     path('settings/rivile-gama-api/keys/<int:pk>/', RivileGamaAPIKeyDetailView.as_view()),
     path('settings/rivile-gama-api/keys/<int:pk>/verify/', RivileGamaAPIKeyVerifyView.as_view()),
+
+    path("settings/api-keys/<str:provider>/", api_provider_keys_list),
+    path("settings/api-keys/<str:provider>/<int:pk>/", api_provider_keys_detail),
+    path("settings/api-keys/<str:provider>/<int:pk>/verify/", api_provider_keys_verify),
 
     path("scanned-documents/<int:doc_id>/inline/", InlineDocUpdateView.as_view()),
     path("scanned-documents/<int:doc_id>/lineitem/<int:line_id>/inline/", InlineLineUpdateView.as_view()),

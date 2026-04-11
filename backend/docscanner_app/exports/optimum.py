@@ -1058,7 +1058,10 @@ def save_export_result(
         }
 
     if update_fields:
-        ScannedDocument.objects.filter(pk=export_result.doc_id).update(**update_fields)
+        updated = ScannedDocument.objects.filter(pk=export_result.doc_id).update(**update_fields)
+        if not updated:
+            from docscanner_app.models import Invoice
+            Invoice.objects.filter(pk=export_result.doc_id).update(**update_fields)
 
     logger.info(
         "[OPTIMUM_API] Saved export_log=%s doc=%s status=%s articles=%d",

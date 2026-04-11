@@ -43,7 +43,7 @@ const ExportProgress = styled(LinearProgress)(({ theme }) => ({
   },
 }));
 
-export default function ExportStatusBar({ onExportComplete }) {
+export default function ExportStatusBar({ onExportComplete, source = "scanned" }) {
   const [sessions, setSessions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState(true);
@@ -76,11 +76,38 @@ export default function ExportStatusBar({ onExportComplete }) {
   const isCompleted = displaySession?.stage === "done" || showingCompleted;
   const isQueued = displaySession?.stage === "queued";
 
+  // Fake progress — плавно растёт когда processed=0 но идёт processing
+  const [fakePercent, setFakePercent] = useState(0);
+
+  useEffect(() => {
+    if (isCompleted || !displaySession || displaySession.stage === "queued") {
+      setFakePercent(0);
+      return;
+    }
+    if (processed > 0) {
+      setFakePercent(0);
+      return;
+    }
+    // processing но processed=0 — fake progress
+    setFakePercent(5);
+    const interval = setInterval(() => {
+      setFakePercent((prev) => {
+        if (prev >= 90) return prev;
+        // Замедляется по мере роста
+        const step = prev < 30 ? 3 : prev < 60 ? 2 : 1;
+        return Math.min(prev + step, 90);
+      });
+    }, 2000);
+    return () => clearInterval(interval);
+  }, [displaySession?.stage, processed, isCompleted]);
+
   const percent = useMemo(() => {
     if (isCompleted) return 100;
     if (!total) return 0;
-    return Math.max(0, Math.min(99, Math.round((processed / total) * 100)));
-  }, [isCompleted, total, processed]);
+    const real = Math.round((processed / total) * 100);
+    if (real > 0) return Math.max(0, Math.min(99, real));
+    return fakePercent || 0;
+  }, [isCompleted, total, processed, fakePercent]);
 
   // Цвет бара зависит от результата
   const barColor = useMemo(() => {
@@ -110,7 +137,11 @@ export default function ExportStatusBar({ onExportComplete }) {
         withCredentials: true,
       });
 
-      const allSessions = data.sessions || [];
+      const rawSessions = data.sessions || [];
+      const allSessions = rawSessions.filter((s) => {
+        if (source === "invoice") return s.has_invoices;
+        return !s.has_invoices;
+      });
 
       // Detect newly completed
       const newDone = allSessions.find(

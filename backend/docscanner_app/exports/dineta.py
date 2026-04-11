@@ -978,10 +978,16 @@ def save_dineta_export_result(
         APIExportArticleLog.objects.bulk_create(article_logs)
 
     # ── ScannedDocument status ──
-    ScannedDocument.objects.filter(pk=export_result.doc_id).update(
+    updated = ScannedDocument.objects.filter(pk=export_result.doc_id).update(
         dineta_api_status=export_result.overall_status,
         dineta_last_try_date=now,
     )
+    if not updated:
+        from docscanner_app.models import Invoice
+        Invoice.objects.filter(pk=export_result.doc_id).update(
+            dineta_api_status=export_result.overall_status,
+            dineta_last_try_date=now,
+        )
 
     logger.info(
         "[DINETA] Išsaugotas export_log=%s doc=%s status=%s articles=%d op_dineta_id=%s",

@@ -1,191 +1,43 @@
 import React, { useEffect, useState } from "react";
 import {
-  Box, Typography, FormControl, InputLabel, Select, MenuItem,
-  Button, Alert, TextField, Stack, Grid2, Chip, Tooltip,
-  IconButton,
+  Box, Typography, FormControl, InputLabel, Select, MenuItem, Alert,
 } from "@mui/material";
-import { alpha } from "@mui/material/styles";
-import HelpOutlineIcon from "@mui/icons-material/HelpOutline";
-import DeleteOutlineIcon from "@mui/icons-material/DeleteOutline";
 import { api } from "../api/endpoints";
 import { ACCOUNTING_PROGRAMS } from "../page_elements/AccountingPrograms";
 
 /**
  * Самодостаточный блок «Buhalterinė programa».
- * Загружает данные из /profile/, рендерит Select программы + API settings (Dineta/Optimum).
- * Extra fields и merge_vat НЕ рендерятся — для Išrašymas используется InvoiceExtraFields.
+ * Загружает данные из /profile/, рендерит только Select программы.
+ * API keys → APIProviderKeys, Extra fields → InvoiceExtraFields.
  */
 export default function AccountingProgramBlock({ onProgramChange }) {
   const [program, setProgram] = useState("");
   const [saving, setSaving] = useState(false);
   const [success, setSuccess] = useState(false);
 
-  // ── Dineta API ──
-  const [dinetaSettings, setDinetaSettings] = useState({ url: "", username: "", password: "" });
-  const [dinetaLoading, setDinetaLoading] = useState(false);
-  const [dinetaSaving, setDinetaSaving] = useState(false);
-  const [dinetaSuccess, setDinetaSuccess] = useState(false);
-  const [dinetaError, setDinetaError] = useState("");
-
-  // ── Optimum API ──
-  const [optimumSettings, setOptimumSettings] = useState({ key: "" });
-  const [optimumSaving, setOptimumSaving] = useState(false);
-  const [optimumSuccess, setOptimumSuccess] = useState(false);
-  const [optimumError, setOptimumError] = useState("");
-  const [optimumMeta, setOptimumMeta] = useState({
-    has_key: false, key_suffix: "", verified_at: null,
-    last_ok: null, last_error_at: null, last_error: "",
-  });
-  const [optimumTesting, setOptimumTesting] = useState(false);
-  const [optimumDeleting, setOptimumDeleting] = useState(false);
-  const [showOptimumKeyInput, setShowOptimumKeyInput] = useState(false);
-
-  // ═════════════════════════════════════════════════════
-  // Helper
-  // ═════════════════════════════════════════════════════
-  const extractMsg = (e, fallback) => {
-    const data = e?.response?.data;
-    let msg = data?.detail || data?.non_field_errors || data?.error || fallback;
-    if (Array.isArray(msg)) msg = msg.join(", ");
-    if (typeof msg === "object") {
-      try { msg = JSON.stringify(msg); } catch { msg = fallback; }
-    }
-    return String(msg || fallback);
-  };
-
-  // ═════════════════════════════════════════════════════
-  // Load profile
-  // ═════════════════════════════════════════════════════
   useEffect(() => {
     api.get("/profile/", { withCredentials: true }).then(({ data }) => {
-      setProgram(data.default_accounting_program || "");
+      const prog = data.default_accounting_program || "";
+      setProgram(prog);
+      if (onProgramChange) onProgramChange(prog);
     });
   }, []);
 
-  // ── Load Dineta API settings ──
-  useEffect(() => {
-    if (program !== "dineta") return;
-    setDinetaLoading(true);
-    setDinetaError("");
-    api.get("/settings/dineta/", { withCredentials: true })
-      .then(({ data }) => {
-        setDinetaSettings({
-          url: data?.url || "", username: data?.username || "", password: data?.password || "",
-        });
-      })
-      .catch(() => {})
-      .finally(() => setDinetaLoading(false));
-  }, [program]);
-
-  // ── Load Optimum meta ──
-  useEffect(() => {
-    if (program !== "optimum") return;
-    refreshOptimumMeta();
-  }, [program]);
-
-  const refreshOptimumMeta = async () => {
+  const handleProgramChange = async (e) => {
+    const v = e.target.value;
+    setProgram(v);
+    if (onProgramChange) onProgramChange(v);
+    setSaving(true);
     try {
-      const { data } = await api.get("/settings/optimum/", { withCredentials: true });
-      setOptimumMeta({
-        has_key: !!data?.has_key, key_suffix: data?.key_suffix ?? "",
-        verified_at: data?.verified_at ?? null, last_ok: data?.last_ok ?? null,
-        last_error_at: data?.last_error_at ?? null, last_error: data?.last_error ?? "",
-      });
+      await api.patch("/profile/", { default_accounting_program: v }, { withCredentials: true });
+      setSuccess(true);
+      setTimeout(() => setSuccess(false), 2000);
     } catch {}
+    finally { setSaving(false); }
   };
 
-  // ═════════════════════════════════════════════════════
-  // Save handlers
-  // ═════════════════════════════════════════════════════
-    const handleProgramChange = async (e) => {
-        const v = e.target.value;
-        setProgram(v);
-        if (onProgramChange) onProgramChange(v);
-        setSaving(true);
-        try {
-        await api.patch("/profile/", { default_accounting_program: v }, { withCredentials: true });
-        setSuccess(true);
-        setTimeout(() => setSuccess(false), 2000);
-        } catch {}
-        finally { setSaving(false); }
-    };
-
-  // ── Dineta API save ──
-  const saveDinetaSettings = async () => {
-    setDinetaSaving(true); setDinetaError(""); setDinetaSuccess(false);
-    const { url, username, password } = dinetaSettings;
-    if (!url.trim() || !username.trim() || !password) {
-      setDinetaError("Visi API laukai yra privalomi.");
-      setDinetaSaving(false); return;
-    }
-    try {
-      const { data } = await api.put("/settings/dineta/", { url, username, password }, { withCredentials: true });
-      setDinetaSettings(prev => ({
-        ...prev, url: data?.url || prev.url, username: data?.username || prev.username,
-        password: data?.password || "••••••••",
-      }));
-      if (data?.connection_status === "warning") {
-        setDinetaError(data.connection_message || "Prisijungimo patikrinimas nepavyko.");
-      }
-      setDinetaSuccess(true); setTimeout(() => setDinetaSuccess(false), 3000);
-    } catch (e) { setDinetaError(extractMsg(e, "Nepavyko išsaugoti Dineta nustatymų.")); }
-    finally { setDinetaSaving(false); }
-  };
-
-  // ── Optimum API save / test / delete ──
-  const saveOptimumSettings = async () => {
-    setOptimumSaving(true); setOptimumError(""); setOptimumSuccess(false);
-    const key = (optimumSettings.key || "").trim();
-    if (!key) { setOptimumError("API Key yra privalomas."); setOptimumSaving(false); return; }
-    try {
-      const { data } = await api.put("/settings/optimum/", { key }, { withCredentials: true });
-      setOptimumSettings({ key: "" });
-      setOptimumMeta({
-        has_key: !!data?.has_key, key_suffix: data?.key_suffix ?? "",
-        verified_at: data?.verified_at ?? null, last_ok: data?.last_ok ?? null,
-        last_error_at: data?.last_error_at ?? null, last_error: data?.last_error ?? "",
-      });
-      setShowOptimumKeyInput(false);
-      setOptimumSuccess(true); setTimeout(() => setOptimumSuccess(false), 2500);
-    } catch (e) {
-      setOptimumError(extractMsg(e, "Nepavyko patikrinti Optimum API Key."));
-      await refreshOptimumMeta();
-    } finally { setOptimumSaving(false); }
-  };
-
-  const testOptimumKey = async () => {
-    setOptimumTesting(true); setOptimumError(""); setOptimumSuccess(false);
-    try {
-      const { data } = await api.post("/settings/optimum/", {}, { withCredentials: true });
-      setOptimumMeta({
-        has_key: !!data?.has_key, key_suffix: data?.key_suffix ?? "",
-        verified_at: data?.verified_at ?? null, last_ok: data?.last_ok ?? null,
-        last_error_at: data?.last_error_at ?? null, last_error: data?.last_error ?? "",
-      });
-      setOptimumSuccess(true); setTimeout(() => setOptimumSuccess(false), 2500);
-    } catch (e) {
-      setOptimumError(extractMsg(e, "Nepavyko patikrinti Optimum API Key."));
-      await refreshOptimumMeta();
-    } finally { setOptimumTesting(false); }
-  };
-
-  const deleteOptimumKey = async () => {
-    if (!window.confirm("Ar tikrai norite ištrinti Optimum API raktą?")) return;
-    setOptimumDeleting(true); setOptimumError(""); setOptimumSuccess(false);
-    try {
-      await api.delete("/settings/optimum/", { withCredentials: true });
-      setOptimumMeta({ has_key: false, key_suffix: "", verified_at: null, last_ok: null, last_error_at: null, last_error: "" });
-      setShowOptimumKeyInput(false); setOptimumSettings({ key: "" });
-    } catch (e) { setOptimumError(extractMsg(e, "Nepavyko ištrinti rakto.")); }
-    finally { setOptimumDeleting(false); }
-  };
-
-  // ═════════════════════════════════════════════════════
-  // Render
-  // ═════════════════════════════════════════════════════
   return (
     <Box>
-      {/* Programa */}
       <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
         Pasirinkite savo buhalterinę programą sąskaitų duomenų eksportui.
       </Typography>
@@ -208,135 +60,9 @@ export default function AccountingProgramBlock({ onProgramChange }) {
       </FormControl>
 
       {success && <Alert severity="success" sx={{ mb: 2 }}>Išsaugota!</Alert>}
-
-      {/* Dineta API */}
-      {program === "dineta" && (
-        <Box sx={{ mb: 2 }}>
-          <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 2 }}>
-            <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
-              Dineta API sąsajos nustatymai
-            </Typography>
-            <Tooltip arrow enterTouchDelay={0} leaveTouchDelay={4000}
-              title="Čia suvedami duomenys, naudojami jungiantis prie Dineta API.">
-              <HelpOutlineIcon fontSize="small" sx={{ color: "text.secondary" }} />
-            </Tooltip>
-          </Box>
-          <Grid2 container spacing={2}>
-            <Grid2 size={12}>
-              <TextField label="Dineta nuoroda" value={dinetaSettings.url}
-                onChange={(e) => setDinetaSettings(prev => ({ ...prev, url: e.target.value }))}
-                fullWidth required disabled={dinetaLoading || dinetaSaving}
-                placeholder="https://lt4.dineta.eu/dokskenas/"
-                sx={{ backgroundColor: '#fff' }} />
-            </Grid2>
-            <Grid2 size={{ xs: 12, md: 6 }}>
-              <TextField label="API naudotojo vardas" value={dinetaSettings.username}
-                onChange={(e) => setDinetaSettings(prev => ({ ...prev, username: e.target.value }))}
-                fullWidth required disabled={dinetaLoading || dinetaSaving}
-                sx={{ backgroundColor: '#fff' }} />
-            </Grid2>
-            <Grid2 size={{ xs: 12, md: 6 }}>
-              <TextField label="API slaptažodis" type="password" value={dinetaSettings.password}
-                onChange={(e) => setDinetaSettings(prev => ({ ...prev, password: e.target.value }))}
-                onFocus={(e) => { if (e.target.value === "••••••••") setDinetaSettings(prev => ({ ...prev, password: "" })); }}
-                onBlur={(e) => { if (!e.target.value) setDinetaSettings(prev => ({ ...prev, password: "••••••••" })); }}
-                fullWidth required disabled={dinetaLoading || dinetaSaving}
-                sx={{ backgroundColor: '#fff' }} />
-            </Grid2>
-          </Grid2>
-          <Box sx={{ mt: 2 }}>
-            <Button variant="contained" onClick={saveDinetaSettings} disabled={dinetaSaving || dinetaLoading}>
-              Išsaugoti API nustatymus
-            </Button>
-          </Box>
-          {dinetaError && <Alert severity={dinetaSuccess ? "warning" : "error"} sx={{ mt: 2 }}>{dinetaError}</Alert>}
-          {dinetaSuccess && <Alert severity="success" sx={{ mt: 2 }}>Dineta nustatymai išsaugoti!</Alert>}
-        </Box>
-      )}
-
-      {/* Optimum API */}
-      {program === "optimum" && (
-        <Box sx={{ mb: 2 }}>
-          <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 2 }}>
-            <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>Optimum API sąsajos nustatymai</Typography>
-            <Tooltip arrow enterTouchDelay={0} leaveTouchDelay={4000}
-              title="Įveskite Optimum API Key, kurį rasite savo Optimum programoje.">
-              <HelpOutlineIcon fontSize="small" sx={{ color: "text.secondary" }} />
-            </Tooltip>
-          </Box>
-
-          {optimumMeta.has_key && !showOptimumKeyInput ? (
-            <Box>
-              <Box sx={{ display: "flex", alignItems: "center", gap: 2, mb: 2, flexWrap: "wrap" }}>
-                <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-                  <Typography variant="body2" sx={{ color: "text.secondary" }}>API raktas:</Typography>
-                  <Typography variant="body1" sx={{ fontFamily: "monospace", fontWeight: 600 }}>
-                    {"••••••••" + (optimumMeta.key_suffix || "****")}
-                  </Typography>
-                </Box>
-                <Chip size="small"
-                  label={optimumMeta.last_ok === true ? "Patikrintas ✓" : optimumMeta.last_ok === false ? "Klaida ✗" : "Nepatikrintas"}
-                  sx={{
-                    fontWeight: 600,
-                    backgroundColor: optimumMeta.last_ok === true ? alpha("#4caf50", 0.1) : optimumMeta.last_ok === false ? alpha("#f44336", 0.1) : alpha("#ff9800", 0.1),
-                    color: optimumMeta.last_ok === true ? "success.dark" : optimumMeta.last_ok === false ? "error.dark" : "warning.dark",
-                    border: "1px solid",
-                    borderColor: optimumMeta.last_ok === true ? "success.main" : optimumMeta.last_ok === false ? "error.main" : "warning.main",
-                  }}
-                />
-              </Box>
-              {optimumMeta.verified_at && (
-                <Typography variant="caption" sx={{ color: "text.secondary", display: "block", mb: 2 }}>
-                  Paskutinis patikrinimas: {new Date(optimumMeta.verified_at).toLocaleString("lt-LT")}
-                </Typography>
-              )}
-              {optimumMeta.last_ok === false && optimumMeta.last_error && (
-                <Alert severity="error" sx={{ mb: 2 }}>{optimumMeta.last_error}</Alert>
-              )}
-              <Stack direction="row" spacing={2} sx={{ flexWrap: "wrap" }}>
-                <Button variant="outlined" onClick={testOptimumKey} disabled={optimumTesting || optimumDeleting}>
-                  {optimumTesting ? "Tikrinama..." : "Patikrinti API"}
-                </Button>
-                <Button variant="outlined" onClick={() => { setShowOptimumKeyInput(true); setOptimumError(""); setOptimumSuccess(false); }}
-                  disabled={optimumTesting || optimumDeleting}>
-                  Pakeisti raktą
-                </Button>
-                <Button variant="outlined" color="error" onClick={deleteOptimumKey}
-                  disabled={optimumTesting || optimumDeleting} startIcon={<DeleteOutlineIcon />}>
-                  {optimumDeleting ? "Trinama..." : "Ištrinti"}
-                </Button>
-              </Stack>
-            </Box>
-          ) : (
-            <Box>
-              <Grid2 container spacing={2}>
-                <Grid2 size={{ xs: 12, md: 8 }}>
-                  <TextField label="API Key" value={optimumSettings.key}
-                    onChange={(e) => { setOptimumSettings(prev => ({ ...prev, key: e.target.value })); setOptimumSuccess(false); setOptimumError(""); }}
-                    fullWidth required disabled={optimumSaving} placeholder="Įveskite Optimum API raktą"
-                    sx={{ backgroundColor: '#fff' }} />
-                </Grid2>
-              </Grid2>
-              <Stack direction="row" spacing={2} sx={{ mt: 2 }}>
-                <Button variant="contained" onClick={saveOptimumSettings} disabled={optimumSaving}>
-                  {optimumSaving ? "Tikrinama..." : "Išsaugoti ir patikrinti"}
-                </Button>
-                {showOptimumKeyInput && optimumMeta.has_key && (
-                  <Button variant="outlined" onClick={() => { setShowOptimumKeyInput(false); setOptimumSettings({ key: "" }); setOptimumError(""); }}>
-                    Atšaukti
-                  </Button>
-                )}
-              </Stack>
-            </Box>
-          )}
-          {optimumError && <Alert severity="error" sx={{ mt: 2 }}>{optimumError}</Alert>}
-          {optimumSuccess && <Alert severity="success" sx={{ mt: 2 }}>Optimum API raktas patikrintas sėkmingai!</Alert>}
-        </Box>
-      )}
     </Box>
   );
 }
-
 
 
 // import React, { useEffect, useState } from "react";

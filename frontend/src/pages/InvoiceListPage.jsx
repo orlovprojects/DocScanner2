@@ -46,10 +46,13 @@ import {
   Pause as PauseIcon,
   PlayArrow as PlayArrowIcon,
   CalendarMonth as CalendarMonthIcon,
+  CheckCircle,
+  WarningAmber,
 } from '@mui/icons-material';
 import MailOutlineIcon from '@mui/icons-material/MailOutline';
 import MarkEmailReadIcon from '@mui/icons-material/MarkEmailRead';
 import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
+import CloseIcon from '@mui/icons-material/Close';
 import { Popover } from '@mui/material';
 import LoopIcon from '@mui/icons-material/Loop';
 import DrawIcon from '@mui/icons-material/Draw';
@@ -69,6 +72,9 @@ import { useInvSubscription } from '../contexts/InvSubscriptionContext';
 import LockIcon from '@mui/icons-material/Lock';
 import SettingsIcon from '@mui/icons-material/Settings';
 import { getInvSubscription } from '../api/endpoints';
+import ExportStatusBar from '../components/ExportStatusBar';
+import { ExportLogPopup } from '../page_elements/DocumentsTable';
+
 
 // ── Palette ──
 
@@ -98,6 +104,22 @@ const TYPE_CONFIG = {
   pvm_saskaita: { label: 'PVM SF' },
   saskaita:     { label: 'SF' },
   kreditine:    { label: 'Kreditinė SF' },
+};
+
+// ── API export helpers ──
+
+const API_PROGRAMS = new Set(["rivile_gama_api", "dineta", "optimum"]);
+
+const API_STATUS_FIELD = {
+  rivile_gama_api: "rivile_api_status",
+  dineta: "dineta_api_status",
+  optimum: "optimum_api_status",
+};
+
+const API_PROGRAM_LABEL = {
+  rivile_gama_api: "Rivile API",
+  dineta: "Dineta API",
+  optimum: "Optimum API",
 };
 
 const fmtAmount = (val, currency = 'EUR') => {
@@ -218,6 +240,8 @@ const InvoiceListPage = () => {
   const [actionLoading, setActionLoading] = useState(null);
   const [exportLoading, setExportLoading] = useState(false);
 
+  const [exportStarting, setExportStarting] = useState(false);
+
   // ── Recurring ──
   const [recurringInvoices, setRecurringInvoices] = useState([]);
   const [recurringTotal, setRecurringTotal] = useState(0);
@@ -235,6 +259,9 @@ const InvoiceListPage = () => {
   // ── Email status ──
   const [emailPopover, setEmailPopover] = useState({ anchorEl: null, invoiceId: null, emails: [], loading: false });
   const [emailTypeDialog, setEmailTypeDialog] = useState({ open: false, invoiceId: null, email: '' });
+
+  // ── API export status dialog ──
+  const [apiErrorDialog, setApiErrorDialog] = useState({ open: false, invoice: null });
 
   const { isFeatureLocked } = useInvSubscription();
   const recurringLocked = isFeatureLocked("recurring");
@@ -254,6 +281,7 @@ const InvoiceListPage = () => {
   const programKey = user?.default_accounting_program || '';
   const programLabel =
     ACCOUNTING_PROGRAMS.find((p) => p.value === programKey)?.label || programKey || '...';
+  const isApiProgram = API_PROGRAMS.has(programKey);
 
   // ── Resolved backend params ──
 
@@ -443,7 +471,6 @@ const InvoiceListPage = () => {
   }, [loadMoreInvoices, loadMoreRecurring, loadingMore, loading, activeCategory]);
 
   // ── Handlers ──
-  // ШАГ 1: Все сбросы состояния делаются синхронно в момент клика.
 
   const resetFiltersForCategory = (key) => {
     setSelectedRows([]);
@@ -504,6 +531,7 @@ const InvoiceListPage = () => {
   // ── Export ──
 
   const handleExport = async () => {
+    if (exportLoading) return;
     if (selectedExportCount === 0) {
       setSnack({ open: true, msg: 'Pasirinkite bent vieną sąskaitą eksportui', severity: 'warning' });
       return;
@@ -513,7 +541,6 @@ const InvoiceListPage = () => {
       return;
     }
 
-    const API_PROGRAMS = new Set(["optimum", "dineta", "rivile_gama_api"]);
     const isApiExport = API_PROGRAMS.has(programKey);
 
     setExportLoading(true);
@@ -525,15 +552,17 @@ const InvoiceListPage = () => {
       };
 
       if (isApiExport) {
-        // --- API export (Optimum, Dineta, Rivile GAMA API) ---
-        const res = await api.post('/documents/export_xml/', payload, {
-          withCredentials: true,
-        });
+        setExportStarting(true);
+        try {
+          await api.post('/documents/export_xml/', payload, {
+            withCredentials: true,
+          });
 
-        setSelectedRows([]);
-        setSnack({ open: true, msg: 'Eksportas pradėtas', severity: 'success' });
-        loadInvoices();
-        loadSummary();
+          setSelectedRows([]);
+          // setSnack({ open: true, msg: 'Eksportas pradėtas', severity: 'success' });
+        } finally {
+          setExportStarting(false);
+        }
 
       } else {
         // --- File export (все остальные программы) ---
@@ -748,7 +777,7 @@ const InvoiceListPage = () => {
   };
 
   // ══════════════════════════════════════════
-  // ШАГ 4: Category cards — useMemo
+  // Category cards — useMemo
   // ══════════════════════════════════════════
 
   const categoryCardsMemo = useMemo(() => {
@@ -900,8 +929,44 @@ const InvoiceListPage = () => {
   const showExportedFilter = ['israsytos', 'veluojancios', 'apmoketos'].includes(activeCategory);
 
   // ══════════════════════════════════════════
-  // ШАГ 2+3: Render-функции вместо inline-компонентов
+  // Render-функции
   // ══════════════════════════════════════════
+
+  // ── renderApiStatus ──
+
+  const renderApiStatus = (inv) => {
+    if (!isApiProgram) return null;
+    const field = API_STATUS_FIELD[programKey];
+    const status = inv[field];
+    if (!status) return <Typography variant="caption" color="text.disabled">—</Typography>;
+
+    if (status === "success") {
+      return (
+        <Tooltip title="Eksportas sėkmingas">
+          <CheckCircle sx={{ fontSize: 18, color: "success.main" }} />
+        </Tooltip>
+      );
+    }
+    if (status === "partial_success") {
+      return (
+        <Tooltip title="Dalinai eksportuota — paspauskite norėdami pamatyti detales">
+          <IconButton size="small" onClick={(e) => { e.stopPropagation(); setApiErrorDialog({ open: true, invoice: inv }); }}>
+            <WarningAmber sx={{ fontSize: 18, color: "warning.main" }} />
+          </IconButton>
+        </Tooltip>
+      );
+    }
+    if (status === "error") {
+      return (
+        <Tooltip title="Eksporto klaida — paspauskite norėdami pamatyti detales">
+          <IconButton size="small" onClick={(e) => { e.stopPropagation(); setApiErrorDialog({ open: true, invoice: inv }); }}>
+            <ErrorOutlineIcon sx={{ fontSize: 18, color: "error.main" }} />
+          </IconButton>
+        </Tooltip>
+      );
+    }
+    return <Typography variant="caption" color="text.disabled">—</Typography>;
+  };
 
   // ── renderRowActions ──
 
@@ -910,7 +975,6 @@ const InvoiceListPage = () => {
     if (isLoading) return <CircularProgress size={20} />;
 
     const cat = activeCategory;
-    const notReady = () => showSnack('Funkcija ruošiama', 'info');
     const a = [];
 
     if (cat === 'juodrasciai') {
@@ -1006,7 +1070,6 @@ const InvoiceListPage = () => {
                 );
                 return;
               }
-              // Успешная первая отправка
               const sd = data;
               if (sd.inv_status === 'free' && sd.emails_used != null) {
                 if (sd.emails_used >= sd.emails_max) {
@@ -1366,6 +1429,9 @@ const InvoiceListPage = () => {
             </Box>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
               {inv.exported && <Chip label="Eksp." size="small" color="secondary" variant="outlined" sx={{ fontSize: 10, height: 20 }} />}
+              {isApiProgram && inv[API_STATUS_FIELD[programKey]] && (
+                <Box sx={{ display: 'inline-flex', ml: 0.5 }}>{renderApiStatus(inv)}</Box>
+              )}
               {renderStatusChip(inv)}
             </Box>
           </Box>
@@ -1428,12 +1494,15 @@ const InvoiceListPage = () => {
     );
   };
 
+  // ── Table colSpan ──
+  const tableColSpan = isApiProgram ? 12 : 11;
+
   // ══════════════════════════════════════════
   // Render
   // ══════════════════════════════════════════
 
   return (
-    <Box sx={{ p: { xs: 2, md: 3 }, maxWidth: 1400, mx: 'auto', overflowX: 'hidden' }}>
+    <Box sx={{ p: { xs: 2, md: 3 }, maxWidth: isApiProgram ? 1500 : 1400, mx: 'auto', overflowX: 'hidden' }}>
       {/* Header */}
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2, flexWrap: 'wrap', gap: 1 }}>
         <Typography variant="h1" sx={{ color: palette.primary, fontWeight: 500, fontSize: 24 }}>
@@ -1477,6 +1546,12 @@ const InvoiceListPage = () => {
           </Button>
         </Box>
       </Box>
+
+      {/* ExportStatusBar for API exports */}
+      <ExportStatusBar
+        source="invoice"
+        onExportComplete={() => { loadInvoices(); loadSummary(); }}
+      />
 
       {categoryCardsMemo}
 
@@ -1748,6 +1823,11 @@ const InvoiceListPage = () => {
                 <TableCell>Mokėti iki</TableCell>
                 <TableCell align="center">Suma</TableCell>
                 <TableCell align="center">Eksp.</TableCell>
+                {isApiProgram && (
+                  <TableCell align="center" sx={{ width: 52 }}>
+                    <Typography variant="caption" fontWeight={700}>{API_PROGRAM_LABEL[programKey]}</Typography>
+                  </TableCell>
+                )}
                 <TableCell align="center" sx={{ width: 44 }}>
                   <MailOutlineIcon sx={{ fontSize: 16, color: 'text.secondary' }} />
                 </TableCell>
@@ -1790,13 +1870,18 @@ const InvoiceListPage = () => {
                       <Typography variant="caption" color="text.disabled">—</Typography>
                     )}
                   </TableCell>
+                  {isApiProgram && (
+                    <TableCell align="center" sx={{ width: 52, px: 0.5 }}>
+                      {renderApiStatus(inv)}
+                    </TableCell>
+                  )}
                   <TableCell align="center" sx={{ width: 44, px: 0.5 }}>
                     {renderEmailIcon(inv)}
                   </TableCell>
                   <TableCell align="left">{renderRowActions(inv)}</TableCell>
                 </TableRow>
               ))}
-              {renderLoadMoreSentinel(11, true)}
+              {renderLoadMoreSentinel(tableColSpan, true)}
             </TableBody>
           </Table>
         </TableContainer>
@@ -1902,6 +1987,14 @@ const InvoiceListPage = () => {
         onRefresh={() => { loadInvoices(); loadSummary(); }}
       />
 
+      {/* ── API Export Log Popup ── */}
+      <ExportLogPopup
+        open={apiErrorDialog.open}
+        onClose={() => setApiErrorDialog({ open: false, invoice: null })}
+        documentId={apiErrorDialog.invoice?.id}
+        program={programKey}
+      />
+
       {/* Confirm dialog */}
       <Dialog open={confirmDialog.open} onClose={closeConfirm} disableScrollLock>
         <DialogTitle>{confirmDialog.title}</DialogTitle>
@@ -1913,6 +2006,7 @@ const InvoiceListPage = () => {
           <Button variant="contained" onClick={executeConfirm}>Patvirtinti</Button>
         </DialogActions>
       </Dialog>
+
       {/* ── Email History Popover ── */}
       <Popover
         open={Boolean(emailPopover.anchorEl)}
@@ -2049,6 +2143,21 @@ const InvoiceListPage = () => {
           </Button>
         </DialogActions>
       </Dialog>
+      {/* Export starting popup */}
+      <Dialog
+        open={exportStarting}
+        disableScrollLock
+        PaperProps={{
+          sx: { borderRadius: 3, px: 2, py: 1.5, minWidth: 280 },
+        }}
+      >
+        <DialogContent sx={{ display: 'flex', alignItems: 'center', gap: 2, py: 2 }}>
+          <CircularProgress size={24} sx={{ color: '#7c4dff' }} />
+          <Typography variant="body2">
+            Ruošiamas eksportas...
+          </Typography>
+        </DialogContent>
+      </Dialog>
 
       <Snackbar open={snack.open} autoHideDuration={4000} onClose={() => setSnack((s) => ({ ...s, open: false }))} anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}>
         <Alert severity={snack.severity} variant="filled" onClose={() => setSnack((s) => ({ ...s, open: false }))}>
@@ -2060,7 +2169,6 @@ const InvoiceListPage = () => {
 };
 
 export default InvoiceListPage;
-
 
 
 

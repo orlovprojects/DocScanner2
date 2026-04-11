@@ -791,12 +791,20 @@ class ClientAutocomplete(models.Model):
     ibans = models.CharField("IBANs (per kablelį, jei keli)", max_length=512, blank=True, null=True)
     address = models.CharField(max_length=255, blank=True, null=True)
     country_iso = models.CharField(max_length=10, blank=True, null=True)
+    is_person = models.BooleanField("Fizinis asmuo", default=False)
 
     class Meta:
         verbose_name = "Klientas autocomplete įrašas"
         verbose_name_plural = "Klientai autocomplete įrašai"
         indexes = [
             models.Index(fields=["user", "imones_kodas"]),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["user", "imones_kodas"],
+                condition=~models.Q(imones_kodas__isnull=True) & ~models.Q(imones_kodas=""),
+                name="unique_client_code_per_user",
+            ),
         ]
 
     def __str__(self):
@@ -1399,10 +1407,10 @@ class APIExportLog(models.Model):
         on_delete=models.CASCADE,
         related_name='api_export_logs'
     )
-    document = models.ForeignKey(
-        'ScannedDocument',
-        on_delete=models.CASCADE,
-        related_name='api_export_logs'
+    document_id = models.IntegerField(
+        "Dokumento ID",
+        db_index=True,
+        help_text="ScannedDocument arba Invoice ID",
     )
     program = models.CharField(max_length=50, choices=ExportProgram.choices)
     status = models.CharField(max_length=20, choices=ExportStatus.choices)
@@ -1430,7 +1438,7 @@ class APIExportLog(models.Model):
     class Meta:
         ordering = ['-created_at']
         indexes = [
-            models.Index(fields=['document', 'program', '-created_at']),
+            models.Index(fields=['document_id', 'program', '-created_at'], name="idx_explog_doc_prog"),
             models.Index(fields=['user', 'program', '-created_at']),
         ]
 
@@ -1482,6 +1490,12 @@ class ExportSession(models.Model):
     documents = models.ManyToManyField(
         'ScannedDocument',
         related_name='export_sessions'
+    )
+
+    invoice_documents = models.ManyToManyField(
+        "Invoice",
+        blank=True,
+        related_name="inv_export_sessions",
     )
 
     # Счётчики
@@ -3494,7 +3508,7 @@ class RivileAPIRefLog(models.Model):
       - Будущей оптимизации (пропуск уже отправленных записей)
     """
     api_key = models.ForeignKey(
-        RivileGamaAPIKey,
+        "APIProviderKey",
         on_delete=models.CASCADE,
         related_name="ref_logs",
     )
@@ -3553,3 +3567,109 @@ class RivileAPIRefLog(models.Model):
  
     def __str__(self):
         return f"{self.method} {self.entity_code} → {self.status}"
+
+
+
+import json
+from .services.encryption import encrypt_value, decrypt_value
+
+
+class APIProviderKey(models.Model):
+    """
+    Универсальный API ключ для любого провайдера (Rivile GAMA API, Dineta, Optimum).
+    Один ключ = одна фирма (или __all__ для всех, или __israsymas__ для Išrašymas).
+    """
+    PROVIDER_CHOICES = [
+        ("rivile_gama_api", "Rivile GAMA API"),
+        ("dineta", "Dineta"),
+        ("optimum", "Optimum"),
+    ]
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="api_provider_keys",
+    )
+    provider = models.CharField(
+        "Teikėjas",
+        max_length=30,
+        choices=PROVIDER_CHOICES,
+    )
+
+    label = models.CharField(
+        "Pavadinimas",
+        max_length=150,
+        blank=True,
+    )
+    company_code = models.CharField(
+        "Įmonės kodas",
+        max_length=50,
+        help_text="Įmonės kodas, '__all__' visoms, '__israsymas__' išrašymui",
+    )
+
+    # Зашифрованные credentials (JSON)
+    # rivile_gama_api: {"api_key": "..."}
+    # dineta: {"url": "...", "username": "...", "password": "..."}
+    # optimum: {"api_key": "..."}
+    credentials_encrypted = models.TextField(
+        "Prisijungimo duomenys (šifruoti)",
+    )
+    key_suffix = models.CharField(
+        "Rakto pabaiga",
+        max_length=8,
+        blank=True,
+        help_text="Paskutiniai 4 simboliai rodymui UI",
+    )
+
+    is_active = models.BooleanField("Aktyvus", default=True)
+    use_for_all = models.BooleanField(
+        "Naudoti visoms įmonėms",
+        default=False,
+        help_text="Jei True, šis raktas naudojamas kai nėra specifinio rakto įmonei",
+    )
+    verified_at = models.DateTimeField("Patikrinimo laikas", null=True, blank=True)
+    last_ok = models.BooleanField("Paskutinis patikrinimas OK", null=True, blank=True)
+    last_error = models.TextField("Paskutinė klaida", blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "API provider key"
+        verbose_name_plural = "API provider keys"
+        unique_together = ("user", "provider", "company_code")
+        ordering = ["provider", "created_at"]
+
+    def __str__(self):
+        return f"{self.get_provider_display()} | {self.label or self.company_code} (****{self.key_suffix})"
+
+    # ─── Credentials ───
+
+    def set_credentials(self, creds: dict):
+        """Шифрует и сохраняет credentials dict."""
+        raw = json.dumps(creds, ensure_ascii=False)
+        self.credentials_encrypted = encrypt_value(raw)
+        # key_suffix из основного ключа
+        main_key = creds.get("api_key") or creds.get("password") or ""
+        self.key_suffix = main_key[-4:] if len(main_key) >= 4 else main_key
+
+    def get_credentials(self) -> dict:
+        """Расшифровывает и возвращает credentials dict."""
+        raw = decrypt_value(self.credentials_encrypted)
+        return json.loads(raw)
+
+    # ─── Convenience для обратной совместимости с Rivile GAMA API ───
+
+    def get_api_key(self) -> str:
+        """Для rivile_gama_api и optimum."""
+        return self.get_credentials().get("api_key", "")
+
+    def set_api_key(self, raw_key: str):
+        """Для rivile_gama_api и optimum."""
+        self.set_credentials({"api_key": raw_key})
+
+    def mark_verified(self, success: bool, error: str = ""):
+        self.verified_at = timezone.now()
+        self.last_ok = success
+        self.last_error = error if not success else ""
+        self.save(update_fields=["verified_at", "last_ok", "last_error", "updated_at"])

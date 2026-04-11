@@ -357,6 +357,7 @@ class AutocompleteClientSerializer(serializers.ModelSerializer):
             "ibans",
             "address",
             "country_iso",
+            "is_person",
         ]
 
 
@@ -1956,7 +1957,10 @@ class InvoiceListSerializer(serializers.ModelSerializer):
             "line_items_count",
             "source_invoice",
             "exported",         
-            "exported_at",      
+            "exported_at",
+            "rivile_api_status",
+            "dineta_api_status",
+            "optimum_api_status",      
             "is_overdue",
             "can_create_pvm_sf",       
             "created_at",

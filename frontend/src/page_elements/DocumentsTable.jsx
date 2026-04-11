@@ -339,6 +339,7 @@ function ExportLogPopup({ open, onClose, documentId, program }) {
   );
 }
 
+export { ExportLogPopup };
 
 export default function DocumentsTable({
   filtered,

@@ -47,8 +47,8 @@ logger = logging.getLogger("docscanner_app")
 # ═══════════════════════════════════════════════════════════
 # Константы
 # ═══════════════════════════════════════════════════════════
-# RIVILE_API_URL = "https://api.manorivile.lt/client/v2"
-RIVILE_API_URL = "http://localhost:8879/client/v2" #fake server for testing
+RIVILE_API_URL = "https://api.manorivile.lt/client/v2"
+# RIVILE_API_URL = "http://localhost:8879/client/v2" #fake server for testing
 REQUEST_TIMEOUT = 45  # секунды
 
 # Коды ошибок, которые означают "запись уже существует" = не ошибка
@@ -1196,7 +1196,10 @@ def save_export_results(session: RivileExportSession, user, api_key_obj,
             update_fields["rivile_api_kodas_po"] = inv_rivile_id
 
         try:
-            ScannedDocument.objects.filter(pk=doc_result.doc_id).update(**update_fields)
+            updated = ScannedDocument.objects.filter(pk=doc_result.doc_id).update(**update_fields)
+            if not updated:
+                from ..models import Invoice
+                Invoice.objects.filter(pk=doc_result.doc_id).update(**update_fields)
         except Exception as e:
             logger.exception(
                 "[RIVILE_API] Failed to update ScannedDocument %s: %s",

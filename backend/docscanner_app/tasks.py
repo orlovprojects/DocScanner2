@@ -54,6 +54,9 @@ from .utils.file_converter import normalize_any, ArchiveLimitError, MAX_SINGLE_F
 
 from .validators.company_matcher import update_seller_buyer_info
 from .validators.verify_lt_company_match import update_seller_buyer_info_from_companies
+from .services.sync_lt_companies import sync_companies_from_vmi, sync_addresses_from_jar
+from .celery_signals import _send_telegram
+from .models import ExportSession
 
 
 
@@ -2729,15 +2732,13 @@ def process_uploaded_file_task(self, user_id, doc_id, scan_type):
 
 
 #FUNKICII dlia exporta cerez API
-
 @shared_task(bind=True, max_retries=0)
-def export_to_optimum_task(self, session_id: int):
+def export_to_optimum_task(self, session_id: int, api_key_id: int):
     """
     Экспортирует все документы из ExportSession в Optimum API.
     """
-    from docscanner_app.models import ExportSession, ScannedDocument
+    from docscanner_app.models import ExportSession, ScannedDocument, APIProviderKey
     from docscanner_app.exports.optimum import export_document_to_optimum, save_export_result
-    from docscanner_app.utils.password_encryption import decrypt_password
 
     try:
         session = ExportSession.objects.get(pk=session_id)
@@ -2745,26 +2746,35 @@ def export_to_optimum_task(self, session_id: int):
         logger.error("[OPTIMUM_TASK] ExportSession %s not found", session_id)
         return
 
-    # Стартуем
     session.stage = ExportSession.Stage.PROCESSING
     session.started_at = timezone.now()
     session.save(update_fields=["stage", "started_at"])
 
-    # Получаем API ключ
-    user = session.user
-    opt_settings = getattr(user, "optimum_settings", {}) or {}
-    enc_key = opt_settings.get("key") or ""
-    key = decrypt_password(enc_key) if enc_key else ""
-
-    if not key:
-        logger.error("[OPTIMUM_TASK] session=%s Optimum API key missing", session_id)
+    # API ключ из универсальной модели
+    try:
+        api_key_obj = APIProviderKey.objects.get(pk=api_key_id)
+    except APIProviderKey.DoesNotExist:
+        logger.error("[OPTIMUM_TASK] session=%s API key %s not found", session_id, api_key_id)
         session.stage = ExportSession.Stage.DONE
         session.finished_at = timezone.now()
         session.save(update_fields=["stage", "finished_at"])
         return
 
-    # Получаем документы
-    documents = list(session.documents.all())
+    creds = api_key_obj.get_credentials()
+    key = creds.get("api_key", "")
+
+    if not key:
+        logger.error("[OPTIMUM_TASK] session=%s Optimum API key empty", session_id)
+        session.stage = ExportSession.Stage.DONE
+        session.finished_at = timezone.now()
+        session.save(update_fields=["stage", "finished_at"])
+        return
+
+    user = session.user
+    if session.invoice_documents.exists():
+        documents = list(session.invoice_documents.all().prefetch_related("line_items"))
+    else:
+        documents = list(session.documents.all())
     session.total_documents = len(documents)
     session.save(update_fields=["total_documents"])
 
@@ -2799,7 +2809,10 @@ def export_to_optimum_task(self, session_id: int):
                 error_count += 1
 
             if result.overall_status in ("success", "partial_success"):
-                ScannedDocument.objects.filter(pk=doc_id).update(status="exported")
+                updated = ScannedDocument.objects.filter(pk=doc_id).update(status="exported")
+                if not updated:
+                    from docscanner_app.models import Invoice
+                    Invoice.objects.filter(pk=doc_id).update(exported=True, exported_at=timezone.now())
 
         except Exception as e:
             logger.exception(
@@ -2808,12 +2821,17 @@ def export_to_optimum_task(self, session_id: int):
             )
             error_count += 1
 
-            ScannedDocument.objects.filter(pk=doc_id).update(
+            updated = ScannedDocument.objects.filter(pk=doc_id).update(
                 optimum_api_status="error",
                 optimum_last_try_date=timezone.now(),
             )
+            if not updated:
+                from docscanner_app.models import Invoice
+                Invoice.objects.filter(pk=doc_id).update(
+                    optimum_api_status="error",
+                    optimum_last_try_date=timezone.now(),
+                )
 
-        # Обновляем счётчики после каждого документа (для progress bar)
         session.processed_documents += 1
         session.success_count = success_count
         session.partial_count = partial_count
@@ -2825,7 +2843,6 @@ def export_to_optimum_task(self, session_id: int):
             "error_count",
         ])
 
-    # Финиш
     total_time = time.time() - start_time
     session.stage = ExportSession.Stage.DONE
     session.finished_at = timezone.now()
@@ -2839,18 +2856,12 @@ def export_to_optimum_task(self, session_id: int):
     )
 
 
-
-
 @shared_task(bind=True, max_retries=0)
-def export_to_dineta_task(self, session_id: int):
+def export_to_dineta_task(self, session_id: int, api_key_id: int):
     """
     Экспортирует все документы из ExportSession в Dineta API.
-    Поток на каждый документ:
-      1. Partner  → v1/partner/
-      2. Stock    → v1/stock/  (chunks по 50)
-      3. setOperation → v1/setOperation/
     """
-    from docscanner_app.models import ExportSession, ScannedDocument
+    from docscanner_app.models import ExportSession, ScannedDocument, APIProviderKey
     from docscanner_app.exports.dineta import (
         export_document_to_dineta,
         save_dineta_export_result,
@@ -2859,7 +2870,6 @@ def export_to_dineta_task(self, session_id: int):
         build_auth_header,
         DinetaError,
     )
-    from docscanner_app.utils.password_encryption import decrypt_password
 
     try:
         session = ExportSession.objects.get(pk=session_id)
@@ -2867,48 +2877,44 @@ def export_to_dineta_task(self, session_id: int):
         logger.error("[DINETA_TASK] ExportSession %s not found", session_id)
         return
 
-    # Стартуем
     session.stage = ExportSession.Stage.PROCESSING
     session.started_at = timezone.now()
     session.save(update_fields=["stage", "started_at"])
 
-    # Получаем настройки Dineta
-    user = session.user
-    dineta_settings = getattr(user, "dineta_settings", {}) or {}
+    # API ключ из универсальной модели
+    try:
+        api_key_obj = APIProviderKey.objects.get(pk=api_key_id)
+    except APIProviderKey.DoesNotExist:
+        logger.error("[DINETA_TASK] session=%s API key %s not found", session_id, api_key_id)
+        session.stage = ExportSession.Stage.DONE
+        session.finished_at = timezone.now()
+        session.save(update_fields=["stage", "finished_at"])
+        return
 
-    server = dineta_settings.get("server", "")
-    client = dineta_settings.get("client", "")
-    username = dineta_settings.get("username", "")
-    enc_password = dineta_settings.get("password", "")
+    creds = api_key_obj.get_credentials()
+    url = creds.get("url", "")
+    username = creds.get("username", "")
+    password = creds.get("password", "")
 
-    if not all([server, client, username, enc_password]):
+    if not all([url, username, password]):
         logger.error(
-            "[DINETA_TASK] session=%s Dineta nustatymai neužpildyti "
-            "(server=%s, client=%s, username=%s, password=%s)",
-            session_id, bool(server), bool(client),
-            bool(username), bool(enc_password),
+            "[DINETA_TASK] session=%s Dineta credentials incomplete (url=%s, user=%s, pass=%s)",
+            session_id, bool(url), bool(username), bool(password),
         )
         session.stage = ExportSession.Stage.DONE
         session.finished_at = timezone.now()
         session.save(update_fields=["stage", "finished_at"])
         return
 
-    password = decrypt_password(enc_password) if enc_password else ""
-    if not password:
-        logger.error(
-            "[DINETA_TASK] session=%s Nepavyko iššifruoti slaptažodžio",
-            session_id,
-        )
-        session.stage = ExportSession.Stage.DONE
-        session.finished_at = timezone.now()
-        session.save(update_fields=["stage", "finished_at"])
-        return
-
+    server, client = parse_dineta_url(url)
     base_url = build_api_base_url(server, client)
     headers = build_auth_header(username, password)
 
-    # Получаем документы
-    documents = list(session.documents.all())
+    user = session.user
+    if session.invoice_documents.exists():
+        documents = list(session.invoice_documents.all().prefetch_related("line_items"))
+    else:
+        documents = list(session.documents.all())
     session.total_documents = len(documents)
     session.save(update_fields=["total_documents"])
 
@@ -2917,8 +2923,6 @@ def export_to_dineta_task(self, session_id: int):
     success_count = 0
     partial_count = 0
     error_count = 0
-
-    # Множество использованных operation ID (для дедупликации blankNo)
     used_ids: set = set()
 
     for doc in documents:
@@ -2948,9 +2952,10 @@ def export_to_dineta_task(self, session_id: int):
                 error_count += 1
 
             if result.overall_status in ("success", "partial_success"):
-                ScannedDocument.objects.filter(pk=doc_id).update(
-                    status="exported",
-                )
+                updated = ScannedDocument.objects.filter(pk=doc_id).update(status="exported")
+                if not updated:
+                    from docscanner_app.models import Invoice
+                    Invoice.objects.filter(pk=doc_id).update(exported=True, exported_at=timezone.now())
 
         except Exception as e:
             logger.exception(
@@ -2959,12 +2964,17 @@ def export_to_dineta_task(self, session_id: int):
             )
             error_count += 1
 
-            ScannedDocument.objects.filter(pk=doc_id).update(
+            updated = ScannedDocument.objects.filter(pk=doc_id).update(
                 dineta_api_status="error",
                 dineta_last_try_date=timezone.now(),
             )
+            if not updated:
+                from docscanner_app.models import Invoice
+                Invoice.objects.filter(pk=doc_id).update(
+                    dineta_api_status="error",
+                    dineta_last_try_date=timezone.now(),
+                )
 
-        # Обновляем счётчики после каждого документа (для progress bar)
         session.processed_documents += 1
         session.success_count = success_count
         session.partial_count = partial_count
@@ -2976,7 +2986,6 @@ def export_to_dineta_task(self, session_id: int):
             "error_count",
         ])
 
-    # Финиш
     total_time = time.time() - start_time
     session.stage = ExportSession.Stage.DONE
     session.finished_at = timezone.now()
@@ -2994,9 +3003,8 @@ def export_to_dineta_task(self, session_id: int):
 def export_to_rivile_gama_api_task(self, session_id: int, api_key_id: int, own_company_code: str):
     """
     Экспортирует документы из ExportSession в Rivile GAMA через REST API.
-    Workflow: N08 (контрагенты) → N17 (товары) → N25 (коды) → I06 (документы).
     """
-    from docscanner_app.models import ExportSession, ScannedDocument, RivileGamaAPIKey
+    from docscanner_app.models import ExportSession, ScannedDocument, APIProviderKey
     from docscanner_app.exports.rivile_gama_api import (
         export_documents_to_rivile_api,
         save_export_results,
@@ -3008,15 +3016,14 @@ def export_to_rivile_gama_api_task(self, session_id: int, api_key_id: int, own_c
         logger.error("[RIVILE_API_TASK] ExportSession %s not found", session_id)
         return
 
-    # --- Стартуем ---
     session.stage = ExportSession.Stage.PROCESSING
     session.started_at = timezone.now()
     session.save(update_fields=["stage", "started_at"])
 
-    # --- API ключ ---
+    # API ключ из универсальной модели
     try:
-        api_key_obj = RivileGamaAPIKey.objects.get(pk=api_key_id)
-    except RivileGamaAPIKey.DoesNotExist:
+        api_key_obj = APIProviderKey.objects.get(pk=api_key_id)
+    except APIProviderKey.DoesNotExist:
         logger.error("[RIVILE_API_TASK] session=%s API key %s not found", session_id, api_key_id)
         session.stage = ExportSession.Stage.DONE
         session.finished_at = timezone.now()
@@ -3025,10 +3032,14 @@ def export_to_rivile_gama_api_task(self, session_id: int, api_key_id: int, own_c
 
     user = session.user
 
-    # --- Документы ---
-    documents = list(
-        session.documents.all().prefetch_related("line_items")
-    )
+    if session.invoice_documents.exists():
+        documents = list(
+            session.invoice_documents.all().prefetch_related("line_items")
+        )
+    else:
+        documents = list(
+            session.documents.all().prefetch_related("line_items")
+        )
     session.total_documents = len(documents)
     session.save(update_fields=["total_documents"])
 
@@ -3041,7 +3052,6 @@ def export_to_rivile_gama_api_task(self, session_id: int, api_key_id: int, own_c
 
     start_time = time.time()
 
-    # --- Экспорт пачки ---
     try:
         rivile_session = export_documents_to_rivile_api(
             documents=documents,
@@ -3060,13 +3070,11 @@ def export_to_rivile_gama_api_task(self, session_id: int, api_key_id: int, own_c
         ])
         return
 
-    # --- Сохраняем логи (APIExportLog, APIExportArticleLog, rivile_api_status) ---
     try:
         save_export_results(rivile_session, user, api_key_obj, export_session=session)
     except Exception as e:
         logger.exception("[RIVILE_API_TASK] session=%s save_export_results failed: %s", session_id, e)
 
-    # --- Считаем результаты и помечаем exported ---
     success_count = 0
     partial_count = 0
     error_count = 0
@@ -3074,14 +3082,24 @@ def export_to_rivile_gama_api_task(self, session_id: int, api_key_id: int, own_c
     for doc_result in rivile_session.i06_results:
         if doc_result.overall_status == "success":
             success_count += 1
-            ScannedDocument.objects.filter(pk=doc_result.doc_id).update(status="exported")
+            updated = ScannedDocument.objects.filter(pk=doc_result.doc_id).update(status="exported")
+            if not updated:
+                from docscanner_app.models import Invoice
+                Invoice.objects.filter(pk=doc_result.doc_id).update(exported=True, exported_at=timezone.now())
         elif doc_result.overall_status == "partial_success":
             partial_count += 1
-            ScannedDocument.objects.filter(pk=doc_result.doc_id).update(status="exported")
+            updated = ScannedDocument.objects.filter(pk=doc_result.doc_id).update(status="exported")
+            if not updated:
+                from docscanner_app.models import Invoice
+                Invoice.objects.filter(pk=doc_result.doc_id).update(exported=True, exported_at=timezone.now())
         else:
             error_count += 1
 
-    # --- Финализация сессии ---
+    # Если обработано меньше документов чем отправлено — остаток = ошибки
+    processed_count = success_count + partial_count + error_count
+    if processed_count < len(documents):
+        error_count += len(documents) - processed_count
+
     total_time = time.time() - start_time
 
     session.stage = ExportSession.Stage.DONE
@@ -3103,7 +3121,6 @@ def export_to_rivile_gama_api_task(self, session_id: int, api_key_id: int, own_c
         success_count, partial_count, error_count,
         rivile_session.infra_error or "",
     )
-
 
 
 
@@ -3876,6 +3893,26 @@ def monitor_stuck_sessions():
                     f"📋 Queued session <code>{str(sq.id)[:8]}</code> stuck\n"
                     f"   kick failed: {str(e)[:200]}"
                 )
+
+    # ─── 6. ExportSession stuck processing > 30 мин ───
+    stuck_exports = ExportSession.objects.filter(
+        stage__in=["processing", "queued"],
+        created_at__lt=now - timedelta(minutes=30),
+    )
+    for se in stuck_exports:
+        try:
+            se.stage = ExportSession.Stage.DONE
+            se.finished_at = now
+            se.save(update_fields=["stage", "finished_at"])
+            fixes.append(
+                f"📦 ExportSession #{se.pk} ({se.program}) → done\n"
+                f"   stuck >30min, user_id={se.user_id}"
+            )
+        except Exception as e:
+            alerts.append(
+                f"📦 ExportSession #{se.pk} stuck\n"
+                f"   fix failed: {str(e)[:200]}"
+            )
 
     # ─── Telegram ───
     from .celery_signals import _send_telegram

@@ -9,6 +9,8 @@ import EditIcon from "@mui/icons-material/Edit";
 import DeleteOutlineIcon from "@mui/icons-material/DeleteOutline";
 import HelpOutlineIcon from "@mui/icons-material/HelpOutline";
 import WarningAmberIcon from "@mui/icons-material/WarningAmber";
+import PlayCircleIcon from "@mui/icons-material/PlayCircle";
+import CloseIcon from "@mui/icons-material/Close";
 import { api } from "../api/endpoints";
 
 
@@ -603,7 +605,7 @@ function ProfileCard({ profile, programKey, onEdit, onDelete }) {
 // ════════════════════════════════════════════════════════════════
 // ГЛАВНЫЙ КОМПОНЕНТ
 // ════════════════════════════════════════════════════════════════
-export default function ExtraFieldsManager({ program }) {
+export default function ExtraFieldsManager({ program, videoUrl }) {
   const programKey = PROGRAM_TO_KEY[program] || null;
   const config = programKey ? PROGRAM_FIELDS_CONFIG[programKey] : null;
 
@@ -627,6 +629,8 @@ export default function ExtraFieldsManager({ program }) {
   const [createSaving, setCreateSaving] = useState(false);
   const [createError, setCreateError] = useState("");
   const [overwriteWarning, setOverwriteWarning] = useState(null);
+
+  const [videoOpen, setVideoOpen] = useState(false);
 
   const INITIAL_LIMIT = 5;
   const MORE_LIMIT = 20;
@@ -798,6 +802,21 @@ export default function ExtraFieldsManager({ program }) {
         </Tooltip>
         {total > 0 && (
           <Chip label={total} size="small" sx={{ fontWeight: 600 }} />
+        )}
+        {videoUrl && (
+          <Typography
+            component="span"
+            variant="caption"
+            onClick={() => setVideoOpen(true)}
+            sx={{
+              display: "flex", alignItems: "center", gap: 0.5,
+              color: "text.secondary", textDecoration: "none", cursor: "pointer",
+              fontWeight: 600, "&:hover": { textDecoration: "underline" },
+            }}
+          >
+            <PlayCircleIcon sx={{ fontSize: 20, color: "error.main" }} />
+            Video instrukcija
+          </Typography>
         )}
       </Box>
 
@@ -1006,6 +1025,31 @@ export default function ExtraFieldsManager({ program }) {
         editData={editData}
         onSaved={handleSaved}
       />
+
+      {videoUrl && (
+        <Dialog open={videoOpen} onClose={() => setVideoOpen(false)} maxWidth="md" fullWidth disableScrollLock>
+          <DialogTitle sx={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            Video instrukcija
+            <IconButton onClick={() => setVideoOpen(false)} size="small">
+              <CloseIcon />
+            </IconButton>
+          </DialogTitle>
+          <DialogContent sx={{ p: 0 }}>
+            <Box sx={{ position: "relative", paddingTop: "56.25%", width: "100%" }}>
+              <iframe
+                src={videoUrl.replace("watch?v=", "embed/")}
+                title="Video instrukcija"
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                allowFullScreen
+                style={{
+                  position: "absolute", top: 0, left: 0,
+                  width: "100%", height: "100%", border: "none",
+                }}
+              />
+            </Box>
+          </DialogContent>
+        </Dialog>
+      )}
     </Paper>
   );
 }

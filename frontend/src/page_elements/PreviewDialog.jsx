@@ -668,23 +668,16 @@ export default function PreviewDialog({
   const handleClientSelect = (type) => async (valueObj) => {
     if (!valueObj || !selected?.id) return;
 
-    const data = type === "buyer"
-      ? {
-          buyer_name: valueObj.pavadinimas,
-          buyer_id: valueObj.imones_kodas,
-          buyer_vat_code: valueObj.pvm_kodas,
-          buyer_iban: valueObj.ibans,
-          buyer_address: valueObj.address,
-          buyer_country_iso: valueObj.country_iso,
-        }
-      : {
-          seller_name: valueObj.pavadinimas,
-          seller_id: valueObj.imones_kodas,
-          seller_vat_code: valueObj.pvm_kodas,
-          seller_iban: valueObj.ibans,
-          seller_address: valueObj.address,
-          seller_country_iso: valueObj.country_iso,
-        };
+    const prefix = type === "buyer" ? "buyer" : "seller";
+    const data = {
+      [`${prefix}_name`]: valueObj.pavadinimas,
+      [`${prefix}_id`]: valueObj.imones_kodas,
+      [`${prefix}_vat_code`]: valueObj.pvm_kodas,
+      [`${prefix}_iban`]: valueObj.ibans,
+      [`${prefix}_address`]: valueObj.address,
+      [`${prefix}_country_iso`]: valueObj.country_iso,
+      [`${prefix}_is_person`]: valueObj.is_person ?? false,
+    };
 
     const res = await api.patch(
       `/scanned-documents/${selected.id}/extra-fields/`,
@@ -717,25 +710,17 @@ export default function PreviewDialog({
   const handleClientClear = (type) => async () => {
     if (!selected?.id) return;
 
-    const data = type === "buyer"
-      ? {
-          buyer_name: "",
-          buyer_id: "",
-          buyer_vat_code: "",
-          buyer_iban: "",
-          buyer_address: "",
-          buyer_country_iso: "",
-          apply_defaults: false,
-        }
-      : {
-          seller_name: "",
-          seller_id: "",
-          seller_vat_code: "",
-          seller_iban: "",
-          seller_address: "",
-          seller_country_iso: "",
-          apply_defaults: false,
-        };
+    const prefix = type === "buyer" ? "buyer" : "seller";
+    const data = {
+      [`${prefix}_name`]: "",
+      [`${prefix}_id`]: "",
+      [`${prefix}_vat_code`]: "",
+      [`${prefix}_iban`]: "",
+      [`${prefix}_address`]: "",
+      [`${prefix}_country_iso`]: "",
+      [`${prefix}_is_person`]: false,
+      apply_defaults: false,
+    };
 
     const res = await api.patch(
       `/scanned-documents/${selected.id}/extra-fields/`,

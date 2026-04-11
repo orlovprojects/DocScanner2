@@ -51,7 +51,7 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, **options):
-        from docscanner_app.models import CustomUser, RivileGamaAPIKey
+        from docscanner_app.models import CustomUser, APIProviderKey
 
         # --- Находим юзера ---
         user = None
@@ -93,8 +93,8 @@ class Command(BaseCommand):
 
         # --- Delete mode ---
         if options["delete"]:
-            deleted, _ = RivileGamaAPIKey.objects.filter(
-                user=user, company_code=company_code,
+            deleted, _ = APIProviderKey.objects.filter(
+                user=user, provider="rivile_gama_api", company_code=company_code,
             ).delete()
             if deleted:
                 self.stdout.write(self.style.SUCCESS(f"\n  ✓ Deleted {deleted} key(s) for {company_code}"))
@@ -103,13 +103,14 @@ class Command(BaseCommand):
             return
 
         # --- Создаём или обновляем ---
-        obj, created = RivileGamaAPIKey.objects.get_or_create(
+        obj, created = APIProviderKey.objects.get_or_create(
             user=user,
+            provider="rivile_gama_api",
             company_code=company_code,
             defaults={"label": label, "is_active": True},
         )
 
-        obj.set_api_key(api_key)
+        obj.set_credentials({"api_key": api_key})
         obj.label = label
         obj.is_active = True
         obj.save()
