@@ -1438,7 +1438,6 @@ class APIExportLog(models.Model):
     class Meta:
         ordering = ['-created_at']
         indexes = [
-            models.Index(fields=['document_id', 'program', '-created_at'], name="idx_explog_doc_prog"),
             models.Index(fields=['user', 'program', '-created_at']),
         ]
 

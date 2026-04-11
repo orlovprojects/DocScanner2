@@ -29,23 +29,16 @@ class Migration(migrations.Migration):
                     ),
                     preserve_default=False,
                 ),
-                migrations.AddIndex(
-                    model_name="apiexportlog",
-                    index=models.Index(
-                        fields=["document_id", "program", "-created_at"],
-                        name="idx_explog_doc_prog",
-                    ),
-                ),
             ],
             database_operations=[
                 migrations.RunSQL(
                     sql="ALTER TABLE docscanner_app_apiexportlog DROP CONSTRAINT IF EXISTS docscanner_app_apiex_document_id_4d8f1a5a_fk_docscanne;",
                     reverse_sql=migrations.RunSQL.noop,
                 ),
-                migrations.RunSQL(
-                    sql='CREATE INDEX IF NOT EXISTS "idx_explog_doc_prog" ON "docscanner_app_apiexportlog" ("document_id", "program", "created_at" DESC);',
-                    reverse_sql=migrations.RunSQL.noop,
-                ),
             ],
+        ),
+        migrations.RunSQL(
+            sql='CREATE INDEX IF NOT EXISTS "idx_explog_doc_prog" ON "docscanner_app_apiexportlog" ("document_id", "program", "created_at" DESC);',
+            reverse_sql='DROP INDEX IF EXISTS "idx_explog_doc_prog";',
         ),
     ]
