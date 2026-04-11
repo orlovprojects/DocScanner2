@@ -14,19 +14,20 @@ class Migration(migrations.Migration):
         ),
         migrations.SeparateDatabaseAndState(
             state_operations=[
-                migrations.RenameField(
+                migrations.RemoveField(
                     model_name="apiexportlog",
-                    old_name="document",
-                    new_name="document_id",
+                    name="document",
                 ),
-                migrations.AlterField(
+                migrations.AddField(
                     model_name="apiexportlog",
                     name="document_id",
                     field=models.IntegerField(
                         verbose_name="Dokumento ID",
                         db_index=True,
                         help_text="ScannedDocument arba Invoice ID",
+                        default=0,
                     ),
+                    preserve_default=False,
                 ),
                 migrations.AddIndex(
                     model_name="apiexportlog",
