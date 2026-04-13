@@ -47,6 +47,7 @@ import GpmSkaiciuokle from './pages/GPMskaiciuokle';
 
 import { initMetaPixel } from './metaPixel';
 import { initGTM } from "./gtm";
+import ScrollToTop from './page_elements/ScrollToTop';
 
 import MokejimuIstorija from './pages/MokejimuIstorija';
 import NotFound from './pages/NotFound';
@@ -115,14 +116,18 @@ function App() {
   // Публичная страница — без AuthProvider, без Header/Footer
   if (isPublicInvoice) {
     return (
-      <Routes>
-        <Route path="/sf/:uuid" element={<InvoicePublicPage />} />
-      </Routes>
+      <>
+        <ScrollToTop />
+        <Routes>
+          <Route path="/sf/:uuid" element={<InvoicePublicPage />} />
+        </Routes>
+      </>
     );
   }  
 
   return (
     <AuthProvider>
+      <ScrollToTop />
       {!isPublicInvoice && <Header />}
       <Routes>
         <Route path="/" element={<AtlyginimoSkaiciuokle2026 />} />
@@ -187,4 +192,3 @@ function App() {
 }
 
 export default App;
-
