@@ -9986,6 +9986,16 @@ def api_provider_keys_detail(request, provider, pk):
 
     key_obj.save()
 
+    # Ре-верификация если credentials были обновлены
+    if creds_update and any(v.strip() for v in creds_update.values()):
+        creds = key_obj.get_credentials()
+        success, error = _verify_key(provider, creds)
+        key_obj.mark_verified(success, error)
+        logger.info(
+            "[API_KEYS] Re-verified after update %s key=%s success=%s",
+            provider, pk, success,
+        )
+
     logger.info("[API_KEYS] Updated %s key=%s", provider, pk)
     return Response(_serialize_key(key_obj))
 

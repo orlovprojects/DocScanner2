@@ -28,7 +28,7 @@ const PROVIDER_CONFIG = {
     tooltip: "Priskirkite API raktą tam tikrai įmonei, jei vedate kelių įmonių apskaitą, arba pasirinkite \"Naudoti visoms įmonėms\" opciją, jei vedate vienos įmonės apskaitą. API raktą gausite iš savo Rivilės administratoriaus arba ManoRivile portale.",
     israsymasTooltip: "Įveskite API raktą, kuris bus naudojamas eksportuojant sąskaitas į Rivile GAMA. API raktą gausite iš savo Rivilės administratoriaus arba ManoRivile portale.",
     videoUrl: "https://www.youtube.com/embed/mUTdwZDsGWQ",
-    israsymasVideoUrl: "",
+    israsymasVideoUrl: "https://www.youtube.com/embed/fCHcX3jHYcM",
     showInstructions: false,
     fields: [
       { key: "api_key", label: "API raktas", type: "password", required: true, placeholder: "Įveskite API raktą" },
@@ -41,7 +41,7 @@ const PROVIDER_CONFIG = {
     israsymasTooltip: "Įveskite Dineta API prisijungimo duomenis, kurie bus naudojami eksportuojant sąskaitas.",
     showInstructions: true,
     israsymasShowInstructions: true,
-    videoUrl: "",
+    videoUrl: "https://www.youtube.com/embed/MLCPSPmcupE",
     israsymasVideoUrl: "",
     fields: [
       { key: "url", label: "Dineta nuoroda", type: "text", required: true, placeholder: "https://lt4.dineta.eu/dokskenas/", fullWidth: true },

@@ -92,21 +92,21 @@ const Footer = () => {
                 >
                   <Link
                     component={RouterLink}
-                    to="/saskaitu-skaitmenizavimas-dokskenas#kaip-veikia"
+                    to="/saskaitu-skaitmenizavimas-dokskenas"
                     underline="none"
                     color="inherit"
                     sx={linkSx}
                   >
-                    Kaip veikia?
+                    Sąskaitų skaitmenizavimas
                   </Link>
                   <Link
                     component={RouterLink}
-                    to="/saskaitu-skaitmenizavimas-dokskenas#kainos"
+                    to="/saskaitu-israsymas"
                     underline="none"
                     color="inherit"
                     sx={linkSx}
                   >
-                    Kainos
+                    Sąskaitų išrašymas
                   </Link>
                   <Link href="/apie-mus" underline="none" color="inherit" sx={linkSx}>
                     Apie mus
@@ -172,7 +172,7 @@ const Footer = () => {
                   spacing={1.25} 
                   alignItems={{ xs: 'center', md: 'center' }}
                 >
-                  <Link href="/saskaitu-israsymas" underline="none" color="inherit" sx={linkSx}>
+                  <Link href="/saskaita-faktura" underline="none" color="inherit" sx={linkSx}>
                     Nemokamas sąskaitos-faktūros generatorius
                   </Link>
                   <Link href="/suma-zodziais" underline="none" color="inherit" sx={linkSx}>

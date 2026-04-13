@@ -15,6 +15,7 @@ import base64
 import json
 import logging
 import random
+import re
 import time
 from dataclasses import dataclass, field
 from datetime import date, datetime
@@ -245,19 +246,70 @@ def _build_operation_id(doc, used_ids: set) -> str:
 # =========================================================
 # HTTP — отправка запроса
 # =========================================================
-def _send_dineta_request(
+def _extract_script_error(body: str) -> str:
+    """Извлекает текст ошибки из <script>alert('...')</script>."""
+    match = re.search(r"alert\('(.+?)'\)", body, re.DOTALL)
+    if match:
+        msg = match.group(1).replace("\\n", " ").replace("\n", " ").strip()
+        return msg[:500]
+    return "Dineta API grąžino klaidą HTML atsakyme"
+
+
+def _check_inner_json_error(body: str) -> str:
+    """
+    Dineta иногда возвращает HTTP 200 но body содержит JSON с ошибкой:
+      {"status": 400, "message": "Neužpildyti privalomi laukai: 'partner'"}
+    или обычный текст ошибки типа "Failas config.php neegzistuoja."
+
+    Также проверяет per-item ответы вида:
+      {"ITEM_ID": {"status": 400, "message": "value too long..."}}
+    """
+    if not body or not body.strip():
+        return ""
+
+    try:
+        data = json.loads(body)
+    except (json.JSONDecodeError, ValueError):
+        # Не JSON — проверяем известные текстовые ошибки
+        stripped = body.strip().strip('"')
+        if "neegzistuoja" in stripped.lower() or "config.php" in stripped.lower():
+            return stripped[:500]
+        return ""
+
+    if not isinstance(data, dict):
+        return ""
+
+    # Формат {"status": 400, "message": "..."}
+    if "status" in data and "message" in data:
+        status = data.get("status")
+        if isinstance(status, int) and status >= 400:
+            return _s(data.get("message", ""))[:500] or f"Dineta klaida (status {status})"
+
+    # Формат {"ITEM_ID": {"status": 400, "message": "..."}}
+    errors = []
+    for item_id, info in data.items():
+        if isinstance(info, dict):
+            item_status = info.get("status")
+            if isinstance(item_status, int) and item_status >= 400:
+                msg = info.get("message", "")
+                errors.append(f"{item_id}: {msg}")
+
+    if errors:
+        return "; ".join(errors)[:500]
+
+    return ""
+
+
+def _send_dineta_request_once(
     url: str,
     payload: dict,
     headers: dict,
     timeout: int = REQUEST_TIMEOUT,
 ) -> DinetaRequestResult:
-    """POST JSON → Dineta API.  Успех = HTTP 200/201."""
+    """Один POST JSON → Dineta API."""
     try:
         resp = requests.post(
-            url,
-            json=payload,
-            headers=headers,
-            timeout=timeout,
+            url, json=payload, headers=headers, timeout=timeout,
         )
     except requests.exceptions.Timeout:
         return DinetaRequestResult(
@@ -275,21 +327,111 @@ def _send_dineta_request(
     body = resp.text[:2000]
 
     if resp.status_code in (200, 201):
+        # Dineta возвращает 200 с <script>alert('PG error')</script>
+        if "<script>" in body and "alert(" in body:
+            error_msg = _extract_script_error(body)
+            logger.warning(
+                "[DINETA] HTTP %s но ошибка в body: %s url=%s",
+                resp.status_code, error_msg, url,
+            )
+            return DinetaRequestResult(
+                success=False,
+                status_code=resp.status_code,
+                response_body=body,
+                error=error_msg,
+            )
+
+        # Dineta возвращает 200 с {"status":400,"message":"..."}
+        inner_error = _check_inner_json_error(body)
+        if inner_error:
+            logger.warning(
+                "[DINETA] HTTP %s но внутренняя ошибка: %s url=%s",
+                resp.status_code, inner_error, url,
+            )
+            return DinetaRequestResult(
+                success=False,
+                status_code=resp.status_code,
+                response_body=body,
+                error=inner_error,
+            )
+
         return DinetaRequestResult(
             success=True,
             status_code=resp.status_code,
             response_body=body,
         )
 
-    # --- ошибка ---
     error_msg = _build_error_message(resp, body)
-
     return DinetaRequestResult(
         success=False,
         status_code=resp.status_code,
         response_body=body,
         error=error_msg,
     )
+
+
+_RETRYABLE_STATUS_CODES = {500, 502, 503, 504}
+
+_USER_FRIENDLY_ERRORS = {
+    401: "Autorizacijos klaida. Pasitikrinkite API duomenis/raktus DokSkeno nustatymuose.",
+    403: "Autorizacijos klaida. Pasitikrinkite API duomenis/raktus DokSkeno nustatymuose.",
+    404: "Netinkamas serveris arba API adresas. Pasitikrinkite API nustatymus DokSkene.",
+    405: "Operacija jau patvirtinta Dineta sistemoje. Ištrynimas/pakeitimas negalimas.",
+}
+
+
+def _send_dineta_request(
+    url: str,
+    payload: dict,
+    headers: dict,
+    timeout: int = REQUEST_TIMEOUT,
+    max_retries: int = 3,
+) -> DinetaRequestResult:
+    """POST JSON → Dineta API с retry при transient ошибках."""
+    last_result = None
+
+    for attempt in range(max_retries):
+        if attempt > 0:
+            delay = 2 ** attempt + random.uniform(0, 1)
+            logger.info(
+                "[DINETA] retry #%d/%d after %.1fs url=%s",
+                attempt, max_retries, delay, url,
+            )
+            time.sleep(delay)
+
+        last_result = _send_dineta_request_once(url, payload, headers, timeout)
+
+        if last_result.status_code in _RETRYABLE_STATUS_CODES:
+            continue
+        if last_result.exception and (
+            "Timeout" in last_result.exception
+            or "Connection" in last_result.exception
+        ):
+            continue
+
+        break
+
+    # User-friendly сообщения
+    if not last_result.success:
+        original_error = last_result.error
+        if last_result.status_code in _USER_FRIENDLY_ERRORS:
+            last_result.error = _USER_FRIENDLY_ERRORS[last_result.status_code]
+        elif last_result.status_code in _RETRYABLE_STATUS_CODES:
+            last_result.error = "Dineta serveris neatsako. Pabandykite vėliau."
+        elif last_result.exception and (
+            "Timeout" in last_result.exception
+            or "Connection" in last_result.exception
+        ):
+            last_result.error = "Dineta serveris neatsako. Pabandykite vėliau."
+
+        if original_error != last_result.error:
+            logger.info(
+                "[DINETA] user_error='%s' raw_error='%s' http=%s url=%s",
+                last_result.error, original_error,
+                last_result.status_code, url,
+            )
+
+    return last_result
 
 
 def _build_error_message(resp, body: str) -> str:
@@ -355,7 +497,35 @@ def _parse_set_operation_response(response_body: str) -> str:
     setOperation возвращает строку — внутренний ID операции Dineta.
     Например: "00012077984"
     """
-    return response_body.strip().strip('"') if response_body else ""
+    if not response_body:
+        return ""
+    if "<script>" in response_body:
+        return ""
+    return response_body.strip().strip('"')
+
+
+# =========================================================
+# Stock name fallback
+# =========================================================
+def _build_stock_name_fallback(doc) -> str:
+    """
+    Fallback для названия товара/услуги когда prekes_pavadinimas пуст.
+    Иерархия:
+      1. Preke_is_{series}_{number}
+      2. Preke_is_{number}
+      3. NEATPAZINTA_XXXX
+    """
+    series = _s(_get_attr(doc, "document_series", "")).strip()
+    number = _s(_get_attr(doc, "document_number", "")).strip()
+
+    if series and number:
+        name = f"Preke_is_{series}_{number}"
+    elif number:
+        name = f"Preke_is_{number}"
+    else:
+        name = f"NEATPAZINTA_{random.randint(1000, 9999)}"
+
+    return name[:100]
 
 
 # =========================================================
@@ -393,18 +563,33 @@ def _build_partner_payload(doc, doc_type: str) -> dict:
         address    = _s(_get_attr(doc, "buyer_address", ""))
         is_person  = bool(_get_attr(doc, "buyer_is_person", False))
 
+    # Обрезка partner ID до 20 символов (лимит Dineta API)
+    if pid and len(pid) > 20:
+        logger.warning(
+            "[DINETA] Partner ID '%s' ilgesnis nei 20 simbolių, trumpiname",
+            pid,
+        )
+        pid = pid[:20]
+
+    # Fallback для пустого name
+    if not name or not name.strip():
+        name = f"NERAPAVADINIMO_{random.randint(1000, 9999)}"
+        logger.warning(
+            "[DINETA] Partner name tuščias, naudojamas fallback: %s", name,
+        )
+
     partner: dict = {
-        "id":      pid,
-        "name":    name,
-        "type":    "1" if is_person else "2",
-        "country": country,
+        "id":      pid[:20] if pid else pid,
+        "name":    name[:100],
+        "type":    1 if is_person else 2,
+        "country": country[:2],
     }
     if code:
-        partner["code"] = code
+        partner["code"] = code[:20]
     if vat_code:
-        partner["vat_code"] = vat_code
+        partner["vat_code"] = vat_code[:20]
     if address:
-        partner["address"] = address
+        partner["address"] = address[:100]
 
     return partner
 
@@ -440,7 +625,7 @@ def _build_stock_items(doc, doc_type: str) -> list[dict]:
             name = (
                 _s(_get_attr(item, "prekes_pavadinimas", ""))
                 or _s(_get_attr(doc, "prekes_pavadinimas", ""))
-                or "Prekė"
+                or _build_stock_name_fallback(doc)
             )
             unit = (
                 _s(_get_attr(item, "unit", ""))
@@ -456,35 +641,35 @@ def _build_stock_items(doc, doc_type: str) -> list[dict]:
             stock_type = 2 if type_str == "PASLAUGA" else 1
 
             stock_item: dict = {
-                "id":       code,
+                "id":       code[:20],
                 "type":     stock_type,
-                "name":     name,
-                "unitid":   _normalize_unit_dineta(unit),
+                "name":     name[:100],
+                "unitid":   _normalize_unit_dineta(unit)[:20],
                 "vat_perc": float(vat_pct),
             }
             if barcode:
-                stock_item["barcodes"] = [{"barcode": barcode, "default": 1}]
+                stock_item["barcodes"] = [{"barcode": barcode[:20], "default": 1}]
 
             items.append(stock_item)
     else:
         # ---- SUMIŠKAI ----
         code    = _get_product_code(item=None, doc=doc)
         barcode = _get_barcode(item=None, doc=doc)
-        name    = _s(_get_attr(doc, "prekes_pavadinimas", "")) or "Prekė"
+        name    = _s(_get_attr(doc, "prekes_pavadinimas", "")) or _build_stock_name_fallback(doc)
         unit    = _s(_get_attr(doc, "unit", "")) or "vnt."
         vat_pct = _safe_D(_get_attr(doc, "vat_percent", 0) or 0)
         type_str, _, _ = _resolve_type_group_product(item=None, doc=doc)
         stock_type = 2 if type_str == "PASLAUGA" else 1
 
         stock_item = {
-            "id":       code,
+            "id":       code[:20],
             "type":     stock_type,
-            "name":     name,
-            "unitid":   _normalize_unit_dineta(unit),
+            "name":     name[:100],
+            "unitid":   _normalize_unit_dineta(unit)[:20],
             "vat_perc": float(vat_pct),
         }
         if barcode:
-            stock_item["barcodes"] = [{"barcode": barcode, "default": 1}]
+            stock_item["barcodes"] = [{"barcode": barcode[:20], "default": 1}]
 
         items.append(stock_item)
 
@@ -525,7 +710,7 @@ def _build_stock_lines(
             name = (
                 _s(_get_attr(item, "prekes_pavadinimas", ""))
                 or _s(_get_attr(doc, "prekes_pavadinimas", ""))
-                or "Prekė"
+                or _build_stock_name_fallback(doc)
             )
             qty     = _safe_D(_get_attr(item, "quantity", 1) or 1)
             price   = _safe_D(_get_attr(item, "price", 0) or 0)
@@ -545,24 +730,24 @@ def _build_stock_lines(
             vat_code = _resolve_vat_code(doc, item, line_map)
 
             line: dict = {
-                "stockId":     code,
-                "name":        name,
+                "stockId":     code[:20],
+                "name":        name[:100],
                 "quant":       float(qty),
                 "vatPerc":     float(vat_pct),
-                "vatCode":     vat_code,
+                "vatCode":     vat_code[:20],
                 "price":       float(new_price),
                 "priceDisc":   0,
                 "dateCreated": now_ms,
             }
             if barcode:
-                line["barcode"] = barcode
+                line["barcode"] = barcode[:20]
 
             lines.append(line)
     else:
         # ---- SUMIŠKAI ----
         code    = _get_product_code(item=None, doc=doc)
         barcode = _get_barcode(item=None, doc=doc)
-        name    = _s(_get_attr(doc, "prekes_pavadinimas", "")) or "Prekė"
+        name    = _s(_get_attr(doc, "prekes_pavadinimas", "")) or _build_stock_name_fallback(doc)
         qty     = _safe_D(_get_attr(doc, "quantity", 1) or 1)
         amount_wo = _safe_D(_get_attr(doc, "amount_wo_vat", 0) or 0)
         discount  = _safe_D(_get_attr(doc, "invoice_discount_wo_vat", 0) or 0)
@@ -583,17 +768,17 @@ def _build_stock_lines(
             )
 
         line = {
-            "stockId":     code,
-            "name":        name,
+            "stockId":     code[:20],
+            "name":        name[:100],
             "quant":       float(qty),
             "vatPerc":     float(vat_pct),
-            "vatCode":     vat_code,
+            "vatCode":     vat_code[:20],
             "price":       float(new_price),
             "priceDisc":   0,
             "dateCreated": now_ms,
         }
         if barcode:
-            line["barcode"] = barcode
+            line["barcode"] = barcode[:20]
 
         lines.append(line)
 
@@ -651,15 +836,19 @@ def _build_set_operation_payload(
 
     op = "purchase" if doc_type == "pirkimas" else "sale"
 
-    # Дата
+    # Дата (с санитизацией)
     inv_date = (
         _get_attr(doc, "invoice_date", None)
         or _get_attr(doc, "operation_date", None)
     )
     if isinstance(inv_date, (date, datetime)):
         date_str = inv_date.strftime("%Y-%m-%d")
+    elif isinstance(inv_date, str):
+        # Извлекаем дату из строки (может содержать мусор типа "ATOSTOGOS2026-01-31")
+        match = re.search(r"\d{4}-\d{2}-\d{2}", inv_date)
+        date_str = match.group(0) if match else datetime.now().strftime("%Y-%m-%d")
     else:
-        date_str = _s(inv_date) or datetime.now().strftime("%Y-%m-%d")
+        date_str = datetime.now().strftime("%Y-%m-%d")
 
     # blankNo (max 20)
     blank_no = _build_ref_id(
@@ -682,10 +871,10 @@ def _build_set_operation_payload(
         "docdate":       date_str,
         "aDate":         date_str,
         "blankNo":       blank_no,
-        "partnerId":     partner_id,
-        "partnerId2":    partner_id,
-        "storeFromId":   store_id,
-        "storeToId":     store_id,
+        "partnerId":     partner_id[:20],
+        "partnerId2":    partner_id[:20],
+        "storeFromId":   store_id[:20],
+        "storeToId":     store_id[:20],
         "totalSum":      round(total_sum, 2),
         "vatSum":        round(vat_sum, 2),
         "externalDocId": operation_id,
@@ -731,6 +920,14 @@ def export_document_to_dineta(
         if not partner_id:
             result.partner_result = DinetaRequestResult(
                 success=False, error="Partner ID yra tuščias",
+            )
+            result.overall_status = "error"
+            return result
+
+        if not partner_payload.get("name") or not partner_payload["name"].strip():
+            result.partner_result = DinetaRequestResult(
+                success=False,
+                error="Partnerio pavadinimas tuščias. Patikrinkite dokumento duomenis.",
             )
             result.overall_status = "error"
             return result
@@ -1045,25 +1242,6 @@ def dineta_hello(
 
 
 
-
-
-
-
-
-
-
-
-# """
-# Dineta.web API — REST/JSON клиент.
-
-# Поток на один документ:
-#   1. Partner  (v1/partner/)       — создание/обновление контрагента
-#   2. Stock    (v1/stock/) × chunks — товары/услуги (max 50 per request)
-#   3. setOperation (v1/setOperation/) — операция purchase/sale
-
-# Авторизация: Basic Auth (base64 encoded username:password).
-# URL:  https://<SERVER>.dineta.eu/<CLIENT>/ws/dineta_api/v1/<METHOD>/
-# """
 # from __future__ import annotations
 
 # import base64
@@ -1076,6 +1254,7 @@ def dineta_hello(
 # from decimal import Decimal, ROUND_HALF_UP
 # from typing import Optional
 # from urllib.parse import urlparse
+# import re
 
 # import requests
 # from django.utils import timezone
@@ -1125,13 +1304,14 @@ def dineta_hello(
 #     response_body: str = ""
 #     error: str = ""
 #     exception: str = ""
+#     api_message: str = ""   # parsed message: "Created"/"Updated"/dineta_id
 
 
 # @dataclass
 # class StockBatchResult:
 #     """Результат одного stock batch запроса (до 50 items)."""
 #     request_result: DinetaRequestResult
-#     items: list = field(default_factory=list)   # [{"code":…, "name":…, "barcode":…}]
+#     items: list = field(default_factory=list)   # [{"code":…, "name":…, "barcode":…, "message":…}]
 
 
 # @dataclass
@@ -1182,7 +1362,7 @@ def dineta_hello(
 #     """
 #     Парсит URL вида  https://lt4.dineta.eu/dokskenas/login.php
 #     Возвращает (server, client) → ("lt4", "dokskenas").
-    
+
 #     Для тестирования: http://localhost:8878/mock_client/login.php
 #     → ("http://localhost:8878", "mock_client")
 #     """
@@ -1299,19 +1479,25 @@ def dineta_hello(
 # # =========================================================
 # # HTTP — отправка запроса
 # # =========================================================
-# def _send_dineta_request(
+# def _extract_script_error(body: str) -> str:
+#     """Извлекает текст ошибки из <script>alert('...')</script>."""
+#     match = re.search(r"alert\('(.+?)'\)", body, re.DOTALL)
+#     if match:
+#         msg = match.group(1).replace("\\n", " ").replace("\n", " ").strip()
+#         return msg[:500]
+#     return "Dineta API grąžino klaidą HTML atsakyme"
+
+
+# def _send_dineta_request_once(
 #     url: str,
 #     payload: dict,
 #     headers: dict,
 #     timeout: int = REQUEST_TIMEOUT,
 # ) -> DinetaRequestResult:
-#     """POST JSON → Dineta API.  Успех = HTTP 200/201."""
+#     """Один POST JSON → Dineta API."""
 #     try:
 #         resp = requests.post(
-#             url,
-#             json=payload,
-#             headers=headers,
-#             timeout=timeout,
+#             url, json=payload, headers=headers, timeout=timeout,
 #         )
 #     except requests.exceptions.Timeout:
 #         return DinetaRequestResult(
@@ -1329,32 +1515,172 @@ def dineta_hello(
 #     body = resp.text[:2000]
 
 #     if resp.status_code in (200, 201):
+#         if "<script>" in body and "alert(" in body:
+#             error_msg = _extract_script_error(body)
+#             logger.warning(
+#                 "[DINETA] HTTP %s но ошибка в body: %s url=%s",
+#                 resp.status_code, error_msg, url,
+#             )
+#             return DinetaRequestResult(
+#                 success=False,
+#                 status_code=resp.status_code,
+#                 response_body=body,
+#                 error=error_msg,
+#             )
 #         return DinetaRequestResult(
 #             success=True,
 #             status_code=resp.status_code,
 #             response_body=body,
 #         )
 
-#     # --- ошибка ---
-#     error_msg = f"HTTP {resp.status_code}"
-#     try:
-#         data = resp.json()
-#         if isinstance(data, dict):
-#             error_msg = (
-#                 data.get("error", "")
-#                 or data.get("message", "")
-#                 or data.get("detail", "")
-#                 or error_msg
-#             )
-#     except Exception:
-#         error_msg = body[:500]
-
+#     error_msg = _build_error_message(resp, body)
 #     return DinetaRequestResult(
 #         success=False,
 #         status_code=resp.status_code,
 #         response_body=body,
 #         error=error_msg,
 #     )
+
+
+# _RETRYABLE_STATUS_CODES = {500, 502, 503, 504}
+
+# _USER_FRIENDLY_ERRORS = {
+#     401: "Autorizacijos klaida. Pasitikrinkite API duomenis/raktus DokSkeno nustatymuose.",
+#     403: "Autorizacijos klaida. Pasitikrinkite API duomenis/raktus DokSkeno nustatymuose.",
+#     404: "Netinkamas serveris arba API adresas. Pasitikrinkite API nustatymus DokSkene.",
+# }
+
+
+# def _send_dineta_request(
+#     url: str,
+#     payload: dict,
+#     headers: dict,
+#     timeout: int = REQUEST_TIMEOUT,
+#     max_retries: int = 3,
+# ) -> DinetaRequestResult:
+#     """POST JSON → Dineta API с retry при transient ошибках."""
+#     last_result = None
+
+#     for attempt in range(max_retries):
+#         if attempt > 0:
+#             delay = 2 ** attempt + random.uniform(0, 1)
+#             logger.info(
+#                 "[DINETA] retry #%d/%d after %.1fs url=%s",
+#                 attempt, max_retries, delay, url,
+#             )
+#             time.sleep(delay)
+
+#         last_result = _send_dineta_request_once(url, payload, headers, timeout)
+
+#         if last_result.status_code in _RETRYABLE_STATUS_CODES:
+#             continue
+#         if last_result.exception and (
+#             "Timeout" in last_result.exception
+#             or "Connection" in last_result.exception
+#         ):
+#             continue
+
+#         break
+
+#     # User-friendly сообщения
+#     if not last_result.success:
+#         original_error = last_result.error
+#         if last_result.status_code in _USER_FRIENDLY_ERRORS:
+#             last_result.error = _USER_FRIENDLY_ERRORS[last_result.status_code]
+#         elif last_result.status_code in _RETRYABLE_STATUS_CODES:
+#             last_result.error = "Dineta serveris neatsako. Pabandykite vėliau."
+#         elif last_result.exception and (
+#             "Timeout" in last_result.exception
+#             or "Connection" in last_result.exception
+#         ):
+#             last_result.error = "Dineta serveris neatsako. Pabandykite vėliau."
+
+#         if original_error != last_result.error:
+#             logger.info(
+#                 "[DINETA] user_error='%s' raw_error='%s' http=%s url=%s",
+#                 last_result.error, original_error,
+#                 last_result.status_code, url,
+#             )
+
+#     return last_result
+
+
+# def _parse_set_operation_response(response_body: str) -> str:
+#     """
+#     setOperation возвращает строку — внутренний ID операции Dineta.
+#     Например: "00012077984"
+#     """
+#     if not response_body:
+#         return ""
+#     if "<script>" in response_body:
+#         return ""
+#     return response_body.strip().strip('"')
+
+
+# def _build_error_message(resp, body: str) -> str:
+#     """Формирует понятное сообщение об ошибке из HTTP ответа."""
+#     if resp.status_code == 401:
+#         return "Neteisingas vartotojo vardas arba slaptažodis (401)"
+
+#     if resp.status_code == 404:
+#         return "Netinkamas serveris, klientas arba API adresas (404)"
+
+#     try:
+#         data = resp.json()
+#         if isinstance(data, dict):
+#             return (
+#                 data.get("error", "")
+#                 or data.get("message", "")
+#                 or data.get("detail", "")
+#                 or f"HTTP {resp.status_code}"
+#             )
+#     except Exception:
+#         pass
+
+#     return body[:500] if body else f"HTTP {resp.status_code}"
+
+
+# # =========================================================
+# # Парсинг ответов Dineta API
+# # =========================================================
+# def _parse_item_response(response_body: str) -> dict[str, str]:
+#     """
+#     Парсит ответ partner/stock вида:
+#       {"ITEM_ID": {"status": 200, "action": "insert", "message": "Created"}}
+
+#     Возвращает dict: {"ITEM_ID": "Created", "ITEM_ID2": "Updated", ...}
+#     """
+#     try:
+#         data = json.loads(response_body)
+#         if not isinstance(data, dict):
+#             return {}
+#         result = {}
+#         for item_id, info in data.items():
+#             if isinstance(info, dict):
+#                 result[item_id] = info.get("message", "")
+#         return result
+#     except Exception:
+#         return {}
+
+
+# def _parse_item_response_summary(response_body: str) -> str:
+#     """
+#     Парсит ответ partner/stock и возвращает сводку строкой.
+#     Например: "PARTNER1: Created" или "PREKE1: Updated; PREKE2: Created"
+#     """
+#     parsed = _parse_item_response(response_body)
+#     if not parsed:
+#         return ""
+#     parts = [f"{item_id}: {msg}" for item_id, msg in parsed.items()]
+#     return "; ".join(parts)
+
+
+# def _parse_set_operation_response(response_body: str) -> str:
+#     """
+#     setOperation возвращает строку — внутренний ID операции Dineta.
+#     Например: "00012077984"
+#     """
+#     return response_body.strip().strip('"') if response_body else ""
 
 
 # # =========================================================
@@ -1739,11 +2065,16 @@ def dineta_hello(
 #             payload={"partners": [partner_payload]},
 #             headers=headers,
 #         )
+#         # Парсим ответ partner: {"ID": {"status":200, "message":"Created"}}
+#         partner_resp.api_message = _parse_item_response_summary(
+#             partner_resp.response_body,
+#         )
 #         result.partner_result = partner_resp
 
 #         logger.info(
-#             "[DINETA] Partner doc=%s partner_id=%s http=%s error=%s",
+#             "[DINETA] Partner doc=%s partner_id=%s http=%s msg=%s error=%s",
 #             doc_id, partner_id, partner_resp.status_code,
+#             partner_resp.api_message or "-",
 #             partner_resp.error or "-",
 #         )
 
@@ -1762,6 +2093,12 @@ def dineta_hello(
 #                 headers=headers,
 #             )
 
+#             # Парсим ответ stock: {"CODE1": {"message":"Created"}, ...}
+#             stock_messages = _parse_item_response(stock_resp.response_body)
+#             stock_resp.api_message = _parse_item_response_summary(
+#                 stock_resp.response_body,
+#             )
+
 #             batch_items_info = []
 #             for si in chunk:
 #                 bc = ""
@@ -1771,6 +2108,7 @@ def dineta_hello(
 #                     "code":    si["id"],
 #                     "name":    si["name"],
 #                     "barcode": bc,
+#                     "message": stock_messages.get(si["id"], ""),
 #                 })
 
 #             result.stock_batch_results.append(
@@ -1781,11 +2119,12 @@ def dineta_hello(
 #             )
 
 #             logger.info(
-#                 "[DINETA] Stock doc=%s items=%d-%d http=%s error=%s",
+#                 "[DINETA] Stock doc=%s items=%d-%d http=%s msg=%s error=%s",
 #                 doc_id,
 #                 chunk_start,
 #                 chunk_start + len(chunk),
 #                 stock_resp.status_code,
+#                 stock_resp.api_message or "-",
 #                 stock_resp.error or "-",
 #             )
 
@@ -1816,11 +2155,16 @@ def dineta_hello(
 #                 payload=op_payload,
 #                 headers=headers,
 #             )
+#             # Парсим ответ setOperation: просто строка "00012077984"
+#             op_resp.api_message = _parse_set_operation_response(
+#                 op_resp.response_body,
+#             )
 #             result.operation_result = op_resp
 
 #             logger.info(
-#                 "[DINETA] setOperation doc=%s id=%s http=%s error=%s",
+#                 "[DINETA] setOperation doc=%s id=%s dineta_id=%s http=%s error=%s",
 #                 doc_id, operation_id,
+#                 op_resp.api_message or "-",
 #                 op_resp.status_code, op_resp.error or "-",
 #             )
 
@@ -1877,9 +2221,11 @@ def dineta_hello(
 #     partner = export_result.partner_result
 #     partner_status = ""
 #     partner_error  = ""
+#     partner_message = ""
 #     if partner:
-#         partner_status = "success" if partner.success else "error"
-#         partner_error  = partner.error
+#         partner_status  = "success" if partner.success else "error"
+#         partner_error   = partner.error
+#         partner_message = partner.api_message
 
 #     # ── setOperation ──
 #     operation = export_result.operation_result
@@ -1887,22 +2233,26 @@ def dineta_hello(
 #         inv_status   = "error"
 #         inv_error    = export_result.exception or "Operacija neišsiųsta"
 #         inv_response = ""
+#         op_message   = ""
 #     else:
 #         inv_status   = "success" if operation.success else "error"
 #         inv_error    = operation.error
 #         inv_response = operation.response_body
+#         op_message   = operation.api_message    # dineta internal ID
 
 #     # ── full_response (partner + operation JSON) ──
 #     full_resp: dict = {}
 #     if partner:
 #         full_resp["partner"] = {
-#             "status_code": partner.status_code,
-#             "body":        partner.response_body,
+#             "status_code":  partner.status_code,
+#             "body":         partner.response_body,
+#             "api_message":  partner.api_message,
 #         }
 #     if operation:
 #         full_resp["operation"] = {
-#             "status_code": operation.status_code,
-#             "body":        operation.response_body,
+#             "status_code":  operation.status_code,
+#             "body":         operation.response_body,
+#             "dineta_id":    operation.api_message,
 #         }
 #     full_response_str = json.dumps(
 #         full_resp, ensure_ascii=False, default=str,
@@ -1922,6 +2272,9 @@ def dineta_hello(
 #         partner_error=partner_error,
 #         full_response=full_response_str,
 #         session=session,
+#         # ↓ НОВЫЕ ПОЛЯ ↓
+#         message=op_message[:255],            # dineta operation ID
+#         partner_message=partner_message[:255],  # "PARTNER_ID: Created"
 #     )
 
 #     # ── APIExportArticleLog (per stock item) ──
@@ -1941,6 +2294,8 @@ def dineta_hello(
 #                     result=batch.request_result.status_code,
 #                     error=batch_error,
 #                     full_response=batch_response,
+#                     # ↓ НОВОЕ ПОЛЕ ↓
+#                     message=item_info.get("message", "")[:255],  # "Created"/"Updated"
 #                 )
 #             )
 
@@ -1948,17 +2303,24 @@ def dineta_hello(
 #         APIExportArticleLog.objects.bulk_create(article_logs)
 
 #     # ── ScannedDocument status ──
-#     ScannedDocument.objects.filter(pk=export_result.doc_id).update(
+#     updated = ScannedDocument.objects.filter(pk=export_result.doc_id).update(
 #         dineta_api_status=export_result.overall_status,
 #         dineta_last_try_date=now,
 #     )
+#     if not updated:
+#         from docscanner_app.models import Invoice
+#         Invoice.objects.filter(pk=export_result.doc_id).update(
+#             dineta_api_status=export_result.overall_status,
+#             dineta_last_try_date=now,
+#         )
 
 #     logger.info(
-#         "[DINETA] Išsaugotas export_log=%s doc=%s status=%s articles=%d",
+#         "[DINETA] Išsaugotas export_log=%s doc=%s status=%s articles=%d op_dineta_id=%s",
 #         export_log.pk,
 #         export_result.doc_id,
 #         export_result.overall_status,
 #         len(article_logs),
+#         op_message or "-",
 #     )
 
 
@@ -1987,9 +2349,21 @@ def dineta_hello(
 #     if result.exception:
 #         raise DinetaError(f"Ryšio klaida: {result.exception}")
 
+#     if result.status_code == 401:
+#         raise DinetaError(
+#             "Neteisingas vartotojo vardas arba slaptažodis (401 Unauthorized)"
+#         )
+
+#     if result.status_code == 404:
+#         raise DinetaError(
+#             "Netinkamas serveris, klientas arba API adresas (404 Not Found)"
+#         )
+
 #     if not result.success:
 #         raise DinetaError(
 #             result.error or "Dineta prisijungimo patikrinimas nepavyko"
 #         )
 
 #     return "OK"
+
+

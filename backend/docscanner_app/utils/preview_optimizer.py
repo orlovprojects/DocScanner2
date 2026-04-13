@@ -129,7 +129,8 @@ def optimize_preview_for_document(doc) -> bool:
         i += 1
     new_rel = candidate
 
-    default_storage.save(new_rel, ContentFile(data))
+    # default_storage.save(new_rel, ContentFile(data))
+    new_rel = default_storage.save(new_rel, ContentFile(data))
 
     # 4) Удалить старый файл (если путь отличается)
     try:

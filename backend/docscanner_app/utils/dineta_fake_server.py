@@ -2,10 +2,17 @@
 Dineta API Mock Server
 ======================
 Запуск:
-    python dineta_mock_server.py          # порт 8878
-    python dineta_mock_server.py 9000     # порт 9000
+    python backend/docscanner_app/utils/dineta_fake_server.py --success 100 2>&1   # 100% success, порт 8878
+    python dineta_mock_server.py --port 9000             # другой порт
+    python backend/docscanner_app/utils/dineta_fake_server.py --success 60 2>&1            # 60% success, 40% errors (auto-distributed)
+    python dineta_mock_server.py --success 70 --e400 15 --e401 10 --e500 5
+    python dineta_mock_server.py --success 0             # 100% errors
+    python dineta_mock_server.py --delay 1.5             # задержка 1.5 сек между ответами
 
-Сервер имитирует Dineta REST/JSON API v1.18:
+Если --success указан без остальных, ошибки распределяются автоматически:
+    50% от ошибок → 400, 30% → 401, 20% → 500
+
+Сервер имитирует Dineta REST/JSON API v1.20:
     POST /<client>/ws/dineta_api/v1/partner/        — создание/обновление партнёров
     POST /<client>/ws/dineta_api/v1/stock/          — создание/обновление товаров
     POST /<client>/ws/dineta_api/v1/setOperation/   — создание операции (purchase/sale)
@@ -13,19 +20,15 @@ Dineta API Mock Server
 
 Авторизация: Basic Auth (любой логин/пароль принимается).
 
-Подключение:
-    В DokSkenas → Nustatymai → Dineta:
-      URL:      http://localhost:8878/mock_client/login.php
-      Username: test
-      Password: test
+Подключение в DokSkenas → Nustatymai → Dineta:
+    URL:      http://localhost:8878/mock_client/login.php
+    Username: test
+    Password: test
 
-Ответы:
-  ~60% — Success  (HTTP 200, JSON ok)
-  ~25% — Error    (HTTP 400, JSON с ошибкой)
-  ~10% — Auth err (HTTP 401)
-  ~5%  — Server   (HTTP 500)
-
-Между ответами задержка 1 секунда.
+Ответы имитируют реальный Dineta API формат:
+  partner  → {"PARTNER_ID": {"status": 200, "action": "insert", "message": "Created"}}
+  stock    → {"STOCK_ID": {"status": 200, "action": "insert", "message": "Created"}}
+  setOp    → "00012077984"  (просто строка с ID)
 """
 
 import os
@@ -34,6 +37,7 @@ import json
 import time
 import random
 import base64
+import argparse
 import django
 from django.conf import settings as django_settings
 from django.http import JsonResponse, HttpResponse
@@ -53,43 +57,39 @@ if not django_settings.configured:
 
 
 # =========================================================
-# Настройки мок-сервера
+# Настройки (заполняются из CLI аргументов)
 # =========================================================
-DELAY_SECONDS = 0            # задержка перед ответом (секунды)
-SUCCESS_WEIGHT = 60          # % успешных ответов (HTTP 200)
-ERROR_400_WEIGHT = 25        # % ошибок валидации (HTTP 400)
-ERROR_401_WEIGHT = 10        # % ошибок авторизации (HTTP 401)
-ERROR_500_WEIGHT = 5         # % серверных ошибок (HTTP 500)
+class MockConfig:
+    success_weight: int = 100
+    error_400_weight: int = 0
+    error_401_weight: int = 0
+    error_500_weight: int = 0
+    delay_seconds: float = 0.0
+
+cfg = MockConfig()
+
 
 # Литовские ошибки для реалистичности
-MOCK_ERRORS_PARTNER = [
-    "Partnerio kodas jau egzistuoja su kitu tipu",
-    "Neteisingas PVM kodas",
-    "Partnerio pavadinimas privalomas",
-    "Šalis neatpažinta: XX",
-    "Per ilgas partnerio ID (max 20 simbolių)",
+MOCK_ERRORS_PARTNER_400 = [
+    {"status": 400, "message": "Neužpildyti privalomi laukai: 'partner'"},
+    {"status": 400, "message": "value too long for type character varying(20)"},
+    {"status": 400, "message": "Netinkamas prekės pavainimas: Prekė"},
 ]
 
-MOCK_ERRORS_STOCK = [
-    "Prekės kodas jau egzistuoja",
-    "Neteisingas prekės tipas (leidžiama: 1, 2)",
-    "Matavimo vienetas neatpažintas",
-    "PVM procentas negali būti neigiamas",
-    "Per ilgas prekės pavadinimas",
-    "Barkodas jau priskirtas kitai prekei",
+MOCK_ERRORS_STOCK_400 = [
+    {"status": 400, "message": "PVM % neegzistuoja: 8"},
+    {"status": 400, "message": "PVM % neegzistuoja: 5.5"},
+    {"status": 400, "message": "PVM % neegzistuoja: 22"},
+    {"status": 400, "message": "Netinkamas prekės pavainimas: Prekė"},
+    {"status": 400, "message": "Nenaujiname prekės: ignore_stock_update"},
 ]
 
-MOCK_ERRORS_OPERATION = [
-    "Operacijos ID jau egzistuoja",
-    "Nežinomas operacijos tipas",
-    "Partneris nerastas: UNKNOWN_ID",
-    "Sandėlis nerastas: BAD_STORE",
-    "Tuščias stock_lines masyvas",
-    "Prekė stock_lines nerasta: MISSING_CODE",
-    "Dokumento data netinkamo formato",
-    "Suma neatitinka eilučių sumos",
-    "externalDocId jau egzistuoja (dublikatas)",
-    "PVM kodas neatpažintas: BAD_VAT",
+MOCK_ERRORS_OPERATION_500 = [
+    "Partneris {partner_id} neegzistuoja!",
+    "Operation is confirmed. Deletion is forbidden!",
+    "<script> alert('insert or update on table t_stockd violates foreign key constraint t_stockd_f_hid_fkey'); </script>",
+    "<script> alert('null value in column f_employee_id of relation t_employee_reason violates not-null constraint'); </script>",
+    "<script> alert('invalid input syntax for type date: null'); </script>",
 ]
 
 
@@ -108,6 +108,9 @@ stats = {
     },
 }
 
+# -- Внутренний счётчик для Dineta operation ID --
+_operation_counter = [10000]
+
 
 # =========================================================
 # Утилиты
@@ -115,11 +118,11 @@ stats = {
 def _roll_response_type():
     """Случайно выбирает тип ответа по весам."""
     roll = random.randint(1, 100)
-    if roll <= SUCCESS_WEIGHT:
+    if roll <= cfg.success_weight:
         return 200
-    elif roll <= SUCCESS_WEIGHT + ERROR_400_WEIGHT:
+    elif roll <= cfg.success_weight + cfg.error_400_weight:
         return 400
-    elif roll <= SUCCESS_WEIGHT + ERROR_400_WEIGHT + ERROR_401_WEIGHT:
+    elif roll <= cfg.success_weight + cfg.error_400_weight + cfg.error_401_weight:
         return 401
     else:
         return 500
@@ -150,6 +153,12 @@ def _parse_json_body(request):
         return None, f"Netinkamas JSON: {e}"
 
 
+def _next_operation_id():
+    """Генерирует следующий Dineta operation ID."""
+    _operation_counter[0] += 1
+    return f"{_operation_counter[0]:011d}"
+
+
 def _log_request(endpoint, method, body_preview, status_code, response_preview):
     """Красивый лог запроса в терминал."""
     stats["total"] += 1
@@ -161,41 +170,56 @@ def _log_request(endpoint, method, body_preview, status_code, response_preview):
         stats["success"] += 1
         if ep_stats:
             ep_stats["ok"] += 1
-        icon = "OK"
-    else:
-        key = f"error_{status_code}"
-        stats[key] = stats.get(key, 0) + 1
+        icon = "\033[92m✓\033[0m"
+        status_str = f"\033[92m{status_code}\033[0m"
+    elif status_code == 400:
+        stats["error_400"] = stats.get("error_400", 0) + 1
         if ep_stats:
             ep_stats["err"] += 1
-        icon = f"E{status_code}"
+        icon = "\033[93m✗\033[0m"
+        status_str = f"\033[93m{status_code}\033[0m"
+    elif status_code == 401:
+        stats["error_401"] = stats.get("error_401", 0) + 1
+        if ep_stats:
+            ep_stats["err"] += 1
+        icon = "\033[91m✗\033[0m"
+        status_str = f"\033[91m{status_code}\033[0m"
+    else:
+        stats["error_500"] = stats.get("error_500", 0) + 1
+        if ep_stats:
+            ep_stats["err"] += 1
+        icon = "\033[91m✗\033[0m"
+        status_str = f"\033[91m{status_code}\033[0m"
 
-    print("")
-    print("=" * 62)
-    print(f"  #{stats['total']}  [{icon}]  {method} /{endpoint}/  ->  HTTP {status_code}")
+    print(f"  {icon} #{stats['total']:>4}  {method} /{endpoint}/  → HTTP {status_str}", end="")
     if body_preview:
-        preview = str(body_preview)[:200]
-        print(f"  Body: {preview}")
-    if response_preview:
-        print(f"  Resp: {str(response_preview)[:200]}")
-    print(
-        f"  Itogo: {stats['total']} | "
-        f"OK: {stats['success']} | "
-        f"400: {stats.get('error_400', 0)} | "
-        f"401: {stats.get('error_401', 0)} | "
-        f"500: {stats.get('error_500', 0)}"
-    )
+        print(f"  [{body_preview}]", end="")
+    print()
+
+    resp_str = str(response_preview)[:120] if response_preview else ""
+    if resp_str:
+        print(f"         └─ {resp_str}")
+
+
+def _print_stats():
+    """Выводит текущую статистику."""
     ep = stats["by_endpoint"]
-    print(
-        f"  partner: {ep['partner']['ok']}/{ep['partner']['total']} | "
-        f"stock: {ep['stock']['ok']}/{ep['stock']['total']} | "
-        f"setOp: {ep['setOperation']['ok']}/{ep['setOperation']['total']} | "
-        f"stores: {ep['getStoreList']['ok']}/{ep['getStoreList']['total']}"
-    )
-    print("=" * 62)
+    total = stats["total"] or 1
+    print(f"\n  Statistika: {stats['total']} užklausų | "
+          f"\033[92m{stats['success']} OK\033[0m | "
+          f"\033[93m{stats.get('error_400', 0)} E400\033[0m | "
+          f"\033[91m{stats.get('error_401', 0)} E401\033[0m | "
+          f"\033[91m{stats.get('error_500', 0)} E500\033[0m | "
+          f"sėkmė: {stats['success']*100//total}%")
+    print(f"  partner: {ep['partner']['ok']}/{ep['partner']['total']} | "
+          f"stock: {ep['stock']['ok']}/{ep['stock']['total']} | "
+          f"setOp: {ep['setOperation']['ok']}/{ep['setOperation']['total']} | "
+          f"stores: {ep['getStoreList']['ok']}/{ep['getStoreList']['total']}")
+    print()
 
 
 # =========================================================
-# Endpoint handlers
+# Endpoint handlers — реалистичный Dineta формат
 # =========================================================
 
 @csrf_exempt
@@ -208,44 +232,52 @@ def handle_partner(request):
 
     body, parse_err = _parse_json_body(request)
     if parse_err:
-        resp_data = {"error": parse_err}
-        _log_request("partner", "POST", None, 400, resp_data)
-        return JsonResponse(resp_data, status=400)
+        _log_request("partner", "POST", None, 400, parse_err)
+        return JsonResponse({"error": parse_err}, status=400)
 
     partners = body.get("partners", []) if body else []
-    count = len(partners)
 
-    time.sleep(DELAY_SECONDS)
+    time.sleep(cfg.delay_seconds)
 
     status_code = _roll_response_type()
     if not auth_ok:
         status_code = 401
 
     if status_code == 200:
-        results = []
+        # Реалистичный Dineta ответ: {"PARTNER_ID": {"status": 200, "action": "insert", "message": "Created"}}
+        resp_data = {}
         for p in partners:
-            results.append({
-                "id": p.get("id", "?"),
-                "status": "ok",
-                "message": "Partneris sukurtas/atnaujintas",
-            })
-        resp_data = {"status": "ok", "count": count, "results": results}
+            pid = p.get("id", "UNKNOWN")
+            action = random.choice(["insert", "update"])
+            resp_data[pid] = {
+                "status": 200,
+                "action": action,
+                "message": "Created" if action == "insert" else "Updated",
+            }
+        resp = JsonResponse(resp_data, status=200)
 
     elif status_code == 400:
-        error_msg = random.choice(MOCK_ERRORS_PARTNER)
-        if partners and random.random() > 0.5:
-            bad_partner = random.choice(partners)
-            error_msg = f"{error_msg} (partneris: {bad_partner.get('id', '?')})"
-        resp_data = {"error": error_msg}
+        # Реалистичная ошибка
+        mock_err = random.choice(MOCK_ERRORS_PARTNER_400)
+        resp_data = {}
+        for p in partners:
+            pid = p.get("id", "UNKNOWN")
+            resp_data[pid] = dict(mock_err)
+        resp = JsonResponse(resp_data, status=400)
 
     elif status_code == 401:
-        resp_data = {"error": auth_msg if not auth_ok else "Neteisingi prisijungimo duomenys"}
+        resp = HttpResponse(status=401)
+        resp_data = "(no body)"
 
     else:  # 500
-        resp_data = {"error": "Vidine serverio klaida. Bandykite veliau."}
+        resp = HttpResponse(status=500)
+        resp_data = "(no body)"
 
-    _log_request("partner", "POST", f"{count} partner(s)", status_code, resp_data)
-    return JsonResponse(resp_data, status=status_code)
+    preview = f"{len(partners)} partner(s)"
+    _log_request("partner", "POST", preview, status_code, resp_data if status_code in (200, 400) else None)
+    if stats["total"] % 10 == 0:
+        _print_stats()
+    return resp
 
 
 @csrf_exempt
@@ -258,44 +290,50 @@ def handle_stock(request):
 
     body, parse_err = _parse_json_body(request)
     if parse_err:
-        resp_data = {"error": parse_err}
-        _log_request("stock", "POST", None, 400, resp_data)
-        return JsonResponse(resp_data, status=400)
+        _log_request("stock", "POST", None, 400, parse_err)
+        return JsonResponse({"error": parse_err}, status=400)
 
     stock_items = body.get("stock", []) if body else []
-    count = len(stock_items)
 
-    time.sleep(DELAY_SECONDS)
+    time.sleep(cfg.delay_seconds)
 
     status_code = _roll_response_type()
     if not auth_ok:
         status_code = 401
 
     if status_code == 200:
-        results = []
+        resp_data = {}
         for s in stock_items:
-            results.append({
-                "id": s.get("id", "?"),
-                "status": "ok",
-                "message": "Preke sukurta/atnaujinta",
-            })
-        resp_data = {"status": "ok", "count": count, "results": results}
+            sid = str(s.get("id", "UNKNOWN")).upper()
+            action = random.choice(["insert", "update"])
+            resp_data[sid] = {
+                "status": 200,
+                "action": action,
+                "message": "Created" if action == "insert" else "Updated",
+            }
+        resp = JsonResponse(resp_data, status=200)
 
     elif status_code == 400:
-        error_msg = random.choice(MOCK_ERRORS_STOCK)
-        if stock_items and random.random() > 0.5:
-            bad_item = random.choice(stock_items)
-            error_msg = f"{error_msg} (preke: {bad_item.get('id', '?')})"
-        resp_data = {"error": error_msg}
+        resp_data = {}
+        for s in stock_items:
+            sid = str(s.get("id", "UNKNOWN")).upper()
+            mock_err = random.choice(MOCK_ERRORS_STOCK_400)
+            resp_data[sid] = dict(mock_err)
+        resp = JsonResponse(resp_data, status=400)
 
     elif status_code == 401:
-        resp_data = {"error": auth_msg if not auth_ok else "Neteisingi prisijungimo duomenys"}
+        resp = HttpResponse(status=401)
+        resp_data = "(no body)"
 
     else:
-        resp_data = {"error": "Vidine serverio klaida. Bandykite veliau."}
+        resp = HttpResponse(status=500)
+        resp_data = "(no body)"
 
-    _log_request("stock", "POST", f"{count} stock item(s)", status_code, resp_data)
-    return JsonResponse(resp_data, status=status_code)
+    preview = f"{len(stock_items)} item(s)"
+    _log_request("stock", "POST", preview, status_code, resp_data if status_code in (200, 400) else None)
+    if stats["total"] % 10 == 0:
+        _print_stats()
+    return resp
 
 
 @csrf_exempt
@@ -308,49 +346,64 @@ def handle_set_operation(request):
 
     body, parse_err = _parse_json_body(request)
     if parse_err:
-        resp_data = {"error": parse_err}
-        _log_request("setOperation", "POST", None, 400, resp_data)
-        return JsonResponse(resp_data, status=400)
+        _log_request("setOperation", "POST", None, 400, parse_err)
+        return JsonResponse({"error": parse_err}, status=400)
 
     op_id = body.get("id", "?") if body else "?"
     op_type = body.get("op", "?") if body else "?"
     lines_count = len(body.get("stock_lines", [])) if body else 0
-    blank_no = body.get("blankNo", "") if body else ""
-    external_id = body.get("externalDocId", "") if body else ""
+    partner_id = body.get("partnerId", "?") if body else "?"
 
-    time.sleep(DELAY_SECONDS)
+    time.sleep(cfg.delay_seconds)
 
     status_code = _roll_response_type()
     if not auth_ok:
         status_code = 401
 
     if status_code == 200:
-        resp_data = {
-            "status": "ok",
-            "id": op_id,
-            "op": op_type,
-            "message": f"Operacija sukurta: {op_type} (blankNo={blank_no})",
-            "stock_lines_count": lines_count,
-            "externalDocId": external_id,
-        }
+        # Реалистичный ответ: просто строка с ID
+        dineta_id = _next_operation_id()
+        resp = HttpResponse(
+            json.dumps(dineta_id),
+            content_type="application/json",
+            status=200,
+        )
+        resp_data = dineta_id
 
     elif status_code == 400:
-        error_msg = random.choice(MOCK_ERRORS_OPERATION)
-        error_msg = error_msg.replace("UNKNOWN_ID", body.get("partnerId", "?") if body else "?")
-        error_msg = error_msg.replace("BAD_STORE", body.get("storeFromId", "?") if body else "?")
-        error_msg = error_msg.replace("MISSING_CODE", "PREKE001")
-        error_msg = error_msg.replace("BAD_VAT", "PVM99")
-        resp_data = {"error": error_msg, "id": op_id}
+        # HTTP 405 для "already confirmed"
+        if random.random() < 0.2:
+            resp = HttpResponse(
+                json.dumps("Operation is confirmed. Deletion is forbidden!"),
+                content_type="application/json",
+                status=405,
+            )
+            resp_data = "405: Operation confirmed"
+            status_code = 405
+        else:
+            error_msg = random.choice(MOCK_ERRORS_OPERATION_500)
+            error_msg = error_msg.replace("{partner_id}", partner_id)
+            resp = HttpResponse(
+                json.dumps(error_msg),
+                content_type="application/json",
+                status=500,
+            )
+            resp_data = error_msg[:100]
+            status_code = 500
 
     elif status_code == 401:
-        resp_data = {"error": auth_msg if not auth_ok else "Neteisingi prisijungimo duomenys"}
+        resp = HttpResponse(status=401)
+        resp_data = "(no body)"
 
-    else:
-        resp_data = {"error": "Vidine serverio klaida. Bandykite veliau."}
+    else:  # 500
+        resp = HttpResponse(status=500)
+        resp_data = "(no body)"
 
-    preview = f"id={op_id} op={op_type} lines={lines_count}"
+    preview = f"op={op_type} lines={lines_count} partner={partner_id}"
     _log_request("setOperation", "POST", preview, status_code, resp_data)
-    return JsonResponse(resp_data, status=status_code)
+    if stats["total"] % 10 == 0:
+        _print_stats()
+    return resp
 
 
 @csrf_exempt
@@ -358,23 +411,20 @@ def handle_get_store_list(request):
     """POST /<client>/ws/dineta_api/v1/getStoreList/ — проверка подключения."""
     auth_ok, auth_msg = _check_basic_auth(request)
 
-    time.sleep(DELAY_SECONDS * 0.3)  # быстрее остальных
+    time.sleep(cfg.delay_seconds * 0.3)
 
     if not auth_ok:
-        resp_data = {"error": auth_msg}
-        _log_request("getStoreList", "POST", None, 401, resp_data)
-        return JsonResponse(resp_data, status=401)
+        _log_request("getStoreList", "POST", None, 401, auth_msg)
+        return HttpResponse(status=401)
 
     # Всегда успех если auth ок (это проверка подключения)
     resp_data = {
-        "status": "ok",
         "stores": [
-            {"id": "S1", "name": "Pagrindinis sandelis"},
-            {"id": "S2", "name": "Atsarginis sandelis"},
-            {"id": "PIRK", "name": "Pirkimu sandelis"},
+            {"storeid": "S1", "store_name": "Pagrindinis sandėlis"},
+            {"storeid": "S2", "store_name": "Atsarginis sandėlis"},
         ],
     }
-    _log_request("getStoreList", "POST", None, 200, resp_data)
+    _log_request("getStoreList", "POST", None, 200, "2 stores")
     return JsonResponse(resp_data, status=200)
 
 
@@ -382,50 +432,35 @@ def handle_get_store_list(request):
 def handle_catch_all(request, path_rest=""):
     """Ловит все неизвестные endpoints."""
     return JsonResponse({
-        "error": f"Nezinomas endpoint: /ws/dineta_api/{path_rest}",
-        "available_endpoints": [
-            "v1/partner/",
-            "v1/stock/",
-            "v1/setOperation/",
-            "v1/getStoreList/",
-        ],
+        "error": f"Nežinomas endpoint: /ws/dineta_api/{path_rest}",
+        "available": ["v1/partner/", "v1/stock/", "v1/setOperation/", "v1/getStoreList/"],
     }, status=404)
 
 
 @csrf_exempt
 def handle_root(request):
-    """Корневая страница — информация о сервере."""
-    html = f"""<html><body>
-<h2>Dineta API Mock Server</h2>
-<p>Veikiantys endpoint'ai:</p>
-<ul>
-  <li>POST <code>/&lt;client&gt;/ws/dineta_api/v1/partner/</code></li>
-  <li>POST <code>/&lt;client&gt;/ws/dineta_api/v1/stock/</code></li>
-  <li>POST <code>/&lt;client&gt;/ws/dineta_api/v1/setOperation/</code></li>
-  <li>POST <code>/&lt;client&gt;/ws/dineta_api/v1/getStoreList/</code></li>
-</ul>
+    """Корневая страница — статистика."""
+    html = f"""<html><body style="font-family: monospace; background: #1a1a2e; color: #e0e0e0; padding: 20px;">
+<h2 style="color: #00d4aa;">Dineta API Mock Server</h2>
+<h3>Konfigūracija:</h3>
+<pre style="color: #7ec8e3;">
+  Success: {cfg.success_weight}%  |  Error 400: {cfg.error_400_weight}%  |  Error 401: {cfg.error_401_weight}%  |  Error 500: {cfg.error_500_weight}%
+  Delay:   {cfg.delay_seconds}s
+</pre>
 <h3>Statistika:</h3>
-<pre>{json.dumps(stats, indent=2, ensure_ascii=False)}</pre>
-<h3>Test su curl:</h3>
-<pre>
-# Tikrinti prisijungima:
-curl -X POST http://localhost:8878/mock_client/ws/dineta_api/v1/getStoreList/ \\
-  -u test:test -H "Content-Type: application/json"
-
-# Sukurti partneri:
-curl -X POST http://localhost:8878/mock_client/ws/dineta_api/v1/partner/ \\
-  -u test:test -H "Content-Type: application/json" \\
-  -d '{{"partners": [{{"id": "P001", "name": "UAB Testas", "type": "2"}}]}}'
-
-# Sukurti preke:
-curl -X POST http://localhost:8878/mock_client/ws/dineta_api/v1/stock/ \\
-  -u test:test -H "Content-Type: application/json" \\
-  -d '{{"stock": [{{"id": "PRK001", "name": "Bananai", "type": "1", "unitid": "KG"}}]}}'
-
-# Sukurti operacija:
-curl -X POST http://localhost:8878/mock_client/ws/dineta_api/v1/setOperation/ \\
-  -u test:test -H "Content-Type: application/json" \\
-  -d '{{"id": "OP001", "op": "purchase", "blankNo": "SF-001", "partnerId": "P001", "stock_lines": []}}'
+<pre style="color: #ffd700;">{json.dumps(stats, indent=2, ensure_ascii=False)}</pre>
+<h3>Endpoints:</h3>
+<ul>
+  <li>POST <code>/{'{client}'}/ws/dineta_api/v1/partner/</code></li>
+  <li>POST <code>/{'{client}'}/ws/dineta_api/v1/stock/</code></li>
+  <li>POST <code>/{'{client}'}/ws/dineta_api/v1/setOperation/</code></li>
+  <li>POST <code>/{'{client}'}/ws/dineta_api/v1/getStoreList/</code></li>
+</ul>
+<h3>DokSkenas nustatymai:</h3>
+<pre style="color: #00d4aa;">
+  URL:      http://localhost:{PORT}/mock_client/login.php
+  Username: test
+  Password: test
 </pre>
 </body></html>"""
     return HttpResponse(html, content_type="text/html; charset=utf-8", status=200)
@@ -434,8 +469,6 @@ curl -X POST http://localhost:8878/mock_client/ws/dineta_api/v1/setOperation/ \\
 # =========================================================
 # URL routing
 # =========================================================
-# Dineta URL: /{client}/ws/dineta_api/v1/{method}/
-# {client} = любая строка (mock_client, real_client, ...)
 urlpatterns = [
     re_path(r"^[^/]+/ws/dineta_api/v1/partner/?$", handle_partner),
     re_path(r"^[^/]+/ws/dineta_api/v1/stock/?$", handle_stock),
@@ -447,40 +480,101 @@ urlpatterns = [
 
 
 # =========================================================
-# Запуск
+# CLI + Запуск
 # =========================================================
+PORT = 8878  # default, обновляется в main
+
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(
+        description="Dineta API Mock Server",
+        formatter_class=argparse.RawTextHelpFormatter,
+    )
+    parser.add_argument("--port", type=int, default=8878, help="Порт (default: 8878)")
+    parser.add_argument("--success", type=int, default=100,
+                        help="Процент успешных ответов 0-100 (default: 100)")
+    parser.add_argument("--e400", type=int, default=None,
+                        help="Процент ошибок 400 (auto если не указан)")
+    parser.add_argument("--e401", type=int, default=None,
+                        help="Процент ошибок 401 (auto если не указан)")
+    parser.add_argument("--e500", type=int, default=None,
+                        help="Процент ошибок 500 (auto если не указан)")
+    parser.add_argument("--delay", type=float, default=0.0,
+                        help="Задержка перед ответом в секундах (default: 0)")
+
+    args = parser.parse_args()
+
+    # Validate success range
+    success = max(0, min(100, args.success))
+    error_budget = 100 - success
+
+    if args.e400 is not None or args.e401 is not None or args.e500 is not None:
+        # Ручное распределение
+        e400 = args.e400 or 0
+        e401 = args.e401 or 0
+        e500 = args.e500 or 0
+        total = success + e400 + e401 + e500
+        if total != 100:
+            print(f"\n  ⚠ Suma procentų: {total}% (turi būti 100%). Koreguojama automatiškai.")
+            # Нормализуем
+            if total > 0:
+                factor = 100 / total
+                success = int(success * factor)
+                e400 = int(e400 * factor)
+                e401 = int(e401 * factor)
+                e500 = 100 - success - e400 - e401
+    else:
+        # Автоматическое распределение ошибок: 50% → 400, 30% → 401, 20% → 500
+        e400 = int(error_budget * 0.50)
+        e401 = int(error_budget * 0.30)
+        e500 = error_budget - e400 - e401
+
+    cfg.success_weight = success
+    cfg.error_400_weight = e400
+    cfg.error_401_weight = e401
+    cfg.error_500_weight = e500
+    cfg.delay_seconds = args.delay
+    PORT = args.port
+
+    print()
+    print("\033[96m" + "=" * 62 + "\033[0m")
+    print("\033[96m  Dineta API Mock Server v2.0\033[0m")
+    print("\033[96m" + "=" * 62 + "\033[0m")
+    print()
+    print(f"  🌐 http://localhost:{PORT}")
+    print(f"  📡 /<client>/ws/dineta_api/v1/<method>/")
+    print()
+
+    # Цветная полоска процентов
+    bar_len = 40
+    s_len = int(bar_len * success / 100)
+    e4_len = int(bar_len * e400 / 100)
+    e1_len = int(bar_len * e401 / 100)
+    e5_len = bar_len - s_len - e4_len - e1_len
+
+    bar = (
+        f"\033[92m{'█' * s_len}\033[0m"
+        f"\033[93m{'█' * e4_len}\033[0m"
+        f"\033[91m{'█' * e1_len}\033[0m"
+        f"\033[31m{'█' * e5_len}\033[0m"
+    )
+    print(f"  Atsakymai: [{bar}]")
+    print(f"    \033[92m■\033[0m Success: {success}%   "
+          f"\033[93m■\033[0m Error 400: {e400}%   "
+          f"\033[91m■\033[0m Error 401: {e401}%   "
+          f"\033[31m■\033[0m Error 500: {e500}%")
+    if cfg.delay_seconds > 0:
+        print(f"  ⏱ Delay: {cfg.delay_seconds}s")
+    print()
+    print("  ┌─────────────────────────────────────────┐")
+    print("  │  DokSkenas → Nustatymai → Dineta:       │")
+    print(f"  │  URL: http://localhost:{PORT}/mock_client/login.php")
+    print("  │  Username: test                         │")
+    print("  │  Password: test                         │")
+    print("  └─────────────────────────────────────────┘")
+    print()
+    print("  Ctrl+C sustabdyti")
+    print("\033[96m" + "=" * 62 + "\033[0m")
+    print()
+
     from django.core.management import execute_from_command_line
-
-    port = sys.argv[1] if len(sys.argv) > 1 else "8878"
-
-    print("")
-    print("=" * 62)
-    print("  Dineta API Mock Server  (REST/JSON)")
-    print("=" * 62)
-    print("")
-    print(f"  Base URL:  http://localhost:{port}")
-    print(f"  API path:  /<client>/ws/dineta_api/v1/<method>/")
-    print("")
-    print("  Endpoints:")
-    print("    POST /<client>/ws/dineta_api/v1/partner/")
-    print("    POST /<client>/ws/dineta_api/v1/stock/")
-    print("    POST /<client>/ws/dineta_api/v1/setOperation/")
-    print("    POST /<client>/ws/dineta_api/v1/getStoreList/")
-    print("")
-    print(f"  Delay:     {DELAY_SECONDS} sek")
-    print(f"  Success:   {SUCCESS_WEIGHT}%  |  Err400: {ERROR_400_WEIGHT}%"
-          f"  |  Err401: {ERROR_401_WEIGHT}%  |  Err500: {ERROR_500_WEIGHT}%")
-    print("")
-    print("  +-----------------------------------------------+")
-    print("  |  V DokSkenas -> Nustatymai -> Dineta:         |")
-    print(f"  |  URL: http://localhost:{port}/mock_client/login.php")
-    print("  |  Username: test                               |")
-    print("  |  Password: test                               |")
-    print("  +-----------------------------------------------+")
-    print("")
-    print("  Ctrl+C dlia ostanovki")
-    print("=" * 62)
-    print("")
-
-    execute_from_command_line(["mock_server", "runserver", f"0.0.0.0:{port}", "--noreload"])
+    execute_from_command_line(["mock_server", "runserver", f"0.0.0.0:{PORT}", "--noreload"])
