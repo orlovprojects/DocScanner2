@@ -27,6 +27,8 @@ except Exception:
     vision = None
 
 from sklearn.cluster import DBSCAN
+from google.api_core.exceptions import ResourceExhausted, GoogleAPIError
+from celery_signals import _send_telegram
 import logging
 logger = logging.getLogger("docscanner_app")
 
@@ -698,12 +700,45 @@ def get_ocr_text(
         client = vision.ImageAnnotatorClient()
         image = vision.Image(content=data)
         resp = client.document_text_detection(image=image)
+    
+    except ResourceExhausted as e:
+        # 429 — упёрлись в quota (60 req/min) или другой лимит
+        err_msg = f"QUOTA_EXCEEDED: {e}"
+        if logger:
+            logger.error(f"[OCR] Vision API quota exceeded for {filename}: {e}")
+        try:
+            _send_telegram(
+                f"🚨 <b>Vision API quota exceeded (429)</b>\n"
+                f"<b>File:</b> <code>{filename}</code>\n"
+                f"<b>Limit:</b> 60 req/min hit\n"
+                f"<b>Error:</b> {str(e)[:300]}",
+                dedup_key="vision_quota_exceeded",
+                dedup_ttl=300,  # 1 алерт в 5 минут
+            )
+        except Exception as tg_err:
+            if logger:
+                logger.warning(f"[OCR] Failed to send Telegram alert: {tg_err}")
+        return None, None, None, err_msg
+    
     except Exception as e:
         if logger:
             logger.error(f"[OCR] Vision API exception for {filename}: {e}")
         return None, None, None, str(e)
 
     if resp.error.message:
+        # Иногда Vision возвращает quota error внутри resp.error, а не как exception
+        msg_lower = resp.error.message.lower()
+        if "quota" in msg_lower or "exhausted" in msg_lower or "rate" in msg_lower:
+            try:
+                _send_telegram(
+                    f"🚨 <b>Vision API quota error (in response)</b>\n"
+                    f"<b>File:</b> <code>{filename}</code>\n"
+                    f"<b>Error:</b> {resp.error.message[:300]}",
+                    dedup_key="vision_quota_exceeded",
+                    dedup_ttl=300,
+                )
+            except Exception:
+                pass
         if logger:
             logger.error(f"[OCR] Vision API error for {filename}: {resp.error.message}")
         return None, None, None, resp.error.message

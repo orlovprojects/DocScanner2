@@ -5,6 +5,7 @@ import openai  # для совместимого RateLimitError
 from dotenv import load_dotenv
 from google import genai
 from google.genai import types  # для HttpOptions(timeout=...)
+from celery_signals import _send_telegram
 
 # Попытка импортировать типовые исключения rate limit от Google SDK (если доступно)
 try:
@@ -663,11 +664,12 @@ def ask_gemini_with_retry(
     wait_seconds: int = 60,
     temperature: float = 1.0,
     max_output_tokens: int = 20000,
-    timeout_seconds: float | int = 300,  # по умолчанию 5 минут
+    timeout_seconds: float | int = 300,
     logger: logging.Logger | None = None,
 ) -> str:
     """
     Повторяет запрос при Rate Limit / временных сбоях и логирует события.
+    При критических ошибках (исчерпаны retry, spend cap, billing) шлёт Telegram.
     """
     log = logger or LOGGER
     last_exc = None
@@ -683,7 +685,7 @@ def ask_gemini_with_retry(
                 model=model,
                 temperature=temperature,
                 max_output_tokens=max_output_tokens,
-                timeout_seconds=timeout_seconds,  # проброс локального таймаута
+                timeout_seconds=timeout_seconds,
                 logger=log,
             )
             elapsed_attempt = time.perf_counter() - t_attempt
@@ -699,6 +701,10 @@ def ask_gemini_with_retry(
                 exc_info=True,
             )
             last_exc = e
+
+            # Проверяем — это spend cap / billing или обычный rate limit?
+            _notify_gemini_error_if_critical(e, model, log)
+
             if attempt < max_retries:
                 time.sleep(wait_seconds)
                 continue
@@ -727,6 +733,7 @@ def ask_gemini_with_retry(
                     exc_info=True,
                 )
                 last_exc = e
+                _notify_gemini_error_if_critical(e, model, log)
                 if attempt < max_retries:
                     time.sleep(wait_seconds)
                     continue
@@ -735,8 +742,67 @@ def ask_gemini_with_retry(
                 log.exception("[Gemini] Unexpected error after %.2fs", elapsed_attempt)
                 raise
 
+    # Все retry исчерпаны — шлём критический Telegram
     log.error("[Gemini] Exhausted retries. Raising last exception: %r", last_exc)
+    try:
+        _send_telegram(
+            f"🚨 <b>Gemini: все retry исчерпаны</b>\n"
+            f"<b>Model:</b> <code>{model}</code>\n"
+            f"<b>Attempts:</b> {max_retries + 1}\n"
+            f"<b>Last error:</b> {str(last_exc)[:300]}",
+            dedup_key="gemini_retries_exhausted",
+            dedup_ttl=600,  # 10 минут
+        )
+    except Exception:
+        pass
     raise last_exc
+
+
+def _notify_gemini_error_if_critical(exc: Exception, model: str, log) -> None:
+    """
+    Отличает обычный rate limit от критических ошибок (spend cap, billing).
+    Обычный 429 per-minute — игнорируем (он часто случается при пиках).
+    Spend cap / billing — шлём Telegram сразу.
+    """
+    msg = str(exc).lower()
+    
+    # Индикаторы того что это НЕ обычный rate limit а что-то серьёзное
+    critical_markers = [
+        "billing",              # billing account issue
+        "suspended",            # проект заморожен
+        "exceeded the quota",   # превышен дневной лимит (не минутный)
+        "per day",              # per-day quota
+        "spend",                # spend cap
+        "budget",
+        "permission_denied",    # 403
+        "not active",           # billing account not active
+    ]
+    
+    if any(marker in msg for marker in critical_markers):
+        try:
+            _send_telegram(
+                f"🚨 <b>Gemini: критическая ошибка (не обычный rate limit!)</b>\n"
+                f"<b>Model:</b> <code>{model}</code>\n"
+                f"<b>Error:</b> {str(exc)[:400]}\n\n"
+                f"Возможные причины: Spend Cap €100 достигнут / billing issue / daily quota exceeded.\n"
+                f"Проверь AI Studio и Billing.",
+                dedup_key="gemini_critical_error",
+                dedup_ttl=300,  # 5 минут
+            )
+        except Exception as tg_err:
+            log.warning(f"[Gemini] Failed to send critical Telegram: {tg_err}")
+    else:
+        # Обычный rate limit — шлём только раз в 15 минут чтобы знать что пики есть
+        try:
+            _send_telegram(
+                f"⚠️ <b>Gemini rate limit hit</b>\n"
+                f"<b>Model:</b> <code>{model}</code>\n"
+                f"<b>Error:</b> {str(exc)[:200]}",
+                dedup_key="gemini_rate_limit_warning",
+                dedup_ttl=900,  # 15 минут
+            )
+        except Exception:
+            pass
 
 
 

@@ -57,7 +57,7 @@ const marqueeScroll = keyframes`
 
 const faqList = [
   { question: "Kiek trunka vieno dokumento skaitmeninimas?", answer: "Vidutiniškai apie 30 sekundžių." },
-  { question: "Kokius dokumentų tipus galima įkelti?", answer: "DokSkenas priima PDF, PNG ir JPG/JPEG failus. Dokumentai gali būti nuskenuoti arba nufotografuoti." },
+  { question: "Kokius dokumentų tipus galima įkelti?", answer: "DokSkenas priima beveik visus dokumentų ir archyvų failus, tokius kaip: PDF, PNG, JPG/JPEG, Heic, WebP, HTML, ZIP, RAR ir kitų formatų failus. Taip pat galite siųsti Word ir Excel formatais. Dokumentai gali būti nuskenuoti arba nufotografuoti." },
   { question: "Ar DokSkenas atpažįsta užsienio kalbomis išrašytas sąskaitas faktūras?", answer: "Taip." },
   { question: "Kaip sistema užtikrina duomenų saugumą?", answer: "Visi jūsų duomenys yra saugomi saugiuose serveriuose ir šifruojami tiek perdavimo, tiek saugojimo metu. Dokumentų atpažinimui naudojame patikimų partnerių (pvz., Google ir OpenAI) debesų paslaugas, kurios taip pat atitinka aukščiausius saugumo standartus. Apdorojimo metu jūsų informacija nėra perduodama trečiosioms šalims reklamos ar kitiems tikslams. Naudojame tik tiek duomenų, kiek būtina dokumentų skaitmenizavimui, ir laikomės visų ES duomenų apsaugos (GDPR) reikalavimų." },
   { question: "Kaip vyksta atsiskaitymas – ar reikia prenumeratos?", answer: "Po registracijos gausite 50 nemokamų kreditų, kuriuos galėsite panaudoti dokumentų skaitmenizavimui. Kai kreditai baigsis, suvestinėje pamatysite pranešimą su nuoroda į apmokėjimo puslapį, kur galėsite įsigyti daugiau kreditų. 1 dokumentas = 1 kreditas, arba 1,3 kredito, jei skaitmenizuojate kiekybiškai su eilutėmis." },
@@ -418,7 +418,7 @@ const Dokskenas = () => {
             Nuskaito per 30 sekundžių
           </Box>
 
-          {/* H1 — Fraunces serif with italic orange underlined accent word */}
+          {/* H1 - Fraunces serif with italic orange underlined accent word */}
           <Typography
             variant="h1"
             sx={{
@@ -538,7 +538,7 @@ const Dokskenas = () => {
 
           {/* Microcopy */}
           <Typography sx={{ fontSize: '13px', fontFamily: 'Helvetica', color: '#6b6660', marginTop: 2 }}>
-            Pirmi 50 skaitmenizavimų — nemokamai
+            Pirmi 50 skaitmenizavimų - nemokamai
           </Typography>
 
           {/* Rating */}
@@ -922,7 +922,7 @@ const Dokskenas = () => {
             {
               Icon: ContentCopyIcon,
               title: 'Dublikatų paieška',
-              desc: 'Suranda dublikatus bei netinkamus dokumentus — už juos mokėti nereikės.',
+              desc: 'Suranda dublikatus bei netinkamus dokumentus - už juos mokėti nereikės.',
             },
             {
               Icon: DomainVerificationIcon,
@@ -942,7 +942,7 @@ const Dokskenas = () => {
             {
               Icon: DynamicFeedIcon,
               title: 'Masinis apdorojimas',
-              desc: 'Vienu metu gali apdoroti tūkstančius dokumentų — be eilių, be laukimo.',
+              desc: 'Vienu metu gali apdoroti tūkstančius dokumentų - be eilių, be laukimo.',
             },
             {
               Icon: GppGoodIcon,
@@ -1137,7 +1137,7 @@ const Dokskenas = () => {
               lineHeight: 1.55,
             }}
           >
-            Tas pats darbas — du visiškai skirtingi keliai.
+            Tas pats darbas - du visiškai skirtingi keliai.
           </Typography>
         </Box>
 
@@ -1353,7 +1353,7 @@ const Dokskenas = () => {
                     maxWidth: '20ch',
                   }}
                 >
-                  tai pačiai krūvai —<br />kol jūs geriate kavą
+                  tai pačiai krūvai -<br />kol jūs geriate kavą
                 </Typography>
               </Box>
 
@@ -1362,7 +1362,7 @@ const Dokskenas = () => {
                 {[
                   '500 sąskaitų skaitmenizuoja per mažiau nei 1 valandą',
                   'Nereikia atskiro žmogaus',
-                  '0,2% klaidų tikimybė — sumos sutikrinamos ir pataisomos',
+                  '0,2% klaidų tikimybė - sumos sutikrinamos ir pataisomos',
                   'Pati suranda klaidas dokumentuose',
                   'Šiuolaikiškas apskaitos vedimo būdas',
                 ].map((item, i) => (
@@ -1700,7 +1700,7 @@ const Dokskenas = () => {
                 marginBottom: 0.5,
               }}
             >
-              Pirmieji <Box component="span" sx={{ fontStyle: 'italic', color: ACCENT }}>50 skaitmenizavimų</Box> — nemokami
+              Pirmieji <Box component="span" sx={{ fontStyle: 'italic', color: ACCENT }}>50 skaitmenizavimų</Box> - nemokami
             </Typography>
             <Typography
               sx={{
@@ -1952,7 +1952,7 @@ export default Dokskenas;
 //                   );
 //                 }
 
-//                 // Иначе — просто абзацы
+//                 // Иначе - просто абзацы
 //                 return lines.map((chunk, i) =>
 //                   chunk.trim() ? <p key={i}>{chunk}</p> : null
 //                 );
@@ -2177,7 +2177,7 @@ export default Dokskenas;
 //         </Box>
 //       </Stack>
 
-//       {/* Section — How It Works */}
+//       {/* Section - How It Works */}
 //       <Box
 //         id="kaip-veikia"
 //         sx={{
@@ -2274,7 +2274,7 @@ export default Dokskenas;
 //         </Box>
 //       </Box>
 
-//       {/* Section — Mini Features Grid */}
+//       {/* Section - Mini Features Grid */}
 //       <Box
 //         id="ka-moka"
 //         sx={{
@@ -2359,7 +2359,7 @@ export default Dokskenas;
 //         </Box>
 //       </Box>
 
-//       {/* Section — Pricing */}
+//       {/* Section - Pricing */}
 //       <Box
 //         id="kainos"
 //         sx={{

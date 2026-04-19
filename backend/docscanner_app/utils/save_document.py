@@ -275,6 +275,21 @@ def _apply_top_level_fields(
     db_doc.document_number = normalize_code_field(doc_struct.get("document_number"))
     db_doc.order_number = doc_struct.get("order_number")
 
+    # --- Фоллбэк: если дата счёта пустая но есть дата операции — ставим обе одинаковые ---
+    if not db_doc.invoice_date and db_doc.operation_date:
+        db_doc.invoice_date = db_doc.operation_date
+    elif not db_doc.operation_date and db_doc.invoice_date:
+        db_doc.operation_date = db_doc.invoice_date
+
+    # --- Фоллбэк: номер счёта ---
+    # 1) если номер пустой но есть номер заказа — берём номер заказа
+    # 2) если и номер и заказ пустые но есть серия — берём серию
+    if not (db_doc.document_number or "").strip():
+        if (db_doc.order_number or "").strip():
+            db_doc.document_number = db_doc.order_number
+        elif (db_doc.document_series or "").strip():
+            db_doc.document_number = db_doc.document_series
+
     db_doc.amount_wo_vat = doc_struct.get("amount_wo_vat")
     db_doc.invoice_discount_with_vat = doc_struct.get("invoice_discount_with_vat")
     db_doc.invoice_discount_wo_vat = doc_struct.get("invoice_discount_wo_vat")

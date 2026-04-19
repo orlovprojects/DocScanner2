@@ -5,6 +5,12 @@ from celery.signals import task_failure, task_success, task_prerun
 
 logger = logging.getLogger("celery_beat_monitor")
 
+# Redis для дедупликации алертов (опционально, если не доступен — работаем без)
+try:
+    from django.core.cache import cache as _cache
+except Exception:
+    _cache = None
+
 MONITORED_TASKS = {
     "process_recurring_invoices",
     "send_payment_reminders",
@@ -15,7 +21,23 @@ MONITORED_TASKS = {
 }
 
 
-def _send_telegram(message):
+def _send_telegram(message, dedup_key=None, dedup_ttl=300):
+    """
+    Отправка сообщения в Telegram.
+    
+    dedup_key: если указан, не шлёт повторно тот же ключ в течение dedup_ttl секунд.
+                Защита от спама при массовых ошибках (например, quota exhausted).
+    dedup_ttl: TTL дедупликации в секундах (default 300 = 5 минут).
+    """
+    if dedup_key and _cache is not None:
+        try:
+            cache_key = f"tg_dedup:{dedup_key}"
+            # cache.add вернёт False если ключ уже существует
+            if not _cache.add(cache_key, "1", timeout=dedup_ttl):
+                return  # уже отправляли недавно — скип
+        except Exception:
+            pass  # если cache недоступен — шлём как обычно
+
     token = getattr(settings, "TELEGRAM_BOT_TOKEN", "")
     chat_id = getattr(settings, "TELEGRAM_CHAT_ID", "")
     if not token or not chat_id:

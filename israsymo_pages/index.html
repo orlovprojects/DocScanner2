@@ -4,1110 +4,1438 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 
-    <title>Sąskaitų išrašymas internetu | Nemokamos PVM sąskaitos faktūros</title>
-    <meta name="description" content="Išrašykite PVM sąskaitas faktūras internetu per 30 sekundžių. Nemokamas planas, PDF sąskaitos, siuntimas el. paštu, i.SAF ir apskaitos programų eksportas." />
-    <meta name="keywords" content="sąskaitų išrašymas, PVM sąskaita faktūra, sąskaita internetu, nemokama sąskaitų programa, i.SAF eksportas" />
+    <title>Išmanus sąskaitų išrašymas internetu - saskaituisrasymas.lt</title>
+    <meta name="description" content="Išrašyk sąskaitas faktūras išmaniai internetu. Duomenis galėsi eksportuoti į savo apskaitos programą, tad nereikės vesti ranka." />
     <link rel="canonical" href="https://saskaituisrasymas.lt/" />
 
-    <meta name="theme-color" content="#6d28d9" />
-    <link rel="icon" type="image/svg+xml" href="/assets/favicon.svg" />
-    <link rel="shortcut icon" href="/assets/favicon.svg" />
+    <meta name="theme-color" content="#0b3d2e" />
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'%3E%3Crect x='3' y='3' width='42' height='42' rx='10' fill='%230b3d2e'/%3E%3Cpath d='M14 14h16l5 5v15H14z' fill='%23f6f1e7'/%3E%3Cpath d='M30 14v5h5' stroke='%230b3d2e' stroke-width='1.5' fill='none'/%3E%3Cline x1='18' y1='24' x2='31' y2='24' stroke='%230b3d2e' stroke-width='2' stroke-linecap='round'/%3E%3Cline x1='18' y1='28' x2='31' y2='28' stroke='%230b3d2e' stroke-width='2' stroke-linecap='round'/%3E%3Cline x1='18' y1='32' x2='26' y2='32' stroke='%230b3d2e' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E" />
+    <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'%3E%3Crect x='3' y='3' width='42' height='42' rx='10' fill='%230b3d2e'/%3E%3Cpath d='M14 14h16l5 5v15H14z' fill='%23f6f1e7'/%3E%3Cpath d='M30 14v5h5' stroke='%230b3d2e' stroke-width='1.5' fill='none'/%3E%3Cline x1='18' y1='24' x2='31' y2='24' stroke='%230b3d2e' stroke-width='2' stroke-linecap='round'/%3E%3Cline x1='18' y1='28' x2='31' y2='28' stroke='%230b3d2e' stroke-width='2' stroke-linecap='round'/%3E%3Cline x1='18' y1='32' x2='26' y2='32' stroke='%230b3d2e' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E" />
 
-    <meta property="og:title" content="Sąskaitų išrašymas internetu | Nemokamos PVM sąskaitos faktūros" />
-    <meta property="og:description" content="Išrašykite PVM sąskaitas faktūras internetu per 30 sekundžių. Nemokamas planas, PDF sąskaitos, siuntimas el. paštu, i.SAF ir apskaitos programų eksportas." />
+    <meta property="og:title" content="Išmanus sąskaitų išrašymas internetu" />
+    <meta property="og:description" content="Išrašyk sąskaitas faktūras išmaniai internetu. Duomenis galėsi eksportuoti į savo apskaitos programą, tad nereikės vesti ranka." />
     <meta property="og:url" content="https://saskaituisrasymas.lt/" />
     <meta property="og:type" content="website" />
     <meta property="og:locale" content="lt_LT" />
 
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,500;0,600;0,700;0,800;1,400;1,500;1,600;1,700&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
     <style>
         :root {
-            --bg: #f8fafc;
-            --surface: #ffffff;
-            --surface-2: #f1f5f9;
-            --text: #0f172a;
-            --muted: #475569;
-            --line: #e2e8f0;
-            --primary: #7c3aed;
-            --primary-2: #4f46e5;
-            --primary-dark: #5b21b6;
-            --success: #16a34a;
-            --shadow: 0 12px 30px rgba(15, 23, 42, 0.08);
-            --radius: 20px;
-            --radius-sm: 14px;
-            --container: 1180px;
+            --bg: #f6f1e7;
+            --bg-alt: #efe7d5;
+            --ink: #0b1b14;
+            --ink-soft: #3d4a42;
+            --muted: #6b7a6f;
+            --line: #d9cfb8;
+            --accent: #0b3d2e;
+            --accent-2: #13694f;
+            --accent-soft: #dfe8df;
+            --highlight: #c4582e;
+            --card: #fffaf0;
+            --shadow: 0 16px 40px rgba(11, 27, 20, 0.08);
+            --radius: 22px;
+            --radius-sm: 12px;
+            --container: 1200px;
+            --serif: "Playfair Display", Georgia, "Times New Roman", serif;
+            --sans: "Inter", -apple-system, system-ui, sans-serif;
         }
 
-        * {
-            box-sizing: border-box;
-        }
-
-        html {
-            scroll-behavior: smooth;
-        }
+        * { box-sizing: border-box; }
+        html { scroll-behavior: smooth; }
 
         body {
             margin: 0;
-            font-family: Inter, Arial, sans-serif;
-            color: var(--text);
+            font-family: var(--sans);
+            color: var(--ink);
             background: var(--bg);
             line-height: 1.6;
+            -webkit-font-smoothing: antialiased;
         }
 
-        a {
-            color: inherit;
-            text-decoration: none;
-        }
+        a { color: inherit; text-decoration: none; }
+        img, svg { display: block; max-width: 100%; }
 
-        img,
-        svg {
-            display: block;
-            max-width: 100%;
+        h1, h2, h3 {
+            font-family: var(--serif);
+            font-weight: 600;
+            letter-spacing: -0.02em;
+            line-height: 1.08;
         }
 
         .container {
-            width: min(var(--container), calc(100% - 32px));
+            width: min(var(--container), calc(100% - 40px));
             margin: 0 auto;
         }
 
-        .section {
-            padding: 88px 0;
+        .section { padding: 110px 0; }
+
+        .section-head {
+            max-width: 720px;
+            margin: 0 0 64px;
         }
 
-        .section-header {
-            max-width: 760px;
-            margin: 0 auto 48px;
+        .section-head.center {
+            margin-left: auto;
+            margin-right: auto;
             text-align: center;
         }
 
-        .section-header h2 {
-            margin: 0 0 12px;
-            font-size: clamp(30px, 4vw, 44px);
-            line-height: 1.12;
+        .section-head h2 {
+            margin: 0 0 16px;
+            font-size: clamp(34px, 4.5vw, 56px);
         }
 
-        .section-header p {
+        .section-head p {
             margin: 0;
-            font-size: 18px;
+            font-size: 19px;
             color: var(--muted);
+            max-width: 640px;
         }
+
+        .section-head.center p { margin: 0 auto; }
 
         .eyebrow {
             display: inline-flex;
             align-items: center;
-            gap: 8px;
-            padding: 8px 14px;
-            border-radius: 999px;
-            background: #ede9fe;
-            color: #6d28d9;
-            font-size: 14px;
+            gap: 10px;
+            font-family: var(--sans);
+            font-size: 13px;
             font-weight: 700;
-            margin-bottom: 18px;
+            text-transform: uppercase;
+            letter-spacing: 0.12em;
+            color: var(--accent);
+            margin-bottom: 22px;
         }
 
+        .eyebrow::before {
+            content: "";
+            width: 28px;
+            height: 1px;
+            background: var(--accent);
+        }
+
+        /* Buttons */
         .btn {
             display: inline-flex;
             align-items: center;
             justify-content: center;
             gap: 10px;
             min-height: 54px;
-            padding: 0 24px;
-            border-radius: 14px;
-            border: 1px solid transparent;
-            font-weight: 800;
-            transition: 0.2s ease;
+            padding: 0 28px;
+            border-radius: 999px;
+            font-family: var(--sans);
+            font-weight: 700;
+            font-size: 15px;
+            border: 1.5px solid transparent;
             cursor: pointer;
+            transition: all 0.25s ease;
             white-space: nowrap;
         }
 
-        .btn:hover {
-            transform: translateY(-1px);
-        }
-
         .btn-primary {
+            background: var(--accent);
             color: #fff;
-            background: linear-gradient(90deg, var(--primary) 0%, var(--primary-2) 100%);
-            box-shadow: 0 14px 28px rgba(109, 40, 217, 0.22);
         }
 
         .btn-primary:hover {
-            background: linear-gradient(90deg, var(--primary-dark) 0%, #4338ca 100%);
+            background: var(--accent-2);
+            transform: translateY(-2px);
+            box-shadow: 0 12px 24px rgba(11, 61, 46, 0.25);
         }
 
-        .btn-secondary {
-            background: #fff;
-            color: var(--text);
-            border-color: var(--line);
+        .btn-ghost {
+            background: transparent;
+            color: var(--ink);
+            border-color: var(--ink);
         }
 
-        .btn-secondary:hover {
-            background: var(--surface-2);
+        .btn-ghost:hover {
+            background: var(--ink);
+            color: var(--bg);
         }
 
         .btn-large {
-            min-height: 58px;
-            padding: 0 28px;
+            min-height: 60px;
+            padding: 0 34px;
             font-size: 16px;
         }
 
+        /* Header */
         .site-header {
             position: sticky;
             top: 0;
-            z-index: 50;
-            background: rgba(255, 255, 255, 0.88);
-            backdrop-filter: blur(14px);
-            border-bottom: 1px solid rgba(226, 232, 240, 0.9);
+            z-index: 60;
+            background: rgba(246, 241, 231, 0.92);
+            backdrop-filter: blur(16px);
+            border-bottom: 1px solid var(--line);
         }
 
         .header-inner {
             display: flex;
             align-items: center;
             justify-content: space-between;
-            gap: 20px;
-            min-height: 92px;
+            gap: 24px;
+            min-height: 88px;
         }
 
         .logo {
             display: inline-flex;
             align-items: center;
             gap: 12px;
-            font-weight: 800;
-            font-size: 20px;
+            font-family: var(--serif);
+            font-size: 22px;
+            font-weight: 700;
+            color: var(--ink);
             letter-spacing: -0.02em;
         }
 
         .logo-mark {
-            width: 44px;
-            height: 44px;
-            flex: 0 0 44px;
-        }
-
-        .logo-text {
-            white-space: nowrap;
+            width: 42px;
+            height: 42px;
+            flex: 0 0 42px;
         }
 
         .nav {
             display: flex;
             align-items: center;
-            gap: 22px;
-        }
-
-        .nav-links {
-            display: flex;
-            align-items: center;
-            gap: 20px;
+            gap: 32px;
         }
 
         .nav-link {
-            color: var(--muted);
-            font-weight: 700;
+            color: var(--ink-soft);
+            font-weight: 500;
+            font-size: 15px;
+            transition: color 0.2s;
+        }
+
+        .nav-link:hover { color: var(--accent); }
+
+        .header-cta {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .login-text {
+            color: var(--ink);
+            font-weight: 600;
             font-size: 15px;
         }
 
-        .nav-link:hover {
-            color: var(--text);
-        }
+        .login-text:hover { color: var(--accent); }
 
-        .header-actions {
-            display: flex;
-            align-items: center;
-            gap: 22px;
-            margin-left: 8px;
-        }
-
-        .header-cta {
-            min-width: 270px;
-            min-height: 60px;
-            padding: 0 30px;
-            border-radius: 12px;
-            font-size: 18px;
-            letter-spacing: -0.01em;
-        }
-
-        .login-link {
-            display: inline-flex;
-            align-items: center;
-            gap: 12px;
-            font-size: 20px;
-            font-weight: 800;
-            color: #000;
-        }
-
-        .login-link:hover {
-            color: var(--primary-dark);
-        }
-
-        .login-link svg {
-            width: 32px;
-            height: 32px;
-            flex: 0 0 32px;
-        }
-
+        /* Hero */
         .hero {
             position: relative;
+            padding: 100px 0 90px;
             overflow: hidden;
-            padding: 84px 0 72px;
-            background:
-                radial-gradient(circle at top left, rgba(124, 58, 237, 0.11), transparent 30%),
-                radial-gradient(circle at top right, rgba(79, 70, 229, 0.09), transparent 24%),
-                linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
         }
 
-        .hero-grid {
+        .hero::before {
+            content: "";
+            position: absolute;
+            top: -200px;
+            right: -200px;
+            width: 600px;
+            height: 600px;
+            background: radial-gradient(circle, rgba(11, 61, 46, 0.06), transparent 70%);
+            border-radius: 50%;
+            pointer-events: none;
+        }
+
+        .hero-inner {
+            position: relative;
             display: grid;
-            grid-template-columns: 1.15fr 0.85fr;
-            gap: 36px;
+            grid-template-columns: 1.3fr 1fr;
+            gap: 60px;
             align-items: center;
         }
 
         .hero h1 {
-            margin: 0 0 18px;
-            font-size: clamp(38px, 6vw, 64px);
-            line-height: 1.02;
-            letter-spacing: -0.04em;
+            font-size: clamp(44px, 6.5vw, 82px);
+            margin: 0 0 24px;
         }
 
-        .hero h1 .highlight {
-            color: var(--primary);
+        .hero h1 em {
+            font-style: italic;
+            font-weight: 500;
+            color: var(--accent);
         }
 
-        .hero-subtitle {
-            max-width: 700px;
-            margin: 0 0 28px;
+        .hero-lead {
             font-size: 20px;
-            color: var(--muted);
+            color: var(--ink-soft);
+            max-width: 580px;
+            margin: 0 0 36px;
+            line-height: 1.55;
         }
 
         .hero-actions {
             display: flex;
             flex-wrap: wrap;
             gap: 14px;
-            margin-bottom: 24px;
+            margin-bottom: 40px;
         }
 
-        .hero-points {
+        .hero-proof {
             display: flex;
-            flex-wrap: wrap;
-            gap: 12px;
+            gap: 40px;
+            padding-top: 32px;
+            border-top: 1px solid var(--line);
+            max-width: 540px;
         }
 
-        .hero-point {
-            display: inline-flex;
-            align-items: center;
-            gap: 8px;
-            padding: 10px 14px;
-            background: #fff;
-            border: 1px solid var(--line);
-            border-radius: 999px;
-            color: var(--muted);
-            font-weight: 600;
-            box-shadow: var(--shadow);
-        }
-
-        .hero-card {
-            background: #fff;
-            border: 1px solid var(--line);
-            border-radius: 24px;
-            box-shadow: var(--shadow);
-            padding: 26px;
-        }
-
-        .hero-card-top {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            gap: 16px;
-            margin-bottom: 18px;
-        }
-
-        .hero-card-title {
-            font-size: 15px;
-            font-weight: 700;
-            color: var(--muted);
-        }
-
-        .status-badge {
-            padding: 8px 12px;
-            border-radius: 999px;
-            background: #dcfce7;
-            color: #166534;
-            font-size: 13px;
-            font-weight: 800;
-        }
-
-        .invoice-preview {
-            display: grid;
-            gap: 14px;
-        }
-
-        .preview-block {
-            padding: 16px;
-            border-radius: 16px;
-            background: var(--surface-2);
-            border: 1px solid var(--line);
-        }
-
-        .preview-row {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            gap: 12px;
-            margin-bottom: 8px;
-        }
-
-        .preview-row:last-child {
-            margin-bottom: 0;
-        }
-
-        .preview-label {
-            color: var(--muted);
-            font-size: 14px;
-        }
-
-        .preview-value {
-            font-weight: 700;
-        }
-
-        .metrics {
-            display: grid;
-            grid-template-columns: repeat(3, 1fr);
-            gap: 18px;
-            margin-top: 28px;
-        }
-
-        .metric {
-            background: #fff;
-            border: 1px solid var(--line);
-            border-radius: 18px;
-            padding: 22px;
-            text-align: center;
-            box-shadow: var(--shadow);
-        }
-
-        .metric strong {
+        .hero-proof-item strong {
             display: block;
-            font-size: 28px;
-            line-height: 1.1;
+            font-family: var(--serif);
+            font-size: 30px;
+            font-weight: 700;
+            color: var(--accent);
+            line-height: 1;
             margin-bottom: 6px;
         }
 
-        .metric span {
+        .hero-proof-item span {
+            font-size: 13px;
             color: var(--muted);
-            font-weight: 600;
-            font-size: 14px;
+            line-height: 1.4;
+            display: block;
         }
 
-        .cards-3 {
-            display: grid;
-            grid-template-columns: repeat(3, 1fr);
-            gap: 22px;
-        }
-
-        .card {
-            background: #fff;
-            border: 1px solid var(--line);
-            border-radius: 22px;
-            padding: 28px;
-            box-shadow: var(--shadow);
-        }
-
-        .feature-icon {
-            width: 52px;
-            height: 52px;
-            display: grid;
-            place-items: center;
-            border-radius: 16px;
-            background: #f3e8ff;
-            color: var(--primary);
-            font-size: 24px;
-            margin-bottom: 16px;
-        }
-
-        .card h3 {
-            margin: 0 0 10px;
-            font-size: 22px;
-            line-height: 1.2;
-        }
-
-        .card p {
-            margin: 0;
-            color: var(--muted);
-        }
-
-        .steps {
-            counter-reset: step;
-        }
-
-        .step {
+        /* Hero visual - realistic invoice */
+        .hero-visual {
             position: relative;
-            padding-top: 22px;
         }
 
-        .step::before {
-            counter-increment: step;
-            content: counter(step);
+        .invoice {
+            background: #ffffff;
+            border: 1px solid var(--line);
+            border-radius: 14px;
+            box-shadow: 0 30px 60px rgba(11, 27, 20, 0.12), 0 8px 20px rgba(11, 27, 20, 0.06);
+            padding: 38px 36px 32px;
+            font-family: var(--sans);
+            color: var(--ink);
+            position: relative;
+            font-size: 12px;
+            line-height: 1.5;
+        }
+
+        .invoice::before {
+            content: "";
             position: absolute;
             top: 0;
             left: 0;
+            right: 0;
+            height: 6px;
+            background: var(--accent);
+            border-radius: 14px 14px 0 0;
+        }
+
+        .inv-top {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 26px;
+        }
+
+        .inv-title {
+            font-family: var(--serif);
+            font-size: 22px;
+            font-weight: 700;
+            letter-spacing: -0.02em;
+            margin: 0 0 4px;
+        }
+
+        .inv-num {
+            font-size: 11px;
+            color: var(--muted);
+            font-family: 'SF Mono', 'Courier New', monospace;
+            letter-spacing: 0.02em;
+        }
+
+        .inv-logo {
             width: 42px;
             height: 42px;
+            border-radius: 10px;
+            background: var(--accent);
             display: grid;
             place-items: center;
-            border-radius: 999px;
-            background: var(--text);
             color: #fff;
+            font-family: var(--serif);
+            font-size: 18px;
+            font-weight: 700;
+            font-style: italic;
+        }
+
+        .inv-parties {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 24px;
+            padding-bottom: 22px;
+            border-bottom: 1px solid var(--line);
+            margin-bottom: 22px;
+        }
+
+        .inv-party-label {
+            font-size: 9px;
+            text-transform: uppercase;
+            letter-spacing: 0.12em;
+            color: var(--muted);
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+
+        .inv-party-name {
+            font-weight: 700;
+            font-size: 13px;
+            margin-bottom: 4px;
+            line-height: 1.3;
+        }
+
+        .inv-party-line {
+            font-size: 11px;
+            color: var(--muted);
+            line-height: 1.5;
+        }
+
+        .inv-meta {
+            display: flex;
+            gap: 22px;
+            margin-bottom: 22px;
+            font-size: 11px;
+        }
+
+        .inv-meta div strong {
+            display: block;
+            color: var(--ink);
+            font-weight: 600;
+            margin-top: 2px;
+        }
+
+        .inv-meta div span {
+            color: var(--muted);
+            font-size: 9px;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            font-weight: 600;
+        }
+
+        .inv-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 20px;
+        }
+
+        .inv-table thead th {
+            text-align: left;
+            font-size: 9px;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            color: var(--muted);
+            font-weight: 600;
+            padding: 0 0 10px;
+            border-bottom: 1px solid var(--line);
+        }
+
+        .inv-table thead th:last-child,
+        .inv-table tbody td:last-child { text-align: right; }
+
+        .inv-table tbody td {
+            padding: 11px 0;
+            border-bottom: 1px solid #f0ead9;
+            font-size: 12px;
+        }
+
+        .inv-table tbody tr:last-child td { border-bottom: none; }
+
+        .inv-table .desc { font-weight: 500; }
+        .inv-table .qty, .inv-table .price { color: var(--muted); }
+        .inv-table .amt { font-weight: 600; }
+
+        .inv-sum {
+            margin-left: auto;
+            width: 56%;
+            font-size: 11px;
+        }
+
+        .inv-sum-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 6px 0;
+            color: var(--muted);
+        }
+
+        .inv-sum-row strong { color: var(--ink); font-weight: 600; }
+
+        .inv-sum-row.total {
+            margin-top: 6px;
+            padding-top: 14px;
+            border-top: 2px solid var(--ink);
+            font-size: 14px;
+        }
+
+        .inv-sum-row.total span:first-child {
+            font-family: var(--serif);
+            font-weight: 700;
+            color: var(--ink);
+        }
+
+        .inv-sum-row.total span:last-child {
+            font-family: var(--serif);
+            font-size: 20px;
+            font-weight: 700;
+            color: var(--accent);
+            letter-spacing: -0.01em;
+        }
+
+        .inv-pay {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 14px;
+            margin-top: 24px;
+            padding: 14px 14px 14px 18px;
+            background: var(--accent);
+            border-radius: 12px;
+            color: #fff;
+            text-decoration: none;
+            transition: all 0.25s ease;
+            box-shadow: 0 8px 20px rgba(11, 61, 46, 0.25);
+        }
+
+        .inv-pay:hover {
+            background: var(--accent-2);
+            transform: translateY(-2px);
+            box-shadow: 0 12px 26px rgba(11, 61, 46, 0.32);
+        }
+
+        .inv-pay-text {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+
+        .inv-pay-text small {
+            font-size: 9px;
+            text-transform: uppercase;
+            letter-spacing: 0.12em;
+            opacity: 0.7;
+            font-weight: 600;
+        }
+
+        .inv-pay-text strong {
+            font-size: 14px;
+            font-weight: 700;
+        }
+
+        .inv-pay-btn {
+            background: #fff;
+            color: var(--accent);
+            font-size: 12px;
+            font-weight: 700;
+            padding: 10px 16px;
+            border-radius: 8px;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            white-space: nowrap;
+        }
+
+        .inv-pay-btn svg {
+            width: 14px;
+            height: 14px;
+        }
+
+        .inv-float {
+            position: absolute;
+            top: 22px;
+            right: -14px;
+            background: #dfe8df;
+            color: var(--accent);
+            font-size: 9px;
             font-weight: 800;
+            text-transform: uppercase;
+            letter-spacing: 0.14em;
+            padding: 8px 14px;
+            border-radius: 999px;
+            box-shadow: 0 6px 14px rgba(11, 61, 46, 0.12);
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            z-index: 2;
+        }
+
+        .inv-float::before {
+            content: "";
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: var(--accent);
+            box-shadow: 0 0 0 3px rgba(11, 61, 46, 0.15);
+        }
+
+        /* Bento features */
+        .bento {
+            display: grid;
+            grid-template-columns: repeat(6, 1fr);
+            gap: 20px;
+        }
+
+        .bento-item {
+            background: var(--card);
+            border: 1px solid var(--line);
+            border-radius: var(--radius);
+            padding: 36px;
+            transition: all 0.3s ease;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .bento-item:hover {
+            transform: translateY(-4px);
+            box-shadow: var(--shadow);
+            border-color: var(--accent);
+        }
+
+        .bento-item.wide { grid-column: span 4; }
+        .bento-item.half { grid-column: span 2; }
+        .bento-item.third { grid-column: span 2; }
+        .bento-item.big { grid-column: span 3; }
+
+        .bento-num {
+            font-family: var(--serif);
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--accent);
+            letter-spacing: 0.1em;
+            margin-bottom: 18px;
+            display: block;
+        }
+
+        .bento-item h3 {
+            margin: 0 0 12px;
+            font-size: 24px;
+        }
+
+        .bento-item.wide h3 { font-size: 30px; }
+
+        .bento-item p {
+            margin: 0;
+            color: var(--muted);
+            font-size: 15px;
+            line-height: 1.6;
+        }
+
+        .bento-item.accent {
+            background: var(--accent);
+            color: var(--bg);
+            border-color: var(--accent);
+        }
+
+        .bento-item.accent h3,
+        .bento-item.accent .bento-num { color: var(--bg); }
+        .bento-item.accent p { color: rgba(246, 241, 231, 0.75); }
+
+        /* Steps */
+        .steps-section {
+            background: var(--ink);
+            color: var(--bg);
+        }
+
+        .steps-section .section-head h2 { color: var(--bg); }
+        .steps-section .section-head p { color: rgba(246, 241, 231, 0.7); }
+        .steps-section .eyebrow { color: #a5c9b5; }
+        .steps-section .eyebrow::before { background: #a5c9b5; }
+
+        .steps-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 40px;
+            margin-top: 20px;
+        }
+
+        .step {
+            padding-top: 32px;
+            border-top: 1px solid rgba(246, 241, 231, 0.2);
+        }
+
+        .step-num {
+            font-family: var(--serif);
+            font-size: 72px;
+            font-weight: 300;
+            line-height: 1;
+            color: #a5c9b5;
+            margin-bottom: 24px;
+            font-style: italic;
         }
 
         .step h3 {
-            margin: 34px 0 10px;
+            margin: 0 0 14px;
+            font-size: 26px;
+            color: var(--bg);
         }
 
-        .pricing {
-            background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+        .step p {
+            margin: 0;
+            color: rgba(246, 241, 231, 0.7);
+            font-size: 15px;
         }
+
+        /* Pricing */
+        .pricing { background: var(--bg-alt); }
 
         .pricing-grid {
             display: grid;
             grid-template-columns: repeat(2, 1fr);
-            gap: 24px;
+            gap: 28px;
             align-items: stretch;
         }
 
-        .price-card {
-            position: relative;
-            background: #fff;
+        .plan {
+            background: var(--card);
             border: 1px solid var(--line);
-            border-radius: 24px;
-            padding: 30px;
-            box-shadow: var(--shadow);
+            border-radius: var(--radius);
+            padding: 44px 40px;
+            display: flex;
+            flex-direction: column;
+            position: relative;
         }
 
-        .price-card.recommended {
-            border: 2px solid var(--primary);
-            transform: translateY(-4px);
+        .plan.featured {
+            background: var(--ink);
+            color: var(--bg);
+            border-color: var(--ink);
         }
 
-        .recommended-badge {
+        .plan-tag {
             position: absolute;
-            top: 18px;
-            right: 18px;
-            padding: 8px 12px;
-            border-radius: 999px;
-            background: #ede9fe;
-            color: #6d28d9;
-            font-size: 12px;
+            top: 24px;
+            right: 24px;
+            background: var(--highlight);
+            color: #fff;
+            font-size: 11px;
             font-weight: 800;
+            letter-spacing: 0.1em;
             text-transform: uppercase;
-            letter-spacing: 0.04em;
+            padding: 7px 12px;
+            border-radius: 999px;
         }
 
-        .plan-name {
-            margin: 0 0 10px;
-            font-size: 28px;
+        .plan h3 {
+            margin: 0 0 8px;
+            font-size: 32px;
         }
+
+        .plan-sub {
+            color: var(--muted);
+            font-size: 14px;
+            margin-bottom: 28px;
+        }
+
+        .plan.featured .plan-sub { color: rgba(246, 241, 231, 0.6); }
 
         .plan-price {
-            display: flex;
-            align-items: flex-end;
-            gap: 8px;
-            margin-bottom: 12px;
+            font-family: var(--serif);
+            margin-bottom: 28px;
+            padding-bottom: 28px;
+            border-bottom: 1px solid var(--line);
         }
+
+        .plan.featured .plan-price { border-color: rgba(246, 241, 231, 0.15); }
 
         .plan-price strong {
-            font-size: 44px;
-            line-height: 1;
-            letter-spacing: -0.04em;
-        }
-
-        .plan-price span {
-            color: var(--muted);
+            font-size: 56px;
             font-weight: 700;
+            line-height: 1;
+            letter-spacing: -0.03em;
         }
 
-        .plan-note {
-            margin: 0 0 20px;
+        .plan-price .per {
             color: var(--muted);
-            font-size: 15px;
+            font-size: 16px;
+            font-family: var(--sans);
+            font-weight: 500;
+            margin-left: 4px;
         }
 
-        .plan-list {
+        .plan.featured .plan-price .per { color: rgba(246, 241, 231, 0.6); }
+
+        .plan-features {
             list-style: none;
             padding: 0;
-            margin: 0 0 26px;
-            display: grid;
-            gap: 12px;
-        }
-
-        .plan-list li {
-            position: relative;
-            padding-left: 28px;
-            color: var(--text);
-        }
-
-        .plan-list li::before {
-            content: "✓";
-            position: absolute;
-            top: 0;
-            left: 0;
-            color: var(--success);
-            font-weight: 800;
-        }
-
-        .faq {
+            margin: 0 0 36px;
             display: grid;
             gap: 14px;
-            max-width: 900px;
+            flex: 1;
+        }
+
+        .plan-features li {
+            position: relative;
+            padding-left: 30px;
+            font-size: 15px;
+            line-height: 1.5;
+        }
+
+        .plan-features li::before {
+            content: "";
+            position: absolute;
+            left: 0;
+            top: 8px;
+            width: 16px;
+            height: 9px;
+            border-left: 2px solid var(--accent);
+            border-bottom: 2px solid var(--accent);
+            transform: rotate(-45deg);
+        }
+
+        .plan.featured .plan-features li::before {
+            border-color: #a5c9b5;
+        }
+
+        .plan .btn {
+            width: 100%;
+        }
+
+        .plan.featured .btn-ghost {
+            color: var(--bg);
+            border-color: var(--bg);
+        }
+
+        .plan.featured .btn-ghost:hover {
+            background: var(--bg);
+            color: var(--ink);
+        }
+
+        /* FAQ */
+        .faq-wrap {
+            max-width: 820px;
             margin: 0 auto;
         }
 
-        .faq details {
-            background: #fff;
-            border: 1px solid var(--line);
-            border-radius: 18px;
-            padding: 18px 20px;
-            box-shadow: var(--shadow);
+        .faq-item {
+            border-bottom: 1px solid var(--line);
+            padding: 8px 0;
         }
 
-        .faq summary {
+        .faq-item summary {
             list-style: none;
             cursor: pointer;
-            font-weight: 800;
+            padding: 22px 0;
+            font-family: var(--serif);
+            font-size: 22px;
+            font-weight: 600;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 24px;
+            transition: color 0.2s;
         }
 
-        .faq summary::-webkit-details-marker {
-            display: none;
+        .faq-item summary:hover { color: var(--accent); }
+        .faq-item summary::-webkit-details-marker { display: none; }
+
+        .faq-item summary::after {
+            content: "+";
+            font-family: var(--sans);
+            font-weight: 300;
+            font-size: 32px;
+            color: var(--accent);
+            transition: transform 0.3s;
+            flex-shrink: 0;
         }
 
-        .faq p {
-            margin: 12px 0 0;
+        .faq-item[open] summary::after {
+            transform: rotate(45deg);
+        }
+
+        .faq-item p {
+            margin: 0 0 22px;
             color: var(--muted);
+            font-size: 16px;
+            max-width: 680px;
         }
 
-        .final-cta {
-            background: linear-gradient(135deg, #1e1b4b 0%, #5b21b6 100%);
-            color: #fff;
+        /* Final CTA */
+        .final {
+            background: var(--accent);
+            color: var(--bg);
+            position: relative;
+            overflow: hidden;
         }
 
-        .final-cta .section-header p {
-            color: rgba(255, 255, 255, 0.78);
+        .final::before {
+            content: "";
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 140%;
+            height: 140%;
+            background: radial-gradient(ellipse at center, rgba(164, 201, 181, 0.1), transparent 60%);
+            transform: translate(-50%, -50%);
+            pointer-events: none;
         }
 
-        .final-cta-box {
-            max-width: 860px;
-            margin: 0 auto;
+        .final-inner {
+            position: relative;
             text-align: center;
+            max-width: 780px;
+            margin: 0 auto;
         }
 
-        .final-cta-actions {
+        .final h2 {
+            font-size: clamp(40px, 6vw, 68px);
+            margin: 0 0 20px;
+            color: var(--bg);
+        }
+
+        .final h2 em {
+            font-style: italic;
+            color: #a5c9b5;
+            font-weight: 500;
+        }
+
+        .final p {
+            font-size: 19px;
+            color: rgba(246, 241, 231, 0.8);
+            margin: 0 0 36px;
+        }
+
+        .final .btn-primary {
+            background: var(--bg);
+            color: var(--accent);
+        }
+
+        .final .btn-primary:hover {
+            background: #fff;
+            color: var(--ink);
+        }
+
+        .final .btn-ghost {
+            color: var(--bg);
+            border-color: rgba(246, 241, 231, 0.4);
+        }
+
+        .final .btn-ghost:hover {
+            background: var(--bg);
+            color: var(--accent);
+        }
+
+        .final-actions {
             display: flex;
             justify-content: center;
             flex-wrap: wrap;
             gap: 14px;
-            margin-top: 28px;
         }
 
-        .final-cta .btn-secondary {
-            background: rgba(255, 255, 255, 0.08);
-            color: #fff;
-            border-color: rgba(255, 255, 255, 0.16);
-        }
-
+        /* Footer */
         .site-footer {
-            padding: 56px 0 32px;
-            background: #fff;
-            border-top: 1px solid var(--line);
+            background: var(--ink);
+            color: rgba(246, 241, 231, 0.7);
+            padding: 72px 0 32px;
         }
 
-        .footer-grid {
+        .footer-top {
             display: grid;
-            grid-template-columns: 1.2fr 0.8fr 0.8fr;
-            gap: 24px;
-            margin-bottom: 28px;
+            grid-template-columns: 1.4fr 1fr 1fr;
+            gap: 48px;
+            padding-bottom: 48px;
+            border-bottom: 1px solid rgba(246, 241, 231, 0.12);
         }
 
-        .footer-brand p,
-        .footer-links a {
-            color: var(--muted);
+        .site-footer .logo { color: var(--bg); }
+
+        .footer-brand p {
+            margin: 20px 0 0;
+            max-width: 340px;
+            font-size: 14px;
+            line-height: 1.6;
         }
 
-        .footer-title {
-            margin: 0 0 10px;
+        .footer-col h4 {
+            font-family: var(--sans);
+            font-size: 12px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.12em;
+            color: var(--bg);
+            margin: 0 0 20px;
+        }
+
+        .footer-col a {
+            display: block;
+            padding: 6px 0;
             font-size: 15px;
-            font-weight: 800;
+            transition: color 0.2s;
         }
 
-        .footer-links {
-            display: grid;
-            gap: 10px;
-        }
+        .footer-col a:hover { color: var(--bg); }
 
         .footer-bottom {
-            padding-top: 20px;
-            border-top: 1px solid var(--line);
-            color: var(--muted);
-            font-size: 14px;
+            padding-top: 28px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 13px;
         }
 
-        @media (max-width: 1100px) {
-            .header-actions {
-                gap: 14px;
-            }
-
-            .header-cta {
-                min-width: 220px;
-                padding: 0 20px;
-                font-size: 16px;
-            }
-
-            .login-link {
-                font-size: 18px;
-            }
+        /* Responsive */
+        @media (max-width: 1024px) {
+            .bento { grid-template-columns: repeat(4, 1fr); }
+            .bento-item.wide { grid-column: span 4; }
+            .bento-item.big { grid-column: span 4; }
+            .bento-item.half { grid-column: span 2; }
+            .bento-item.third { grid-column: span 2; }
         }
 
-        @media (max-width: 980px) {
-            .hero-grid,
-            .cards-3,
-            .pricing-grid,
-            .footer-grid,
-            .metrics {
-                grid-template-columns: 1fr;
-            }
-
-            .nav-links {
-                display: none;
-            }
-
-            .header-inner {
-                min-height: 84px;
-            }
-
-            .hero {
-                padding-top: 60px;
-            }
+        @media (max-width: 900px) {
+            .section { padding: 80px 0; }
+            .hero { padding: 70px 0; }
+            .hero-inner { grid-template-columns: 1fr; gap: 56px; }
+            .steps-grid { grid-template-columns: 1fr; gap: 48px; }
+            .pricing-grid { grid-template-columns: 1fr; }
+            .footer-top { grid-template-columns: 1fr; gap: 32px; }
+            .nav { display: none; }
         }
 
-        @media (max-width: 760px) {
-            .header-inner {
-                flex-direction: column;
-                align-items: flex-start;
-                padding: 18px 0;
-            }
-
-            .nav {
-                width: 100%;
-                justify-content: flex-end;
-            }
-
-            .header-actions {
-                width: 100%;
-                justify-content: space-between;
-                margin-left: 0;
-            }
-
-            .header-cta {
-                min-width: auto;
-                flex: 1;
-            }
-
-            .login-link {
-                font-size: 18px;
-            }
-        }
-
-        @media (max-width: 560px) {
-            .header-actions {
-                flex-direction: column;
-                align-items: stretch;
-            }
-
-            .login-link {
-                justify-content: center;
-            }
-
-            .hero h1 {
-                font-size: 40px;
-            }
-
-            .hero-subtitle {
-                font-size: 18px;
-            }
-
-            .price-card,
-            .card,
-            .hero-card {
-                padding: 22px;
-            }
-
-            .logo-text {
-                font-size: 16px;
-            }
+        @media (max-width: 640px) {
+            .header-inner { min-height: 72px; }
+            .logo { font-size: 18px; }
+            .login-text { display: none; }
+            .bento { grid-template-columns: 1fr; }
+            .bento-item,
+            .bento-item.wide,
+            .bento-item.big,
+            .bento-item.half,
+            .bento-item.third { grid-column: span 1; }
+            .bento-item { padding: 28px; }
+            .plan { padding: 32px 26px; }
+            .hero-proof { gap: 24px; flex-wrap: wrap; }
+            .footer-bottom { flex-direction: column; gap: 16px; text-align: center; }
+            .section-head { margin-bottom: 44px; }
         }
     </style>
 </head>
 <body>
-    <header class="site-header">
-        <div class="container header-inner">
-            <a href="/" class="logo" aria-label="Sąskaitų išrašymas">
-                <svg class="logo-mark" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-                    <rect x="4" y="4" width="40" height="40" rx="12" fill="#7C3AED" />
-                    <path d="M16 15.5C16 14.6716 16.6716 14 17.5 14H27L32 19V32.5C32 33.3284 31.3284 34 30.5 34H17.5C16.6716 34 16 33.3284 16 32.5V15.5Z" fill="white" />
-                    <path d="M27 14V18C27 18.5523 27.4477 19 28 19H32" fill="#DDD6FE" />
-                    <path d="M20 23H28" stroke="#7C3AED" stroke-width="2.2" stroke-linecap="round" />
-                    <path d="M20 27H28" stroke="#7C3AED" stroke-width="2.2" stroke-linecap="round" />
-                    <path d="M21 30.5L23 32.5L27.5 28" stroke="#16A34A" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" />
-                </svg>
-                <span class="logo-text">Sąskaitų išrašymas</span>
-            </a>
 
-            <nav class="nav">
-                <div class="nav-links">
-                    <a href="#funkcijos" class="nav-link">Funkcijos</a>
-                    <a href="#kaip-veikia" class="nav-link">Kaip veikia</a>
-                    <a href="#planai" class="nav-link">Planai</a>
-                    <a href="#duk" class="nav-link">DUK</a>
-                </div>
+<header class="site-header">
+    <div class="container header-inner">
+        <a href="/" class="logo">
+            <svg class="logo-mark" viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                <rect x="3" y="3" width="42" height="42" rx="10" fill="#0b3d2e"/>
+                <path d="M14 14h16l5 5v15H14z" fill="#f6f1e7"/>
+                <path d="M30 14v5h5" stroke="#0b3d2e" stroke-width="1.5" fill="none"/>
+                <line x1="18" y1="24" x2="31" y2="24" stroke="#0b3d2e" stroke-width="2" stroke-linecap="round"/>
+                <line x1="18" y1="28" x2="31" y2="28" stroke="#0b3d2e" stroke-width="2" stroke-linecap="round"/>
+                <line x1="18" y1="32" x2="26" y2="32" stroke="#0b3d2e" stroke-width="2" stroke-linecap="round"/>
+            </svg>
+            <span>saskaituisrasymas.lt</span>
+        </a>
 
-                <div class="header-actions">
-                    <a href="https://atlyginimoskaiciuokle.com/registruotis" class="btn btn-primary header-cta">
-                        Išbandyti nemokamai
-                    </a>
+        <nav class="nav">
+            <a href="#galimybes" class="nav-link">Galimybės</a>
+            <a href="#procesas" class="nav-link">Procesas</a>
+            <a href="#kainos" class="nav-link">Kainos</a>
+            <a href="#duk" class="nav-link">DUK</a>
+        </nav>
 
-                    <a href="https://atlyginimoskaiciuokle.com/prisijungti" class="login-link" aria-label="Prisijungti">
-                        <svg viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-                            <path d="M18 6H26V14" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/>
-                            <path d="M26 6L13 19" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/>
-                            <path d="M26 18V24C26 25.1046 25.1046 26 24 26H8C6.89543 26 6 25.1046 6 24V8C6 6.89543 6.89543 6 8 6H14" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/>
-                        </svg>
-                        <span>Prisijungti</span>
-                    </a>
-                </div>
-            </nav>
+        <div class="header-cta">
+            <a href="https://atlyginimoskaiciuokle.com/prisijungti" class="login-text">Prisijungti</a>
+            <a href="https://atlyginimoskaiciuokle.com/registruotis" class="btn btn-primary">Pradėti dabar</a>
         </div>
-    </header>
+    </div>
+</header>
 
-    <main>
-        <section class="hero">
-            <div class="container">
-                <div class="hero-grid">
-                    <div>
-                        <div class="eyebrow">Nemokamas planas • Be diegimo • Veikia naršyklėje</div>
-                        <h1>Išrašykite PVM sąskaitas faktūras <span class="highlight">per 30 sekundžių</span></h1>
-                        <p class="hero-subtitle">
-                            Paprastas ir profesionalus sąskaitų išrašymas internetu.
-                            PDF sąskaitos, siuntimas el. paštu, i.SAF eksportas, prekių katalogas ir mokėjimų sekimas vienoje vietoje.
-                        </p>
+<main>
 
-                        <div class="hero-actions">
-                            <a href="https://atlyginimoskaiciuokle.com/registruotis" class="btn btn-primary btn-large">Išbandyti nemokamai</a>
-                            <a href="#planai" class="btn btn-secondary btn-large">Peržiūrėti planus</a>
-                        </div>
-
-                        <div class="hero-points">
-                            <div class="hero-point">✓ Tinka individualiai veiklai ir įmonėms</div>
-                            <div class="hero-point">✓ Neribotos PDF sąskaitos</div>
-                            <div class="hero-point">✓ Registrų centro duomenys</div>
-                        </div>
-
-                        <div class="metrics">
-                            <div class="metric">
-                                <strong>€0</strong>
-                                <span>pradėti galima nemokamai</span>
-                            </div>
-                            <div class="metric">
-                                <strong>30 s</strong>
-                                <span>iki pirmos sąskaitos</span>
-                            </div>
-                            <div class="metric">
-                                <strong>i.SAF</strong>
-                                <span>ir apskaitos eksportas</span>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div>
-                        <div class="hero-card">
-                            <div class="hero-card-top">
-                                <div class="hero-card-title">Sąskaitos peržiūra</div>
-                                <div class="status-badge">Paruošta siųsti</div>
-                            </div>
-
-                            <div class="invoice-preview">
-                                <div class="preview-block">
-                                    <div class="preview-row">
-                                        <span class="preview-label">Dokumentas</span>
-                                        <span class="preview-value">PVM sąskaita faktūra</span>
-                                    </div>
-                                    <div class="preview-row">
-                                        <span class="preview-label">Numeris</span>
-                                        <span class="preview-value">SF-2026-001</span>
-                                    </div>
-                                    <div class="preview-row">
-                                        <span class="preview-label">Klientas</span>
-                                        <span class="preview-value">UAB Pavyzdys</span>
-                                    </div>
-                                </div>
-
-                                <div class="preview-block">
-                                    <div class="preview-row">
-                                        <span class="preview-label">Prekės / paslaugos</span>
-                                        <span class="preview-value">3 pozicijos</span>
-                                    </div>
-                                    <div class="preview-row">
-                                        <span class="preview-label">PDF sąskaita</span>
-                                        <span class="preview-value">Sugeneruota</span>
-                                    </div>
-                                    <div class="preview-row">
-                                        <span class="preview-label">Siuntimas el. paštu</span>
-                                        <span class="preview-value">1 paspaudimu</span>
-                                    </div>
-                                </div>
-
-                                <div class="preview-block">
-                                    <div class="preview-row">
-                                        <span class="preview-label">Suma</span>
-                                        <span class="preview-value">€1 250,00</span>
-                                    </div>
-                                    <div class="preview-row">
-                                        <span class="preview-label">PVM</span>
-                                        <span class="preview-value">€262,50</span>
-                                    </div>
-                                    <div class="preview-row">
-                                        <span class="preview-label">Mokėtina</span>
-                                        <span class="preview-value">€1 512,50</span>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </section>
-
-        <section id="funkcijos" class="section">
-            <div class="container">
-                <div class="section-header">
-                    <h2>Viskas, ko reikia kasdieniam sąskaitų išrašymui</h2>
-                    <p>Mažiau rankinio darbo, daugiau aiškumo ir greitesnis atsiskaitymas su klientais.</p>
-                </div>
-
-                <div class="cards-3">
-                    <div class="card">
-                        <div class="feature-icon">⚡</div>
-                        <h3>Greita ir paprasta</h3>
-                        <p>Išrašykite sąskaitas vos per kelias minutes. Aiški forma, patogus dublikavimas ir jokių sudėtingų nustatymų.</p>
-                    </div>
-
-                    <div class="card">
-                        <div class="feature-icon">📧</div>
-                        <h3>Siuntimas el. paštu</h3>
-                        <p>Siųskite sąskaitas klientams tiesiai iš sistemos ir automatizuokite mokėjimų priminimus.</p>
-                    </div>
-
-                    <div class="card">
-                        <div class="feature-icon">🏢</div>
-                        <h3>Įmonių duomenys automatiškai</h3>
-                        <p>Greitai užpildykite pirkėjo informaciją iš Registrų centro duomenų ir sumažinkite klaidų tikimybę.</p>
-                    </div>
-
-                    <div class="card">
-                        <div class="feature-icon">📦</div>
-                        <h3>Prekių ir paslaugų katalogas</h3>
-                        <p>Išsisaugokite dažniausiai naudojamas pozicijas ir dar labiau pagreitinkite sąskaitų kūrimą.</p>
-                    </div>
-
-                    <div class="card">
-                        <div class="feature-icon">📊</div>
-                        <h3>Mokėjimų sekimas</h3>
-                        <p>Matykite, kurios sąskaitos apmokėtos, kurios vėluoja, ir susiekite apmokėjimus su banko išrašais.</p>
-                    </div>
-
-                    <div class="card">
-                        <div class="feature-icon">🔄</div>
-                        <h3>Eksportas į i.SAF ir apskaitą</h3>
-                        <p>Eksportuokite duomenis į i.SAF ir 15 apskaitos programų, įskaitant Rivilę, Finvaldą ir Centą.</p>
-                    </div>
-                </div>
-            </div>
-        </section>
-
-        <section id="kaip-veikia" class="section">
-            <div class="container">
-                <div class="section-header">
-                    <h2>Kaip tai veikia</h2>
-                    <p>Nuo pirmos sąskaitos iki išsiuntimo klientui vos per kelis žingsnius.</p>
-                </div>
-
-                <div class="cards-3 steps">
-                    <div class="card step">
-                        <h3>Sukurkite sąskaitą</h3>
-                        <p>Pasirinkite klientą, įveskite prekes ar paslaugas ir sugeneruokite profesionalią PVM sąskaitą faktūrą PDF formatu.</p>
-                    </div>
-
-                    <div class="card step">
-                        <h3>Išsiųskite klientui</h3>
-                        <p>Išsiųskite sąskaitą el. paštu tiesiai iš sistemos arba atsisiųskite PDF failą ir siųskite savo būdu.</p>
-                    </div>
-
-                    <div class="card step">
-                        <h3>Sekite apmokėjimą</h3>
-                        <p>Matykite apmokėjimo būseną, importuokite banko išrašus ir automatiškai susiekite mokėjimus su sąskaitomis.</p>
-                    </div>
-                </div>
-            </div>
-        </section>
-
-        <section id="planai" class="section pricing">
-            <div class="container">
-                <div class="section-header">
-                    <h2>Pasirinkite tinkamą planą</h2>
-                    <p>Pradėkite nemokamai ir pereikite į PRO, kai prireiks daugiau automatizavimo.</p>
-                </div>
-
-                <div class="pricing-grid">
-                    <div class="price-card">
-                        <h3 class="plan-name">Nemokamas</h3>
-                        <div class="plan-price">
-                            <strong>€0</strong>
-                            <span>/ mėn.</span>
-                        </div>
-                        <p class="plan-note">Puikus pasirinkimas pradžiai arba mažesniam sąskaitų kiekiui.</p>
-
-                        <ul class="plan-list">
-                            <li>Neribotas sąskaitų išrašymas</li>
-                            <li>Neribotos PDF sąskaitos</li>
-                            <li>Greitas sąskaitų dublikavimas</li>
-                            <li>Įmonių duomenys iš Registrų centro</li>
-                            <li>Sąskaitų išsiuntimas el. paštu iki 10 sąskaitų per mėnesį</li>
-                            <li>Eksportas į i.SAF ir 15 apskaitos programų iki 10 sąskaitų per mėnesį</li>
-                            <li>Prekių ir paslaugų katalogas</li>
-                            <li>DokSkenas logotipas sąskaitos poraštėje</li>
-                        </ul>
-
-                        <a href="https://atlyginimoskaiciuokle.com/registruotis" class="btn btn-secondary btn-large">Registruotis nemokamai</a>
-                    </div>
-
-                    <div class="price-card recommended">
-                        <div class="recommended-badge">Rekomenduojamas</div>
-                        <h3 class="plan-name">PRO</h3>
-                        <div class="plan-price">
-                            <strong>€9,99</strong>
-                            <span>/ mėn.</span>
-                        </div>
-                        <p class="plan-note">Mokama iš karto €119,88 už metus. Skirta tiems, kas nori pilnos automatizacijos.</p>
-
-                        <ul class="plan-list">
-                            <li>Visos Nemokamo plano funkcijos</li>
-                            <li>Apmokėjimo mygtukas sąskaitose per Montonio arba Paysera</li>
-                            <li>Periodinės sąskaitos</li>
-                            <li>Neribotas sąskaitų išsiuntimas el. paštu</li>
-                            <li>Neribotas eksportas į i.SAF ir 15 apskaitos programų</li>
-                            <li>Banko išrašų importas ir automatinis apmokėjimų susiejimas</li>
-                            <li>Automatiniai apmokėjimų priminimai el. paštu</li>
-                            <li>Jūsų logotipas sąskaitose</li>
-                            <li>Be DokSkenas logotipo sąskaitos poraštėje</li>
-                        </ul>
-
-                        <a href="https://atlyginimoskaiciuokle.com/registruotis" class="btn btn-primary btn-large">Pasirinkti PRO</a>
-                    </div>
-                </div>
-            </div>
-        </section>
-
-        <section id="duk" class="section">
-            <div class="container">
-                <div class="section-header">
-                    <h2>Dažniausiai užduodami klausimai</h2>
-                    <p>Trumpi atsakymai į dažniausius klausimus prieš pradedant naudotis sistema.</p>
-                </div>
-
-                <div class="faq">
-                    <details>
-                        <summary>Ar tikrai galima pradėti nemokamai?</summary>
-                        <p>Taip. Galite registruotis ir pradėti naudotis Nemokamu planu be papildomų pradinių mokesčių.</p>
-                    </details>
-
-                    <details>
-                        <summary>Ar sistema tinka individualiai veiklai ir įmonėms?</summary>
-                        <p>Taip. Sistema tinka tiek individualiai veiklai, tiek mažoms ir vidutinėms įmonėms, kurioms reikia greitai išrašyti PVM sąskaitas faktūras.</p>
-                    </details>
-
-                    <details>
-                        <summary>Ar galiu eksportuoti duomenis į i.SAF ir apskaitos programas?</summary>
-                        <p>Taip. Galimas eksportas į i.SAF ir 15 apskaitos programų, įskaitant Rivilę, Finvaldą ir Centą.</p>
-                    </details>
-
-                    <details>
-                        <summary>Ar galima siųsti sąskaitas el. paštu tiesiai iš sistemos?</summary>
-                        <p>Taip. Sąskaitas galima siųsti tiesiai klientams el. paštu, o PRO plane taip pat galima naudoti automatinius priminimus.</p>
-                    </details>
-
-                    <details>
-                        <summary>Kuo skiriasi Nemokamas ir PRO planai?</summary>
-                        <p>PRO planas suteikia neribotą el. pašto siuntimą, neribotą eksportą, periodines sąskaitas, banko išrašų importą, apmokėjimo mygtukus ir jūsų logotipą sąskaitose.</p>
-                    </details>
-                </div>
-            </div>
-        </section>
-
-        <section class="section final-cta">
-            <div class="container">
-                <div class="final-cta-box">
-                    <div class="section-header">
-                        <h2>Pradėkite išrašyti sąskaitas šiandien</h2>
-                        <p>Registracija nemokama. Be diegimo, be sudėtingo pasiruošimo ir be pradinių mokesčių.</p>
-                    </div>
-
-                    <div class="final-cta-actions">
-                        <a href="https://atlyginimoskaiciuokle.com/registruotis" class="btn btn-primary btn-large">Išbandyti nemokamai</a>
-                        <a href="https://atlyginimoskaiciuokle.com/prisijungti" class="btn btn-secondary btn-large">Prisijungti</a>
-                    </div>
-                </div>
-            </div>
-        </section>
-    </main>
-
-    <footer class="site-footer">
+    <!-- HERO -->
+    <section class="hero">
         <div class="container">
-            <div class="footer-grid">
-                <div class="footer-brand">
-                    <a href="/" class="logo" aria-label="Sąskaitų išrašymas">
-                        <svg class="logo-mark" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-                            <rect x="4" y="4" width="40" height="40" rx="12" fill="#7C3AED" />
-                            <path d="M16 15.5C16 14.6716 16.6716 14 17.5 14H27L32 19V32.5C32 33.3284 31.3284 34 30.5 34H17.5C16.6716 34 16 33.3284 16 32.5V15.5Z" fill="white" />
-                            <path d="M27 14V18C27 18.5523 27.4477 19 28 19H32" fill="#DDD6FE" />
-                            <path d="M20 23H28" stroke="#7C3AED" stroke-width="2.2" stroke-linecap="round" />
-                            <path d="M20 27H28" stroke="#7C3AED" stroke-width="2.2" stroke-linecap="round" />
-                            <path d="M21 30.5L23 32.5L27.5 28" stroke="#16A34A" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" />
-                        </svg>
-                        <span class="logo-text">Sąskaitų išrašymas</span>
-                    </a>
-                    <p>Paprastas būdas išrašyti PVM sąskaitas faktūras internetu, siųsti jas klientams ir sekti apmokėjimus.</p>
-                </div>
-
+            <div class="hero-inner">
                 <div>
-                    <div class="footer-title">Produktas</div>
-                    <div class="footer-links">
-                        <a href="#funkcijos">Funkcijos</a>
-                        <a href="#planai">Planai</a>
-                        <a href="#duk">DUK</a>
-                        <a href="https://atlyginimoskaiciuokle.com/registruotis">Išbandyti nemokamai</a>
+                    <div class="eyebrow">Išrašyk šiuolaikiškai · Pradėk nemokamai</div>
+                    <h1>Išmanus sąskaitų išrašymas <em>per pusę minutės</em></h1>
+                    <p class="hero-lead">
+                        Užpildyk, atsisiųsk arba išsiųsk su apmokėjimo nuoroda el. paštu klientui.
+                        Jokio instaliavimo, jokio popieriaus, jokio galvos skausmo.
+                    </p>
+
+                    <div class="hero-actions">
+                        <a href="https://atlyginimoskaiciuokle.com/registruotis" class="btn btn-primary btn-large">Susikurti paskyrą →</a>
+                        <a href="#kainos" class="btn btn-ghost btn-large">Kainos</a>
+                    </div>
+
+                    <div class="hero-proof">
+                        <div class="hero-proof-item">
+                            <strong>0 €</strong>
+                            <span>pradėk nemokamai</span>
+                        </div>
+                        <div class="hero-proof-item">
+                            <strong>~30 s</strong>
+                            <span>iki paruoštos sąskaitos</span>
+                        </div>
+                        <div class="hero-proof-item">
+                            <strong>15+</strong>
+                            <span>apskaitos programų</span>
+                        </div>
                     </div>
                 </div>
 
-                <div>
-                    <div class="footer-title">Informacija</div>
-                    <div class="footer-links">
-                        <a href="/privatumo-politika">Privatumo politika</a>
-                        <a href="/naudojimo-taisykles">Naudojimo taisyklės</a>
-                        <a href="/susisiekti">Susisiekti</a>
+                <div class="hero-visual">
+                    <div class="inv-float">Paruošta siųsti</div>
+                    <div class="invoice">
+                        <div class="inv-top">
+                            <div>
+                                <h4 class="inv-title">PVM sąskaita faktūra</h4>
+                                <div class="inv-num">Nr. SI-0642</div>
+                            </div>
+                            <div class="inv-logo">S</div>
+                        </div>
+
+                        <div class="inv-parties">
+                            <div>
+                                <div class="inv-party-label">Pardavėjas</div>
+                                <div class="inv-party-name">MB Pardavejas1</div>
+                                <div class="inv-party-line">Įm. k. 305412667</div>
+                                <div class="inv-party-line">PVM LT10012345678</div>
+                            </div>
+                            <div>
+                                <div class="inv-party-label">Pirkėjas</div>
+                                <div class="inv-party-name">UAB Pirkejas2</div>
+                                <div class="inv-party-line">Įm. k. 302984120</div>
+                                <div class="inv-party-line">Vilnius, Lietuva</div>
+                            </div>
+                        </div>
+
+                        <div class="inv-meta">
+                            <div>
+                                <span>Data</span>
+                                <strong>2026-04-29</strong>
+                            </div>
+                            <div>
+                                <span>Apmokėti iki</span>
+                                <strong>2026-05-29</strong>
+                            </div>
+                        </div>
+
+                        <table class="inv-table">
+                            <thead>
+                                <tr>
+                                    <th>Paslauga</th>
+                                    <th>Kiekis</th>
+                                    <th>Kaina</th>
+                                    <th>Suma</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td class="desc">Ąžuolo stalo plokštė, 200x90</td>
+                                    <td class="qty">1</td>
+                                    <td class="price">320,00 €</td>
+                                    <td class="amt">320,00 €</td>
+                                </tr>
+                                <tr>
+                                    <td class="desc">Metalinės kojos, komplektas</td>
+                                    <td class="qty">1</td>
+                                    <td class="price">85,00 €</td>
+                                    <td class="amt">85,00 €</td>
+                                </tr>
+                                <tr>
+                                    <td class="desc">Pristatymas</td>
+                                    <td class="qty">1</td>
+                                    <td class="price">25,00 €</td>
+                                    <td class="amt">25,00 €</td>
+                                </tr>
+                            </tbody>
+                        </table>
+
+                        <div class="inv-sum">
+                            <div class="inv-sum-row"><span>Tarpinė suma</span><strong>430,00 €</strong></div>
+                            <div class="inv-sum-row"><span>PVM 21%</span><strong>90,30 €</strong></div>
+                            <div class="inv-sum-row total"><span>Mokėtina</span><span>520,30 €</span></div>
+                        </div>
+
+                        <a href="#" class="inv-pay" onclick="return false;">
+                            <div class="inv-pay-text">
+                                <small>Paysera apmokėjimas</small>
+                                <strong>Apmokėti 520,30 €</strong>
+                            </div>
+                            <span class="inv-pay-btn">
+                                <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                                    <rect x="3" y="6" width="18" height="13" rx="2" stroke="currentColor" stroke-width="2"/>
+                                    <path d="M3 10h18" stroke="currentColor" stroke-width="2"/>
+                                </svg>
+                                Tęsti
+                            </span>
+                        </a>
                     </div>
                 </div>
-            </div>
-
-            <div class="footer-bottom">
-                © 2026 Sąskaitų išrašymas. Visos teisės saugomos.
             </div>
         </div>
-    </footer>
+    </section>
+
+    <!-- FEATURES BENTO -->
+    <section id="galimybes" class="section">
+        <div class="container">
+            <div class="section-head">
+                <div class="eyebrow">Ką gauni</div>
+                <h2>Sąskaitų išrašymas ir apmokėjimų susiejimas</h2>
+                <p>Atsisakyk sąskaitų Excel'yje. </p>
+            </div>
+
+            <div class="bento">
+                <div class="bento-item wide accent">
+                    <span class="bento-num">- 01</span>
+                    <h3>Sąskaita išrašoma akimirksniu</h3>
+                    <p>Pasirenki klientą, įvedi prekes ar paslaugas - sąskaita išrašoma ir išsiunčiama tą pačią sekundę. Dublikuok ir koreguok esamas sąskaitas vienu paspaudimu, nereikės visko pildyti iš naujo.</p>
+                </div>
+
+                <div class="bento-item half">
+                    <span class="bento-num">- 02</span>
+                    <h3>Įmonių rekvizitai</h3>
+                    <p>Klientų duomenys imami tiesiai iš Registrų Centro - mažiau klaidų, nulis perrašinėjimo.</p>
+                </div>
+
+                <div class="bento-item third">
+                    <span class="bento-num">- 03</span>
+                    <h3>Siuntimas el. paštu</h3>
+                    <p>Išrašytas sąskaitas siųskite el. paštu bei automatiškai priminkite, jei apmokėjimas pradelstas.</p>
+                </div>
+
+                <div class="bento-item third">
+                    <span class="bento-num">- 04</span>
+                    <h3>Katalogas</h3>
+                    <p>Išsaugok dažniausias naudojamas prekes ar paslaugas ir kitą kartą jas pridėk iš sąrašo, o ne rašyk iš naujo.</p>
+                </div>
+
+                <div class="bento-item big">
+                    <span class="bento-num">- 05</span>
+                    <h3>Apmokėjimų kontrolė</h3>
+                    <p>Iš karto matysi, kurios sąskaitos apmokėtos, kurios dar ne, o kurios pradelstos. Importuok banko išrašą ir leisk sistemai pačiai susieti pavedimus su sąskaitomis.</p>
+                </div>
+
+                <div class="bento-item big">
+                    <span class="bento-num">- 06</span>
+                    <h3>Eksportas į apskaitą</h3>
+                    <p>Duomenys paruošiami importui į i.SAF ir populiariausias Lietuvos apskaitos sistemas - Rivilę, Finvaldą, Centą ir dar tuziną kitų. Jokio rankinio sąskaitų vedimo.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- STEPS -->
+    <section id="procesas" class="section steps-section">
+        <div class="container">
+            <div class="section-head">
+                <div class="eyebrow">Trys žingsniai</div>
+                <h2>Nuo šablono iki apmokėtos sąskaitos</h2>
+                <p>Pirmą kartą užtruksi kelias minutes. Antrą - vos kelias sekundes.</p>
+            </div>
+
+            <div class="steps-grid">
+                <div class="step">
+                    <div class="step-num">i.</div>
+                    <h3>Užpildyk</h3>
+                    <p>Pasirink klientą, surašyk prekes ar paslaugas. Sistema pati paskaičiuoja PVM ir galutinę sumą.</p>
+                </div>
+
+                <div class="step">
+                    <div class="step-num">ii.</div>
+                    <h3>Išsiųsk</h3>
+                    <p>Vienu mygtuku išsiųsk klientui el. paštu arba atsisiųsk PDF. Gali iš karto siųsti su Montonio ar Paysera apmokėjimo nuorodomis.</p>
+                </div>
+
+                <div class="step">
+                    <div class="step-num">iii.</div>
+                    <h3>Stebėk</h3>
+                    <p>Matysi, kas apmokėta, kas vėluoja. Banko išrašas automatiškai susieja pavedimus su sąskaitymus. Duomenis eksportuok į savo apskaitos programą.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- PRICING -->
+    <section id="kainos" class="section pricing">
+        <div class="container">
+            <div class="section-head center">
+                <div class="eyebrow">Kainos</div>
+                <h2>Pradėk be mokesčio. Automatizuok, kai reikės.</h2>
+                <p>Du aiškūs planai be paslėptų sąlygų. Jokių pradinių mokesčių, jokių ilgų įsipareigojimų.</p>
+            </div>
+
+            <div class="pricing-grid">
+                <div class="plan">
+                    <h3>Pradžiai</h3>
+                    <p class="plan-sub">Tinka savarankiškai veiklai ar išrašant rečiau</p>
+
+                    <div class="plan-price">
+                        <strong>0 €</strong>
+                        <span class="per">/ mėn.</span>
+                    </div>
+
+                    <ul class="plan-features">
+                        <li>Neribotas sąskaitų kiekis</li>
+                        <li>PDF generavimas be limitų</li>
+                        <li>Greitas esamų sąskaitų dublikavimas</li>
+                        <li>Rekvizitų užpildymas iš Registrų centro</li>
+                        <li>Prekių katalogas</li>
+                        <li>Siuntimas el. paštu (10 per mėn.)</li>
+                        <li>Eksportas į i.SAF ir apskaitą (10 per mėn.)</li>
+                        <li>Sistemos logotipas sąskaitos apačioje</li>
+                    </ul>
+
+                    <a href="https://atlyginimoskaiciuokle.com/registruotis" class="btn btn-ghost">Pradėti nemokamai</a>
+                </div>
+
+                <div class="plan featured">
+                    <div class="plan-tag">Išmaniam versui</div>
+                    <h3>Verslui</h3>
+                    <p class="plan-sub">Neribotas planas</p>
+
+                    <div class="plan-price">
+                        <strong>9,99 €</strong>
+                        <span class="per">/ mėn.</span>
+                    </div>
+
+                    <ul class="plan-features">
+                        <li>Viskas, kas yra nemokamame plane</li>
+                        <li>Neribotas siuntimas el. paštu</li>
+                        <li>Neribotas eksportas į i.SAF ir 15+ apskaitos programų</li>
+                        <li>Pasikartojančios (periodinės) sąskaitos</li>
+                        <li>Apmokėjimo mygtukas per Montonio arba Paysera</li>
+                        <li>Banko išrašų importas ir automatinis sutapatinimas</li>
+                        <li>Automatiniai priminimai vėluojantiems mokėtojams</li>
+                        <li>Tavo prekės ženklo logotipas sąskaitose</li>
+                        <li>Be mūsų logotipo dokumente</li>
+                    </ul>
+
+                    <a href="https://atlyginimoskaiciuokle.com/registruotis" class="btn btn-primary">Rinktis Verslui</a>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- FAQ -->
+    <section id="duk" class="section">
+        <div class="container">
+            <div class="section-head center">
+                <div class="eyebrow">Klausimai</div>
+                <h2>Klausimai ir atsakymai</h2>
+            </div>
+
+            <div class="faq-wrap">
+                <details class="faq-item">
+                    <summary>Ar tikrai galima naudotis be jokio mokesčio?</summary>
+                    <p>Taip. Užsiregistravęs iš karto gauni prieigą prie nemokamo plano, tačiau kai kurios funkcijos bus ribojamos.</p>
+                </details>
+
+                <details class="faq-item">
+                    <summary>Tinka individualiai veiklai ir dirbant pagal verslo liudijimui?</summary>
+                    <p>Tinka visiems. Į pardavėjo rekvizitus galėsi įvesti tiek savo įmonę, tiek vardą ir pavardę.</p>
+                </details>
+
+                <details class="faq-item">
+                    <summary>Ar reikės kiekvieną kartą iš naujo vesti duomenis?</summary>
+                    <p>Ne. Pirmą kartą supildęs duomenis išsaugai juos paskyroje. Kitą kartą galėsi tiesiog dublikuoti jau išrašytą sąskaitą arba išsaugotą šabloną. Įmonių rekvizitai lengvai importuojami iš Registro Centro duomenų bazės.</p>
+                </details>
+
+                <details class="faq-item">
+                    <summary>Kaip viskas pasiekia buhalterį?</summary>
+                    <p>Išrašytų sąskaitų duomenis gali eksportuoti į i.SAF ir dar 15 skirtingų apskaitos programų, tokių kaip Rivilė, Finvalda, Centas, Pragma, Apskaita5 ir kitos. Tai reiškia, kad tavo buhalteris neturės vesti sąskaitų ranka. Taip sumažinsi darbo naštą bei išlaidas buhalterijai.</p>
+                </details>
+
+                <details class="faq-item">
+                    <summary>Ar galima naudoti nestandartinį PVM tarifą?</summary>
+                    <p>Taip. Be įprastų 21%, 9%, 5% ir 0% tarifų, gali įvesti savo, tiek konkrečiai eilutei, tiek visai sąskaitai. Sistema perskaičiuos sumas automatiškai.</p>
+                </details>
+
+                <details class="faq-item">
+                    <summary>Ar sistema priskiria PVM klasifikatorius?</summary>
+                    <p>Taip. Eksportuoti duomenys jau turės priskirtus PVM klasifikatorius, kurie importuosis į jūsų apskaitos programas.</p>
+                </details>
+
+                <details class="faq-item">
+                    <summary>Ar galima priskirti sandėlį, objektą ir kitus papildomus laukus?</summary>
+                    <p>Taip. Prieš eksportuojant duomenis galėsi susivesti reikšmes papildomų laukų, tokių kaip sandėlis, objektas, atskaitingas asmuo, projektas, logistika ir kitus, priklausomai nuo tavo pasirinktos apskaitos programos. Reikšmės importuosis į tavo apskaitos programą.</p>
+                </details>
+
+                <details class="faq-item">
+                    <summary>Ar sąskaitą galima išsiųsti klientui iš paties įrankio?</summary>
+                    <p>Taip. Paspaudęs "Išrašyti ir siųsti" klientas automatiškai gaus elektroninį laišką su nuorodą į sąskaitą, kartu su tiesioginio apmokėjimo nuoroda, jei ją pridėjai. Taip pat sistema išsiunčia automatinius apmokėjimo priminimus.</p>
+                </details>
+
+                <details class="faq-item">
+                    <summary>Ar klientas gali apmokėti sąskaitą tiesiogiai?</summary>
+                    <p>Taip. Galėsi pridėti apmokėjimo mygtuką per Montonio arba Paysera. O klientas atidaręs el. laišką, galės iš karto atsiskaityti banko pavedimu arba kortele. Po apmokėjimo sąskaitos iš karto pasižymės, kaip apmokėtos.</p>
+                </details>
+
+                <details class="faq-item">
+                    <summary>Ar mano duomenys saugūs?</summary>
+                    <p>Visi duomenys saugomi Europos Sąjungos serveriuose, perdavimas šifruojamas (HTTPS), o prieigą prie paskyros turėsi tik tu ar tavo buhalteris. Jokių duomenų tretiesiems asmenims neperduodame, o sąskaitų istorija esant poreikiui galėsi panaikinti.</p>
+                </details>
+            </div>
+        </div>
+    </section>
+
+    <!-- FINAL CTA -->
+    <section class="section final">
+        <div class="container">
+            <div class="final-inner">
+                <h2>Pirmą sąskaitą išrašyk <em>jau šiandien</em></h2>
+                <p>Registracija trunka mažiau nei sąskaitos numerio sugalvojimas.</p>
+                <div class="final-actions">
+                    <a href="https://atlyginimoskaiciuokle.com/registruotis" class="btn btn-primary btn-large">Susikurti paskyrą</a>
+                    <a href="https://atlyginimoskaiciuokle.com/prisijungti" class="btn btn-ghost btn-large">Jau turiu paskyrą</a>
+                </div>
+            </div>
+        </div>
+    </section>
+
+</main>
+
+<footer class="site-footer">
+    <div class="container">
+        <div class="footer-top">
+            <div class="footer-brand">
+                <a href="/" class="logo">
+                    <svg class="logo-mark" viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                        <rect x="3" y="3" width="42" height="42" rx="10" fill="#f6f1e7"/>
+                        <path d="M14 14h16l5 5v15H14z" fill="#0b3d2e"/>
+                        <path d="M30 14v5h5" stroke="#f6f1e7" stroke-width="1.5" fill="none"/>
+                        <line x1="18" y1="24" x2="31" y2="24" stroke="#f6f1e7" stroke-width="2" stroke-linecap="round"/>
+                        <line x1="18" y1="28" x2="31" y2="28" stroke="#f6f1e7" stroke-width="2" stroke-linecap="round"/>
+                        <line x1="18" y1="32" x2="26" y2="32" stroke="#f6f1e7" stroke-width="2" stroke-linecap="round"/>
+                    </svg>
+                    <span>saskaituisrasymas.lt</span>
+                </a>
+                <p>Išmanus sąskaitų išrašymas internetu, skirtas skirtingų dydžių Lietuvos verslams bei įmonėms. Sąskaitų duomenys lengvai eksportuojami į apskaitos programas.</p>
+            </div>
+
+            <div class="footer-col">
+                <h4>Produktas</h4>
+                <a href="#galimybes">Galimybės</a>
+                <a href="#procesas">Kaip veikia</a>
+                <a href="#kainos">Kainos</a>
+                <a href="#duk">DUK</a>
+                <a href="https://atlyginimoskaiciuokle.com/registruotis">Pradėti nemokamai</a>
+            </div>
+
+            <div class="footer-col">
+                <h4>Informacija</h4>
+                <a href="/privatumo-politika">Privatumo politika</a>
+                <a href="/naudojimo-taisykles">Naudojimo taisyklės</a>
+                <a href="/susisiekti">Susisiekti</a>
+            </div>
+        </div>
+
+        <div class="footer-bottom">
+            <span>© 2026 SaskaituIsrasymas.lt | Visos teisės saugomos</span>
+            <span>Pagaminta Lietuvoje</span>
+        </div>
+    </div>
+</footer>
+
 </body>
 </html>
