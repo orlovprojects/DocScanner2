@@ -5,7 +5,7 @@ import openai  # для совместимого RateLimitError
 from dotenv import load_dotenv
 from google import genai
 from google.genai import types  # для HttpOptions(timeout=...)
-from celery_signals import _send_telegram
+from ..celery_signals import _send_telegram
 
 # Попытка импортировать типовые исключения rate limit от Google SDK (если доступно)
 try:
