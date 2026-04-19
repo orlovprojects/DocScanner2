@@ -28,7 +28,7 @@ except Exception:
 
 from sklearn.cluster import DBSCAN
 from google.api_core.exceptions import ResourceExhausted, GoogleAPIError
-from celery_signals import _send_telegram
+from ..celery_signals import _send_telegram
 import logging
 logger = logging.getLogger("docscanner_app")
 
