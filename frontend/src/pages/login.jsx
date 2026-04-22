@@ -1,4 +1,4 @@
-import { Box, Typography, TextField, Button, Link, Container } from '@mui/material';
+import { Box, Typography, TextField, Button, Link, Container, Alert } from '@mui/material';
 import { useState } from "react";
 import { useAuth } from "../contexts/useAuth";
 import { useNavigate } from "react-router-dom";
@@ -7,12 +7,36 @@ import { Helmet } from 'react-helmet';
 const Login = () => {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
   const nav = useNavigate();
   const { login_user } = useAuth();
 
-  const handleLogin = (e) => {
+  const handleLogin = async (e) => {
     e.preventDefault();
-    login_user(email, password);
+    setError("");
+
+    if (!email || !password) {
+      setError("Įveskite el. paštą ir slaptažodį.");
+      return;
+    }
+
+    try {
+      setLoading(true);
+      await login_user(email, password);
+    } catch (err) {
+      if (!err?.response) {
+        setError("Nepavyko prisijungti. Patikrinkite interneto ryšį.");
+      } else if (err.response.status === 401 || err.response.status === 400) {
+        setError("Neteisingas el. paštas arba slaptažodis.");
+      } else if (err.response.data?.detail) {
+        setError(err.response.data.detail);
+      } else {
+        setError("Įvyko klaida. Bandykite dar kartą.");
+      }
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleNav = () => {
@@ -60,14 +84,14 @@ const Login = () => {
             boxShadow: 2,
           }}
         >
+          {error && <Alert severity="error">{error}</Alert>}
+
           <TextField
             label="El. paštas"
             type="email"
             variant="outlined"
             value={email}
-            onChange={(e) => {
-              setEmail(e.target.value);
-            }}
+            onChange={(e) => setEmail(e.target.value)}
             fullWidth
           />
           <TextField
@@ -75,9 +99,7 @@ const Login = () => {
             type="password"
             variant="outlined"
             value={password}
-            onChange={(e) => {
-              setPassword(e.target.value);
-            }}
+            onChange={(e) => setPassword(e.target.value)}
             fullWidth
           />
 
@@ -105,17 +127,18 @@ const Login = () => {
             type="submit"
             variant="contained"
             color="primary"
+            disabled={loading}
             fullWidth
             sx={{ 
               height: '50px',
-              bgcolor: 'black',
+              bgcolor: loading ? 'grey.500' : 'black',
               '&:hover': {
-                bgcolor: '#f5be0d',
+                bgcolor: loading ? 'grey.600' : '#f5be0d',
                 color: 'black',
               },
             }}
           >
-            Prisijungti
+            {loading ? "Jungiamasi..." : "Prisijungti"}
           </Button>
           <Box sx={{ textAlign: 'center' }}>
             <Link

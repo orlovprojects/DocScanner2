@@ -63,18 +63,13 @@ const AuthProvider = ({ children }) => {
   // Логин
   const login_user = async (email, password) => {
     console.log("Starting login process...");
-    try {
-      const success = await login(email, password);
-      console.log("Login response:", success);
-      if (success) {
-        setIsAuthenticated(true);
-        navigate('/suvestine');
-      } else {
-        alert("Neteisingas el. paštas arba slaptažodis");
-      }
-    } catch (error) {
-      console.log("Error during login:", error);
-      alert("Prisijungimo klaida");
+    const success = await login(email, password);
+    console.log("Login response:", success);
+    if (success) {
+      setIsAuthenticated(true);
+      navigate('/suvestine');
+    } else {
+      throw { response: { status: 401 } };
     }
   };
 

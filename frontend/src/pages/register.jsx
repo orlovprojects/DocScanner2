@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef } from "react";
+import { useState, useMemo, useRef, useEffect } from "react";
 import { useAuth } from "../contexts/useAuth";
 import { useNavigate } from "react-router-dom";
 import { Helmet } from "react-helmet";
@@ -59,7 +59,7 @@ export default function Register() {
   const nav = useNavigate();
   const { register_user } = useAuth();
 
-  // guard от повторной отправки событий (StrictMode/HMR)
+  // guard від повторної відправки подій (StrictMode/HMR)
   const firedRef = useRef(false);
 
   const emailError = useMemo(() => {
@@ -79,10 +79,10 @@ export default function Register() {
   }, [Cpassword, password, touched.Cpassword]);
 
   useEffect(() => {
-      const src = new URLSearchParams(window.location.search).get("src");
-      if (src && ["skaitmenizavimas", "israsymas"].includes(src)) {
-          sessionStorage.setItem("reg_source", src);
-      }
+    const src = new URLSearchParams(window.location.search).get("src");
+    if (src && ["skaitmenizavimas", "israsymas"].includes(src)) {
+      sessionStorage.setItem("reg_source", src);
+    }
   }, []);
 
   const handleRegister = async (e) => {
@@ -130,9 +130,36 @@ export default function Register() {
 
       nav("/prisijungti");
     } catch (err) {
-      const msg =
-        (err && (err.message || err.error || err.detail)) ||
-        "Įvyko klaida. Bandykite dar kartą.";
+      let msg = "Įvyko klaida. Bandykite dar kartą.";
+
+      if (!err?.response) {
+        msg = "Nepavyko prisijungti. Patikrinkite interneto ryšį.";
+      } else {
+        const data = err.response?.data;
+        if (data) {
+          if (data.email) {
+            const emailErr = Array.isArray(data.email) ? data.email[0] : data.email;
+            if (
+              emailErr.toLowerCase().includes("already") ||
+              emailErr.toLowerCase().includes("exists") ||
+              emailErr.toLowerCase().includes("unique")
+            ) {
+              msg = "Šis el. paštas jau užregistruotas. Gal norėjote prisijungti?";
+            } else {
+              msg = emailErr;
+            }
+          } else if (data.password) {
+            msg = Array.isArray(data.password) ? data.password[0] : data.password;
+          } else if (data.detail) {
+            msg = data.detail;
+          } else if (data.error) {
+            msg = data.error;
+          } else if (typeof data === "string") {
+            msg = data;
+          }
+        }
+      }
+
       setBackendError(String(msg));
     } finally {
       setLoading(false);
@@ -165,7 +192,6 @@ export default function Register() {
       </Box>
     );
 
-    // ВАЖНО: возвращаем список как самостоятельный блок (не в helperText)
     return (
       <Box component="ul" sx={{ pl: 2, m: 0.5 }}>
         <Row ok={okLen} text="Minimum 8 simboliai" />
@@ -242,12 +268,10 @@ export default function Register() {
               onChange={(e) => setPassword(e.target.value)}
               onBlur={() => setTouched((t) => ({ ...t, password: true }))}
               error={touched.password && validatePassword(password).length > 0}
-              helperText={" " /* держим место, но не кладём <ul> внутрь */}
+              helperText={" "}
               fullWidth
             />
-            {touched.password && (
-              <PasswordRequirements value={password} />
-            )}
+            {touched.password && <PasswordRequirements value={password} />}
           </Box>
 
           <TextField
@@ -323,10 +347,10 @@ export default function Register() {
 
 
 
-
-// import { useState, useMemo } from "react";
+// import { useState, useMemo, useRef, useEffect } from "react";
 // import { useAuth } from "../contexts/useAuth";
 // import { useNavigate } from "react-router-dom";
+// import { Helmet } from "react-helmet";
 // import {
 //   Box,
 //   Typography,
@@ -338,6 +362,10 @@ export default function Register() {
 // } from "@mui/material";
 // import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 // import CancelIcon from "@mui/icons-material/Cancel";
+// import { gtmPush } from "../gtm";
+
+// // Meta Pixel
+// import { track, ensureFbqReady } from "../metaPixel";
 
 // // --- Validators ---
 // const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -380,6 +408,9 @@ export default function Register() {
 //   const nav = useNavigate();
 //   const { register_user } = useAuth();
 
+//   // guard от повторной отправки событий (StrictMode/HMR)
+//   const firedRef = useRef(false);
+
 //   const emailError = useMemo(() => {
 //     if (!touched.email) return "";
 //     return validateEmail(email);
@@ -395,6 +426,13 @@ export default function Register() {
 //     if (password !== Cpassword) return "Slaptažodžiai nesutampa";
 //     return "";
 //   }, [Cpassword, password, touched.Cpassword]);
+
+//   useEffect(() => {
+//       const src = new URLSearchParams(window.location.search).get("src");
+//       if (src && ["skaitmenizavimas", "israsymas"].includes(src)) {
+//           sessionStorage.setItem("reg_source", src);
+//       }
+//   }, []);
 
 //   const handleRegister = async (e) => {
 //     e.preventDefault();
@@ -413,7 +451,33 @@ export default function Register() {
 
 //     try {
 //       setLoading(true);
-//       await register_user(email, password, Cpassword);
+//       const regSource = sessionStorage.getItem("reg_source") || "";
+//       await register_user(email, password, Cpassword, regSource);
+
+//       // ✅ только после успешной регистрации
+//       if (!firedRef.current) {
+//         try {
+//           await ensureFbqReady(3000);
+//         } catch {
+//           // ок — событие уйдёт из буфера позже
+//         }
+
+//         track("CompleteRegistration", {
+//           status: true,
+//           method: "email",
+//         });
+
+//         gtmPush("sign_up", {
+//           method: "email",
+//         });
+
+//         firedRef.current = true;
+
+//         // маленькая задержка, чтобы Pixel Helper увидел событие в dev
+//         await new Promise((r) => setTimeout(r, 150));
+//       }
+
+//       nav("/prisijungti");
 //     } catch (err) {
 //       const msg =
 //         (err && (err.message || err.error || err.detail)) ||
@@ -450,8 +514,9 @@ export default function Register() {
 //       </Box>
 //     );
 
+//     // ВАЖНО: возвращаем список как самостоятельный блок (не в helperText)
 //     return (
-//       <Box component="ul" sx={{ pl: 0, m: 1 }}>
+//       <Box component="ul" sx={{ pl: 2, m: 0.5 }}>
 //         <Row ok={okLen} text="Minimum 8 simboliai" />
 //         <Row ok={okLower} text="Bent viena mažoji raidė" />
 //         <Row ok={okUpper} text="Bent viena didžioji raidė" />
@@ -463,6 +528,13 @@ export default function Register() {
 
 //   return (
 //     <Container maxWidth={false} disableGutters justifyContent="center">
+//       <Helmet>
+//         <title>Registruotis – DokSkenas</title>
+//         <meta
+//           name="description"
+//           content="Registruokitės ir išbandykite DokSkeną."
+//         />
+//       </Helmet>
 //       <Box
 //         sx={{
 //           display: "flex",
@@ -510,19 +582,22 @@ export default function Register() {
 //             fullWidth
 //           />
 
-//           <TextField
-//             label="Slaptažodis"
-//             type="password"
-//             variant="outlined"
-//             value={password}
-//             onChange={(e) => setPassword(e.target.value)}
-//             onBlur={() => setTouched((t) => ({ ...t, password: true }))}
-//             error={touched.password && validatePassword(password).length > 0}
-//             helperText={
-//               touched.password ? <PasswordRequirements value={password} /> : " "
-//             }
-//             fullWidth
-//           />
+//           <Box>
+//             <TextField
+//               label="Slaptažodis"
+//               type="password"
+//               variant="outlined"
+//               value={password}
+//               onChange={(e) => setPassword(e.target.value)}
+//               onBlur={() => setTouched((t) => ({ ...t, password: true }))}
+//               error={touched.password && validatePassword(password).length > 0}
+//               helperText={" " /* держим место, но не кладём <ul> внутрь */}
+//               fullWidth
+//             />
+//             {touched.password && (
+//               <PasswordRequirements value={password} />
+//             )}
+//           </Box>
 
 //           <TextField
 //             label="Pakartok slaptažodį"
@@ -589,3 +664,5 @@ export default function Register() {
 //     </Container>
 //   );
 // }
+
+
