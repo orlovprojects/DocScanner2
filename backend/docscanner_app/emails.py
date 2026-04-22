@@ -98,7 +98,7 @@ def siusti_sveikinimo_laiska(vartotojas):
             "Žiūrėti video: https://youtu.be/falGn4_S_5Y\n\n"
             "Jei kyla kitų klausimų (pvz. kaip importuoti duomenis į Rivilę), "
             "atsakymus rasite mūsų naudojimo gide: https://atlyginimoskaiciuokle.com/naudojimo-gidas\n\n"
-            "O jei turite pastebėjimų ar norite pasakyti \"Labas!\" mūsų komandai — "
+            "O jei turite pastebėjimų ar norite pasakyti \"Labas!\" mūsų komandai,"
             "tiesiog atsakykite į šį el. laišką.\n\n"
             "Pagarbiai,\nDenis iš DokSkeno"
         )
@@ -352,11 +352,11 @@ def siusti_mobilios_apps_kvietima(
 #  Video mapping по бухгалтерской программе
 # ──────────────────────────────────────────────
 VIDEO_BY_PROGRAM = {
-    "rivile_erp":  {"label": "Rivile ERP",  "url": "https://www.youtube.com/embed/7uwLLA3uTQ0"},
-    "rivile":      {"label": "Rivile Gama", "url": "https://www.youtube.com/embed/7uwLLA3uTQ0"},
-    "apskaita5":   {"label": "Apskaita5",   "url": "https://www.youtube.com/embed/_HeD_TKUsl0"},
-    "finvalda":    {"label": "Centas",      "url": "https://www.youtube.com/embed/n1OGeQ9quEk"},
-    "dineta":      {"label": "Dineta",      "url": "https://www.youtube.com/embed/MLCPSPmcupE"},
+    "rivile_erp":  {"label": "Rivilę ERP",  "url": "https://youtu.be/2ENROTqWfYw"},
+    "rivile":      {"label": "Rivilę Gama", "url": "https://youtu.be/7uwLLA3uTQ0"},
+    "apskaita5":   {"label": "Apskaita 5",   "url": "https://youtu.be/_HeD_TKUsl0"},
+    "finvalda":    {"label": "Centą",      "url": "https://youtu.be/n1OGeQ9quEk"},
+    "dineta":      {"label": "Dinetą",      "url": "https://youtu.be/MLCPSPmcupE"},
     # Добавляй по мере появления видео. Если программы нет в словаре —
     # строка про видео просто не попадёт в письмо.
 }
@@ -424,7 +424,7 @@ def _skaitmn_scanned(user):
             "Taip pat galbūt norėsite nusistatyti papildomus laukus, tokius kaip "
             "sandėlis, objektas, atskaitingas asmuo ir kiti, plačiau šiame video: "
             "https://youtu.be/_AuMdOP66bE\n\n"
-            "Kilo klausimų — susisiekite.\n\n"
+            "Kilo klausimų, susisiekite.\n\n"
             "Pagarbiai,\n"
             "Denis iš DokSkeno"
         ),
@@ -637,7 +637,7 @@ def _trial_expired_email(user):
             "jūsų bandomasis laikotarpis baigėsi.\n\n"
             "Norėdami neribotai naudotis visomis funkcijomis, įsigykite PRO planą.\n\n"
             'Tai galite padaryti prisijungę prie paskyros ir aplankę "Papildyti" puslapį.\n\n'
-            "Reikia pagalbos — praneškite.\n\n"
+            "Reikia pagalbos, praneškite.\n\n"
             "Pagarbiai,\n"
             "Denis iš DokSkeno"
         ),
