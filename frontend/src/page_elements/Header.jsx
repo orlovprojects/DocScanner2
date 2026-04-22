@@ -362,7 +362,10 @@ const Header = () => {
 
   const handleClose = () => setAnchorEl(null);
   const handleMenuClick = (event) => setAnchorEl(event.currentTarget);
-  const handleStartTrial = () => nav("/registruotis");
+  const handleStartTrial = () => {
+      const src = location.pathname.includes("israsymas") ? "israsymas" : "skaitmenizavimas";
+      nav(`/registruotis?src=${src}`);
+  };
 
   // ─── Простые (не-dropdown) desktop-пункты (без админ-пунктов) ────────────────────
   const plainDesktopItems = [
@@ -630,7 +633,8 @@ const Header = () => {
                   button
                   onClick={() => {
                     setIsDrawerOpen(false);
-                    nav("/registruotis");
+                    const src = location.pathname.includes("israsymas") ? "israsymas" : "skaitmenizavimas";
+                    nav(`/registruotis?src=${src}`);
                   }}
                 >
                   <ListItemText primary="Registruotis" />

@@ -70,7 +70,7 @@ const Debetas = () => {
         <Button
           variant="contained"
           size="large"
-          href="/registruotis"
+          href="/registruotis?src=skaitmenizavimas"
           sx={{
             backgroundColor: "#f5be0d",
             color: "black",
@@ -792,7 +792,7 @@ const Debetas = () => {
         <Button
           variant="contained"
           size="large"
-          href="/registruotis"
+          href="/registruotis?src=skaitmenizavimas"
           sx={{
             backgroundColor: "#f5be0d",
             color: "black",

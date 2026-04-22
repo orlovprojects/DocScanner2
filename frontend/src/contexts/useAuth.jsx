@@ -93,18 +93,30 @@ const AuthProvider = ({ children }) => {
   };
 
   // Регистрация
-  const register_user = async (email, password, Cpassword) => {
-    console.log("Starting registration process...");
-    if (password !== Cpassword) {
-      throw new Error('Slaptažodžiai nesutampa');
-    }
-    await register(email, password);
-    const success = await login(email, password);
-    if (success) {
-      setIsAuthenticated(true);
-      navigate('/suvestine');
-    }
+  const register_user = async (email, password, Cpassword, registration_source) => {
+      console.log("Starting registration process...");
+      if (password !== Cpassword) {
+          throw new Error('Slaptažodžiai nesutampa');
+      }
+      await register(email, password, registration_source);
+      const success = await login(email, password);
+      if (success) {
+          setIsAuthenticated(true);
+          navigate('/suvestine');
+      }
   };
+  // const register_user = async (email, password, Cpassword) => {
+  //   console.log("Starting registration process...");
+  //   if (password !== Cpassword) {
+  //     throw new Error('Slaptažodžiai nesutampa');
+  //   }
+  //   await register(email, password);
+  //   const success = await login(email, password);
+  //   if (success) {
+  //     setIsAuthenticated(true);
+  //     navigate('/suvestine');
+  //   }
+  // };
 
   // Принудительный logout (вызывается когда refresh token не сработал)
   const forceLogout = useCallback(() => {

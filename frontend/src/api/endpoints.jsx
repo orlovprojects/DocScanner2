@@ -172,11 +172,29 @@ export const subscription_status = async () => {
   }
 };
 
-export const register = async (email, password) => {
+// export const register = async (email, password) => {
+//   try {
+//     const { data } = await publicApi.post(
+//       'register/',
+//       { email, password },
+//       { headers: { 'Content-Type': 'application/json' } }
+//     );
+//     return data;
+//   } catch (error) {
+//     console.error('Registration error:', error.response?.data || error.message);
+//     throw error;
+//   }
+// };
+
+export const register = async (email, password, registration_source) => {
   try {
     const { data } = await publicApi.post(
       'register/',
-      { email, password },
+      {
+        email,
+        password,
+        ...(registration_source ? { registration_source } : {}),
+      },
       { headers: { 'Content-Type': 'application/json' } }
     );
     return data;

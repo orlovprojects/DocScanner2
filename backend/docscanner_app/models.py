@@ -637,6 +637,29 @@ class CustomUser(AbstractUser):
         "Registracijos IP", null=True, blank=True
     )
 
+    registration_source = models.CharField(
+        "Registracijos šaltinis",
+        max_length=32,
+        choices=[
+            ("skaitmenizavimas", "Skaitmenizavimas"),
+            ("israsymas", "Sąskaitų išrašymas"),
+        ],
+        blank=True,
+        null=True,
+    )
+
+    trial_expired_email_sent_at = models.DateTimeField(
+        "Trial pabaigos laiško data",
+        blank=True,
+        null=True,
+    )
+
+    onboarding_email_sent_at = models.DateTimeField(
+        "Onboarding laiško išsiuntimo data",
+        blank=True,
+        null=True,
+    )
+
     # mobile_key = models.CharField(max_length=64, unique=True, null=True, blank=True)
 
     # def generate_mobile_key(self, save: bool = True) -> str:

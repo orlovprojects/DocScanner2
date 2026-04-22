@@ -3624,7 +3624,13 @@ def register(request):
             # Устанавливаем default extra_settings
             user.registration_ip = get_client_ip(request)
             user.extra_settings = {"fix_delta": 1}
-            user.save(update_fields=["extra_settings"])
+
+            # --- Onboarding source ---
+            reg_source = request.data.get("registration_source", "")
+            if reg_source in ("skaitmenizavimas", "israsymas"):
+                user.registration_source = reg_source
+
+            user.save(update_fields=["extra_settings", "registration_ip", "registration_source"])
 
             user.ensure_inbox_token(save=True)
 

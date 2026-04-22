@@ -283,7 +283,7 @@ const Saskaitos = () => {
             <Button
               variant="contained"
               size="large"
-              href="/registruotis"
+              href="/registruotis?src=israsymas"
               sx={{
                 backgroundColor: ACCENT,
                 color: '#fff',
@@ -1418,7 +1418,7 @@ const Saskaitos = () => {
             <Button
               variant="outlined"
               size="large"
-              href="/registruotis"
+              href="/registruotis?src=israsymas"
               sx={{
                 borderColor: '#1b1b1b',
                 color: '#1b1b1b',
@@ -1606,7 +1606,7 @@ const Saskaitos = () => {
               <Button
                 variant="contained"
                 size="large"
-                href="/registruotis"
+                href="/registruotis?src=israsymas"
                 sx={{
                   backgroundColor: ACCENT,
                   color: '#fff',
@@ -1672,7 +1672,7 @@ const Saskaitos = () => {
           <Button
             variant="contained"
             size="large"
-            href="/registruotis"
+            href="/registruotis?src=israsymas"
             sx={{
               backgroundColor: ACCENT,
               color: '#fff',

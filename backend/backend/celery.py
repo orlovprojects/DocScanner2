@@ -43,6 +43,14 @@ app.conf.beat_schedule = {
         'task': 'docscanner_app.services.sync_lt_companies.sync_lt_companies_weekly',
         'schedule': crontab(hour=5, minute=0, day_of_week=1),
     },
+    'send-onboarding-emails': {
+        'task': 'docscanner_app.tasks.send_onboarding_emails',
+        'schedule': crontab(hour=10, minute=0, day_of_week='1-5'),
+    },
+    'send-trial-expired-emails': {
+        'task': 'docscanner_app.tasks.send_trial_expired_emails',
+        'schedule': crontab(hour=10, minute=15, day_of_week='1-5'),
+    },
 }
 
 

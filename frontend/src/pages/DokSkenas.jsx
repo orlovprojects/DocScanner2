@@ -498,7 +498,7 @@ const Dokskenas = () => {
             <Button
               variant="contained"
               size="large"
-              href="/registruotis"
+              href="/registruotis?src=skaitmenizavimas"
               sx={{
                 backgroundColor: ACCENT,
                 color: '#fff',
@@ -1715,7 +1715,7 @@ const Dokskenas = () => {
           <Button
             variant="contained"
             size="large"
-            href="/registruotis"
+            href="/registruotis?src=skaitmenizavimas"
             sx={{
               backgroundColor: ACCENT,
               color: '#fff',

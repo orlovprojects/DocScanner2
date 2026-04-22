@@ -4001,6 +4001,17 @@ def sync_lt_companies_weekly():
 
 
 
+@shared_task(name="docscanner_app.tasks.send_onboarding_emails")
+def send_onboarding_emails():
+    from .emails import send_onboarding_emails as _send
+    return _send()
+
+
+@shared_task(name="docscanner_app.tasks.send_trial_expired_emails")
+def send_trial_expired_emails():
+    from .emails import send_trial_expired_emails as _send
+    return _send()
+
 
 
 

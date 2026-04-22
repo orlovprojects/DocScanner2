@@ -3,7 +3,7 @@ from django.core.mail import EmailMultiAlternatives
 from django.template.loader import render_to_string
 from django.conf import settings
 from email.utils import formataddr
-from django.utils.timezone import now
+from django.utils.timezone import now, localtime
 from django.contrib.auth import get_user_model
 
 import io
@@ -59,11 +59,10 @@ def siusti_kontakto_laiska(*, vardas: str, email: str, zinute: str, tema: str | 
             body=text_body,
             from_email=formataddr(("DokSkenas", settings.DEFAULT_FROM_EMAIL)),
             to=[getattr(settings, "CONTACT_EMAIL", settings.DEFAULT_FROM_EMAIL)],
-            reply_to=[f"{vardas} <{email}>"],  # ← «Atsakyti» keliaus siuntėjui
+            reply_to=[f"{vardas} <{email}>"],
         )
         msg.attach_alternative(html_body, "text/html")
 
-        # (neprivaloma) žymos/metadata – jei jūsų ESP jas palaiko
         try:
             msg.tags = ["contact"]
             msg.metadata = {"event": "contact_form"}
@@ -95,11 +94,11 @@ def siusti_sveikinimo_laiska(vartotojas):
             "Sveiki prisijungę prie DokSkeno!\n\n"
             "Į jūsų sąskaitą pridėjome 50 nemokamų kreditų, kad galėtumėte išbandyti DokSkeną.\n\n"
             "Prieš pradedant kelti failus, įveskite savo įmonės rekvizitus bei pasirinkite buhalterinę "
-            "programą nustatymuose, tada bus aktyvuotas „Įkelti failus“ mygtukas.\n"
-            "Žiūrėti video 📽️: https://youtu.be/falGn4_S_5Y\n\n"
+            "programą nustatymuose, tada bus aktyvuotas \"Įkelti failus\" mygtukas.\n"
+            "Žiūrėti video: https://youtu.be/falGn4_S_5Y\n\n"
             "Jei kyla kitų klausimų (pvz. kaip importuoti duomenis į Rivilę), "
             "atsakymus rasite mūsų naudojimo gide: https://atlyginimoskaiciuokle.com/naudojimo-gidas\n\n"
-            "O jei turite pastebėjimų ar norite pasakyti „Labas!“ mūsų komandai — "
+            "O jei turite pastebėjimų ar norite pasakyti \"Labas!\" mūsų komandai — "
             "tiesiog atsakykite į šį el. laišką.\n\n"
             "Pagarbiai,\nDenis iš DokSkeno"
         )
@@ -117,7 +116,6 @@ def siusti_sveikinimo_laiska(vartotojas):
         msg = EmailMultiAlternatives(
             subject="Pridėjome 50 nemokamų kreditų į jūsų sąskaitą",
             body=text_content,
-            # from_email=settings.DEFAULT_FROM_EMAIL,
             from_email=formataddr(("Denis iš DokSkeno", settings.DEFAULT_FROM_EMAIL)),
             to=[vartotojas.email],
         )
@@ -205,7 +203,6 @@ def siusti_masini_laiska_visiems(
                 try:
                     text_body = text_template.format(**ctx)
                 except Exception:
-                    # jei format nepavyko – nenaudojam .format, kad bent kažką išsiųstų
                     text_body = text_template
             else:
                 vardas = ctx["vardas"] or "vartotojau"
@@ -230,7 +227,6 @@ def siusti_masini_laiska_visiems(
             if html_body:
                 msg.attach_alternative(html_body, "text/html")
 
-            # Mailjet / Anymail žymos ir metaduomenys
             try:
                 msg.tags = ["bulk"]
                 msg.metadata = {"event": "bulk_send", "user_id": user.id}
@@ -255,8 +251,8 @@ def siusti_masini_laiska_visiems(
 
 def siusti_mobilios_apps_kvietima(
     *,
-    kvietejas,          # CustomUser, который приглашает
-    gavejo_email: str,  # кому отправляем приглашение
+    kvietejas,
+    gavejo_email: str,
     play_store_link: str,
     mobile_key: str,
 ) -> bool:
@@ -267,7 +263,6 @@ def siusti_mobilios_apps_kvietima(
     """
     subject = "Kvietimas į DokSkenas mobilųjį aplikaciją"
 
-    # Paprasta tekstinė versija (fallback)
     text_body = (
         "Sveiki!\n\n"
         "Jūs gavote kvietimą naudotis DokSkenas mobiliąja programėle.\n\n"
@@ -279,7 +274,6 @@ def siusti_mobilios_apps_kvietima(
         "DokSkeno komanda\n"
     )
 
-    # Bandome sugeneruoti HTML šabloną, jei jis yra
     html_body = None
     try:
         html_body = render_to_string(
@@ -292,7 +286,6 @@ def siusti_mobilios_apps_kvietima(
             },
         )
     except Exception as e:
-        # Jei šablono nėra ar klaida – loginam ir paliekam tik text_body
         logger.warning(f"[MOBILE INVITE TEMPLATE WARNING] {e}")
 
     try:
@@ -313,7 +306,6 @@ def siusti_mobilios_apps_kvietima(
         if html_body:
             msg.attach_alternative(html_body, "text/html")
 
-        # --- Generuojame QR kodą ---
         qr = qrcode.QRCode(
             version=1,
             box_size=10,
@@ -328,10 +320,8 @@ def siusti_mobilios_apps_kvietima(
         buf.seek(0)
         qr_png_data = buf.read()
 
-        # Prisegame QR kaip priedą
         msg.attach("dokskenas_qr.png", qr_png_data, "image/png")
 
-        # Žymos / metadata, jei jos palaikomos
         try:
             msg.tags = ["mobile_invite"]
             msg.metadata = {
@@ -348,3 +338,369 @@ def siusti_mobilios_apps_kvietima(
     except Exception as e:
         logger.exception(f"[MOBILE INVITE ERROR] {e}")
         return False
+
+
+# ══════════════════════════════════════════════════════════════════
+#  ONBOARDING EMAILS
+#  Celery Beat runs send_onboarding_emails() every workday at 10:00.
+#  Each new user gets exactly ONE onboarding email the next business
+#  day after registration.
+# ══════════════════════════════════════════════════════════════════
+
+
+# ──────────────────────────────────────────────
+#  Video mapping по бухгалтерской программе
+# ──────────────────────────────────────────────
+VIDEO_BY_PROGRAM = {
+    "rivile_erp":  {"label": "Rivile ERP",  "url": "https://www.youtube.com/embed/7uwLLA3uTQ0"},
+    "rivile":      {"label": "Rivile Gama", "url": "https://www.youtube.com/embed/7uwLLA3uTQ0"},
+    "apskaita5":   {"label": "Apskaita5",   "url": "https://www.youtube.com/embed/_HeD_TKUsl0"},
+    "finvalda":    {"label": "Centas",      "url": "https://www.youtube.com/embed/n1OGeQ9quEk"},
+    "dineta":      {"label": "Dineta",      "url": "https://www.youtube.com/embed/MLCPSPmcupE"},
+    # Добавляй по мере появления видео. Если программы нет в словаре —
+    # строка про видео просто не попадёт в письмо.
+}
+
+
+# ──────────────────────────────────────────────
+#  Текстовые шаблоны — SKAITMENIZAVIMAS
+# ──────────────────────────────────────────────
+
+def _skaitmn_not_configured(user):
+    """Зарегался, но не ввёл компанию или не выбрал бух. программу."""
+    return {
+        "subject": "Kaip pradėti skaitmenizuoti DokSkene?",
+        "body": (
+            "Sveiki,\n\n"
+            "tam kad galėtumėte įkelti dokumentus skaitmenizuoti DokSkene, tereikia "
+            "nustatymuose įvesti savo įmonės rekvizitus bei pasirinkti apskaitos programą.\n\n"
+            "Plačiau šiame video: https://youtu.be/ByViuilYxZA\n\n"
+            "Jei kils sunkumų, drąsiai kreipkitės.\n\n"
+            "Pagarbiai,\n"
+            "Denis iš DokSkeno"
+        ),
+    }
+
+
+def _skaitmn_configured_not_scanned(user):
+    """Ввёл компанию + выбрал программу, но ещё не сканировал (credits == 50)."""
+    return {
+        "subject": "Jūsų paskyra paruošta skaitmenizuoti dokumentus",
+        "body": (
+            "Sveiki,\n\n"
+            "jūsų DokSkeno paskyra jau paruošta skaitmenizuoti dokumentus.\n\n"
+            'Suvestinėje tiesiog paspauskite "Įkelti failus" mygtuką ir pasirinkite failus. '
+            "Viename faile turi būti viena sąskaita (gali būti iki 5 puslapių). "
+            "Galite įkelti ir archyvus.\n\n"
+            "Jei norėsite, kad nesikurtų prekių/paslaugų kortelės kiekvienai prekei, "
+            "galite nusistatyti automatizacijas, plačiau šiame video: "
+            "https://youtu.be/MftJl0_4jOE\n\n"
+            "Jei kyla klausimų, drąsiai kreipkitės.\n\n"
+            "Pagarbiai,\n"
+            "Denis iš DokSkeno"
+        ),
+    }
+
+
+def _skaitmn_scanned(user):
+    """Сканировал хотя бы 1 документ (credits < 50)."""
+    program = user.default_accounting_program
+    video = VIDEO_BY_PROGRAM.get(program)
+
+    video_line = ""
+    if video:
+        video_line = (
+            f"Šis video parodo, kaip importuoti į {video['label']}: "
+            f"{video['url']}\n\n"
+        )
+
+    return {
+        "subject": "Ar pavyko importuoti sąskaitas į apskaitą?",
+        "body": (
+            "Sveiki,\n\n"
+            "matome, kad jau skaitmenizavote kelis dokumentus. "
+            "Ar pavyko importuoti duomenis į apskaitos programą?\n\n"
+            f"{video_line}"
+            "Taip pat galbūt norėsite nusistatyti papildomus laukus, tokius kaip "
+            "sandėlis, objektas, atskaitingas asmuo ir kiti, plačiau šiame video: "
+            "https://youtu.be/_AuMdOP66bE\n\n"
+            "Kilo klausimų — susisiekite.\n\n"
+            "Pagarbiai,\n"
+            "Denis iš DokSkeno"
+        ),
+    }
+
+
+# ──────────────────────────────────────────────
+#  Текстовые шаблоны — ISRASYMAS
+# ──────────────────────────────────────────────
+
+def _israsymas_nothing(user):
+    """Зарегался с išrašymas, но нет trial."""
+    return {
+        "subject": "Paskyra paruošta išrašyti sąskaitas",
+        "body": (
+            "Sveiki,\n\n"
+            "savo DokSkeno paskyroje jau galite išrašyti sąskaitas.\n\n"
+            "Prisijungę eikite į Išrašymas -> Sąskaitos -> Nauja sąskaita\n\n"
+            "Norėdami išbandyti visas funkcijas, tokias kaip apmokėjimo mygtukai "
+            "sąskaitose, banko išrašų importas, automatiniai priminimai bei neribotas "
+            "sąskaitų išrašymas ir siuntimas klientams, pradėkite bandomąjį laikotarpį "
+            "arba įsigykite PRO planą.\n\n"
+            "Jei kils klausimų, drąsiai kreipkitės.\n\n"
+            "Pagarbiai,\n"
+            "Denis iš DokSkeno"
+        ),
+    }
+
+
+def _israsymas_trial_no_invoices(user):
+    """Начал trial, но не выписал ни одной фактуры."""
+    return {
+        "subject": "Išrašykite savo pirmąją sąskaitą",
+        "body": (
+            "Sveiki,\n\n"
+            "jūsų PRO plano bandomasis laikotarpis jau prasidėjo. "
+            "Nedelskite ir išbandykite visas funkcijas.\n\n"
+            "Sąskaitas galite išrašyti ir siųsti per: "
+            "Išrašymas -> Sąskaitos -> Nauja sąskaita\n\n"
+            "Bandomuoju laikotarpiu galite neribotai naudotis visomis funkcijomis.\n\n"
+            "Jei kils klausimų, drąsiai kreipkitės.\n\n"
+            "Pagarbiai,\n"
+            "Denis iš DokSkeno"
+        ),
+    }
+
+
+def _israsymas_has_invoices(user):
+    """Начал trial и выписал хотя бы 1 фактуру."""
+    return {
+        "subject": "Naudingos funkcijos",
+        "body": (
+            "Sveiki,\n\n"
+            "sveikiname su pirmąja išrašyta sąskaita.\n\n"
+            "Keletas funkcijų, kurias rekomenduojame išbandyti:\n"
+            "- Periodinės sąskaitos\n"
+            "- Montonio / Paysera mygtukai sąskaitose\n"
+            "- Banko išrašų importas ir apmokėjimų susiejimas su sąskaitomis\n"
+            "- Automatiniai apmokėjimo priminimai\n"
+            "- Sąskaitų duomenų eksportas į apskaitos programą\n\n"
+            "Jei kils klausimų, drąsiai kreipkitės.\n\n"
+            "Pagarbiai,\n"
+            "Denis iš DokSkeno"
+        ),
+    }
+
+
+# ──────────────────────────────────────────────
+#  Определение категории и отправка
+# ──────────────────────────────────────────────
+
+def _classify_skaitmenizavimas(user):
+    """Возвращает функцию-шаблон для skaitmenizavimas юзера."""
+    has_company = bool(user.company_name and user.company_name.strip())
+    has_program = bool(user.default_accounting_program)
+
+    if not has_company or not has_program:
+        return _skaitmn_not_configured
+
+    from decimal import Decimal
+    if user.credits >= Decimal("50"):
+        return _skaitmn_configured_not_scanned
+
+    return _skaitmn_scanned
+
+
+def _classify_israsymas(user):
+    """Возвращает функцию-шаблон для israsymas юзера."""
+    from .models import InvSubscription, Invoice
+
+    has_trial = InvSubscription.objects.filter(user=user).exists()
+
+    if not has_trial:
+        return _israsymas_nothing
+
+    has_invoices = Invoice.objects.filter(user=user).exists()
+
+    if not has_invoices:
+        return _israsymas_trial_no_invoices
+
+    return _israsymas_has_invoices
+
+
+def _send_onboarding_to_user(user):
+    """Определяет категорию, формирует текст, отправляет."""
+    source = user.registration_source or "skaitmenizavimas"
+
+    if source == "israsymas":
+        template_fn = _classify_israsymas(user)
+    else:
+        template_fn = _classify_skaitmenizavimas(user)
+
+    email_data = template_fn(user)
+
+    try:
+        msg = EmailMultiAlternatives(
+            subject=email_data["subject"],
+            body=email_data["body"],
+            from_email=formataddr(("Denis iš DokSkeno", settings.DEFAULT_FROM_EMAIL)),
+            to=[user.email],
+        )
+        try:
+            msg.tags = ["onboarding"]
+            msg.metadata = {
+                "event": "onboarding",
+                "user_id": user.id,
+                "source": source,
+                "template": template_fn.__name__,
+            }
+        except Exception:
+            pass
+
+        msg.send()
+        logger.info(
+            f"[ONBOARDING SENT] user_id={user.id} email={user.email} "
+            f"source={source} template={template_fn.__name__}"
+        )
+        return True
+    except Exception as e:
+        logger.exception(
+            f"[ONBOARDING ERROR] user_id={user.id} email={user.email}: {e}"
+        )
+        return False
+
+
+# ──────────────────────────────────────────────
+#  Главная функция — вызывается из Celery task
+# ──────────────────────────────────────────────
+
+def send_onboarding_emails():
+    """
+    Берёт всех юзеров, которым ещё не отправлен onboarding email
+    и которые зарегистрировались до начала сегодняшнего дня.
+    Beat запускает это Пн–Пт в 10:00.
+    """
+    from django.contrib.auth import get_user_model
+    User = get_user_model()
+
+    today = localtime(now()).date()
+
+    # Перестраховка: не шлём в выходные (beat не должен запускать, но мало ли)
+    if today.weekday() in (5, 6):  # 5=Сб, 6=Вс
+        logger.info("[ONBOARDING] Weekend — skipping.")
+        return 0
+
+    users = User.objects.filter(
+        onboarding_email_sent_at__isnull=True,
+        is_active=True,
+        date_joined__date__lt=today,
+    )
+
+    total = users.count()
+    if total == 0:
+        logger.info("[ONBOARDING] No users to process.")
+        return 0
+
+    logger.info(f"[ONBOARDING START] {total} user(s) to process.")
+
+    sent = 0
+    stats = {}
+    for user in users:
+        ok = _send_onboarding_to_user(user)
+        if ok:
+            sent += 1
+            source = user.registration_source or "skaitmenizavimas"
+            if source == "israsymas":
+                tpl = _classify_israsymas(user).__name__
+            else:
+                tpl = _classify_skaitmenizavimas(user).__name__
+            stats[tpl] = stats.get(tpl, 0) + 1
+
+        user.onboarding_email_sent_at = now()
+        user.save(update_fields=["onboarding_email_sent_at"])
+
+    logger.info(f"[ONBOARDING DONE] Sent {sent}/{total}. Breakdown: {stats}")
+    return sent
+
+
+# ══════════════════════════════════════════════════════════════════
+#  TRIAL EXPIRED EMAIL
+#  Celery Beat runs send_trial_expired_emails() every workday at 10:15.
+# ══════════════════════════════════════════════════════════════════
+
+def _trial_expired_email(user):
+    """Trial закончился — просим подписаться."""
+    return {
+        "subject": "Bandomasis laikotarpis baigėsi",
+        "body": (
+            "Sveiki,\n\n"
+            "jūsų bandomasis laikotarpis baigėsi.\n\n"
+            "Norėdami neribotai naudotis visomis funkcijomis, įsigykite PRO planą.\n\n"
+            'Tai galite padaryti prisijungę prie paskyros ir aplankę "Papildyti" puslapį.\n\n'
+            "Reikia pagalbos — praneškite.\n\n"
+            "Pagarbiai,\n"
+            "Denis iš DokSkeno"
+        ),
+    }
+
+
+def send_trial_expired_emails():
+    """
+    Шлёт email юзерам, у которых trial israsymas закончился.
+    Beat: Пн–Пт 10:15.
+    """
+    from django.contrib.auth import get_user_model
+    from .models import InvSubscription
+
+    User = get_user_model()
+    today = localtime(now()).date()
+
+    if today.weekday() in (5, 6):
+        logger.info("[TRIAL EXPIRED] Weekend — skipping.")
+        return 0
+
+    users = User.objects.filter(
+        trial_expired_email_sent_at__isnull=True,
+        is_active=True,
+    )
+
+    sent = 0
+    for user in users:
+        sub = InvSubscription.objects.filter(user=user).first()
+        if not sub:
+            continue
+
+        # Trial закончился?
+        if sub.status != "trial_expired" and not (
+            sub.status == "trial"
+            and sub.trial_end
+            and sub.trial_end < now()
+        ):
+            continue
+
+        email_data = _trial_expired_email(user)
+
+        try:
+            msg = EmailMultiAlternatives(
+                subject=email_data["subject"],
+                body=email_data["body"],
+                from_email=formataddr(("Denis iš DokSkeno", settings.DEFAULT_FROM_EMAIL)),
+                to=[user.email],
+            )
+            try:
+                msg.tags = ["trial_expired"]
+                msg.metadata = {"event": "trial_expired", "user_id": user.id}
+            except Exception:
+                pass
+
+            msg.send()
+            sent += 1
+            logger.info(f"[TRIAL EXPIRED SENT] user_id={user.id} email={user.email}")
+        except Exception as e:
+            logger.exception(f"[TRIAL EXPIRED ERROR] user_id={user.id}: {e}")
+
+        user.trial_expired_email_sent_at = now()
+        user.save(update_fields=["trial_expired_email_sent_at"])
+
+    logger.info(f"[TRIAL EXPIRED DONE] Sent {sent}.")
+    return sent

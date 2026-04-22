@@ -72,7 +72,7 @@ const Apskaita5 = () => {
         <Button
           variant="contained"
           size="large"
-          href="/registruotis"
+          href="/registruotis?src=skaitmenizavimas"
           sx={{
             backgroundColor: "#f5be0d",
             color: "black",
@@ -939,7 +939,7 @@ const Apskaita5 = () => {
         <Button
           variant="contained"
           size="large"
-          href="/registruotis"
+          href="/registruotis?src=skaitmenizavimas"
           sx={{
             backgroundColor: "#f5be0d",
             color: "black",

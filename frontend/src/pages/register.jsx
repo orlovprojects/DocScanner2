@@ -78,6 +78,13 @@ export default function Register() {
     return "";
   }, [Cpassword, password, touched.Cpassword]);
 
+  useEffect(() => {
+      const src = new URLSearchParams(window.location.search).get("src");
+      if (src && ["skaitmenizavimas", "israsymas"].includes(src)) {
+          sessionStorage.setItem("reg_source", src);
+      }
+  }, []);
+
   const handleRegister = async (e) => {
     e.preventDefault();
     setBackendError("");
@@ -95,7 +102,8 @@ export default function Register() {
 
     try {
       setLoading(true);
-      await register_user(email, password, Cpassword);
+      const regSource = sessionStorage.getItem("reg_source") || "";
+      await register_user(email, password, Cpassword, regSource);
 
       // ✅ только после успешной регистрации
       if (!firedRef.current) {
