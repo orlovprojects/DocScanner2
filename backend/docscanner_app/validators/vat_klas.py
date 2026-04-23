@@ -74,8 +74,11 @@ def auto_select_pvm_code(
         # Paslaugos pirkimas (RC) su 21%:
         # - iš ES -> PVM21
         # - iš ne ES -> PVM20
-        if kind == "paslauga" and seller_country_iso != "LT" and vat_percent in (21, 21.0):
-            return "PVM21" if seller_in_eu else "PVM20"
+        if kind == "paslauga" and seller_country_iso != "LT":
+            if vat_percent in (21, 21.0):
+                return "PVM21" if seller_in_eu else "PVM20"
+            if vat_percent in (5, 5.0):
+                return "PVM40" if seller_in_eu else "PVM37"
 
     # --------- Обычные фиксированные ставки (fallback) ---------
     if vat_percent in (21, 21.0):
@@ -105,8 +108,8 @@ def auto_select_pvm_code(
                     return "PVM12"  # экспорт
             if pirkimas_pardavimas == "pirkimas" and buyer_country_iso == "LT":
                 if seller_country_iso == "LT": return "PVM5"
-                if seller_in_eu and seller_country_iso != "LT": return "PVM13"  # IČP (как у тебя было)
-                if (not seller_in_eu) and seller_country_iso != "LT": return "PVM12"  # импорт
+                if seller_in_eu and seller_country_iso != "LT": return "PVM16"  # IČP (как у тебя было)
+                if (not seller_in_eu) and seller_country_iso != "LT": return "PVM48"  # импорт
 
         if kind == "paslauga":
             # pardavimas: LT -> EU B2B (0%) -> PVM15 (по твоему правилу)
@@ -122,9 +125,9 @@ def auto_select_pvm_code(
             if pirkimas_pardavimas == "pirkimas" and buyer_country_iso == "LT":
                 if seller_country_iso == "LT": return "PVM5"
                 if seller_in_eu and seller_country_iso != "LT":
-                    return "PVM21"  # pirkimas из ЕС (0% ветка как у тебя)
+                    return "PVM41"  # pirkimas из ЕС (0% ветка как у тебя)
                 if (not seller_in_eu) and seller_country_iso != "LT":
-                    return "PVM14"  # как у тебя было
+                    return "PVM38"  # как у тебя было
 
     return None
 
