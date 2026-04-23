@@ -1189,9 +1189,9 @@ def process_uploaded_file_task(self, user_id, doc_id, scan_type):
         _log_t("update_scanned_document()", t0)
 
         # 15) Сопоставление продавца/покупателя
-        t0 = _t()
-        update_seller_buyer_info(doc)
-        _log_t("update_seller_buyer_info()", t0)
+        # t0 = _t()
+        # update_seller_buyer_info(doc)
+        # _log_t("update_seller_buyer_info()", t0)
 
         t0 = _t()
         update_seller_buyer_info_from_companies(doc)

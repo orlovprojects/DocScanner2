@@ -5014,6 +5014,42 @@ export default function NustatymaiPage() {
               </Tooltip>
             </Box>
           </Box>
+
+          {program === "centas" && (
+            <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+              <Switch
+                checked={String(extraSettings?.centas_atsak_asmuo_only_cash ?? "0").trim() === "1"}
+                onChange={async (e) => {
+                  const checked = e.target.checked;
+                  const prev = extraSettings || {};
+                  const next = { ...prev };
+                  if (checked) next.centas_atsak_asmuo_only_cash = "1";
+                  else delete next.centas_atsak_asmuo_only_cash;
+                  setExtraSettings(next);
+                  try {
+                    await api.patch("/profile/", { extra_settings: next }, { withCredentials: true });
+                  } catch {
+                    setExtraSettings(prev);
+                    alert("Nepavyko išsaugoti nustatymo.");
+                  }
+                }}
+              />
+              <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
+                <Typography variant="body2">
+                  Priskirti atskaitingą asmenį tik kai pirkimo sąskaita apmokėta grynais
+                </Typography>
+                <Tooltip
+                  arrow
+                  enterTouchDelay={0}
+                  leaveTouchDelay={4000}
+                  title="Įjungus šį nustatymą, atskaitingas asmuo bus priskirtas tik pirkimo sąskaitoms apmokėtoms grynais. Kai nustatymas išjungtas, atskaitingas asmuo bus priskirtas visoms pirkimo sąskaitoms"
+                >
+                  <HelpOutlineIcon fontSize="small" sx={{ color: "text.secondary" }} />
+                </Tooltip>
+              </Box>
+            </Box>
+          )}
+
         </Stack>
 
         {program === "rivile" && (

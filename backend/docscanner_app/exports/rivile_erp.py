@@ -77,6 +77,7 @@ class HeaderCols:
     CURRENCY = 9
     DEPARTMENT = 20
     OBJECT = 21
+    PASTABOS = 33
 
 
 class LineCols:
@@ -867,6 +868,10 @@ def export_documents_to_rivile_erp_xlsx(
 
         currency = _s(getattr(doc, "currency", "") or DEFAULT_CURRENCY) or DEFAULT_CURRENCY
         ws_headers.cell(row=header_row, column=HeaderCols.CURRENCY, value=currency)
+
+        preview_url = _s(getattr(doc, "preview_url", None))
+        if preview_url:
+            ws_headers.cell(row=header_row, column=HeaderCols.PASTABOS, value=safe_excel_text(preview_url))
 
         header_idx += 1
 

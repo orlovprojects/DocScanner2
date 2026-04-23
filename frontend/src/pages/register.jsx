@@ -144,7 +144,7 @@ export default function Register() {
               emailErr.toLowerCase().includes("exists") ||
               emailErr.toLowerCase().includes("unique")
             ) {
-              msg = "Šis el. paštas jau užregistruotas. Gal norėjote prisijungti?";
+              msg = "Paskyra su šiuo el. paštu jau egzistuoja. Gal norėjote prisijungti?";
             } else {
               msg = emailErr;
             }

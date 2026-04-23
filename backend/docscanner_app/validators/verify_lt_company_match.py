@@ -85,24 +85,24 @@ def update_seller_buyer_info_from_companies(scanned_doc):
                 logger.warning(f"[COMP] {sideU} budget exceeded before start; skipping")
                 return False
 
-            # 1) VAT (все варианты)
+            # 1) im_kodas — самый надёжный идентификатор
             comp = None
-            for v in _vat_variants(vat_code, country_iso):
-                if time_left() <= 0:
-                    logger.warning(f"[COMP] {sideU} budget exceeded during VAT loop; skipping")
-                    return False
-                c = Company.objects.filter(pvm_kodas__iexact=v).only("id","pavadinimas","im_kodas","pvm_kodas").first()
-                if c:
-                    comp = c
-                    logger.info(f"[COMP] {sideU} matched by VAT={v}")
-                    break
-
-            # 2) im_kodas
-            if not comp and company_id:
+            if company_id:
                 c = Company.objects.filter(im_kodas__iexact=company_id.strip()).only("id","pavadinimas","im_kodas","pvm_kodas").first()
                 if c:
                     comp = c
                     logger.info(f"[COMP] {sideU} matched by im_kodas")
+
+            # 2) VAT (все варианты)
+            if not comp:
+                for v in _vat_variants(vat_code, country_iso):
+                    if time_left() <= 0:
+                        break
+                    c = Company.objects.filter(pvm_kodas__iexact=v).only("id","pavadinimas","im_kodas","pvm_kodas").first()
+                    if c:
+                        comp = c
+                        logger.info(f"[COMP] {sideU} matched by VAT={v}")
+                        break
 
             # 3) Имя (fuzzy), если есть время и нормальный префикс
             if not comp and name and fuzzy_allowed():

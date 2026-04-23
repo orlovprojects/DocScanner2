@@ -218,7 +218,7 @@ def _validate_line_items(line_items, separate_vat: bool, report: Dict[str, Any])
 
         # CHECK 3
         if not separate_vat and subtotal != 0 and vat_percent is not None:
-            expected_vat = subtotal * vat_percent / Decimal("100")
+            expected_vat = Q2(subtotal * vat_percent / Decimal("100"))
             delta = (expected_vat - vat).copy_abs()
             match = delta <= LINE_TOLERANCE
             line_check["checks"]["vat_from_percent"] = {

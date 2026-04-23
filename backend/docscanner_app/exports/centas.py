@@ -399,6 +399,23 @@ def export_document_to_centras_xml(
     if kastu_centras_value:
         ET.SubElement(dok, 'kastu_centras').text = smart_str(kastu_centras_value)
 
+    # --- atsak_asmuo (только pirkimas) ---
+    if direction_key == 'pirkimas':
+        atsak_asmuo_value = _s(extra_fields.get("pirkimas_atsk_asmuo", ""))
+        if atsak_asmuo_value:
+            apply_atsak = True
+            if user:
+                es = getattr(user, 'extra_settings', None) or {}
+                if str(es.get("centas_atsak_asmuo_only_cash", "0")).strip() == "1":
+                    apply_atsak = bool(getattr(document, "paid_by_cash", False))
+            if apply_atsak:
+                ET.SubElement(dok, 'atsak_asmuo').text = smart_str(atsak_asmuo_value)
+
+    # --- apmok_budas (только pardavimas, если grynais) ---
+    if direction_key == 'pardavimas':
+        if bool(getattr(document, "paid_by_cash", False)):
+            ET.SubElement(dok, 'apmok_budas').text = "kpo"
+
     line_items = getattr(document, "line_items", None)
     if line_items and hasattr(line_items, 'all') and line_items.exists():
         line_map = getattr(document, "_pvm_line_map", None)

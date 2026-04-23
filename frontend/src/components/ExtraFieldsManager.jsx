@@ -175,6 +175,7 @@ const PROGRAM_FIELDS_CONFIG = {
         fields: [
           { key: "pirkimas_sandelis", label: "Sandėlis" },
           { key: "pirkimas_kastu_centras", label: "Kaštų centras" },
+          { key: "pirkimas_atsk_asmuo", label: "Atskaitingas asmuo" },
         ],
       },
       {

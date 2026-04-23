@@ -539,7 +539,6 @@ ACCOUNTING_PROGRAM_CHOICES = [
     ('isaf', 'iSAF'),
     ('paulita', 'Paulita'),
     ('rivile_gama_api', 'Rivilė GAMA (per API)'),
-    ('stekas', 'Stekas Plius'),
     # добавь нужные программы
 ]
 

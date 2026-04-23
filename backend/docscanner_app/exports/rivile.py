@@ -1500,7 +1500,7 @@ def export_clients_group_to_rivile(clients=None, documents=None):
                 )
 
             if client_code and client_code not in client_codes_seen:
-                logger.info("[RIVILE:N08] add from clients type=%s client_code=%r raw=%s", doc_type, client_code, client)
+                logger.info("[RIVILE:N08] add from clients type=%s client_code=%r name=%s", doc_type, client_code, client.get('name', ''))
                 client = {**client, 'client_code': client_code}
                 _add_client_n08(elements, client)
                 client_codes_seen.add(client_code)
