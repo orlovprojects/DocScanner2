@@ -10080,3 +10080,365 @@ def _serialize_key(key_obj):
 # ═══════════════════════════════════════════════════
 # END - Funkcii sviazany s exportom po API
 # ═══════════════════════════════════════════════════
+
+
+
+# ──────────────────────────────────────────────────────────────
+# Individualios veiklos žurnalas
+# ──────────────────────────────────────────────────────────────
+import io
+import logging
+from decimal import Decimal
+
+from django.db.models import Count
+from django.http import HttpResponse
+from rest_framework.views import APIView
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+from openpyxl import Workbook
+from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
+
+from .models import ScannedDocument
+
+
+logger = logging.getLogger("docscanner_app")
+
+
+def get_currency_rate(currency_code, date_obj):
+    """Получить курс для валюты на заданную дату (к EUR)."""
+    if not currency_code or currency_code.upper() == "EUR":
+        return 1.0
+    from .models import CurrencyRate
+    obj = CurrencyRate.objects.filter(currency=currency_code.upper(), date=date_obj).first()
+    if obj:
+        return obj.rate
+    obj = CurrencyRate.objects.filter(currency=currency_code.upper(), date__lt=date_obj).order_by("-date").first()
+    return obj.rate if obj else None
+
+
+def _company_key(name, vat, cp_id):
+    """Тот же ключ что в get_user_counterparties."""
+    cp_id = (cp_id or "").strip()
+    if cp_id:
+        return f"id:{cp_id}"
+    vat = (vat or "").strip().lower()
+    if vat:
+        return vat
+    name = (name or "").strip().lower()
+    return name
+
+
+class VeiklosContractorSearchView(APIView):
+    """Поиск контрагентов для выбора своей ИВ."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        search = (request.query_params.get('q') or '').strip().lower()
+        if len(search) < 2:
+            return Response([])
+
+        qs = ScannedDocument.objects.filter(
+            user=request.user,
+            status__in=['completed', 'exported'],
+            is_archive_container=False,
+        )
+
+        sellers = (
+            qs.exclude(seller_name__isnull=True).exclude(seller_name__exact='')
+            .values('seller_id', 'seller_name', 'seller_vat_code')
+            .annotate(cnt=Count('id'))
+        )
+        buyers = (
+            qs.exclude(buyer_name__isnull=True).exclude(buyer_name__exact='')
+            .values('buyer_id', 'buyer_name', 'buyer_vat_code')
+            .annotate(cnt=Count('id'))
+        )
+
+        merged = {}
+
+        def upsert(cp_id, name, vat, cnt):
+            key = _company_key(name, vat, cp_id)
+            if not key:
+                return
+            if key in merged:
+                merged[key]['count'] += int(cnt or 0)
+                if not merged[key]['code'] and cp_id:
+                    merged[key]['code'] = (cp_id or '').strip() or None
+                if not merged[key]['vat'] and vat:
+                    merged[key]['vat'] = vat or ''
+                if not merged[key]['display_name'] and name:
+                    merged[key]['display_name'] = name or ''
+            else:
+                merged[key] = {
+                    'key': key,
+                    'display_name': name or '',
+                    'code': (cp_id or '').strip() or None,
+                    'vat': vat or '',
+                    'count': int(cnt or 0),
+                }
+
+        for r in sellers:
+            upsert(r['seller_id'], r['seller_name'], r['seller_vat_code'], r['cnt'])
+        for r in buyers:
+            upsert(r['buyer_id'], r['buyer_name'], r['buyer_vat_code'], r['cnt'])
+
+        items = []
+        for item in merged.values():
+            if (
+                search in (item['display_name'] or '').lower()
+                or search in (item['vat'] or '').lower()
+                or search in (item['code'] or '').lower()
+                or search in (item['key'] or '').lower()
+            ):
+                items.append(item)
+
+        items.sort(key=lambda x: -x['count'])
+        return Response(items[:30])
+
+
+class VeiklosZurnalasGenerateView(APIView):
+    """Генерация журнала с пагинацией."""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        contractor_keys = request.data.get('contractor_keys', [])
+        pvm_moketojas = request.data.get('pvm_moketojas', False)
+        date_from = request.data.get('date_from')
+        date_to = request.data.get('date_to')
+        offset = int(request.data.get('offset', 0))
+        limit = int(request.data.get('limit', 25))
+
+        if not contractor_keys:
+            return Response({'error': 'Nepasirinktas nė vienas kontrahentas'}, status=400)
+
+        entries, summary = self._build_journal(
+            request.user, contractor_keys, pvm_moketojas, date_from, date_to,
+        )
+
+        total_count = len(entries)
+        page = entries[offset:offset + limit]
+
+        return Response({
+            'summary': summary,
+            'total_count': total_count,
+            'offset': offset,
+            'entries': page,
+        })
+
+    @staticmethod
+    def _build_journal(user, contractor_keys, pvm_moketojas, date_from, date_to):
+        """contractor_keys — список key из _company_key."""
+        base_qs = ScannedDocument.objects.filter(
+            user=user,
+            status__in=['completed', 'exported'],
+            is_archive_container=False,
+            invoice_date__isnull=False,
+        )
+        if date_from:
+            base_qs = base_qs.filter(invoice_date__gte=date_from)
+        if date_to:
+            base_qs = base_qs.filter(invoice_date__lte=date_to)
+
+        contractor_keys_set = set(contractor_keys)
+
+        pardavimas_ids = set()
+        pirkimas_ids = set()
+
+        for doc in base_qs.only(
+            'id', 'seller_id', 'seller_name', 'seller_vat_code',
+            'buyer_id', 'buyer_name', 'buyer_vat_code',
+        ).iterator():
+            seller_key = _company_key(doc.seller_name, doc.seller_vat_code, doc.seller_id)
+            buyer_key = _company_key(doc.buyer_name, doc.buyer_vat_code, doc.buyer_id)
+
+            if seller_key in contractor_keys_set:
+                pardavimas_ids.add(doc.id)
+            elif buyer_key in contractor_keys_set:
+                pirkimas_ids.add(doc.id)
+
+        all_ids = pardavimas_ids | pirkimas_ids
+        if not all_ids:
+            return [], {
+                'pardavimo_operacijos': 0,
+                'pirkimo_operacijos': 0,
+                'pajamu_suma': '0',
+                'islaidu_suma': '0',
+            }
+
+        docs = base_qs.filter(id__in=all_ids).order_by('invoice_date', 'id')
+
+        entries = []
+        pajamu_suma = Decimal('0')
+        islaidu_suma = Decimal('0')
+        pardavimo_cnt = 0
+        pirkimo_cnt = 0
+
+        for doc in docs:
+            is_pardavimas = doc.id in pardavimas_ids
+
+            raw_amount = doc.amount_wo_vat if pvm_moketojas else doc.amount_with_vat
+
+            if raw_amount is None:
+                amount_eur = Decimal('0')
+            else:
+                currency = (doc.currency or 'EUR').upper()
+                if currency == 'EUR':
+                    amount_eur = Decimal(str(raw_amount))
+                else:
+                    rate = get_currency_rate(currency, doc.invoice_date)
+                    if rate:
+                        amount_eur = (Decimal(str(raw_amount)) / Decimal(str(rate))).quantize(Decimal('0.01'))
+                    else:
+                        amount_eur = Decimal(str(raw_amount))
+
+            if doc.document_series:
+                serija_nr = f"{doc.document_series}-{doc.document_number or ''}"
+            else:
+                serija_nr = doc.document_number or ''
+
+            if is_pardavimas:
+                counterparty = doc.buyer_name or doc.buyer_id or ''
+                pardavimo_cnt += 1
+                pajamu_suma += amount_eur
+            else:
+                counterparty = doc.seller_name or doc.seller_id or ''
+                pirkimo_cnt += 1
+                islaidu_suma += amount_eur
+
+            turinys = doc.prekes_pavadinimas
+            if not turinys:
+                turinys = 'Pajamos' if is_pardavimas else 'Išlaidos'
+
+            entries.append({
+                'doc_id': doc.id,
+                'invoice_date': doc.invoice_date.strftime('%Y-%m-%d') if doc.invoice_date else '',
+                'serija_nr': serija_nr,
+                'counterparty': counterparty,
+                'turinys': turinys,
+                'pajamos': str(amount_eur) if is_pardavimas else None,
+                'islaidos': str(amount_eur) if not is_pardavimas else None,
+                'currency': doc.currency or 'EUR',
+                'converted': (doc.currency or 'EUR').upper() != 'EUR',
+            })
+
+        summary = {
+            'pardavimo_operacijos': pardavimo_cnt,
+            'pirkimo_operacijos': pirkimo_cnt,
+            'pajamu_suma': str(pajamu_suma),
+            'islaidu_suma': str(islaidu_suma),
+        }
+
+        return entries, summary
+
+
+class VeiklosZurnalasExportView(APIView):
+    """XLSX экспорт журнала."""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        contractor_keys = request.data.get('contractor_keys', [])
+        pvm_moketojas = request.data.get('pvm_moketojas', False)
+        date_from = request.data.get('date_from')
+        date_to = request.data.get('date_to')
+
+        if not contractor_keys:
+            return Response({'error': 'Nepasirinktas nė vienas kontrahentas'}, status=400)
+
+        entries, summary = VeiklosZurnalasGenerateView._build_journal(
+            request.user, contractor_keys, pvm_moketojas, date_from, date_to,
+        )
+
+        wb = Workbook()
+
+        # ── Sheet 1: Operacijos ──
+        ws1 = wb.active
+        ws1.title = "Operacijos"
+
+        header_font = Font(bold=True, size=11)
+        header_fill = PatternFill(start_color="D9E1F2", end_color="D9E1F2", fill_type="solid")
+        thin_border = Border(
+            left=Side(style='thin'), right=Side(style='thin'),
+            top=Side(style='thin'), bottom=Side(style='thin'),
+        )
+
+        headers = [
+            'Eil. Nr.', 'Sąskaitos data', 'Serija ir numeris',
+            'Pirkėjas/pardavėjas', 'Turinys', 'Pajamos', 'Išlaidos',
+        ]
+
+        for col_idx, h in enumerate(headers, 1):
+            cell = ws1.cell(row=1, column=col_idx, value=h)
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.border = thin_border
+            cell.alignment = Alignment(horizontal='center', vertical='center')
+
+        for row_idx, entry in enumerate(entries, 1):
+            r = row_idx + 1
+            ws1.cell(row=r, column=1, value=row_idx).border = thin_border
+            ws1.cell(row=r, column=2, value=entry['invoice_date']).border = thin_border
+            ws1.cell(row=r, column=3, value=entry['serija_nr']).border = thin_border
+            ws1.cell(row=r, column=4, value=entry['counterparty']).border = thin_border
+            ws1.cell(row=r, column=5, value=entry['turinys']).border = thin_border
+
+            paj_cell = ws1.cell(row=r, column=6)
+            paj_cell.border = thin_border
+            if entry['pajamos']:
+                paj_cell.value = float(entry['pajamos'])
+                paj_cell.number_format = '#,##0.00'
+
+            isl_cell = ws1.cell(row=r, column=7)
+            isl_cell.border = thin_border
+            if entry['islaidos']:
+                isl_cell.value = float(entry['islaidos'])
+                isl_cell.number_format = '#,##0.00'
+
+        ws1.column_dimensions['A'].width = 10
+        ws1.column_dimensions['B'].width = 16
+        ws1.column_dimensions['C'].width = 22
+        ws1.column_dimensions['D'].width = 30
+        ws1.column_dimensions['E'].width = 30
+        ws1.column_dimensions['F'].width = 16
+        ws1.column_dimensions['G'].width = 16
+
+        # ── Sheet 2: Apžvalga ──
+        ws2 = wb.create_sheet("Apžvalga")
+
+        summary_rows = [
+            ('Pardavimo operacijos', summary['pardavimo_operacijos']),
+            ('Pirkimo operacijos', summary['pirkimo_operacijos']),
+            ('Pajamų suma, EUR', float(summary['pajamu_suma'])),
+            ('Išlaidų suma, EUR', float(summary['islaidu_suma'])),
+        ]
+
+        ws2.cell(row=1, column=1, value='Rodiklis').font = header_font
+        ws2.cell(row=1, column=2, value='Reikšmė').font = header_font
+        ws2.cell(row=1, column=1).fill = header_fill
+        ws2.cell(row=1, column=2).fill = header_fill
+
+        for i, (label, val) in enumerate(summary_rows, 2):
+            ws2.cell(row=i, column=1, value=label).border = thin_border
+            c = ws2.cell(row=i, column=2, value=val)
+            c.border = thin_border
+            if isinstance(val, float):
+                c.number_format = '#,##0.00'
+
+        ws2.column_dimensions['A'].width = 28
+        ws2.column_dimensions['B'].width = 18
+
+        # ── Response ──
+        buf = io.BytesIO()
+        wb.save(buf)
+        buf.seek(0)
+
+        response = HttpResponse(
+            buf.read(),
+            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        )
+        response['Content-Disposition'] = 'attachment; filename="veiklos_zurnalas.xlsx"'
+        return response
+
+
+# ──────────────────────────────────────────────────────────────
+# END - Individualios veiklos žurnalas
+# ──────────────────────────────────────────────────────────────

@@ -55,6 +55,9 @@ from .views import (
     api_provider_keys_list,
     api_provider_keys_detail,
     api_provider_keys_verify,
+    VeiklosContractorSearchView,
+    VeiklosZurnalasGenerateView,
+    VeiklosZurnalasExportView,
 )
 from .views import (
     counterparty_list_create,
@@ -446,5 +449,12 @@ urlpatterns = [
  
     # Webhook (public)
     path("invoicing/payment-webhook/<str:provider_name>/<int:invoice_id>/", payment_webhook, name="payment_webhook"),
+
+
+
+
+    path('veiklos-zurnalas/contractors/', VeiklosContractorSearchView.as_view()),
+    path('veiklos-zurnalas/generate/', VeiklosZurnalasGenerateView.as_view()),
+    path('veiklos-zurnalas/export/', VeiklosZurnalasExportView.as_view()),
 
 ]

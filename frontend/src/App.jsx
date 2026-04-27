@@ -71,6 +71,7 @@ import CounterpartiesPage from './pages/CounterpartiesPage';
 import ProductsPage from './pages/ProductsPage';
 import BankStatementsPage from './pages/BankStatementsPage';
 import InvoicePublicPage from './pages/InvoicePublicPage';
+import VeiklosZurnalasPage from './pages/VeiklosZurnalasPage';
 
 
 function App() {
@@ -166,6 +167,7 @@ function App() {
         <Route path="/suvestine" element={<PrivateRoute><UploadPage /></PrivateRoute>} />
         <Route path="/prisijungti" element={<RedirectIfAuthenticated><Login /></RedirectIfAuthenticated>} />
         <Route path="/registruotis" element={<RedirectIfAuthenticated><Register /></RedirectIfAuthenticated>} />
+        <Route path="/veiklos-zurnalas" element={<PrivateRoute><VeiklosZurnalasPage /></PrivateRoute>} />
         <Route path="/papildyti" element={<Subscribe />} />
         <Route path="/susisiekti" element={<Contact />} />
         <Route path="/nustatymai" element={<PrivateRoute><NustatymaiPage /></PrivateRoute>} />

@@ -574,6 +574,14 @@ const Header = () => {
         >
           Nustatymai
         </MenuItem>
+        <MenuItem
+          onClick={() => {
+            handleClose();
+            nav("/veiklos-zurnalas");
+          }}
+        >
+          Ind. veiklos žurnalas
+        </MenuItem>
         <Divider />
         <MenuItem
           onClick={() => {
@@ -696,6 +704,15 @@ const Header = () => {
                   }}
                 >
                   <ListItemText primary="Nustatymai" />
+                </ListItem>
+                <ListItem
+                  button
+                  onClick={() => {
+                    setIsDrawerOpen(false);
+                    nav("/veiklos-zurnalas");
+                  }}
+                >
+                  <ListItemText primary="Ind. veiklos žurnalas" />
                 </ListItem>
                 <Divider />
                 <ListItem
