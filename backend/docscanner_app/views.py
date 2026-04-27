@@ -10265,7 +10265,7 @@ class VeiklosZurnalasGenerateView(APIView):
                 'islaidu_suma': '0',
             }
 
-        docs = base_qs.filter(id__in=all_ids).order_by('invoice_date', 'id')
+        docs = base_qs.filter(id__in=all_ids).order_by('-invoice_date', '-id')
 
         entries = []
         pajamu_suma = Decimal('0')
