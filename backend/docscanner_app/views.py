@@ -10190,6 +10190,7 @@ class VeiklosContractorSearchView(APIView):
         inv_qs = Invoice.objects.filter(
             user=request.user,
             status__in=['issued', 'sent', 'partially_paid', 'paid'],
+            invoice_type__in=['saskaita', 'pvm_saskaita'],
         )
         for r in inv_qs.exclude(seller_name='') \
                 .values('seller_id', 'seller_name', 'seller_vat_code').annotate(cnt=Count('id')):
@@ -10296,6 +10297,7 @@ class VeiklosZurnalasGenerateView(APIView):
             inv_qs = Invoice.objects.filter(
                 user=user,
                 status__in=['issued', 'sent', 'partially_paid', 'paid'],
+                invoice_type__in=['saskaita', 'pvm_saskaita'],
                 invoice_date__isnull=False,
             )
             if date_from:
