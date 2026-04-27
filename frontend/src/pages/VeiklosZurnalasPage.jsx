@@ -403,8 +403,8 @@ export default function VeiklosZurnalasPage() {
                                     <TableCell sx={{ fontWeight: 700 }}>Serija ir numeris</TableCell>
                                     <TableCell sx={{ fontWeight: 700 }}>Pirkėjas/pardavėjas</TableCell>
                                     <TableCell sx={{ fontWeight: 700 }}>Turinys</TableCell>
-                                    <TableCell sx={{ fontWeight: 700 }} align="right">Pajamos</TableCell>
-                                    <TableCell sx={{ fontWeight: 700 }} align="right">Išlaidos</TableCell>
+                                    <TableCell sx={{ fontWeight: 700 }} align="right">Pajamos, EUR</TableCell>
+                                    <TableCell sx={{ fontWeight: 700 }} align="right">Išlaidos, EUR</TableCell>
                                 </TableRow>
                             </TableHead>
                             <TableBody>

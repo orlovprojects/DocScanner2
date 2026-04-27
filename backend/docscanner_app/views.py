@@ -10349,21 +10349,20 @@ class VeiklosZurnalasExportView(APIView):
         )
 
         wb = Workbook()
-
-        # ── Sheet 1: Operacijos ──
-        ws1 = wb.active
-        ws1.title = "Operacijos"
-
         header_font = Font(bold=True, size=11)
-        header_fill = PatternFill(start_color="D9E1F2", end_color="D9E1F2", fill_type="solid")
+        header_fill = PatternFill(start_color="F2F2F2", end_color="F2F2F2", fill_type="solid")
         thin_border = Border(
             left=Side(style='thin'), right=Side(style='thin'),
             top=Side(style='thin'), bottom=Side(style='thin'),
         )
 
+        # ── Sheet 1: Operacijos ──
+        ws1 = wb.active
+        ws1.title = "Operacijos"
+
         headers = [
             'Eil. Nr.', 'Sąskaitos data', 'Serija ir numeris',
-            'Pirkėjas/pardavėjas', 'Turinys', 'Pajamos', 'Išlaidos',
+            'Pirkėjas/pardavėjas', 'Turinys', 'Pajamos, EUR', 'Išlaidos, EUR',
         ]
 
         for col_idx, h in enumerate(headers, 1):
@@ -10404,17 +10403,20 @@ class VeiklosZurnalasExportView(APIView):
         # ── Sheet 2: Apžvalga ──
         ws2 = wb.create_sheet("Apžvalga")
 
+        apzvalga_headers = ['Rodiklis', 'Reikšmė']
+        for col_idx, h in enumerate(apzvalga_headers, 1):
+            cell = ws2.cell(row=1, column=col_idx, value=h)
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.border = thin_border
+            cell.alignment = Alignment(horizontal='center', vertical='center')
+
         summary_rows = [
             ('Pardavimo operacijos', summary['pardavimo_operacijos']),
             ('Pirkimo operacijos', summary['pirkimo_operacijos']),
-            ('Pajamų suma, EUR', float(summary['pajamu_suma'])),
-            ('Išlaidų suma, EUR', float(summary['islaidu_suma'])),
+            ('Pajamos, EUR', float(summary['pajamu_suma'])),
+            ('Išlaidos, EUR', float(summary['islaidu_suma'])),
         ]
-
-        ws2.cell(row=1, column=1, value='Rodiklis').font = header_font
-        ws2.cell(row=1, column=2, value='Reikšmė').font = header_font
-        ws2.cell(row=1, column=1).fill = header_fill
-        ws2.cell(row=1, column=2).fill = header_fill
 
         for i, (label, val) in enumerate(summary_rows, 2):
             ws2.cell(row=i, column=1, value=label).border = thin_border
