@@ -1,9 +1,10 @@
 import React, { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import {
-    Box, Typography, TextField, Autocomplete, Chip, Switch, FormControlLabel,
+    Box, Typography, TextField, Autocomplete, Chip, Switch,
     Button, Table, TableHead, TableBody, TableRow, TableCell, TableContainer,
     Paper, CircularProgress, Stack, Alert, Card, CardContent, Tooltip,
     MenuItem, Select, InputLabel, FormControl, IconButton,
+    Checkbox, FormControlLabel, FormGroup,
 } from '@mui/material';
 import { DatePicker, LocalizationProvider } from '@mui/x-date-pickers';
 import { AdapterDayjs } from '@mui/x-date-pickers/AdapterDayjs';
@@ -17,7 +18,6 @@ import { api } from "../api/endpoints";
 const PAGE_SIZE = 25;
 const CURRENT_YEAR = new Date().getFullYear();
 
-// Годы: текущий + 4 предыдущих + "pagal datas"
 const PERIOD_OPTIONS = [
     ...Array.from({ length: 5 }, (_, i) => {
         const y = CURRENT_YEAR - i;
@@ -40,6 +40,10 @@ export default function VeiklosZurnalasPage() {
     const [period, setPeriod] = useState(DEFAULT_PERIOD);
     const [dateFrom, setDateFrom] = useState(null);
     const [dateTo, setDateTo] = useState(null);
+
+    // ── Источники ──
+    const [srcSkaitmenizavimas, setSrcSkaitmenizavimas] = useState(true);
+    const [srcIsrasymas, setSrcIsrasymas] = useState(true);
 
     // ── Данные журнала ──
     const [entries, setEntries] = useState([]);
@@ -71,6 +75,13 @@ export default function VeiklosZurnalasPage() {
             date_to: `${year}-12-31`,
         };
     }, [period, dateFrom, dateTo]);
+
+    const sources = useMemo(() => {
+        const s = [];
+        if (srcSkaitmenizavimas) s.push('skaitmenizavimas');
+        if (srcIsrasymas) s.push('israsymas');
+        return s;
+    }, [srcSkaitmenizavimas, srcIsrasymas]);
 
     // ── Поиск контрагентов (debounce 300ms) ──
     const searchContractors = useCallback(async (query) => {
@@ -104,11 +115,12 @@ export default function VeiklosZurnalasPage() {
         pvm_moketojas: pvmMoketojas,
         date_from: resolvedDates.date_from,
         date_to: resolvedDates.date_to,
-    }), [selectedContractors, pvmMoketojas, resolvedDates]);
+        sources,
+    }), [selectedContractors, pvmMoketojas, resolvedDates, sources]);
 
     // ── Генерация ──
     const handleGenerate = async () => {
-        if (!selectedContractors.length) return;
+        if (!selectedContractors.length || !sources.length) return;
         setGenerating(true);
         setError('');
         setEntries([]);
@@ -277,6 +289,35 @@ export default function VeiklosZurnalasPage() {
                             </Tooltip>
                         </Stack>
 
+                        {/* ── Šaltiniai ── */}
+                        <Box>
+                            <Typography variant="body2" color="text.secondary" sx={{ mb: 0.5 }}>
+                                Šaltiniai
+                            </Typography>
+                            <FormGroup row>
+                                <FormControlLabel
+                                    control={
+                                        <Checkbox
+                                            size="small"
+                                            checked={srcSkaitmenizavimas}
+                                            onChange={(e) => setSrcSkaitmenizavimas(e.target.checked)}
+                                        />
+                                    }
+                                    label={<Typography variant="body2">Skaitmenizavimas</Typography>}
+                                />
+                                <FormControlLabel
+                                    control={
+                                        <Checkbox
+                                            size="small"
+                                            checked={srcIsrasymas}
+                                            onChange={(e) => setSrcIsrasymas(e.target.checked)}
+                                        />
+                                    }
+                                    label={<Typography variant="body2">Išrašymas</Typography>}
+                                />
+                            </FormGroup>
+                        </Box>
+
                         {/* ── Laikotarpis ── */}
                         <Stack spacing={2}>
                             <FormControl size="small" sx={{ width: 220 }}>
@@ -337,7 +378,7 @@ export default function VeiklosZurnalasPage() {
                                         : <PlayArrowIcon />
                                 }
                                 onClick={handleGenerate}
-                                disabled={!selectedContractors.length || generating}
+                                disabled={!selectedContractors.length || !sources.length || generating}
                             >
                                 Generuoti
                             </Button>
@@ -405,11 +446,12 @@ export default function VeiklosZurnalasPage() {
                                     <TableCell sx={{ fontWeight: 700 }}>Turinys</TableCell>
                                     <TableCell sx={{ fontWeight: 700 }} align="right">Pajamos, EUR</TableCell>
                                     <TableCell sx={{ fontWeight: 700 }} align="right">Išlaidos, EUR</TableCell>
+                                    <TableCell sx={{ fontWeight: 700 }}>Šaltinis</TableCell>
                                 </TableRow>
                             </TableHead>
                             <TableBody>
                                 {entries.map((entry, idx) => (
-                                    <TableRow key={entry.doc_id} hover>
+                                    <TableRow key={`${entry.source}-${entry.doc_id}`} hover>
                                         <TableCell>{idx + 1}</TableCell>
                                         <TableCell>{entry.invoice_date}</TableCell>
                                         <TableCell>{entry.serija_nr}</TableCell>
@@ -430,12 +472,17 @@ export default function VeiklosZurnalasPage() {
                                         <TableCell align="right">
                                             {entry.islaidos ? fmtAmount(entry.islaidos) : ''}
                                         </TableCell>
+                                        <TableCell>
+                                            <Typography variant="caption" color="text.secondary">
+                                                {entry.source === 'israsymas' ? 'Išrašymas' : 'Skaitmenizavimas'}
+                                            </Typography>
+                                        </TableCell>
                                     </TableRow>
                                 ))}
 
                                 {entries.length === 0 && (
                                     <TableRow>
-                                        <TableCell colSpan={7} align="center" sx={{ py: 4 }}>
+                                        <TableCell colSpan={8} align="center" sx={{ py: 4 }}>
                                             <Typography color="text.secondary">
                                                 Nėra operacijų pagal pasirinktus filtrus
                                             </Typography>

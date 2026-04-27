@@ -10098,7 +10098,7 @@ from rest_framework.response import Response
 from openpyxl import Workbook
 from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
 
-from .models import ScannedDocument
+from .models import ScannedDocument, Invoice
 
 
 logger = logging.getLogger("docscanner_app")
@@ -10128,6 +10128,17 @@ def _company_key(name, vat, cp_id):
     return name
 
 
+def _dedup_key(series, number, amount):
+    """Ключ дедупликации: (series_lower, number_lower, amount_rounded)."""
+    s = (series or "").strip().lower()
+    n = (number or "").strip().lower()
+    try:
+        a = str(Decimal(str(amount)).quantize(Decimal('0.01'))) if amount is not None else ''
+    except Exception:
+        a = ''
+    return (s, n, a)
+
+
 class VeiklosContractorSearchView(APIView):
     """Поиск контрагентов для выбора своей ИВ."""
     permission_classes = [IsAuthenticated]
@@ -10136,25 +10147,6 @@ class VeiklosContractorSearchView(APIView):
         search = (request.query_params.get('q') or '').strip().lower()
         if len(search) < 2:
             return Response([])
-
-        qs = ScannedDocument.objects.filter(
-            user=request.user,
-            status__in=['completed', 'exported'],
-            is_archive_container=False,
-            ready_for_export=True,
-            math_validation_passed=True,
-        )
-
-        sellers = (
-            qs.exclude(seller_name__isnull=True).exclude(seller_name__exact='')
-            .values('seller_id', 'seller_name', 'seller_vat_code')
-            .annotate(cnt=Count('id'))
-        )
-        buyers = (
-            qs.exclude(buyer_name__isnull=True).exclude(buyer_name__exact='')
-            .values('buyer_id', 'buyer_name', 'buyer_vat_code')
-            .annotate(cnt=Count('id'))
-        )
 
         merged = {}
 
@@ -10179,11 +10171,34 @@ class VeiklosContractorSearchView(APIView):
                     'count': int(cnt or 0),
                 }
 
-        for r in sellers:
+        # ── ScannedDocument ──
+        sd_qs = ScannedDocument.objects.filter(
+            user=request.user,
+            status__in=['completed', 'exported'],
+            is_archive_container=False,
+            ready_for_export=True,
+            math_validation_passed=True,
+        )
+        for r in sd_qs.exclude(seller_name__isnull=True).exclude(seller_name__exact='') \
+                .values('seller_id', 'seller_name', 'seller_vat_code').annotate(cnt=Count('id')):
             upsert(r['seller_id'], r['seller_name'], r['seller_vat_code'], r['cnt'])
-        for r in buyers:
+        for r in sd_qs.exclude(buyer_name__isnull=True).exclude(buyer_name__exact='') \
+                .values('buyer_id', 'buyer_name', 'buyer_vat_code').annotate(cnt=Count('id')):
             upsert(r['buyer_id'], r['buyer_name'], r['buyer_vat_code'], r['cnt'])
 
+        # ── Invoice ──
+        inv_qs = Invoice.objects.filter(
+            user=request.user,
+            status__in=['issued', 'sent', 'partially_paid', 'paid'],
+        )
+        for r in inv_qs.exclude(seller_name='') \
+                .values('seller_id', 'seller_name', 'seller_vat_code').annotate(cnt=Count('id')):
+            upsert(r['seller_id'], r['seller_name'], r['seller_vat_code'], r['cnt'])
+        for r in inv_qs.exclude(buyer_name='') \
+                .values('buyer_id', 'buyer_name', 'buyer_vat_code').annotate(cnt=Count('id')):
+            upsert(r['buyer_id'], r['buyer_name'], r['buyer_vat_code'], r['cnt'])
+
+        # ── Фильтр ──
         items = []
         for item in merged.values():
             if (
@@ -10207,6 +10222,7 @@ class VeiklosZurnalasGenerateView(APIView):
         pvm_moketojas = request.data.get('pvm_moketojas', False)
         date_from = request.data.get('date_from')
         date_to = request.data.get('date_to')
+        sources = request.data.get('sources', ['skaitmenizavimas', 'israsymas'])
         offset = int(request.data.get('offset', 0))
         limit = int(request.data.get('limit', 25))
 
@@ -10214,7 +10230,7 @@ class VeiklosZurnalasGenerateView(APIView):
             return Response({'error': 'Nepasirinktas nė vienas kontrahentas'}, status=400)
 
         entries, summary = self._build_journal(
-            request.user, contractor_keys, pvm_moketojas, date_from, date_to,
+            request.user, contractor_keys, pvm_moketojas, date_from, date_to, sources,
         )
 
         total_count = len(entries)
@@ -10228,101 +10244,162 @@ class VeiklosZurnalasGenerateView(APIView):
         })
 
     @staticmethod
-    def _build_journal(user, contractor_keys, pvm_moketojas, date_from, date_to):
-        """contractor_keys — список key из _company_key."""
-        base_qs = ScannedDocument.objects.filter(
-            user=user,
-            status__in=['completed', 'exported'],
-            is_archive_container=False,
-            invoice_date__isnull=False,
-            ready_for_export=True,
-            math_validation_passed=True,
-        )
-        if date_from:
-            base_qs = base_qs.filter(invoice_date__gte=date_from)
-        if date_to:
-            base_qs = base_qs.filter(invoice_date__lte=date_to)
-
+    def _build_journal(user, contractor_keys, pvm_moketojas, date_from, date_to, sources):
         contractor_keys_set = set(contractor_keys)
+        raw_rows = []
 
-        pardavimas_ids = set()
-        pirkimas_ids = set()
+        # ── ScannedDocument ──
+        if 'skaitmenizavimas' in sources:
+            sd_qs = ScannedDocument.objects.filter(
+                user=user,
+                status__in=['completed', 'exported'],
+                is_archive_container=False,
+                invoice_date__isnull=False,
+                ready_for_export=True,
+                math_validation_passed=True,
+            )
+            if date_from:
+                sd_qs = sd_qs.filter(invoice_date__gte=date_from)
+            if date_to:
+                sd_qs = sd_qs.filter(invoice_date__lte=date_to)
 
-        for doc in base_qs.only(
-            'id', 'seller_id', 'seller_name', 'seller_vat_code',
-            'buyer_id', 'buyer_name', 'buyer_vat_code',
-        ).iterator():
-            seller_key = _company_key(doc.seller_name, doc.seller_vat_code, doc.seller_id)
-            buyer_key = _company_key(doc.buyer_name, doc.buyer_vat_code, doc.buyer_id)
+            for doc in sd_qs.iterator():
+                seller_key = _company_key(doc.seller_name, doc.seller_vat_code, doc.seller_id)
+                buyer_key = _company_key(doc.buyer_name, doc.buyer_vat_code, doc.buyer_id)
 
-            if seller_key in contractor_keys_set:
-                pardavimas_ids.add(doc.id)
-            elif buyer_key in contractor_keys_set:
-                pirkimas_ids.add(doc.id)
+                if seller_key in contractor_keys_set:
+                    is_pardavimas = True
+                elif buyer_key in contractor_keys_set:
+                    is_pardavimas = False
+                else:
+                    continue
 
-        all_ids = pardavimas_ids | pirkimas_ids
-        if not all_ids:
-            return [], {
-                'pardavimo_operacijos': 0,
-                'pirkimo_operacijos': 0,
-                'pajamu_suma': '0',
-                'islaidu_suma': '0',
-            }
+                raw_rows.append({
+                    'source': 'skaitmenizavimas',
+                    'doc_id': doc.id,
+                    'invoice_date': doc.invoice_date,
+                    'document_series': doc.document_series or '',
+                    'document_number': doc.document_number or '',
+                    'amount_with_vat': doc.amount_with_vat,
+                    'amount_wo_vat': doc.amount_wo_vat,
+                    'currency': doc.currency or 'EUR',
+                    'is_pardavimas': is_pardavimas,
+                    'buyer_name': doc.buyer_name or '',
+                    'buyer_id': doc.buyer_id or '',
+                    'seller_name': doc.seller_name or '',
+                    'seller_id': doc.seller_id or '',
+                    'prekes_pavadinimas': doc.prekes_pavadinimas or '',
+                })
 
-        docs = base_qs.filter(id__in=all_ids).order_by('-invoice_date', '-id')
+        # ── Invoice ──
+        if 'israsymas' in sources:
+            inv_qs = Invoice.objects.filter(
+                user=user,
+                status__in=['issued', 'sent', 'partially_paid', 'paid'],
+                invoice_date__isnull=False,
+            )
+            if date_from:
+                inv_qs = inv_qs.filter(invoice_date__gte=date_from)
+            if date_to:
+                inv_qs = inv_qs.filter(invoice_date__lte=date_to)
 
+            for inv in inv_qs.iterator():
+                seller_key = _company_key(inv.seller_name, inv.seller_vat_code, inv.seller_id)
+                buyer_key = _company_key(inv.buyer_name, inv.buyer_vat_code, inv.buyer_id)
+
+                if seller_key in contractor_keys_set:
+                    is_pardavimas = True
+                elif buyer_key in contractor_keys_set:
+                    is_pardavimas = False
+                else:
+                    continue
+
+                raw_rows.append({
+                    'source': 'israsymas',
+                    'doc_id': inv.id,
+                    'invoice_date': inv.invoice_date,
+                    'document_series': inv.document_series or '',
+                    'document_number': inv.document_number or '',
+                    'amount_with_vat': inv.amount_with_vat,
+                    'amount_wo_vat': inv.amount_wo_vat,
+                    'currency': inv.currency or 'EUR',
+                    'is_pardavimas': is_pardavimas,
+                    'buyer_name': inv.buyer_name or '',
+                    'buyer_id': inv.buyer_id or '',
+                    'seller_name': inv.seller_name or '',
+                    'seller_id': inv.seller_id or '',
+                    'prekes_pavadinimas': inv.prekes_pavadinimas or '',
+                })
+
+        # ── Дедупликация: israsymas приоритетнее ──
+        raw_rows.sort(key=lambda r: (0 if r['source'] == 'israsymas' else 1))
+        seen_keys = {}
+        deduped = []
+
+        for row in raw_rows:
+            dk = _dedup_key(row['document_series'], row['document_number'], row['amount_with_vat'])
+            if dk == ('', '', ''):
+                deduped.append(row)
+                continue
+            if dk in seen_keys:
+                continue
+            seen_keys[dk] = True
+            deduped.append(row)
+
+        deduped.sort(key=lambda r: r['invoice_date'], reverse=True)
+
+        # ── Формирование entries ──
         entries = []
         pajamu_suma = Decimal('0')
         islaidu_suma = Decimal('0')
         pardavimo_cnt = 0
         pirkimo_cnt = 0
 
-        for doc in docs:
-            is_pardavimas = doc.id in pardavimas_ids
-
-            raw_amount = doc.amount_wo_vat if pvm_moketojas else doc.amount_with_vat
+        for row in deduped:
+            is_pardavimas = row['is_pardavimas']
+            raw_amount = row['amount_wo_vat'] if pvm_moketojas else row['amount_with_vat']
 
             if raw_amount is None:
                 amount_eur = Decimal('0')
             else:
-                currency = (doc.currency or 'EUR').upper()
+                currency = (row['currency'] or 'EUR').upper()
                 if currency == 'EUR':
                     amount_eur = Decimal(str(raw_amount))
                 else:
-                    rate = get_currency_rate(currency, doc.invoice_date)
+                    rate = get_currency_rate(currency, row['invoice_date'])
                     if rate:
                         amount_eur = (Decimal(str(raw_amount)) / Decimal(str(rate))).quantize(Decimal('0.01'))
                     else:
                         amount_eur = Decimal(str(raw_amount))
 
-            if doc.document_series:
-                serija_nr = f"{doc.document_series}-{doc.document_number or ''}"
-            else:
-                serija_nr = doc.document_number or ''
+            series = row['document_series']
+            number = row['document_number']
+            serija_nr = f"{series}-{number}" if series else number
 
             if is_pardavimas:
-                counterparty = doc.buyer_name or doc.buyer_id or ''
+                counterparty = row['buyer_name'] or row['buyer_id'] or ''
                 pardavimo_cnt += 1
                 pajamu_suma += amount_eur
             else:
-                counterparty = doc.seller_name or doc.seller_id or ''
+                counterparty = row['seller_name'] or row['seller_id'] or ''
                 pirkimo_cnt += 1
                 islaidu_suma += amount_eur
 
-            turinys = doc.prekes_pavadinimas
+            turinys = row['prekes_pavadinimas']
             if not turinys:
                 turinys = 'Pajamos' if is_pardavimas else 'Išlaidos'
 
             entries.append({
-                'doc_id': doc.id,
-                'invoice_date': doc.invoice_date.strftime('%Y-%m-%d') if doc.invoice_date else '',
+                'doc_id': row['doc_id'],
+                'source': row['source'],
+                'invoice_date': row['invoice_date'].strftime('%Y-%m-%d') if row['invoice_date'] else '',
                 'serija_nr': serija_nr,
                 'counterparty': counterparty,
                 'turinys': turinys,
                 'pajamos': str(amount_eur) if is_pardavimas else None,
                 'islaidos': str(amount_eur) if not is_pardavimas else None,
-                'currency': doc.currency or 'EUR',
-                'converted': (doc.currency or 'EUR').upper() != 'EUR',
+                'currency': row['currency'] or 'EUR',
+                'converted': (row['currency'] or 'EUR').upper() != 'EUR',
             })
 
         summary = {
@@ -10344,12 +10421,13 @@ class VeiklosZurnalasExportView(APIView):
         pvm_moketojas = request.data.get('pvm_moketojas', False)
         date_from = request.data.get('date_from')
         date_to = request.data.get('date_to')
+        sources = request.data.get('sources', ['skaitmenizavimas', 'israsymas'])
 
         if not contractor_keys:
             return Response({'error': 'Nepasirinktas nė vienas kontrahentas'}, status=400)
 
         entries, summary = VeiklosZurnalasGenerateView._build_journal(
-            request.user, contractor_keys, pvm_moketojas, date_from, date_to,
+            request.user, contractor_keys, pvm_moketojas, date_from, date_to, sources,
         )
 
         wb = Workbook()
@@ -10441,7 +10519,7 @@ class VeiklosZurnalasExportView(APIView):
             buf.read(),
             content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         )
-        response['Content-Disposition'] = 'attachment; filename="veiklos_zurnalas.xlsx"'
+        response['Content-Disposition'] = 'attachment; filename="ind_veiklos_zurnalas.xlsx"'
         return response
 
 
