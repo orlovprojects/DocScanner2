@@ -10141,6 +10141,8 @@ class VeiklosContractorSearchView(APIView):
             user=request.user,
             status__in=['completed', 'exported'],
             is_archive_container=False,
+            ready_for_export=True,
+            math_validation_passed=True,
         )
 
         sellers = (
@@ -10233,6 +10235,8 @@ class VeiklosZurnalasGenerateView(APIView):
             status__in=['completed', 'exported'],
             is_archive_container=False,
             invoice_date__isnull=False,
+            ready_for_export=True,
+            math_validation_passed=True,
         )
         if date_from:
             base_qs = base_qs.filter(invoice_date__gte=date_from)
