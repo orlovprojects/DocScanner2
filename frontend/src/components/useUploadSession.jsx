@@ -6,7 +6,7 @@ import { api } from "../api/endpoints";
 // ============ ЛИМИТЫ ============
 // Батчи (для простых файлов)
 const MAX_BATCH_FILES = 50;
-const MAX_BATCH_BYTES = 250 * 1024 * 1024; // 250 MB
+const MAX_BATCH_BYTES = 150 * 1024 * 1024; // 250 MB
 
 // Chunks (для архивов)
 const CHUNK_SIZE = 10 * 1024 * 1024; // 10 MB
