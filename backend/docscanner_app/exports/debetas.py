@@ -3,6 +3,7 @@ import os
 import csv
 import logging
 import zipfile
+import random
 from io import BytesIO, StringIO
 from pathlib import Path
 from decimal import Decimal, ROUND_HALF_UP, InvalidOperation
@@ -144,21 +145,59 @@ def _multiply_for_debetas(value, multiplier: int) -> str:
         return "0"
 
 
+def normalize_tip_lineitem(value) -> str:
+    s = str(value).strip() if value is not None else ""
+    if not s:
+        return "1"
+    try:
+        n = int(float(s.replace(",", ".")))
+        if n in (1, 3):
+            return "1"
+        elif n in (2, 4):
+            return "2"
+        return "1"
+    except Exception:
+        pass
+    low = s.lower()
+    if low in ("preke", "prekė", "prekes", "prekės"):
+        return "1"
+    if low in ("paslauga", "paslaugos"):
+        return "2"
+    return "1"
+
+
 def _get_preke_paslauga(value) -> str:
     """
-    Преобразует preke_paslauga в формат Debetas:
-    1, 3 -> "0" (prekė/товар)
-    2, 4 -> "1" (paslauga/услуга)
+    Нормализует и конвертирует в формат Debetas:
+    prekė (1) -> "0", paslauga (2) -> "1"
     """
+    normalized = normalize_tip_lineitem(value)
+    return "0" if normalized == "1" else "1"
+
+
+def _ensure_prekes_pavadinimas(obj) -> str:
+    """
+    Если obj.prekes_pavadinimas пустой — генерирует 'Preke' + 5 случайных цифр,
+    сохраняет в obj (doc или line_item) и возвращает.
+    """
+    existing = _s(getattr(obj, "prekes_pavadinimas", ""))
+    if existing:
+        return existing
+
+    generated = f"Preke{random.randint(10000, 99999)}"
+    logger.info(
+        "[DEBETAS:PAVADINIMAS] pk=%s generated prekes_pavadinimas=%s",
+        getattr(obj, "pk", None), generated
+    )
+    obj.prekes_pavadinimas = generated
     try:
-        v = int(value)
-        if v in (1, 3):
-            return "0"
-        elif v in (2, 4):
-            return "1"
-    except (ValueError, TypeError):
-        pass
-    return ""
+        obj.save(update_fields=["prekes_pavadinimas"])
+    except Exception as e:
+        logger.warning(
+            "[DEBETAS:PAVADINIMAS] pk=%s save failed: %s",
+            getattr(obj, "pk", None), e
+        )
+    return generated
 
 
 def _is_merge_vat(user) -> bool:
@@ -696,19 +735,11 @@ def _generate_debetas_csv(documents: List, doc_type: str, user=None, own_company
                     or "PREKE001"
                 )
 
-                prekes_pavadinimas = (
-                    _s(getattr(item, "prekes_pavadinimas", ""))
-                    or _s(getattr(item, "name", ""))
-                    or _s(getattr(doc, "prekes_pavadinimas", ""))
-                    or ""
-                )
+                prekes_pavadinimas = _ensure_prekes_pavadinimas(item)
 
                 mato_vienetas = _s(getattr(item, "unit", "")) or "vnt"
 
-                preke_paslauga_raw = getattr(item, "preke_paslauga", None)
-                if preke_paslauga_raw is None:
-                    preke_paslauga_raw = getattr(doc, "preke_paslauga", None)
-                l009 = _get_preke_paslauga(preke_paslauga_raw)
+                l009 = _get_preke_paslauga(getattr(item, "preke_paslauga", None))
 
                 qty = Decimal(str(getattr(item, "quantity", 1) or 1))
 
@@ -769,7 +800,7 @@ def _generate_debetas_csv(documents: List, doc_type: str, user=None, own_company
                 or "PREKE001"
             )
 
-            prekes_pavadinimas = _s(getattr(doc, "prekes_pavadinimas", "")) or ""
+            prekes_pavadinimas = _ensure_prekes_pavadinimas(doc)
             l009 = _get_preke_paslauga(getattr(doc, "preke_paslauga", None))
 
             if merge_vat:
