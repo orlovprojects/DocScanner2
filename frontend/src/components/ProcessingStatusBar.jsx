@@ -21,12 +21,21 @@ import {
 import { styled, keyframes } from "@mui/material/styles";
 import { api } from "../api/endpoints";
 
-const POLL_INTERVAL = 2000;
+const POLL_INTERVAL = 1500;
 const DONE_DISPLAY_MS = 3000;
 
-// Плавная анимация: +0.5% каждые 100ms
+// Плавная fake-анимация, чтобы user всегда видел движение
 const UI_TICK_MS = 100;
-const UI_STEP = 0.5;
+const UI_STEP = 0.15;
+
+// До split-а parent файл может медленно дойти сюда
+const PARENT_PROCESSING_CAP = 88;
+
+// После split-а child-документы могут дойти почти до конца
+const CHILD_PROCESSING_CAP = 97;
+
+// Для обычного multi-upload без split-а
+const FILE_PROCESSING_CAP = 96;
 
 const pulse = keyframes`
   0%, 100% { opacity: 1; }
@@ -34,6 +43,176 @@ const pulse = keyframes`
 `;
 
 const COMPLETED_GREEN = "#4caf50";
+
+function pickNumber(session, keys, fallback = 0) {
+  for (const key of keys) {
+    const value = session?.[key];
+
+    if (value !== undefined && value !== null && value !== "") {
+      const parsed = Number(value);
+
+      if (!Number.isNaN(parsed)) {
+        return parsed;
+      }
+    }
+  }
+
+  return fallback;
+}
+
+function documentWordAccusative(count) {
+  const n = Math.abs(Number(count) || 0);
+  const lastTwo = n % 100;
+  const last = n % 10;
+
+  if (last === 1 && lastTwo !== 11) {
+    return "dokumentą";
+  }
+
+  if (last >= 2 && last <= 9 && !(lastTwo >= 12 && lastTwo <= 19)) {
+    return "dokumentus";
+  }
+
+  return "dokumentų";
+}
+
+function documentWordGenitive(count) {
+  const n = Math.abs(Number(count) || 0);
+  const lastTwo = n % 100;
+  const last = n % 10;
+
+  if (last === 1 && lastTwo !== 11) {
+    return "dokumento";
+  }
+
+  return "dokumentų";
+}
+
+function makeSplitMessage(count) {
+  const n = Number(count) || 0;
+
+  if (n <= 1) {
+    return "";
+  }
+
+  return `Sukarpyta į ${n} ${documentWordAccusative(n)}`;
+}
+
+function buildSessionProgress(session) {
+  if (!session) {
+    return {
+      uploadedFiles: 0,
+      expectedItems: 0,
+      actualItems: 0,
+      total: 0,
+      processed: 0,
+      done: 0,
+      failed: 0,
+      wasSplit: false,
+      splitMessage: "",
+      progressMessage: "",
+      bottomLabel: "",
+      realPercent: 0,
+    };
+  }
+
+  const uploadedFiles = pickNumber(session, [
+    "uploaded_files",
+    "uploadedFiles",
+  ], 0);
+
+  const expectedItems = Math.max(
+    pickNumber(session, [
+      "expected_items",
+      "expectedItems",
+      "client_total_files",
+      "clientTotalFiles",
+    ], 0),
+    uploadedFiles
+  );
+
+  const actualItems = pickNumber(session, [
+    "actual_items",
+    "actualItems",
+    "total_items",
+    "totalItems",
+  ], 0);
+
+  const done = pickNumber(session, [
+    "done_items",
+    "doneItems",
+    "completed_items",
+    "completedItems",
+    "success_count",
+    "successCount",
+  ], 0);
+
+  const failed = pickNumber(session, [
+    "failed_items",
+    "failedItems",
+    "rejected_items",
+    "rejectedItems",
+    "error_count",
+    "errorCount",
+  ], 0);
+
+  const explicitProcessed = pickNumber(session, [
+    "processed_items",
+    "processedItems",
+    "processed",
+  ], 0);
+
+  const splitCount = pickNumber(session, [
+    "split_count",
+    "splitCount",
+    "discovered_items",
+    "discoveredItems",
+    "child_count",
+    "childCount",
+  ], 0);
+
+  const total = Math.max(
+    actualItems,
+    splitCount,
+    expectedItems,
+    uploadedFiles,
+    1
+  );
+
+  const processed = Math.min(
+    Math.max(explicitProcessed, done + failed),
+    total
+  );
+
+  const wasSplit = total > Math.max(expectedItems, uploadedFiles, 1);
+
+  const realPercent = total > 0
+    ? Math.max(0, Math.min(100, (processed / total) * 100))
+    : 0;
+
+  const splitMessage = wasSplit ? makeSplitMessage(total) : "";
+
+  const progressMessage = wasSplit
+    ? `${processed} / ${total} ${documentWordGenitive(total)} apdorota`
+    : `${processed} / ${total} failų apdorota`;
+
+  const bottomLabel = wasSplit ? progressMessage : `${processed} / ${total} failų apdorota`;
+
+  return {
+    uploadedFiles,
+    expectedItems,
+    actualItems,
+    total,
+    processed,
+    done,
+    failed,
+    wasSplit,
+    splitMessage,
+    progressMessage,
+    bottomLabel,
+    realPercent,
+  };
+}
 
 const FancyProgress = styled(LinearProgress)(({ theme }) => ({
   height: 12,
@@ -99,11 +278,25 @@ export default function ProcessingStatusBar({ onSessionComplete }) {
     ? completedSession
     : activeSession || doneSession;
 
-  const total =
-    displaySession?.expected_items || displaySession?.actual_items || 0;
-  const processed = displaySession?.processed_items || 0;
-  const done = displaySession?.done_items || 0;
-  const failed = displaySession?.failed_items || 0;
+  const progressMeta = useMemo(
+    () => buildSessionProgress(displaySession),
+    [displaySession]
+  );
+
+  const {
+    uploadedFiles,
+    expectedItems,
+    actualItems,
+    total,
+    processed,
+    done,
+    failed,
+    wasSplit,
+    splitMessage,
+    progressMessage,
+    bottomLabel,
+    realPercent,
+  } = progressMeta;
 
   const isCreditCheck = displaySession?.stage === "credit_check";
   const isCompleted = displaySession?.stage === "done" || showingCompleted;
@@ -121,20 +314,36 @@ export default function ProcessingStatusBar({ onSessionComplete }) {
     activeSessionIdRef.current = currentId;
   }, [activeSession?.id]);
 
-  // Реальный процент с бэкенда
-  const realPercent = useMemo(() => {
-    if (isCompleted) return 100;
-    if (!total) return 0;
-    return Math.max(0, Math.min(100, (processed / total) * 100));
-  }, [isCompleted, total, processed]);
-
-  // Максимум куда можно дойти плавно
+  // Максимум, куда fake-анимация может дойти до реального завершения
   const maxAllowed = useMemo(() => {
     if (isCompleted) return 100;
-    if (!total) return 15;
-    const oneFilePercent = 100 / total;
-    return Math.min(99, realPercent + oneFilePercent * 0.95);
-  }, [isCompleted, total, realPercent]);
+    if (!displaySession) return 0;
+
+    if (isCreditCheck) {
+      return 25;
+    }
+
+    if (total > 0 && processed >= total) {
+      return 100;
+    }
+
+    if (wasSplit) {
+      return CHILD_PROCESSING_CAP;
+    }
+
+    if (total <= 1) {
+      return PARENT_PROCESSING_CAP;
+    }
+
+    return FILE_PROCESSING_CAP;
+  }, [
+    isCompleted,
+    displaySession,
+    isCreditCheck,
+    total,
+    processed,
+    wasSplit,
+  ]);
 
   // Стоп анимации
   const stopAnim = useCallback(() => {
@@ -321,7 +530,9 @@ export default function ProcessingStatusBar({ onSessionComplete }) {
       : isCreditCheck
         ? "Tikrinami kreditai..."
         : showProgress
-          ? "Apdorojami failai..."
+          ? wasSplit
+            ? "Apdorojami dokumentai..."
+            : "Apdorojami failai..."
           : isBlocked
             ? "Nepakanka kreditų"
             : `Eilėje: ${queuedSessions.length} užduotys`;
@@ -329,19 +540,15 @@ export default function ProcessingStatusBar({ onSessionComplete }) {
   const headerSub =
     showProgress && total
       ? isCompleted
-        ? `${done + failed} / ${total} failų apdorota`
+        ? `${done + failed} / ${total} apdorota`
         : `${processed} / ${total} failų`
       : showProgress
         ? "Vykdoma..."
         : "";
 
-  const barVariant =
-    isCreditCheck && !isCompleted ? "indeterminate" : "determinate";
+  const barVariant = "determinate";
   const displayPercent = Math.round(uiPercent) || 0;
-  const barValue =
-    barVariant === "determinate"
-      ? Math.max(0, Math.min(100, displayPercent))
-      : undefined;
+  const barValue = Math.max(0, Math.min(100, displayPercent));
 
   const headerBgColor = isCompleted
     ? COMPLETED_GREEN
@@ -443,7 +650,10 @@ export default function ProcessingStatusBar({ onSessionComplete }) {
               label={`${displayPercent}%`}
               size="small"
               color={isCompleted ? "success" : "primary"}
-              sx={{ fontWeight: 600, minWidth: 56 }}
+              sx={{
+                fontWeight: 600,
+                minWidth: 56,
+              }}
             />
           </Box>
 
@@ -452,7 +662,9 @@ export default function ProcessingStatusBar({ onSessionComplete }) {
             value={barValue}
             sx={{
               [`& .${linearProgressClasses.bar}`]: {
-                backgroundColor: isCompleted ? COMPLETED_GREEN : undefined,
+                backgroundColor: isCompleted
+                  ? COMPLETED_GREEN
+                  : undefined,
               },
             }}
           />
@@ -465,9 +677,28 @@ export default function ProcessingStatusBar({ onSessionComplete }) {
               mt: 0.75,
             }}
           >
-            <Typography variant="caption" color="textSecondary">
-              {displaySession?.uploaded_files || 0} failų įkelta
-            </Typography>
+            <Box>
+              <Typography
+                variant="caption"
+                color="textSecondary"
+              >
+                {bottomLabel}
+              </Typography>
+
+              {wasSplit && splitMessage && (
+                <Typography
+                  variant="caption"
+                  sx={{
+                    display: "block",
+                    color: "textSecondary",
+                    fontWeight: 600,
+                    lineHeight: 1.2,
+                  }}
+                >
+                  {splitMessage}
+                </Typography>
+              )}
+            </Box>
 
             <Box sx={{ display: "flex", gap: 2, alignItems: "center" }}>
               <Box

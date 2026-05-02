@@ -126,6 +126,8 @@ class UploadSession(models.Model):
     started_at = models.DateTimeField(null=True, blank=True)
     finished_at = models.DateTimeField(null=True, blank=True)
 
+    multi_doc = models.BooleanField(default=False)
+
     class Meta:
         indexes = [
             models.Index(fields=["user", "stage"]),
@@ -366,6 +368,10 @@ class ScannedDocument(models.Model):
         blank=True,
         help_text="Grąžintas Rivile GAMA operacijos numeris",
     )
+
+    is_multi_doc_container = models.BooleanField(default=False)
+    source_pages = models.JSONField(null=True, blank=True)
+    pre_extracted_ocr_text = models.TextField(null=True, blank=True)
 
     class Meta:
         indexes = [

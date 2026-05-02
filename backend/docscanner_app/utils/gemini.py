@@ -137,7 +137,7 @@ If you identified more than 1 document, return only the count (one line):
 If you are very confident the document type is one of: Kreditinė sąskaita, Debetinė sąskaita, Išankstinė sąskaita, Pavedimo kopija, Delivery note / Važtaraštis / Packing slip (or closely related forms), then return ONLY this one-line JSON:
 {"docs":1,"netinkamas_dokumentas": true,"documents":[]}
 
-Make sure you don't consider receipt or payment confirmation as a separate document. Invoice can come with receipt if it's been paid already.
+Make sure you don't consider receipt, pinigu priemimo kvitas or any other payment confirmation as a separate document. Invoice can come with receipt if it's been paid already.
 """
 
 GEMINI_DETAILED_PROMPT = """
@@ -290,7 +290,7 @@ If you identified more than 1 document, return only the count (one line):
 If you are very confident the document type is one of: Kreditinė sąskaita, Debetinė sąskaita, Išankstinė sąskaita, Pavedimo kopija, Delivery note / Važtaraštis / Packing slip (or closely related forms), then return ONLY this one-line JSON:
 {"docs":1,"netinkamas_dokumentas": true,"documents":[]}
 
-Make sure you don't consider receipt or payment confirmation as a separate document. Invoice can come with receipt if it's been paid already.
+Make sure you don't consider receipt, pinigu priemimo kvitas or any other payment confirmation as a separate document. Invoice can come with receipt if it's been paid already.
 DON'T FORGET TO RETURN ALL LINEITEMS IN JSON!
 """
 
@@ -577,7 +577,7 @@ ADDITIONAL RULES
   Product name is usually above this line.
   document_number is usually next to "kvitas".
   Ignore long number below "kasininkas" at the bottom of the document but don't ignore the date there.
-- Make sure you don't consider a receipt or payment confirmation as a separate document.
+- Make sure you don't consider a receipt, pinigu priemimo kvitas or any other payment confirmation as a separate document.
   An invoice can include a receipt if it has already been paid.
 
 OUTPUT FORMAT (STRICT)

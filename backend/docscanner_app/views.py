@@ -2450,7 +2450,7 @@ def get_user_documents(request):
         include_archive_warnings = q.get("include_archive_warnings", "").lower() == "true"
         session_id = q.get("session_id")
 
-        qs = ScannedDocument.objects.filter(user=user, is_archive_container=False)
+        qs = ScannedDocument.objects.filter(user=user, is_archive_container=False, is_multi_doc_container=False)
 
         if status_param:
             qs = qs.filter(status=status_param)
@@ -5076,11 +5076,11 @@ def get_user_counterparties(request):
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
 def create_session(request):
-    stuck = UploadSession.objects.filter(
+    has_blocked = UploadSession.objects.filter(
         user=request.user,
-        stage__in=["blocked", "uploading"],
+        stage="blocked",
     ).exists()
-    if stuck:
+    if has_blocked:
         return Response({
             "error": "BLOCKED_SESSION_EXISTS",
             "detail": "Turite neužbaigtą užduotį. Papildykite kreditus ir spauskite PAKARTOTI arba panaikinkite užduotį.",
@@ -5096,6 +5096,33 @@ def create_session(request):
         client_total_files=max(0, client_total_files),
     )
     return Response({"id": str(s.id), "stage": s.stage})
+
+# @api_view(["POST"])
+# @permission_classes([IsAuthenticated])
+# def create_session(request):
+#     stuck = UploadSession.objects.filter(
+#         user=request.user,
+#         stage__in=["blocked", "uploading"],
+#     ).exists()
+#     if stuck:
+#         return Response({
+#             "error": "BLOCKED_SESSION_EXISTS",
+#             "detail": "Turite neužbaigtą užduotį. Papildykite kreditus ir spauskite PAKARTOTI arba panaikinkite užduotį.",
+#         }, status=409)
+
+#     scan_type = (request.data.get("scan_type") or "sumiskai").strip()
+#     client_total_files = int(request.data.get("client_total_files") or 0)
+
+#     multi_doc = bool(request.data.get("multi_doc", False))
+
+#     s = UploadSession.objects.create(
+#         user=request.user,
+#         scan_type=scan_type,
+#         stage="uploading",
+#         client_total_files=max(0, client_total_files),
+#         multi_doc=multi_doc,
+#     )
+#     return Response({"id": str(s.id), "stage": s.stage})
 
 
 #Статус сессии (для progress bar)
@@ -5121,6 +5148,7 @@ def session_status(request, session_id):
         "error_message": s.error_message,
         "created_at": s.created_at,
         "updated_at": s.updated_at,
+        "multi_doc": s.multi_doc,
     })
 
 

@@ -8,6 +8,7 @@ import logging
 import logging.config
 from django.db.models import F
 from decimal import Decimal
+import fitz
 
 from celery import shared_task
 from celery.exceptions import SoftTimeLimitExceeded
@@ -57,6 +58,17 @@ from .validators.verify_lt_company_match import update_seller_buyer_info_from_co
 from .services.sync_lt_companies import sync_companies_from_vmi, sync_addresses_from_jar
 from .celery_signals import _send_telegram
 from .models import ExportSession
+
+from .utils.pdf_splitter import (
+    get_pdf_page_count,
+    extract_pages_as_pdf_bytes,
+    split_pdf_document,
+    separate_docs_on_single_page,
+    pre_classify_pdf,
+    is_pdf_file,
+)
+ 
+MIN_CREDITS_FOR_SPLIT = Decimal("10")
 
 
 
@@ -116,6 +128,16 @@ def settle_session_for_doc(doc_id: int):
         s.save(update_fields=["pending_archives", "reserved_credits", "updated_at"])
         doc.save(update_fields=["counted_in_session"])
         return
+    
+    # === 1b) multi-doc контейнер ===
+    if doc.is_multi_doc_container:
+        # Контейнер был посчитан в actual_items при старте сессии,
+        # но он не настоящий документ — убираем из счётчика
+        s.actual_items = max((s.actual_items or 0) - 1, 0)
+        s.save(update_fields=["actual_items", "updated_at"])
+        doc.counted_in_session = True
+        doc.save(update_fields=["counted_in_session"])
+        return
 
     # === 2) обычный документ (включая распакованные из архива) ===
     s.processed_items = (s.processed_items or 0) + 1
@@ -124,7 +146,7 @@ def settle_session_for_doc(doc_id: int):
     success = (
         doc.status in ("completed", "exported")
         and getattr(doc, 'math_validation_passed', None) is True
-        and getattr(doc, 'ready_for_export', None) is True
+        # and getattr(doc, 'ready_for_export', None) is True
     )
     
     if success:
@@ -301,6 +323,15 @@ def _t():
 def _log_t(label: str, t0: float):
     logger.info(f"[TIME] {label}: {time.perf_counter() - t0:.2f}s")
 
+def _is_pdf_multi_page(file_path: str) -> int:
+    """Возвращает кол-во страниц если PDF 2+, иначе 0."""
+    if not file_path.lower().endswith('.pdf'):
+        return 0
+    try:
+        return get_pdf_page_count(file_path)
+    except Exception:
+        return 0
+
 
 
 def ask_llm_with_fallback(raw_text: str, scan_type: str, logger):
@@ -423,7 +454,8 @@ def start_session_processing(session_id: str):
 
 
 @shared_task(bind=True, soft_time_limit=600, time_limit=630, acks_late=True)
-def process_uploaded_file_task(self, user_id, doc_id, scan_type):
+def process_uploaded_file_task(self, user_id, doc_id, scan_type,
+                                split_depth=0, skip_ocr=False):
     """
     Полный пайплайн:
     - OCR: Google Vision (компактный JSON параграфов + склеенный текст) → fallback Gemini OCR (только текст)
@@ -473,6 +505,99 @@ def process_uploaded_file_task(self, user_id, doc_id, scan_type):
             elif low.endswith(('.xls', '.xlsx')): content_type = 'application/vnd.ms-excel'
         logger.info(f"[TASK] Detected content_type={content_type} for {original_filename}")
         _log_t("Detect content_type", t0)
+
+        # ── EARLY PDF PRE-CLASSIFICATION BEFORE normalize_any ──
+        # ВАЖНО:
+        # normalize_any может превратить multi-page PDF в PNG.
+        # Поэтому multi-page PDF нужно проверять ДО нормализации и ДО удаления оригинального PDF.
+        pre_classify_result = None
+
+        if split_depth == 0 and file_path.lower().endswith(".pdf"):
+            pdf_page_count_before_normalize = _is_pdf_multi_page(file_path)
+
+            if pdf_page_count_before_normalize >= 2:
+                t_pre = _t()
+                try:
+                    pre_classify_result = pre_classify_pdf(file_path)
+                    _log_t("Pre-classify PDF before normalize", t_pre)
+
+                    try:
+                        total_docs = int(pre_classify_result.get("total_docs") or 1)
+                    except Exception:
+                        total_docs = 1
+
+                    pre_docs = pre_classify_result.get("documents") or []
+                    needs_full_split = pre_classify_result.get("needs_full_split") is True
+
+                    logger.info(
+                        "[TASK] Early pre-classify: pages=%d visible_docs=%d needs_full_split=%s",
+                        pdf_page_count_before_normalize,
+                        total_docs,
+                        needs_full_split,
+                    )
+
+                    if needs_full_split:
+                        logger.info("[TASK] Early pre-classify requires full batched split")
+                        _save_multi_doc_debug_copy(doc)
+                        doc.pre_extracted_ocr_text = json.dumps(pre_classify_result)
+                        doc.preview_url = f"{settings.SITE_URL_BACKEND}/media/{doc.file.name}"
+                        doc.save(update_fields=["pre_extracted_ocr_text", "preview_url"])
+                        split_multi_doc_task.delay(doc.id, scan_type, 1)
+                        _log_t("TOTAL (redirected to batched split before normalize)", total_start)
+                        return
+
+                    if total_docs == 1 and pre_docs:
+                        pre_doc = pre_docs[0]
+                        pre_number = normalize_code_field(pre_doc.get("number") or "") or None
+                        pre_series = normalize_code_field(pre_doc.get("series") or "") or None
+
+                        if pre_number:
+                            t_dup = _t()
+                            is_dup = is_duplicate_by_series_number(
+                                user,
+                                pre_number,
+                                pre_series,
+                                exclude_doc_id=doc.pk,
+                                check_parties=False,
+                            )
+                            _log_t("Early pre-classify dup check", t_dup)
+
+                            if is_dup:
+                                doc.status = "rejected"
+                                doc.error_message = (
+                                    "Dublikatas: dokumentas su tokia serija ir numeriu jau buvo įkeltas"
+                                    if pre_series else
+                                    "Dublikatas: dokumentas su tokiu numeriu jau buvo įkeltas"
+                                )
+                                doc.preview_url = f"{settings.SITE_URL_BACKEND}/media/{doc.file.name}"
+                                doc.save(update_fields=["status", "error_message", "preview_url"])
+                                _settle_and_finish_if_session(doc)
+
+                                logger.info(
+                                    "[TASK] Early duplicate rejection before normalize: number=%s series=%s",
+                                    pre_number,
+                                    pre_series,
+                                )
+                                _log_t("TOTAL", total_start)
+                                return
+
+                    elif total_docs > 1:
+                        logger.info("[TASK] Early pre-classify found %d docs → split", total_docs)
+                        _save_multi_doc_debug_copy(doc)
+                        doc.pre_extracted_ocr_text = json.dumps(pre_classify_result)
+                        doc.preview_url = f"{settings.SITE_URL_BACKEND}/media/{doc.file.name}"
+                        doc.save(update_fields=["pre_extracted_ocr_text", "preview_url"])
+                        split_multi_doc_task.delay(doc.id, scan_type, 1)
+                        _log_t("TOTAL (redirected to split before normalize)", total_start)
+                        return
+
+                except Exception as e:
+                    _log_t("Pre-classify PDF before normalize failed", t_pre)
+                    logger.warning(
+                        "[TASK] Early pre-classify failed before normalize: %s — continuing normal pipeline",
+                        e,
+                    )
+                    pre_classify_result = None
 
         # 4) Нормализация через улучшенный file_converter
         class FakeUpload:
@@ -667,6 +792,13 @@ def process_uploaded_file_task(self, user_id, doc_id, scan_type):
             
             if not created_docs:
                 logger.error(f"[TASK] Failed to create ANY documents from archive {original_filename}")
+
+                doc.status = "rejected"
+                doc.error_message = "Nepavyko sukurti dokumentų iš archyvo"
+                doc.preview_url = None
+                doc.save(update_fields=["status", "error_message", "preview_url"])
+
+                _settle_and_finish_if_session(doc)
                 _log_t("TOTAL (archive processing failed)", total_start)
                 return
             
@@ -703,6 +835,8 @@ def process_uploaded_file_task(self, user_id, doc_id, scan_type):
             normalized = normalized_result
             logger.info(f"[TASK] Processing single file: {normalized['filename']}, size: {len(normalized['data'])}")
 
+
+
         # Удалить исходный файл
         t0 = _t()
         if doc.file and os.path.exists(file_path):
@@ -735,215 +869,205 @@ def process_uploaded_file_task(self, user_id, doc_id, scan_type):
         logger.info(f"[TASK] Preview URL: {preview_url}")
 
 
-        # 6) OCR: Google Vision → fallback Gemini OCR
-        # t0 = _t()
-        # # get_ocr_text_gcv возвращает: raw_json, joined_text, paragraphs, error
-        # gcv_raw_json, gcv_joined_text, _, gcv_err = get_ocr_text_gcv(data, original_filename, logger)
-        # _log_t("OCR (Google Vision)", t0)
-        # logger.info("[TASK] GCV result: err=%s, raw_len=%s, text_len=%s",
-        #     gcv_err, len(gcv_raw_json or ''), len(gcv_joined_text or ''))
-
-        # if gcv_err or (not gcv_raw_json and not gcv_joined_text):
-        #     logger.warning(f"[TASK] GCV failed or empty ({gcv_err or 'empty'}). Trying Gemini OCR...")
-        #     t1 = _t()
-        #     gemini_text, gemini_err = get_ocr_text_gemini(data, original_filename, logger)  # текст БЕЗ координат
-        #     _log_t("OCR (Gemini OCR fallback)", t1)
-
-        #     if gemini_err or not gemini_text:
-        #         # финальная ошибка OCR
-        #         t0 = _t()
-        #         doc.status = 'rejected'
-        #         doc.error_message = gemini_err or gcv_err or "OCR returned empty text"
-        #         doc.preview_url = preview_url
-        #         doc.save(update_fields=['status', 'error_message', 'preview_url'])
-        #         _settle_and_finish_if_session(doc)
-        #         _log_t("Save rejected (OCR error)", t0)
-        #         logger.error(f"[TASK] OCR error (GCV+Gemini): {doc.error_message}")
-        #         _log_t("TOTAL", total_start)
-        #         return
-
-        #     # fallback: координат нет → raw_text кладём сам текст, glued_raw_text тоже текст
-        #     raw_json_for_db = gemini_text
-        #     glued_text_for_db = gemini_text
-        # else:
-        #     # GCV успех: есть компактный JSON + склеенный текст
-        #     raw_json_for_db = gcv_raw_json
-        #     glued_text_for_db = gcv_joined_text
-
-        # logger.info("[TASK] OCR lengths: raw=%s, glued=%s",
-        #             len(raw_json_for_db or ""), len(glued_text_for_db or ""))
-
-        t0 = _t()
-        # get_ocr_text_gcv возвращает: raw_json, joined_text, paragraphs, error
-        gcv_raw_json, gcv_joined_text, _, gcv_err = get_ocr_text_gcv(data, original_filename, logger)
-        _log_t("OCR (Google Vision)", t0)
-        logger.info("[TASK] GCV result: err=%s, raw_len=%s, text_len=%s",
-            gcv_err, len(gcv_raw_json or ''), len(gcv_joined_text or ''))
-
-        if gcv_err or (not gcv_raw_json and not gcv_joined_text):
-            # ВРЕМЕННО: без fallback, чтобы увидеть ошибку GCV
-            t0 = _t()
-            doc.status = 'rejected'
-            doc.error_message = f"GCV error: {gcv_err or 'empty result'}"
-            doc.preview_url = preview_url
-            doc.save(update_fields=['status', 'error_message', 'preview_url'])
-            _settle_and_finish_if_session(doc)
-            _log_t("Save rejected (GCV error, no fallback)", t0)
-            logger.error("[TASK] GCV FAILED: err=%s, raw=%s, text=%s",
-                gcv_err, len(gcv_raw_json or ''), len(gcv_joined_text or ''))
-            _log_t("TOTAL", total_start)
-            return
-
-        raw_json_for_db = gcv_raw_json
-        glued_text_for_db = gcv_joined_text
-
-        logger.info("[TASK] OCR lengths: raw=%s, glued=%s",
-                    len(raw_json_for_db or ""), len(glued_text_for_db or ""))
-
-        ocr_mode = "UNKNOWN"
-        line_collision = 0.0
-        try:
-            _meta = json.loads(gcv_raw_json or "{}").get("meta", {})
-            ocr_mode = _meta.get("mode", "UNKNOWN")
-            line_collision = float(_meta.get("metrics", {}).get("line_collision_ratio", 0))
-        except Exception:
-            pass
-        logger.info("[TASK] GCV OCR mode=%s, line_collision=%.1f", ocr_mode, line_collision)
-
-        need_enhanced_ocr = (ocr_mode == "FULLTEXT") or (line_collision > 22)
-
-        if need_enhanced_ocr and data:
-            t_m = _t()
-            try:
-                from .utils.enhanced_ocr import get_enhanced_ocr_text
-                enhanced_text, enhanced_err = get_enhanced_ocr_text(
-                    data, original_filename, logger
-                )
-                _log_t("OCR (Enhanced Gemini)", t_m)
-
-                if enhanced_text and not enhanced_err:
-                    doc.enhanced_ocr_text = enhanced_text
-                    doc.enhanced_ocr_source = "gemini-flash-lite-latest"
-                    doc.save(update_fields=["enhanced_ocr_text", "enhanced_ocr_source"])
-
-                    glued_text_for_db = enhanced_text
-                    logger.info(
-                        "[TASK] Using enhanced OCR (gemini-flash-lite) for LLM (len=%d)",
-                        len(enhanced_text),
-                    )
-                else:
-                    logger.warning(
-                        "[TASK] Enhanced OCR failed: %s — using GCV text",
-                        enhanced_err,
-                    )
-            except Exception as e:
-                _log_t("OCR (Enhanced Gemini, failed)", t_m)
-                logger.warning("[TASK] Enhanced OCR exception: %s", e)
-        else:
-            logger.info("[TASK] No enhanced OCR needed: mode=%s collision=%.1f", ocr_mode, line_collision)
-
-        # 7) Ранний reject по типу документа (по склеенному тексту)
-        t0 = _t()
-        found_type = detect_doc_type(glued_text_for_db or "")
-        _log_t("Detect doc type", t0)
-        if found_type:
-            t0 = _t()
-            doc.status = 'rejected'
-            doc.error_message = f"Potenciali {found_type}"
-            doc.raw_text = raw_json_for_db
-            doc.glued_raw_text = gcv_joined_text
-            doc.preview_url = preview_url
-            doc.save(update_fields=['status', 'error_message', 'raw_text', 'glued_raw_text', 'preview_url'])
-            _settle_and_finish_if_session(doc)
-            _log_t("Save rejected (doc type)", t0)
-            logger.info(f"[TASK] Rejected due to type: {found_type}")
-            _log_t("TOTAL", total_start)
-            return
-
-        # 8) Сохранить OCR результаты
-        t0 = _t()
-        doc.raw_text = raw_json_for_db
-        doc.glued_raw_text = gcv_joined_text   
-        doc.preview_url = preview_url
-        doc.save(update_fields=['raw_text', 'glued_raw_text', 'preview_url'])
-        _log_t("Save OCR results", t0)
-
-        # 9) Похожесть с другими документами пользователя — по склеенному тексту
-        t0 = _t()
-        similarity_percent, similar_doc_id = calculate_max_similarity_percent(
-            doc.glued_raw_text or "",  # <--- склеенный текст, не raw_json
-            user=user,
-            exclude_doc_id=doc.pk
-        )
-        _log_t("Calculate similarity", t0)
-
-        t0 = _t()
-        doc.similarity_percent = similarity_percent
-        # Если есть поле в модели, можно сохранить и ID:
-        # doc.similar_doc_id = similar_doc_id
-        doc.save(update_fields=['similarity_percent'])  # , 'similar_doc_id'
-        _log_t("Save similarity", t0)
-
-
-        # Если похожесть высокая (>=95%), пробуем быстро вытащить серию/номер и проверить дубликат
-        if similarity_percent >= 95:
-            t0 = _t()
-            prompt = (
-                "You are given OCRed text of a single Lithuanian accounting document (invoice/receipt).\n"
-                "Extract two fields ONLY and return STRICT JSON with EXACT keys:\n"
-                '{\n  "document_series": string|null,\n  "document_number": string|null\n}\n'
-                "Rules:\n"
-                "- If series is absent, set document_series to null.\n"
-                "- If number is absent, set document_number to null.\n"
-                "- Respond with pure JSON. Do NOT use markdown code fences."
+        # ── SKIP OCR: текст уже извлечён сплиттером ──
+        if skip_ocr and doc.pre_extracted_ocr_text:
+            logger.info(
+                "[TASK] skip_ocr=True, using pre_extracted_ocr_text (len=%d)",
+                len(doc.pre_extracted_ocr_text),
             )
+            raw_json_for_db = doc.pre_extracted_ocr_text
+            glued_text_for_db = doc.pre_extracted_ocr_text
+            doc.raw_text = raw_json_for_db
+            doc.glued_raw_text = glued_text_for_db
+            doc.preview_url = preview_url
+            doc.save(update_fields=['raw_text', 'glued_raw_text', 'preview_url'])
+
+        else:
+
+            t0 = _t()
+            # get_ocr_text_gcv возвращает: raw_json, joined_text, paragraphs, error
+            gcv_raw_json, gcv_joined_text, _, gcv_err = get_ocr_text_gcv(data, original_filename, logger)
+            _log_t("OCR (Google Vision)", t0)
+            logger.info("[TASK] GCV result: err=%s, raw_len=%s, text_len=%s",
+                gcv_err, len(gcv_raw_json or ''), len(gcv_joined_text or ''))
+
+            if gcv_err or (not gcv_raw_json and not gcv_joined_text):
+                # ВРЕМЕННО: без fallback, чтобы увидеть ошибку GCV
+                t0 = _t()
+                doc.status = 'rejected'
+                doc.error_message = f"GCV error: {gcv_err or 'empty result'}"
+                doc.preview_url = preview_url
+                doc.save(update_fields=['status', 'error_message', 'preview_url'])
+                _settle_and_finish_if_session(doc)
+                _log_t("Save rejected (GCV error, no fallback)", t0)
+                logger.error("[TASK] GCV FAILED: err=%s, raw=%s, text=%s",
+                    gcv_err, len(gcv_raw_json or ''), len(gcv_joined_text or ''))
+                _log_t("TOTAL", total_start)
+                return
+
+            raw_json_for_db = gcv_raw_json
+            glued_text_for_db = gcv_joined_text
+
+            logger.info("[TASK] OCR lengths: raw=%s, glued=%s",
+                        len(raw_json_for_db or ""), len(glued_text_for_db or ""))
+
+            ocr_mode = "UNKNOWN"
+            line_collision = 0.0
             try:
-                resp = ask_gemini_with_retry(
-                    text=doc.glued_raw_text or "",
-                    prompt=prompt,
-                    model="gemini-2.5-flash-lite",
-                    logger=logger,
-                )
-                _log_t("Gemini-lite extract (series/number, high-sim)", t0)
-                logger.info(f"[DUP-CHECK] gemini-lite extract resp preview={repr((resp or '')[:200])}")
+                _meta = json.loads(gcv_raw_json or "{}").get("meta", {})
+                ocr_mode = _meta.get("mode", "UNKNOWN")
+                line_collision = float(_meta.get("metrics", {}).get("line_collision_ratio", 0))
+            except Exception:
+                pass
+            logger.info("[TASK] GCV OCR mode=%s, line_collision=%.1f", ocr_mode, line_collision)
 
-                data = _extract_json_object(resp or "")
-                series_ex = normalize_code_field((data.get("document_series") or "")) or None
-                number_ex = normalize_code_field((data.get("document_number") or "")) or None
-                
-                logger.info(f"[DUP-CHECK] Extracted: series={repr(series_ex)}, number={repr(number_ex)}")
+            need_enhanced_ocr = (ocr_mode == "FULLTEXT") or (line_collision > 22)
 
-                if not series_ex and not number_ex:
-                    logger.info("[DUP-CHECK] gemini-lite returned empty → skip duplicate check")
-                else:
-                    t1 = _t()
-                    # Проверяем только серию/номер без контрагентов (они еще не распознаны)
-                    is_dup = is_duplicate_by_series_number(
-                        user, 
-                        number_ex, 
-                        series_ex, 
-                        exclude_doc_id=doc.pk,
-                        check_parties=False  # ← КЛЮЧЕВОЕ ИЗМЕНЕНИЕ
+            if need_enhanced_ocr and data:
+                t_m = _t()
+                try:
+                    from .utils.enhanced_ocr import get_enhanced_ocr_text
+                    enhanced_text, enhanced_err = get_enhanced_ocr_text(
+                        data, original_filename, logger
                     )
-                    logger.info(f"[DUP-CHECK] is_duplicate_by_series_number(check_parties=False) returned: {is_dup}")
-                    
-                    if is_dup:
-                        doc.status = 'rejected'
-                        doc.error_message = ("Dublikatas: dokumentas su tokia serija ir numeriu jau buvo įkeltas"
-                                            if series_ex else
-                                            "Dublikatas: dokumentas su tokiu numeriu jau buvo įkeltas")
-                        if not getattr(doc, "preview_url", None):
-                            doc.preview_url = f"{settings.SITE_URL_BACKEND}/media/{doc.file.name}"
-                        doc.save(update_fields=['status', 'error_message', 'preview_url'])
-                        _settle_and_finish_if_session(doc)
-                        _log_t("Duplicate check (series/number @95%+)", t1)
-                        logger.info("[TASK] Rejected as duplicate by series/number on high similarity (no credits deducted)")
-                        _log_t("TOTAL", total_start)
-                        return
-                    _log_t("Duplicate check (series/number passed @95%+)", t1)
+                    _log_t("OCR (Enhanced Gemini)", t_m)
 
-            except Exception as e:
-                logger.warning(f"[DUP-CHECK] gemini-lite extract failed: {e} — skipping duplicate check")
+                    if enhanced_text and not enhanced_err:
+                        doc.enhanced_ocr_text = enhanced_text
+                        doc.enhanced_ocr_source = "gemini-flash-lite-latest"
+                        doc.save(update_fields=["enhanced_ocr_text", "enhanced_ocr_source"])
+
+                        glued_text_for_db = enhanced_text
+                        logger.info(
+                            "[TASK] Using enhanced OCR (gemini-flash-lite) for LLM (len=%d)",
+                            len(enhanced_text),
+                        )
+                    else:
+                        logger.warning(
+                            "[TASK] Enhanced OCR failed: %s — using GCV text",
+                            enhanced_err,
+                        )
+                except Exception as e:
+                    _log_t("OCR (Enhanced Gemini, failed)", t_m)
+                    logger.warning("[TASK] Enhanced OCR exception: %s", e)
+            else:
+                logger.info("[TASK] No enhanced OCR needed: mode=%s collision=%.1f", ocr_mode, line_collision)
+
+            # 7) Ранний reject по типу документа (по склеенному тексту)
+            t0 = _t()
+            found_type = detect_doc_type(glued_text_for_db or "")
+            _log_t("Detect doc type", t0)
+            if found_type:
+                t0 = _t()
+                doc.status = 'rejected'
+                doc.error_message = f"Potenciali {found_type}"
+                doc.raw_text = raw_json_for_db
+                doc.glued_raw_text = gcv_joined_text
+                doc.preview_url = preview_url
+                doc.save(update_fields=['status', 'error_message', 'raw_text', 'glued_raw_text', 'preview_url'])
+                _settle_and_finish_if_session(doc)
+                _log_t("Save rejected (doc type)", t0)
+                logger.info(f"[TASK] Rejected due to type: {found_type}")
+                _log_t("TOTAL", total_start)
+                return
+
+            # 8) Сохранить OCR результаты
+            t0 = _t()
+            doc.raw_text = raw_json_for_db
+            doc.glued_raw_text = gcv_joined_text   
+            doc.preview_url = preview_url
+            doc.save(update_fields=['raw_text', 'glued_raw_text', 'preview_url'])
+            _log_t("Save OCR results", t0)
+
+        # 9) Похожесть и дубликат-проверка
+        # Если pre-classify уже проверил дубликат — пропускаем
+        _pre_checked_dup = False
+
+        try:
+            _pre_checked_dup = bool(
+                pre_classify_result is not None
+                and int(pre_classify_result.get("total_docs") or 0) == 1
+                and not (pre_classify_result.get("needs_full_split") is True)
+                and pre_classify_result.get("documents")
+                and normalize_code_field(
+                    pre_classify_result["documents"][0].get("number") or ""
+                )
+            )
+        except Exception:
+            _pre_checked_dup = False
+
+        if _pre_checked_dup:
+            logger.info("[TASK] Skipping similarity & dup-check (pre-classify already checked)")
+            similarity_percent = 0
+            doc.similarity_percent = 0
+            doc.save(update_fields=['similarity_percent'])
+        else:
+            t0 = _t()
+            similarity_percent, similar_doc_id = calculate_max_similarity_percent(
+                doc.glued_raw_text or "",
+                user=user,
+                exclude_doc_id=doc.pk
+            )
+            _log_t("Calculate similarity", t0)
+
+            t0 = _t()
+            doc.similarity_percent = similarity_percent
+            doc.save(update_fields=['similarity_percent'])
+            _log_t("Save similarity", t0)
+
+            # Если похожесть высокая (>=95%), вытаскиваем серию/номер
+            if similarity_percent >= 95:
+                t0 = _t()
+                prompt = (
+                    "You are given OCRed text of a single Lithuanian accounting document (invoice/receipt).\n"
+                    "Extract two fields ONLY and return STRICT JSON with EXACT keys:\n"
+                    '{\n  "document_series": string|null,\n  "document_number": string|null\n}\n'
+                    "Rules:\n"
+                    "- If series is absent, set document_series to null.\n"
+                    "- If number is absent, set document_number to null.\n"
+                    "- Respond with pure JSON. Do NOT use markdown code fences."
+                )
+                try:
+                    resp = ask_gemini_with_retry(
+                        text=doc.glued_raw_text or "",
+                        prompt=prompt,
+                        model="gemini-2.5-flash-lite",
+                        logger=logger,
+                    )
+                    _log_t("Gemini-lite extract (series/number, high-sim)", t0)
+
+                    data = _extract_json_object(resp or "")
+                    series_ex = normalize_code_field((data.get("document_series") or "")) or None
+                    number_ex = normalize_code_field((data.get("document_number") or "")) or None
+
+                    if not series_ex and not number_ex:
+                        logger.info("[DUP-CHECK] gemini-lite returned empty → skip duplicate check")
+                    else:
+                        t1 = _t()
+                        is_dup = is_duplicate_by_series_number(
+                            user, number_ex, series_ex,
+                            exclude_doc_id=doc.pk,
+                            check_parties=False,
+                        )
+
+                        if is_dup:
+                            doc.status = 'rejected'
+                            doc.error_message = (
+                                "Dublikatas: dokumentas su tokia serija ir numeriu jau buvo įkeltas"
+                                if series_ex else
+                                "Dublikatas: dokumentas su tokiu numeriu jau buvo įkeltas"
+                            )
+                            if not getattr(doc, "preview_url", None):
+                                doc.preview_url = f"{settings.SITE_URL_BACKEND}/media/{doc.file.name}"
+                            doc.save(update_fields=['status', 'error_message', 'preview_url'])
+                            _settle_and_finish_if_session(doc)
+                            _log_t("Duplicate check (series/number @95%+)", t1)
+                            _log_t("TOTAL", total_start)
+                            return
+                        _log_t("Duplicate check (series/number passed @95%+)", t1)
+
+                except Exception as e:
+                    logger.warning(f"[DUP-CHECK] gemini-lite extract failed: {e}")
 
 
         # 10) LLM: Gemini → GPT fallback (скармливаем склеенный текст)
@@ -973,8 +1097,7 @@ def process_uploaded_file_task(self, user_id, doc_id, scan_type):
         # 11) Сохранить сырой JSON от LLM
         t0 = _t()
         doc.gpt_raw_json = llm_resp
-        doc.save(update_fields=['gpt_raw_json'])
-        logger.info(f"[LLM] Saved gpt_raw_json: source={source_model} len={len(llm_resp or '')} preview={repr((llm_resp or '')[:200])}")
+        doc.save(update_fields=['gpt_raw_json'])      
         _log_t("Save gpt_raw_json", t0)
 
         # 12) Парсинг JSON + ретрай на gemini-2.5-lite при ОБРЫВЕ
@@ -1118,22 +1241,93 @@ def process_uploaded_file_task(self, user_id, doc_id, scan_type):
 
 
 
-        # 13) Проверка количества документов
+        # 13) Проверка результата LLM и количества документов
         t0 = _t()
-        docs_count = max(1, int(structured.get("docs", 1)))
-        documents = structured.get("documents", [structured])
+
+        try:
+            docs_count = int(structured.get("docs") or 1)
+        except Exception:
+            docs_count = 1
+
+        docs_count = max(1, docs_count)
+
+        documents = structured.get("documents")
+
+        if documents is None:
+            documents = [structured]
+
+        if not isinstance(documents, list):
+            documents = []
+
+        netinkamas_dokumentas = structured.get("netinkamas_dokumentas")
+
+        if isinstance(netinkamas_dokumentas, str):
+            netinkamas_dokumentas = netinkamas_dokumentas.strip().lower() in (
+                "true",
+                "1",
+                "yes",
+                "y",
+                "taip",
+            )
+
+        netinkamas_dokumentas = bool(netinkamas_dokumentas)
+
         _log_t("Check docs count", t0)
 
-        if docs_count != 1:
+        if netinkamas_dokumentas:
             t1 = _t()
-            doc.status = 'rejected'
-            doc.error_message = "Daugiau nei 1 dokumentas faile"
-            # оставляем сырые OCR-поля, чтобы юзер видел, что распознано
-            doc.save(update_fields=['status', 'error_message'])
+            doc.status = "rejected"
+            doc.error_message = "Netinkamas dokumentas"
+            doc.preview_url = preview_url
+            doc.save(update_fields=["status", "error_message", "preview_url"])
             _settle_and_finish_if_session(doc)
-            _log_t("Save rejected (multi-docs)", t1)
-            logger.info("[TASK] Rejected due to multiple docs")
+            _log_t("Save rejected (netinkamas_dokumentas)", t1)
             _log_t("TOTAL", total_start)
+            return
+
+        if docs_count == 1 and not documents:
+            t1 = _t()
+            doc.status = "rejected"
+            doc.error_message = "Nepavyko atpažinti dokumento"
+            doc.preview_url = preview_url
+            doc.save(update_fields=["status", "error_message", "preview_url"])
+            _settle_and_finish_if_session(doc)
+            _log_t("Save rejected (empty documents)", t1)
+            _log_t("TOTAL", total_start)
+            return
+
+        if docs_count != 1:
+            if split_depth >= 2:
+                # Уже прошли 2 попытки сплита, reject
+                t1 = _t()
+                doc.status = "rejected"
+                doc.error_message = "Daugiau nei 1 dokumentas faile"
+                doc.preview_url = preview_url
+                doc.save(update_fields=["status", "error_message", "preview_url"])
+                _settle_and_finish_if_session(doc)
+                _log_t("Save rejected (multi-docs, split_depth=%d)" % split_depth, t1)
+                _log_t("TOTAL", total_start)
+                return
+
+            logger.info("[TASK] docs=%d, split_depth=%d → redirecting to split", docs_count, split_depth)
+            _save_multi_doc_debug_copy(doc, file_bytes=file_bytes)
+
+            _fp = doc.file.path
+            _is_pdf = _fp.lower().endswith(".pdf")
+            _total_pages = 0
+
+            if _is_pdf and os.path.exists(_fp):
+                try:
+                    _total_pages = get_pdf_page_count(_fp)
+                except Exception:
+                    pass
+
+            if _is_pdf and _total_pages >= 2:
+                split_multi_doc_task.delay(doc.id, scan_type, split_depth + 1)
+            else:
+                split_single_page_multi_doc_task.delay(doc.id, scan_type, docs_count, split_depth + 1)
+
+            _log_t("TOTAL (redirected to split, depth=%d)" % split_depth, total_start)
             return
         
 
@@ -3739,7 +3933,7 @@ def monitor_stuck_sessions():
     # ─── 1. uploading > 2 часа — авто-фейл ───
     stuck_uploading = UploadSession.objects.filter(
         stage="uploading",
-        updated_at__lt=now - timedelta(hours=2),
+        updated_at__lt=now - timedelta(hours=1),
     )
     for s in stuck_uploading:
         try:
@@ -3762,7 +3956,7 @@ def monitor_stuck_sessions():
             )
         except Exception as e:
             alerts.append(
-                f"📤 Session <code>{str(s.id)[:8]}</code> stuck uploading >2h\n"
+                f"📤 Session <code>{str(s.id)[:8]}</code> stuck uploading >1h\n"
                 f"   fix failed: {str(e)[:200]}"
             )
 
@@ -4123,4 +4317,744 @@ def send_trial_expired_emails():
 #         logger.error("Sync failed for folder %s: %s", cloud_folder_id, e, exc_info=True)
 #         if self.request.retries < self.max_retries:
 #             raise self.retry(exc=e)
+
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PDF splitter
+# ═══════════════════════════════════════════════════════════════════════════════
+
+import os
+import logging
+import logging.config
+from decimal import Decimal
+ 
+from celery import shared_task
+from django.conf import settings
+from django.core.files.base import ContentFile
+from django.db import transaction
+from django.db.models import F
+ 
+from .models import ScannedDocument, CustomUser, UploadSession
+from .utils.pdf_splitter import (
+    get_pdf_page_count,
+    extract_pages_as_pdf_bytes,
+    split_pdf_document,
+    separate_docs_on_single_page,
+    is_pdf_file,
+)
+ 
+logging.config.dictConfig(settings.LOGGING)
+logger = logging.getLogger('docscanner_app')
+ 
+ 
+# ═══════════════════════════════════════════════════════════════════════════════
+# CONSTANTS
+# ═══════════════════════════════════════════════════════════════════════════════
+ 
+MIN_CREDITS_FOR_SPLIT = Decimal("10")
+ 
+COST = {
+    "sumiskai": Decimal("1.00"),
+    "detaliai": Decimal("1.30"),
+}
+ 
+def _doc_cost(scan_type: str) -> Decimal:
+    return COST.get((scan_type or "").strip(), Decimal("1.00"))
+ 
+ 
+def _get_mime_type(filename: str) -> str:
+    ext = (filename.rsplit(".", 1)[-1] if "." in (filename or "") else "").lower()
+    mime_map = {
+        "jpg": "image/jpeg", "jpeg": "image/jpeg",
+        "png": "image/png", "webp": "image/webp",
+        "tiff": "image/tiff", "tif": "image/tiff",
+        "pdf": "application/pdf",
+    }
+    return mime_map.get(ext, "image/jpeg")
+ 
+ 
+# ═══════════════════════════════════════════════════════════════════════════════
+# SPLIT TASK: PDF с 2+ страницами
+# ═══════════════════════════════════════════════════════════════════════════════
+ 
+def _reject_split_parent_doc(doc_id: int, message: str):
+    """
+    Fail-safe для split task.
+    Главное правило: parent PDF не должен оставаться processing.
+    """
+    try:
+        doc = ScannedDocument.objects.filter(pk=doc_id).first()
+        if not doc:
+            return
+
+        doc.status = "rejected"
+        doc.error_message = (message or "Dokumentų atskyrimo klaida")[:500]
+        doc.save(update_fields=["status", "error_message"])
+
+        _settle_and_finish_if_session(doc)
+
+    except Exception:
+        logger.exception("[MULTI-DOC] Failed to reject split parent doc_id=%s", doc_id)
+
+
+@shared_task(bind=True, soft_time_limit=300, time_limit=330)
+def split_multi_doc_task(self, doc_id: int, scan_type: str, split_depth: int = 1):
+    """
+    Разбивает multi-doc PDF на отдельные документы.
+
+    Safe rules:
+    - parent PDF never stays processing forever
+    - all split errors reject parent and settle session
+    - page map is verified inside pdf_splitter.py
+    """
+    t0 = _t()
+    logger.info("[MULTI-DOC] Starting split for doc_id=%d, depth=%d", doc_id, split_depth)
+
+    try:
+        try:
+            doc = ScannedDocument.objects.get(pk=doc_id)
+            user = CustomUser.objects.get(pk=doc.user_id)
+        except (ScannedDocument.DoesNotExist, CustomUser.DoesNotExist) as e:
+            logger.warning(
+                "[MULTI-DOC] Doc or user not found. Probably deleted while split task was queued. doc_id=%s error=%s",
+                doc_id,
+                e,
+            )
+            return
+
+        session = doc.upload_session
+
+        if user.credits < MIN_CREDITS_FOR_SPLIT:
+            doc.status = "rejected"
+            doc.error_message = (
+                "Kelių dokumentų atpažinimui reikia bent 10 kreditų. "
+                "Šiuo metu turite: {:.1f}".format(user.credits)
+            )
+            doc.save(update_fields=["status", "error_message"])
+            _settle_and_finish_if_session(doc)
+            return
+
+        pdf_path = doc.file.path
+
+        if not os.path.exists(pdf_path):
+            doc.status = "rejected"
+            doc.error_message = "Failas nerastas"
+            doc.save(update_fields=["status", "error_message"])
+            _settle_and_finish_if_session(doc)
+            return
+
+        pre_classify_groups = None
+        needs_full_split = False
+
+        if doc.pre_extracted_ocr_text:
+            try:
+                cached = json.loads(doc.pre_extracted_ocr_text)
+                if isinstance(cached, dict) and "documents" in cached:
+                    pre_classify_groups = cached.get("documents") or []
+                    needs_full_split = bool(cached.get("needs_full_split", False))
+
+                    logger.info(
+                        "[MULTI-DOC] Cached pre-classify: groups=%d needs_full_split=%s",
+                        len(pre_classify_groups),
+                        needs_full_split,
+                    )
+
+                    doc.pre_extracted_ocr_text = None
+                    doc.save(update_fields=["pre_extracted_ocr_text"])
+            except Exception as e:
+                logger.warning("[MULTI-DOC] Failed to read cached pre-classify: %s", e)
+
+        try:
+            total_pages = get_pdf_page_count(pdf_path)
+            logger.info("[MULTI-DOC] PDF has %d pages", total_pages)
+
+            if total_pages < 2:
+                split_single_page_multi_doc_task.delay(doc_id, scan_type, 0, split_depth)
+                return
+
+            if pre_classify_groups and not needs_full_split:
+                groups = pre_classify_groups
+                logger.info("[MULTI-DOC] Using pre-classify groups without full split")
+            else:
+                groups = split_pdf_document(pdf_path)
+
+            if len(groups) <= 1 and not any(g.get("multiple_on_page") for g in groups):
+                logger.info("[MULTI-DOC] Only 1 document found, processing normally")
+                doc.status = "processing"
+                doc.save(update_fields=["status"])
+                process_uploaded_file_task.delay(doc.user_id, doc_id, scan_type, split_depth, False)
+                return
+
+        except Exception as e:
+            logger.exception("[MULTI-DOC] Classification failed for doc_id=%d", doc_id)
+            doc.status = "rejected"
+            doc.error_message = f"Dokumentų atskyrimo klaida: {str(e)[:200]}"
+            doc.save(update_fields=["status", "error_message"])
+            _settle_and_finish_if_session(doc)
+            return
+
+        total_doc_count = 0
+
+        for g in groups:
+            if g.get("multiple_on_page"):
+                total_doc_count += max(int(g.get("documents_on_page") or 1), 1)
+            else:
+                total_doc_count += 1
+
+        if total_doc_count <= 1:
+            logger.info("[MULTI-DOC] total_doc_count<=1, processing normally")
+            doc.status = "processing"
+            doc.save(update_fields=["status"])
+            process_uploaded_file_task.delay(doc.user_id, doc_id, scan_type, split_depth, False)
+            return
+
+        cost = _doc_cost(scan_type)
+        needed = cost * Decimal(total_doc_count)
+
+        original_reserved = cost if session else Decimal("0")
+
+        available = (
+            (user.credits or Decimal("0"))
+            - (user.credits_reserved or Decimal("0"))
+            + original_reserved
+        )
+
+        logger.info(
+            "[MULTI-DOC] Found %d documents, need %.2f credits, available %.2f",
+            total_doc_count,
+            needed,
+            available,
+        )
+
+        if available < needed and session:
+            with transaction.atomic():
+                s = UploadSession.objects.select_for_update().get(id=session.id)
+                s.stage = "blocked"
+                s.error_message = (
+                    f"Rasta {total_doc_count} dokumentų. "
+                    f"Nepakanka kreditų. Turite: {available:.0f} | Reikia: {needed:.0f}"
+                )
+                s.save(update_fields=["stage", "error_message", "updated_at"])
+
+                doc.status = "rejected"
+                doc.error_message = s.error_message
+                doc.save(update_fields=["status", "error_message"])
+
+            _settle_and_finish_if_session(doc)
+            return
+
+        doc.is_multi_doc_container = True
+        doc.status = "completed"
+        doc.error_message = None
+        doc.save(update_fields=["is_multi_doc_container", "status", "error_message"])
+
+        created_docs = _create_children_from_groups_with_dup_check(
+            groups=groups,
+            parent_doc=doc,
+            pdf_path=pdf_path,
+            user=user,
+            scan_type=scan_type,
+        )
+
+        all_children = [(cid, skip, is_dup) for cid, skip, is_dup in created_docs]
+        processable = [(cid, skip) for cid, skip, is_dup in created_docs if not is_dup]
+
+        if not all_children:
+            doc.status = "rejected"
+            doc.error_message = "Nepavyko sukurti dokumentų iš PDF"
+            doc.is_multi_doc_container = False
+            doc.save(update_fields=["status", "error_message", "is_multi_doc_container"])
+            _settle_and_finish_if_session(doc)
+            return
+
+        if session:
+            with transaction.atomic():
+                u = CustomUser.objects.select_for_update().get(pk=user.id)
+                s = UploadSession.objects.select_for_update().get(id=session.id)
+
+                original_reserve = cost
+                child_reserve = cost * Decimal(len(all_children))
+
+                u.credits_reserved = max(
+                    (u.credits_reserved or Decimal("0")) - original_reserve,
+                    Decimal("0"),
+                )
+                s.reserved_credits = max(
+                    (s.reserved_credits or Decimal("0")) - original_reserve,
+                    Decimal("0"),
+                )
+
+                u.credits_reserved = (u.credits_reserved or Decimal("0")) + child_reserve
+                s.reserved_credits = (s.reserved_credits or Decimal("0")) + child_reserve
+
+                s.actual_items = (s.actual_items or 0) + len(all_children)
+
+                s.save(update_fields=["actual_items", "reserved_credits", "updated_at"])
+                u.save(update_fields=["credits_reserved"])
+
+        _settle_and_finish_if_session(doc)
+
+        for child_id, _, is_dup in all_children:
+            if is_dup:
+                try:
+                    dup_doc = ScannedDocument.objects.get(pk=child_id)
+                    _settle_and_finish_if_session(dup_doc)
+                except Exception as e:
+                    logger.warning("[MULTI-DOC] Failed to settle dup child %d: %s", child_id, e)
+
+        for child_id, skip_ocr in processable:
+            process_uploaded_file_task.apply_async(
+                args=[user.id, child_id, scan_type, split_depth + 1, skip_ocr],
+            )
+            logger.info(
+                "[MULTI-DOC] Scheduled doc_id=%d depth=%d skip_ocr=%s",
+                child_id,
+                split_depth + 1,
+                skip_ocr,
+            )
+
+        _log_t("[MULTI-DOC] TOTAL", t0)
+
+        logger.info(
+            "[MULTI-DOC] Done: %d children, %d processable, %d duplicates from doc_id=%d",
+            len(all_children),
+            len(processable),
+            len(all_children) - len(processable),
+            doc_id,
+        )
+
+    except SoftTimeLimitExceeded as e:
+        logger.error("[MULTI-DOC] Soft time limit exceeded for doc_id=%d: %s", doc_id, e)
+        _reject_split_parent_doc(
+            doc_id,
+            "Dokumentų atskyrimas užtruko per ilgai. Bandykite įkelti mažesnį PDF."
+        )
+        return
+
+    except Exception as e:
+        logger.exception("[MULTI-DOC] Unhandled split error for doc_id=%d", doc_id)
+        _reject_split_parent_doc(
+            doc_id,
+            f"Dokumentų atskyrimo klaida: {str(e)[:200]}"
+        )
+        return
+ 
+ 
+def _create_children_from_groups_with_dup_check(
+    groups: list[dict],
+    parent_doc: ScannedDocument,
+    pdf_path: str,
+    user,
+    scan_type: str,
+) -> list[tuple[int, bool, bool]]:
+    """
+    Создаёт дочерние ScannedDocument для каждой группы.
+    Проверяет дубликаты по номеру/серии из pre-classify.
+ 
+    Возвращает список [(child_doc_id, skip_ocr, is_duplicate), ...]
+    """
+    created = []
+    base_name = os.path.splitext(parent_doc.original_filename or "document")[0]
+ 
+    for group_idx, group in enumerate(groups, start=1):
+        pages = group.get("pages") or []
+
+        try:
+            pages = sorted(set(int(p) for p in pages))
+        except Exception:
+            logger.warning("[MULTI-DOC] Bad pages in group %s: %r", group_idx, group)
+            continue
+
+        if not pages:
+            logger.warning("[MULTI-DOC] Empty pages in group %s: %r", group_idx, group)
+            continue
+
+        is_multi = bool(group.get("multiple_on_page", False))
+
+        try:
+            docs_on_page = int(group.get("documents_on_page") or 1)
+        except Exception:
+            docs_on_page = 1
+
+        docs_on_page = max(docs_on_page, 1)
+        doc_number = normalize_code_field(group.get("number") or "") or None
+        doc_series = normalize_code_field(group.get("series") or "") or None
+ 
+        if is_multi and len(pages) == 1:
+            page_pdf = extract_pages_as_pdf_bytes(pdf_path, pages)
+
+            # Рендерим страницу в PNG для preview дубликатов
+            page_preview_bytes = None
+            try:
+                _src = fitz.open(stream=page_pdf, filetype="pdf")
+                _pix = _src[0].get_pixmap(dpi=150)
+                page_preview_bytes = _pix.tobytes("png")
+                _src.close()
+            except Exception as e:
+                logger.warning("[MULTI-DOC] Failed to render page preview: %s", e)
+
+            # Номера из pre-classify для раннего duplicate check
+            doc_numbers = group.get("numbers") or []
+
+            try:
+                separated_texts = separate_docs_on_single_page(
+                    page_pdf, "application/pdf", docs_on_page,
+                )
+            except Exception as e:
+                logger.error("[MULTI-DOC] OCR separate failed for page %d: %s", pages[0] + 1, e)
+                separated_texts = []
+
+            if not separated_texts:
+                separated_texts = [""]
+
+            for doc_idx, text in enumerate(separated_texts, start=1):
+                child_name = f"{base_name}_p{pages[0]+1}_dok{doc_idx}"
+
+                # Достаём number/series из pre-classify (если есть)
+                child_number = None
+                child_series = None
+                if doc_idx - 1 < len(doc_numbers):
+                    entry = doc_numbers[doc_idx - 1]
+                    child_number = normalize_code_field(entry.get("number") or "") or None
+                    child_series = normalize_code_field(entry.get("series") or "") or None
+
+                try:
+                    child = ScannedDocument.objects.create(
+                        user=user,
+                        original_filename=f"{child_name}.pdf",
+                        status="processing",
+                        scan_type=scan_type,
+                        upload_session=parent_doc.upload_session,
+                        parent_document=parent_doc,
+                        is_archive_container=False,
+                        is_multi_doc_container=False,
+                        source_pages=pages,
+                        pre_extracted_ocr_text=text if text else None,
+                    )
+                    child.file.save(f"{child_name}.pdf", ContentFile(page_pdf), save=True)
+                    skip_ocr = bool(text)
+
+                    # Ранний duplicate check по номеру из pre-classify
+                    is_dup = False
+                    if child_number:
+                        is_dup = is_duplicate_by_series_number(
+                            user, child_number, child_series,
+                            exclude_doc_id=child.pk,
+                            check_parties=False,
+                        )
+                        if is_dup:
+                            child.status = "rejected"
+                            child.error_message = (
+                                "Dublikatas: dokumentas su tokia serija ir numeriu jau buvo įkeltas"
+                                if child_series else
+                                "Dublikatas: dokumentas su tokiu numeriu jau buvo įkeltas"
+                            )
+                            if page_preview_bytes:
+                                child.file.save(f"{child_name}_preview.png", ContentFile(page_preview_bytes), save=True)
+                            child.preview_url = f"{settings.SITE_URL_BACKEND}/media/{child.file.name}"
+                            child.save(update_fields=["status", "error_message", "preview_url"])
+                            logger.info(
+                                "[MULTI-DOC] Multi-page child %d is duplicate: number=%s series=%s",
+                                child.id, child_number, child_series,
+                            )
+
+                    created.append((child.id, skip_ocr, is_dup))
+                except Exception as e:
+                    logger.error("[MULTI-DOC] Failed to create child %s: %s", child_name, e)
+ 
+        else:
+            # ── Обычная группа страниц → мини-PDF ──
+            mini_pdf = extract_pages_as_pdf_bytes(pdf_path, pages)
+            pages_str = f"p{pages[0]+1}" if len(pages) == 1 else f"p{pages[0]+1}-{pages[-1]+1}"
+            child_name = f"{base_name}_{pages_str}"
+ 
+            try:
+                child = ScannedDocument.objects.create(
+                    user=user,
+                    original_filename=f"{child_name}.pdf",
+                    status="processing",
+                    scan_type=scan_type,
+                    upload_session=parent_doc.upload_session,
+                    parent_document=parent_doc,
+                    is_archive_container=False,
+                    is_multi_doc_container=False,
+                    source_pages=pages,
+                    pre_extracted_ocr_text=None,
+                )
+                child.file.save(f"{child_name}.pdf", ContentFile(mini_pdf), save=True)
+ 
+                # ── Проверка дубликата по номеру/серии ──
+                is_dup = False
+                if doc_number:
+                    is_dup = is_duplicate_by_series_number(
+                        user, doc_number, doc_series,
+                        exclude_doc_id=child.pk,
+                        check_parties=False,
+                    )
+                    if is_dup:
+                        child.status = "rejected"
+                        child.error_message = (
+                            "Dublikatas: dokumentas su tokia serija ir numeriu jau buvo įkeltas"
+                            if doc_series else
+                            "Dublikatas: dokumentas su tokiu numeriu jau buvo įkeltas"
+                        )
+                        try:
+                            _src = fitz.open(stream=mini_pdf, filetype="pdf")
+                            _pix = _src[0].get_pixmap(dpi=150)
+                            _preview_png = _pix.tobytes("png")
+                            _src.close()
+                            child.file.save(f"{child_name}_preview.png", ContentFile(_preview_png), save=True)
+                        except Exception as e:
+                            logger.warning("[MULTI-DOC] Failed to render dup preview: %s", e)
+                        child.preview_url = f"{settings.SITE_URL_BACKEND}/media/{child.file.name}"
+                        child.save(update_fields=["status", "error_message", "preview_url"])
+                        logger.info(
+                            "[MULTI-DOC] Child %d is duplicate: number=%s series=%s",
+                            child.id, doc_number, doc_series,
+                        )
+ 
+                created.append((child.id, False, is_dup))
+                logger.info(
+                    "[MULTI-DOC] Created child doc_id=%d: %s (%d pages, number=%s, dup=%s)",
+                    child.id, child_name, len(pages), doc_number, is_dup,
+                )
+            except Exception as e:
+                logger.error("[MULTI-DOC] Failed to create child %s: %s", child_name, e)
+ 
+    return created
+ 
+# ═══════════════════════════════════════════════════════════════════════════════
+# SPLIT TASK: Одна страница / не-PDF с несколькими документами
+# ═══════════════════════════════════════════════════════════════════════════════
+ 
+@shared_task(bind=True, soft_time_limit=180, time_limit=210)
+def split_single_page_multi_doc_task(self, doc_id: int, scan_type: str,
+                                      docs_count: int = 0, split_depth: int = 1):
+    """
+    Для не-PDF или PDF с 1 страницей, где LLM обнаружил несколько документов.
+ 
+    Поток:
+    1. Отправляем файл в Gemini OCR с промптом на разделение
+    2. Парсим ---DOC_N--- блоки
+    3. Создаём дочерние ScannedDocument с pre_extracted_ocr_text
+    4. Запускаем process_uploaded_file_task(skip_ocr=True)
+    """
+    t0 = _t()
+    logger.info("[SINGLE-PAGE-SPLIT] Starting for doc_id=%d, docs_count=%d", doc_id, docs_count)
+ 
+    try:
+        doc = ScannedDocument.objects.get(pk=doc_id)
+        user = CustomUser.objects.get(pk=doc.user_id)
+    except (ScannedDocument.DoesNotExist, CustomUser.DoesNotExist) as e:
+        logger.error("[SINGLE-PAGE-SPLIT] Doc or user not found: %s", e)
+        return
+ 
+    session = doc.upload_session
+ 
+    # Проверка кредитов
+    if user.credits < MIN_CREDITS_FOR_SPLIT:
+        doc.status = "rejected"
+        doc.error_message = (
+            "Kelių dokumentų atpažinimui reikia bent 10 kreditų. "
+            "Šiuo metu turite: {:.1f}".format(user.credits)
+        )
+        doc.save(update_fields=["status", "error_message"])
+        _settle_and_finish_if_session(doc)
+        return
+ 
+    file_path = doc.file.path
+    if not os.path.exists(file_path):
+        doc.status = "rejected"
+        doc.error_message = "Failas nerastas"
+        doc.save(update_fields=["status", "error_message"])
+        _settle_and_finish_if_session(doc)
+        return
+ 
+    # Читаем файл
+    with open(file_path, "rb") as f:
+        file_bytes = f.read()
+ 
+    mime_type = _get_mime_type(doc.file.name or file_path or doc.original_filename or "")
+ 
+    # Gemini OCR с разделением
+    expected = docs_count if docs_count > 1 else 2
+    try:
+        separated_texts = separate_docs_on_single_page(file_bytes, mime_type, expected)
+    except Exception as e:
+        logger.exception("[SINGLE-PAGE-SPLIT] OCR separate failed")
+        doc.status = "rejected"
+        doc.error_message = f"Dokumentų atskyrimo klaida: {str(e)[:200]}"
+        doc.save(update_fields=["status", "error_message"])
+        _settle_and_finish_if_session(doc)
+        return
+ 
+    if not separated_texts:
+        logger.warning("[SINGLE-PAGE-SPLIT] Split returned no documents, rejecting parent")
+        doc.status = "rejected"
+        doc.error_message = "Nepavyko atskirti kelių dokumentų faile"
+        doc.save(update_fields=["status", "error_message"])
+        _settle_and_finish_if_session(doc)
+        return
+
+    if len(separated_texts) == 1:
+        logger.info("[SINGLE-PAGE-SPLIT] Only 1 doc found, processing normally")
+        doc.status = "processing"
+        doc.save(update_fields=["status"])
+        process_uploaded_file_task.delay(doc.user_id, doc_id, scan_type, split_depth, False)
+        return
+ 
+    total_doc_count = len(separated_texts)
+    cost = _doc_cost(scan_type)
+    needed = cost * Decimal(total_doc_count)
+
+    original_reserved = cost if session else Decimal("0")
+
+    available = (
+        (user.credits or Decimal("0"))
+        - (user.credits_reserved or Decimal("0"))
+        + original_reserved
+    )
+ 
+    # Freeze если не хватает
+    if available < needed and session:
+        with transaction.atomic():
+            s = UploadSession.objects.select_for_update().get(id=session.id)
+            s.stage = "blocked"
+            s.error_message = (
+                f"Rasta {total_doc_count} dokumentų. "
+                f"Nepakanka kreditų. Turite: {available:.0f} | Reikia: {needed:.0f}"
+            )
+            s.save(update_fields=["stage", "error_message", "updated_at"])
+
+            doc.status = "rejected"
+            doc.error_message = s.error_message
+            doc.save(update_fields=["status", "error_message"])
+
+        _settle_and_finish_if_session(doc)
+        return
+ 
+    # Помечаем оригинал как контейнер
+    doc.is_multi_doc_container = True
+    doc.status = "completed"
+    doc.error_message = None
+    doc.save(update_fields=["is_multi_doc_container", "status", "error_message"])
+ 
+    # Создаём дочерние документы
+    base_name = os.path.splitext(doc.original_filename or "document")[0]
+    ext = os.path.splitext(doc.file.name or file_path or doc.original_filename or ".pdf")[1] or ".pdf"
+    created_ids = []
+ 
+    for idx, text in enumerate(separated_texts, start=1):
+        child_name = f"{base_name}_dok{idx}{ext}"
+        try:
+            child = ScannedDocument.objects.create(
+                user=user,
+                original_filename=child_name,
+                status="processing",
+                scan_type=scan_type,
+                upload_session=session,
+                parent_document=doc,
+                is_archive_container=False,
+                is_multi_doc_container=False,
+                source_pages=[0],  # одна страница
+                pre_extracted_ocr_text=text,
+            )
+            child.file.save(child_name, ContentFile(file_bytes), save=True)
+            created_ids.append(child.id)
+            logger.info(
+                "[SINGLE-PAGE-SPLIT] Created child doc_id=%d: %s (ocr_len=%d)",
+                child.id, child_name, len(text),
+            )
+        except Exception as e:
+            logger.error("[SINGLE-PAGE-SPLIT] Failed to create child %d: %s", idx, e)
+ 
+    if not created_ids:
+        doc.status = "rejected"
+        doc.error_message = "Nepavyko sukurti dokumentų"
+        doc.is_multi_doc_container = False
+        doc.save(update_fields=["status", "error_message", "is_multi_doc_container"])
+        _settle_and_finish_if_session(doc)
+        return
+ 
+    # Резервируем кредиты и обновляем сессию
+    if session:
+        with transaction.atomic():
+            u = CustomUser.objects.select_for_update().get(pk=user.id)
+            s = UploadSession.objects.select_for_update().get(id=session.id)
+
+            original_reserve = cost
+            child_reserve = cost * Decimal(len(created_ids))
+
+            # Снимаем резерв за parent
+            u.credits_reserved = max(
+                (u.credits_reserved or Decimal("0")) - original_reserve,
+                Decimal("0"),
+            )
+            s.reserved_credits = max(
+                (s.reserved_credits or Decimal("0")) - original_reserve,
+                Decimal("0"),
+            )
+
+            # Добавляем резерв за children
+            u.credits_reserved = (u.credits_reserved or Decimal("0")) + child_reserve
+            s.reserved_credits = (s.reserved_credits or Decimal("0")) + child_reserve
+
+            # Parent потом через _settle_and_finish_if_session уменьшит actual_items на 1
+            s.actual_items = (s.actual_items or 0) + len(created_ids)
+
+            s.save(update_fields=["actual_items", "reserved_credits", "updated_at"])
+            u.save(update_fields=["credits_reserved"])
+ 
+    _settle_and_finish_if_session(doc)
+ 
+    # Запускаем обработку
+    for i, child_id in enumerate(created_ids, start=1):
+        process_uploaded_file_task.apply_async(
+            args=[user.id, child_id, scan_type, split_depth + 1, True],
+        )
+ 
+    _log_t("[SINGLE-PAGE-SPLIT] TOTAL", t0)
+    logger.info(
+        "[SINGLE-PAGE-SPLIT] Done: %d child documents from doc_id=%d",
+        len(created_ids), doc_id,
+    )
+
+
+#ETO MOZNO UDALIT KOGDA PROTESTISH PDF SPLIT - ETO SOXRANIAJET FAIL GDE >1 DOC V DEBUG MULTI DOC PAPKU
+import shutil
+
+MULTI_DOC_DEBUG_DIR = os.path.join(settings.MEDIA_ROOT, "debug_multi_doc")
+
+
+def _save_multi_doc_debug_copy(doc, file_bytes=None):
+    """
+    Сохраняет ОРИГИНАЛЬНЫЙ файл в debug-папку когда обнаружено >1 документ.
+    file_bytes: оригинальные байты до нормализации (если ещё в памяти).
+    """
+    try:
+        os.makedirs(MULTI_DOC_DEBUG_DIR, exist_ok=True)
+
+        filename = doc.original_filename or f"doc_{doc.id}"
+        name, ext = os.path.splitext(filename)
+        debug_filename = f"{name}_id{doc.id}{ext}"
+        debug_path = os.path.join(MULTI_DOC_DEBUG_DIR, debug_filename)
+
+        if file_bytes:
+            with open(debug_path, "wb") as f:
+                f.write(file_bytes)
+        elif doc.file and os.path.exists(doc.file.path):
+            shutil.copy2(doc.file.path, debug_path)
+        else:
+            logger.warning("[DEBUG-MULTI] No file to save for doc_id=%s", doc.id)
+            return
+
+        logger.info("[DEBUG-MULTI] Saved debug copy: %s (%d bytes)", debug_path, os.path.getsize(debug_path))
+    except Exception as e:
+        logger.warning("[DEBUG-MULTI] Failed to save debug copy for doc_id=%s: %s", doc.id, e)
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# END - PDF splitter
+# ═══════════════════════════════════════════════════════════════════════════════
+
 

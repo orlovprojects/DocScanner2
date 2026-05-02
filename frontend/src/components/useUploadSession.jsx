@@ -6,13 +6,13 @@ import { api } from "../api/endpoints";
 // ============ ЛИМИТЫ ============
 // Батчи (для простых файлов)
 const MAX_BATCH_FILES = 50;
-const MAX_BATCH_BYTES = 150 * 1024 * 1024; // 250 MB
+const MAX_BATCH_BYTES = 150 * 1024 * 1024; // 150 MB
 
 // Chunks (для архивов)
 const CHUNK_SIZE = 10 * 1024 * 1024; // 10 MB
 
 // Лимиты на один файл
-const MAX_SINGLE_FILE_BYTES = 50 * 1024 * 1024; // 50 MB для обычных файлов
+const MAX_SINGLE_FILE_BYTES = 150 * 1024 * 1024; // 50 MB для обычных файлов
 const MAX_SINGLE_ARCHIVE_BYTES = 2 * 1024 * 1024 * 1024; // 2 GB для одного архива
 
 // Лимиты на весь upload
@@ -91,9 +91,6 @@ function formatBytes(bytes) {
 /**
  * Валидация файлов с учётом всех лимитов
  * Возвращает: { valid, skipped, errors }
- * - valid: файлы которые можно загрузить
- * - skipped: файлы пропущенные из-за формата/размера
- * - errors: критические ошибки (превышены общие лимиты)
  */
 function validateFiles(files) {
   const valid = [];
@@ -139,7 +136,7 @@ function validateFiles(files) {
 
     valid.push(file);
     totalBytes += size;
-    
+
     if (isArch) {
       archiveCount++;
       archiveTotalBytes += size;
@@ -149,22 +146,19 @@ function validateFiles(files) {
   }
 
   // ============ Проверка общих лимитов ============
-  
+
   const totalCount = valid.length;
   const isMix = archiveCount > 0 && regularCount > 0;
   const isOnlyArchives = archiveCount > 0 && regularCount === 0;
 
-  // Общее кол-во файлов
   if (totalCount > MAX_TOTAL_FILES) {
     errors.push(`Per daug failų: ${totalCount} (max ${MAX_TOTAL_FILES})`);
   }
 
-  // Общий размер
   if (totalBytes > MAX_TOTAL_BYTES) {
     errors.push(`Per didelis bendras dydis: ${formatBytes(totalBytes)} (max ${formatBytes(MAX_TOTAL_BYTES)})`);
   }
 
-  // Лимит архивов
   if (isOnlyArchives && archiveCount > MAX_ARCHIVES_PER_UPLOAD) {
     errors.push(`Per daug archyvų: ${archiveCount} (max ${MAX_ARCHIVES_PER_UPLOAD})`);
   }
@@ -173,7 +167,6 @@ function validateFiles(files) {
     errors.push(`Per daug archyvų kartu su failais: ${archiveCount} (max ${MAX_ARCHIVES_IN_MIX})`);
   }
 
-  // Общий размер архивов
   if (archiveTotalBytes > MAX_TOTAL_BYTES) {
     errors.push(`Per didelis archyvų bendras dydis: ${formatBytes(archiveTotalBytes)} (max ${formatBytes(MAX_TOTAL_BYTES)})`);
   }
@@ -210,7 +203,7 @@ function splitIntoBatches(files) {
   return batches;
 }
 
-// Throttle helper - вызывает fn не чаще чем раз в ms миллисекунд
+// Throttle helper
 function createThrottle(fn, ms) {
   let lastCall = 0;
   let lastArgs = null;
@@ -225,7 +218,6 @@ function createThrottle(fn, ms) {
       lastCall = now;
       fn(...args);
     } else if (!timeoutId) {
-      // Запланировать вызов с последними аргументами
       timeoutId = setTimeout(() => {
         lastCall = Date.now();
         timeoutId = null;
@@ -249,7 +241,7 @@ export function useUploadSession({ onUploadComplete, onError }) {
   const [skippedFiles, setSkippedFiles] = useState([]);
   const [validationErrors, setValidationErrors] = useState([]);
   const abortRef = useRef(false);
-  
+
   // Ref для хранения актуального значения bytes (чтобы избежать stale closure)
   const bytesRef = useRef(0);
 
@@ -300,14 +292,14 @@ export function useUploadSession({ onUploadComplete, onError }) {
   };
 
   // Main upload
-  const startUpload = useCallback(async (files, scanType = "sumiskai") => {
+  const startUpload = useCallback(async (files, scanType = "sumiskai", multiDoc = false) => {
     if (!files || files.length === 0) return;
 
     const fileList = Array.from(files);
-    
+
     // Validate files
     const { valid: validFiles, skipped, errors } = validateFiles(fileList);
-    
+
     // Store skipped files to show warning
     setSkippedFiles(skipped);
     setValidationErrors(errors);
@@ -350,6 +342,7 @@ export function useUploadSession({ onUploadComplete, onError }) {
 
     let globalUploadedBytes = 0;
     let uploadedFilesCount = 0;
+    let sid = null;
 
     // Throttled update function - обновляем UI не чаще чем раз в 50ms
     const throttledSetProgress = createThrottle((newBytes) => {
@@ -367,6 +360,7 @@ export function useUploadSession({ onUploadComplete, onError }) {
         const { data } = await api.post("/sessions/create/", {
           scan_type: scanType,
           client_total_files: validFiles.length,
+          multi_doc: multiDoc,
         });
         session = data;
       } catch (e) {
@@ -381,7 +375,7 @@ export function useUploadSession({ onUploadComplete, onError }) {
       }
       console.log(`Session created: ${session.id}`);
 
-      const sid = session.id;
+      sid = session.id;
 
       // 2. Separate files
       const archives = [];
@@ -491,20 +485,64 @@ export function useUploadSession({ onUploadComplete, onError }) {
       console.log("=== UPLOAD SESSION END ===");
 
       if (finalized.stage === "blocked") {
-        setError(finalized.error_message || "Nepakanka kreditų");
-        onError?.(finalized.error_message);
-      } else {
-        onUploadComplete?.(finalized);
+        const msg = finalized.error_message || "Nepakanka kreditų";
+        setError(msg);
+        onError?.(msg);
+        return;
       }
+
+      // Модал закрывается, ProcessingStatusBar подхватит обработку
+      onUploadComplete?.(finalized);
 
     } catch (e) {
       console.error("Upload error:", e);
+
+      if (sid) {
+        try {
+          const uploaded = uploadedFilesCount || 0;
+          const total = validFiles.length;
+          console.log(
+            `Finalizing session ${sid} after error: uploaded ${uploaded}/${total} files`
+          );
+
+          const { data: rescued } = await api.post(`/sessions/${sid}/finalize/`);
+          console.log(
+            `Session ${sid} rescued: stage=${rescued.stage}, expected=${rescued.expected_items}`
+          );
+
+          if (rescued.expected_items > 0 && rescued.stage === "processing") {
+            const warningMsg = `Įkėlimo klaida: įkelta ${uploaded} iš ${total} failų. Įkelti failai bus apdoroti.`;
+            setError(warningMsg);
+
+            // Модал закрывается, ProcessingStatusBar подхватит
+            onUploadComplete?.(rescued);
+            return;
+          }
+
+          if (rescued.stage === "blocked") {
+            const msg = rescued.error_message || "Nepakanka kreditų";
+            setError(msg);
+            onError?.(msg);
+            return;
+          }
+        } catch (finalizeErr) {
+          console.error("Finalize after error failed:", finalizeErr);
+        }
+      }
+
       const msg = e?.response?.data?.error || e.message || "Įkėlimo klaida";
       setError(msg);
       onError?.(msg);
     } finally {
       setIsUploading(false);
-      setUploadProgress({ current: 0, total: 0, bytes: 0, totalBytes: 0, phase: "uploading", currentFile: "" });
+      setUploadProgress({
+        current: 0,
+        total: 0,
+        bytes: 0,
+        totalBytes: 0,
+        phase: "uploading",
+        currentFile: "",
+      });
     }
   }, [onUploadComplete, onError]);
 
@@ -536,7 +574,6 @@ export const UPLOAD_LIMITS = {
   MAX_ARCHIVES_IN_MIX,
   formatBytes,
 };
-
 
 
 
