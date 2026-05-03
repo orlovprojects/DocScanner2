@@ -2,6 +2,7 @@ from django.db import transaction
 from ..models import ProductAutocomplete, ClientAutocomplete
 from openpyxl import load_workbook
 import io
+from ..utils.client_autocomplete_upsert import normalize_name
 
 
 def _get_xlsx_rows(file, required_fields):
@@ -210,6 +211,9 @@ def import_clients_from_xlsx(user, file):
                     ibans=(data.get('iban') or '').strip(),
                     address=(data.get('adresas') or '').strip(),
                     country_iso=country,
+                    source="imported",
+                    doc_count=0,
+                    name_normalized=normalize_name(name),
                 )
                 imported += 1
             except Exception as e:

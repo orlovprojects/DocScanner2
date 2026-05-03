@@ -335,14 +335,48 @@ export default function EditableAutoCell({
               const title = option.pavadinimas || option.name || "—";
               const code  = option.imones_kodas || option.code || "";
               const vat   = option.pvm_kodas || option.vat || "";
+              const srcLabel = option.source_label || "";
               const subtitle = [code && `įmonės kodas: ${code}`, vat && `PVM: ${vat}`]
                 .filter(Boolean)
                 .join(" • ");
 
+              const srcColor = option.source === "imported"
+                ? "success"
+                : option.source === "company_db"
+                  ? "info"
+                  : "default";
+
               return (
-                <li {...props} key={`${code}-${vat}-${title}`}>
-                  <Box sx={{ display: "flex", flexDirection: "column" }}>
-                    <Typography sx={{ fontWeight: 600 }}>{title}</Typography>
+                <li {...props} key={`${option.source || ""}-${code}-${vat}-${title}`}>
+                  <Box sx={{ display: "flex", flexDirection: "column", width: "100%" }}>
+                    <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 1 }}>
+                      <Typography sx={{ fontWeight: 600 }}>{title}</Typography>
+                      {srcLabel && (
+                        <Typography
+                          variant="caption"
+                          sx={{
+                            flexShrink: 0,
+                            px: 0.75,
+                            py: 0.125,
+                            borderRadius: 1,
+                            fontSize: "0.65rem",
+                            fontWeight: 600,
+                            bgcolor: option.source === "imported"
+                              ? "#a5d6a7"
+                              : option.source === "company_db"
+                                ? "#90caf9"
+                                : "#e0e0e0",
+                            color: option.source === "imported"
+                              ? "#fff"
+                              : option.source === "company_db"
+                                ? "#fff"
+                                : "#616161",
+                          }}
+                        >
+                          {srcLabel}
+                        </Typography>
+                      )}
+                    </Box>
                     {subtitle && (
                       <Typography variant="caption" color="text.secondary">
                         {subtitle}

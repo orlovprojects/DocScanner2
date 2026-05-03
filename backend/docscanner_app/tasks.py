@@ -159,6 +159,35 @@ def settle_session_for_doc(doc_id: int):
             credits_used=cost,
             document_filename=doc.original_filename or '',
         )
+
+        # --- upsert контрагентов в autocomplete ---
+        try:
+            from .utils.client_autocomplete_upsert import upsert_client_from_document
+
+            if doc.seller_name or doc.seller_id:
+                upsert_client_from_document(u, {
+                    "name": doc.seller_name,
+                    "company_code": doc.seller_id,
+                    "vat_code": doc.seller_vat_code,
+                    "address": doc.seller_address,
+                    "country_iso": doc.seller_country_iso,
+                    "iban": doc.seller_iban,
+                    "is_person": doc.seller_is_person,
+                })
+
+            if doc.buyer_name or doc.buyer_id:
+                upsert_client_from_document(u, {
+                    "name": doc.buyer_name,
+                    "company_code": doc.buyer_id,
+                    "vat_code": doc.buyer_vat_code,
+                    "address": doc.buyer_address,
+                    "country_iso": doc.buyer_country_iso,
+                    "iban": doc.buyer_iban,
+                    "is_person": doc.buyer_is_person,
+                })
+        except Exception as e:
+            logger.warning("[SETTLE] Client autocomplete upsert failed: %s", e)
+
     else:
         s.failed_items = (s.failed_items or 0) + 1
 

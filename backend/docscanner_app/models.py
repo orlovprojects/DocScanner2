@@ -806,7 +806,45 @@ class ProductAutocomplete(models.Model):
 
 
 
+# class ClientAutocomplete(models.Model):
+#     user = models.ForeignKey(
+#         settings.AUTH_USER_MODEL,
+#         on_delete=models.CASCADE,
+#         related_name="clients"
+#     )
+#     kodas_programoje = models.CharField("Kliento kodas programoje", max_length=128, blank=True, null=True)
+#     imones_kodas = models.CharField("Imonės kodas", max_length=128, blank=True, db_index=True, null=True)
+#     pavadinimas = models.CharField("Pavadinimas", max_length=255, blank=True, null=True)
+#     pvm_kodas = models.CharField("PVM kodas", max_length=128, blank=True, null=True)
+#     ibans = models.CharField("IBANs (per kablelį, jei keli)", max_length=512, blank=True, null=True)
+#     address = models.CharField(max_length=255, blank=True, null=True)
+#     country_iso = models.CharField(max_length=10, blank=True, null=True)
+#     is_person = models.BooleanField("Fizinis asmuo", default=False)
+
+#     class Meta:
+#         verbose_name = "Klientas autocomplete įrašas"
+#         verbose_name_plural = "Klientai autocomplete įrašai"
+#         indexes = [
+#             models.Index(fields=["user", "imones_kodas"]),
+#         ]
+#         constraints = [
+#             models.UniqueConstraint(
+#                 fields=["user", "imones_kodas"],
+#                 condition=~models.Q(imones_kodas__isnull=True) & ~models.Q(imones_kodas=""),
+#                 name="unique_client_code_per_user",
+#             ),
+#         ]
+
+#     def __str__(self):
+#         return f"{self.pavadinimas or self.imones_kodas}"
+
+
 class ClientAutocomplete(models.Model):
+    SOURCE_CHOICES = [
+        ("imported", "Importuotas"),
+        ("document", "Iš dokumentų"),
+    ]
+
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
@@ -821,17 +859,30 @@ class ClientAutocomplete(models.Model):
     country_iso = models.CharField(max_length=10, blank=True, null=True)
     is_person = models.BooleanField("Fizinis asmuo", default=False)
 
+    # Новые поля
+    source = models.CharField(
+        max_length=20,
+        choices=SOURCE_CHOICES,
+        default="imported",
+    )
+    doc_count = models.PositiveIntegerField(default=0)
+    last_seen_at = models.DateTimeField(null=True, blank=True)
+    name_normalized = models.CharField(max_length=255, blank=True, default="")
+
     class Meta:
         verbose_name = "Klientas autocomplete įrašas"
         verbose_name_plural = "Klientai autocomplete įrašai"
         indexes = [
             models.Index(fields=["user", "imones_kodas"]),
+            models.Index(fields=["user", "pvm_kodas"]),
+            models.Index(fields=["user", "name_normalized"]),
+            models.Index(fields=["user", "source", "-doc_count"]),
         ]
         constraints = [
             models.UniqueConstraint(
-                fields=["user", "imones_kodas"],
+                fields=["user", "imones_kodas", "source"],
                 condition=~models.Q(imones_kodas__isnull=True) & ~models.Q(imones_kodas=""),
-                name="unique_client_code_per_user",
+                name="unique_client_code_source_per_user",
             ),
         ]
 

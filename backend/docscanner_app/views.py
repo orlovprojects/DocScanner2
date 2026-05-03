@@ -3254,19 +3254,89 @@ def autocomplete_products(request):
 
 
 
+def _filled_fields_count(record: dict) -> int:
+    fields = ["pavadinimas", "imones_kodas", "pvm_kodas", "address", "country_iso", "ibans"]
+    return sum(1 for f in fields if record.get(f) and str(record[f]).strip())
+
+
+def _dedup_results(results: list, show_richer_duplicates: bool = False) -> list:
+    seen_codes = {}
+    seen_vats = {}
+    output = []
+    duplicates = []
+
+    source_priority = {"imported": 0, "document": 1, "company_db": 2}
+
+    for r in results:
+        code = (r.get("imones_kodas") or "").strip()
+        vat = (r.get("pvm_kodas") or "").strip()
+        r_priority = source_priority.get(r.get("source"), 9)
+
+        existing = None
+        if code and code in seen_codes:
+            existing = seen_codes[code]
+        elif vat and vat in seen_vats:
+            existing = seen_vats[vat]
+
+        if existing is None:
+            output.append(r)
+            if code:
+                seen_codes[code] = r
+            if vat:
+                seen_vats[vat] = r
+        else:
+            existing_priority = source_priority.get(existing.get("source"), 9)
+            existing_filled = _filled_fields_count(existing)
+            r_filled = _filled_fields_count(r)
+
+            if r_priority < existing_priority:
+                output = [x for x in output if x is not existing]
+                output.append(r)
+                if code:
+                    seen_codes[code] = r
+                if vat:
+                    seen_vats[vat] = r
+                if show_richer_duplicates and existing_filled > r_filled:
+                    duplicates.append(existing)
+            else:
+                if show_richer_duplicates and r_filled > existing_filled:
+                    duplicates.append(r)
+
+    if show_richer_duplicates:
+        output.extend(duplicates)
+
+    output.sort(key=lambda r: (
+        source_priority.get(r.get("source"), 9),
+        -(r.get("doc_count") or 0),
+        (r.get("pavadinimas") or ""),
+    ))
+
+    return output
+
+
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def autocomplete_clients(request):
+    from .models import ClientAutocomplete, Company
+
     query = request.GET.get('q', '').strip()
-    qs = ClientAutocomplete.objects.filter(user=request.user)
+    show_richer = len(query) >= 3
+
+    MAX_IMPORTED = 4
+    MAX_DOCUMENT = 4
+    MAX_COMPANY = 2
+
+    # ── 1) Imported ──
+    qs_imported = ClientAutocomplete.objects.filter(user=request.user, source="imported")
     if query:
-        qs = qs.filter(
+        qs_imported = qs_imported.filter(
             Q(pavadinimas__icontains=query) |
             Q(imones_kodas__icontains=query) |
             Q(pvm_kodas__icontains=query)
         )
-    qs = qs.order_by('pavadinimas')[:30]
-    data = [
+    qs_imported = qs_imported.order_by("-doc_count", "pavadinimas")[:MAX_IMPORTED]
+
+    results = [
         {
             "id": c.id,
             "pavadinimas": c.pavadinimas,
@@ -3276,11 +3346,69 @@ def autocomplete_clients(request):
             "country_iso": c.country_iso,
             "ibans": c.ibans,
             "is_person": c.is_person,
+            "source": "imported",
+            "source_label": "Importuotas",
+            "doc_count": c.doc_count or 0,
         }
-        for c in qs
+        for c in qs_imported
     ]
-    return Response(data)
 
+    # ── 2) Document ──
+    qs_doc = ClientAutocomplete.objects.filter(user=request.user, source="document")
+    if query:
+        qs_doc = qs_doc.filter(
+            Q(pavadinimas__icontains=query) |
+            Q(imones_kodas__icontains=query) |
+            Q(pvm_kodas__icontains=query)
+        )
+    qs_doc = qs_doc.order_by("-doc_count", "pavadinimas")[:MAX_DOCUMENT]
+
+    results.extend([
+        {
+            "id": c.id,
+            "pavadinimas": c.pavadinimas,
+            "imones_kodas": c.imones_kodas,
+            "pvm_kodas": c.pvm_kodas,
+            "address": c.address,
+            "country_iso": c.country_iso,
+            "ibans": c.ibans,
+            "is_person": c.is_person,
+            "source": "document",
+            "source_label": "Iš dokumentų",
+            "doc_count": c.doc_count or 0,
+        }
+        for c in qs_doc
+    ])
+
+    # ── 3) Company DB ──
+    if query:
+        companies = Company.objects.filter(
+            Q(pavadinimas__icontains=query) |
+            Q(im_kodas__icontains=query) |
+            Q(pvm_kodas__icontains=query)
+        )[:MAX_COMPANY]
+
+        results.extend([
+            {
+                "id": f"company_{comp.id}",
+                "pavadinimas": comp.pavadinimas,
+                "imones_kodas": comp.im_kodas,
+                "pvm_kodas": comp.pvm_kodas,
+                "address": comp.adresas,
+                "country_iso": "LT",
+                "ibans": "",
+                "is_person": False,
+                "source": "company_db",
+                "source_label": "Iš registro",
+                "doc_count": 0,
+            }
+            for comp in companies
+        ])
+
+    # ── 4) Дедупликация ──
+    results = _dedup_results(results, show_richer_duplicates=show_richer)
+
+    return Response(results[:10])
 
 
 
