@@ -58,6 +58,7 @@ from .views import (
     VeiklosContractorSearchView,
     VeiklosZurnalasGenerateView,
     VeiklosZurnalasExportView,
+    NewsletterSendView,
 )
 from .views import (
     counterparty_list_create,
@@ -314,6 +315,7 @@ urlpatterns = [
     path('superuser/dashboard-stats/', superuser_dashboard_stats, name="superuser_dashboard_stats"),
     path('admin/visi-failai/', admin_all_documents, name='admin_all_documents'),
     path("admin/users/", admin_users_simple, name="admin_users_simple"),
+    path("admin/newsletter/", NewsletterSendView.as_view(), name="newsletter-send"),
 
     #ADMIN israsymas
     path("admin/visos-saskaitos/", admin_all_invoices, name="admin_all_invoices"),

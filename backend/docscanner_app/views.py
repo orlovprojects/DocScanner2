@@ -18,6 +18,8 @@ import openpyxl
 from django.conf import settings as django_settings
 from django.http import FileResponse
 from django.db import models
+from django.core.mail import EmailMultiAlternatives
+from email.utils import formataddr
 
 from django.core.files.base import ContentFile
 from .tasks import process_uploaded_file_task 
@@ -157,6 +159,7 @@ from .serializers import (
     RivileGamaAPIKeyUpdateSerializer,
     InvoiceAdminListSerializer,
     RecurringInvoiceAdminListSerializer,
+    NewsletterSerializer,
 )
 from django.db.models import Prefetch
 from django.db.models import Count, Sum
@@ -10684,3 +10687,81 @@ class VeiklosZurnalasExportView(APIView):
 # ──────────────────────────────────────────────────────────────
 # END - Individualios veiklos žurnalas
 # ──────────────────────────────────────────────────────────────
+
+# ────────────────────────────────────────────────────────────
+# ─── Dlia frontend newsletter ───
+# ────────────────────────────────────────────────────────────
+
+class NewsletterSendView(APIView):
+    permission_classes = [IsAdminUser]
+
+    def post(self, request):
+        ser = NewsletterSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        d = ser.validated_data
+
+        from .tasks import send_newsletter_task
+        result = send_newsletter_task.delay(
+            subject=d["subject"],
+            body=d["body"],
+            exclude_user_ids=d.get("exclude_user_ids", []),
+            registration_sources=d.get("registration_sources", []),
+            sender_user_id=request.user.id,
+        )
+        return Response({"task_id": result.id, "status": "queued"})
+
+    def get(self, request):
+        """Возвращает кол-во получателей для preview."""
+        from django.db.models import Q
+
+        sources = request.query_params.getlist("sources")
+        exclude_raw = request.query_params.get("exclude_ids", "")
+        exclude_ids = [
+            int(x.strip()) for x in exclude_raw.split(",")
+            if x.strip().isdigit()
+        ]
+
+        User = get_user_model()
+        qs = User.objects.filter(is_active=True)
+
+        if exclude_ids:
+            qs = qs.exclude(id__in=exclude_ids)
+
+        if sources:
+            source_q = Q()
+            for src in sources:
+                if src == "null":
+                    source_q |= Q(registration_source__isnull=True) | Q(registration_source="")
+                else:
+                    source_q |= Q(registration_source=src)
+            qs = qs.filter(source_q)
+
+        return Response({"recipient_count": qs.count()})
+
+    def put(self, request):
+        """Тестовая отправка на фиксированный email."""
+        ser = NewsletterSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        d = ser.validated_data
+
+        try:
+            msg = EmailMultiAlternatives(
+                subject=f"[TEST] {d['subject'].strip()}",
+                body=d["body"],
+                from_email=formataddr(("Denis iš DokSkeno", settings.DEFAULT_FROM_EMAIL)),
+                to=["orlov.projects@gmail.com"],
+            )
+            try:
+                msg.tags = ["newsletter_test"]
+                msg.metadata = {"event": "newsletter_test", "sender_user_id": request.user.id}
+            except Exception:
+                pass
+            msg.send()
+            return Response({"status": "sent", "to": "orlov.projects@gmail.com"})
+        except Exception as e:
+            logger.exception(f"[NEWSLETTER TEST ERROR] {e}")
+            return Response({"detail": str(e)}, status=500)
+
+# ────────────────────────────────────────────────────────────
+# END ─── Dlia frontend newsletter ───
+# ────────────────────────────────────────────────────────────

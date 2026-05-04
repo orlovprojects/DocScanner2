@@ -3371,3 +3371,23 @@ class RecurringInvoiceAdminListSerializer(serializers.ModelSerializer):
 # ────────────────────────────────────────────────────────────
 # END ─── Dlia ADMIN israsymas ───
 # ────────────────────────────────────────────────────────────
+
+# ────────────────────────────────────────────────────────────
+# ─── Dlia frontend newsletter ───
+# ────────────────────────────────────────────────────────────
+class NewsletterSerializer(serializers.Serializer):
+    subject = serializers.CharField(max_length=255)
+    body = serializers.CharField()
+    exclude_user_ids = serializers.ListField(
+        child=serializers.IntegerField(), required=False, default=list
+    )
+    registration_sources = serializers.ListField(
+        child=serializers.ChoiceField(choices=["skaitmenizavimas", "israsymas", "null"]),
+        required=False,
+        default=list,
+        help_text="Filtras pagal registration_source. 'null' = be šaltinio.",
+    )
+
+# ────────────────────────────────────────────────────────────
+# END ─── Dlia frontend newsletter ───
+# ────────────────────────────────────────────────────────────

@@ -5087,3 +5087,84 @@ def _save_multi_doc_debug_copy(doc, file_bytes=None):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
+# ────────────────────────────────────────────────────────────
+# ─── Dlia frontend newsletter ───
+# ────────────────────────────────────────────────────────────
+
+@shared_task(bind=True, max_retries=0)
+def send_newsletter_task(
+    self,
+    *,
+    subject: str,
+    body: str,
+    exclude_user_ids: list[int] | None = None,
+    registration_sources: list[str] | None = None,
+    sender_user_id: int | None = None,
+):
+    """
+    Рассылка plain-text newsletter всем подходящим юзерам.
+    Запускается из NewsletterSendView.
+    """
+    from django.contrib.auth import get_user_model
+    from django.core.mail import EmailMultiAlternatives
+    from email.utils import formataddr
+    from django.db.models import Q
+
+    User = get_user_model()
+
+    qs = User.objects.filter(is_active=True)
+
+    if exclude_user_ids:
+        qs = qs.exclude(id__in=exclude_user_ids)
+
+    # registration_sources фильтр
+    if registration_sources:
+        source_q = Q()
+        for src in registration_sources:
+            if src == "null":
+                source_q |= Q(registration_source__isnull=True) | Q(registration_source="")
+            else:
+                source_q |= Q(registration_source=src)
+        qs = qs.filter(source_q)
+
+    users = list(qs.values_list("id", "email", named=True))
+    total = len(users)
+
+    if total == 0:
+        logger.info("[NEWSLETTER] No recipients matched filters.")
+        return {"sent": 0, "total": 0, "errors": 0}
+
+    logger.info(
+        f"[NEWSLETTER START] total={total}, sources={registration_sources}, "
+        f"exclude={exclude_user_ids}, sender_user_id={sender_user_id}"
+    )
+
+    sent = 0
+    errors = 0
+
+    for u in users:
+        try:
+            msg = EmailMultiAlternatives(
+                subject=subject.strip(),
+                body=body,
+                from_email=formataddr(("Denis iš DokSkeno", settings.DEFAULT_FROM_EMAIL)),
+                to=[u.email],
+            )
+            try:
+                msg.tags = ["newsletter"]
+                msg.metadata = {"event": "newsletter", "user_id": u.id}
+            except Exception:
+                pass
+
+            msg.send()
+            sent += 1
+        except Exception as e:
+            errors += 1
+            logger.exception(f"[NEWSLETTER ERROR] user_id={u.id}, email={u.email}: {e}")
+
+    logger.info(f"[NEWSLETTER DONE] sent={sent}, errors={errors}, total={total}")
+    return {"sent": sent, "total": total, "errors": errors}
+
+# ────────────────────────────────────────────────────────────
+# END ─── Dlia frontend newsletter ───
+# ────────────────────────────────────────────────────────────
