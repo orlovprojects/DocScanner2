@@ -315,6 +315,19 @@ def _apply_top_level_fields(
     db_doc.with_receipt = doc_struct.get("with_receipt")
     db_doc.paid_by_cash = doc_struct.get("paid_by_cash")
     db_doc.document_type = doc_struct.get("document_type")
+    # Кредитная / дебетная SF
+    if "is_credit_invoice" in doc_struct:
+        db_doc.is_credit_invoice = bool(doc_struct["is_credit_invoice"])
+    if "is_debit_invoice" in doc_struct:
+        db_doc.is_debit_invoice = bool(doc_struct["is_debit_invoice"])
+
+    # Защита: не может быть одновременно — приоритет у кредитной
+    if db_doc.is_credit_invoice and db_doc.is_debit_invoice:
+        logger.warning(
+            "doc=%s: LLM returned both is_credit and is_debit=True, keeping credit only",
+            db_doc.pk,
+        )
+        db_doc.is_debit_invoice = False
 
     db_doc.similarity_percent = doc_struct.get("similarity_percent")
     db_doc.note = doc_struct.get("note")

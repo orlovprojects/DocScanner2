@@ -89,7 +89,7 @@ Assign the detected type to the field "document_type".
 - paid_by_cash
 - doc_96_str
 
-All boolean fields (seller_is_person, buyer_is_person, with_receipt, separate_vat, paid_by_cash, doc_96_str) must be returned as true/false, not as strings.
+All boolean fields (seller_is_person, buyer_is_person, with_receipt, separate_vat, paid_by_cash, doc_96_str, is_credit_invoice, is_debit_invoice) must be returned as true/false, not as strings.
 
 *Return ONLY a valid JSON object in a SINGLE LINE (compact form): no newlines, no \n, no \r, no tabs, and no spaces outside string values. Do not use Markdown or code fences. No trailing commas. Do NOT wrap in quotes or escape characters. Do NOT include any explanations, comments, or extra text outside the JSON. The output must be directly parsable by JSON.parse().
 
@@ -121,6 +121,10 @@ When separate_vat is true, omit document-level "vat_percent" (do NOT put a singl
 
 Set "doc_96_str": true only if the document explicitly mentions Lietuvos PVM įstatymo 96 straipsnis, e.g. “PVM įstatymo 96 straipsnis”, “96 straipsnis”, “96 str.”, “taikomas 96 straipsnis”, “pagal PVMĮ 96 str.”. Otherwise set "doc_96_str": false.
 
+Set "is_credit_invoice": true ONLY if the document is a credit invoice (kreditinė sąskaita faktūra, credit note, grąžinimas). Signs: title contains "Kreditinė", "Credit note", "Grąžinimas", negative amounts, reference to original invoice number. If the document is a regular invoice, do NOT include this field.
+Set "is_debit_invoice": true ONLY if the document is a debit invoice (debetinė sąskaita faktūra, debit note). Signs: title contains "Debetinė", "Debit note", reference to original invoice, additional charge. If the document is a regular invoice, do NOT include this field.
+A document cannot be both credit and debit at the same time.
+
 If the document displays amounts in multiple currencies, always extract the EUR amounts if available.
 
 If there are any signs of cash payment, for example, 'gryni', 'grąža' or similar, return paid_by_cash as True.
@@ -134,7 +138,7 @@ If you cannot extract any documents, return exactly (one line):
 If you identified more than 1 document, return only the count (one line):
 {"docs":<number_of_documents>,"documents":[]}
 
-If you are very confident the document type is one of: Kreditinė sąskaita, Debetinė sąskaita, Išankstinė sąskaita, Pavedimo kopija, Delivery note / Važtaraštis / Packing slip (or closely related forms), then return ONLY this one-line JSON:
+If you are very confident the document type is one of: Išankstinė sąskaita, Pavedimo kopija, Delivery note / Važtaraštis / Packing slip (or closely related forms), then return ONLY this one-line JSON:
 {"docs":1,"netinkamas_dokumentas": true,"documents":[]}
 
 Make sure you don't consider receipt, pinigu priemimo kvitas or any other payment confirmation as a separate document. Invoice can come with receipt if it's been paid already.
@@ -196,7 +200,7 @@ Assign the detected type to the field "document_type".
 - paid_by_cash
 - doc_96_str
 
-All boolean fields (seller_is_person, buyer_is_person, with_receipt, separate_vat, paid_by_cash, doc_96_str) must be returned as true/false, not as strings.
+All boolean fields (seller_is_person, buyer_is_person, with_receipt, separate_vat, paid_by_cash, doc_96_str, is_credit_invoice, is_debit_invoice) must be returned as true/false, not as strings.
 If there are any signs of cash payment, for example, 'gryni', 'grąža' or similar, return paid_by_cash as True.
 
 5. For each document, also extract an array of line items (products or services) if present. For each line item, extract the following fields (leave empty if not found):
@@ -276,6 +280,8 @@ To decide this, you MUST check line items and VAT summary - if lines have differ
 When separate_vat is true, omit document-level "vat_percent" (do NOT put a single rate like "21").
 You MUST include "vat_percent" for EACH line item, even if not explicitly shown in the row. Use VAT summary section to deduce rates: match line item subtotals to taxable bases in summary. Hint: packaging/deposit items ("skardinė", "tara", "užstatas") are usually 0% VAT; make sure you add them as separate lineitems.
 Set "doc_96_str": true only if the document explicitly mentions Lietuvos PVM įstatymo 96 straipsnis, e.g. "PVM įstatymo 96 straipsnis", "96 straipsnis", "96 str.", "taikomas 96 straipsnis", "pagal PVMĮ 96 str.". Otherwise set "doc_96_str": false.
+Set "is_credit_invoice": true ONLY if the document is a credit invoice (kreditinė sąskaita faktūra, credit note, grąžinimas). Signs: title contains "Kreditinė", "Credit note", "Grąžinimas", negative amounts, reference to original invoice number. If the document is a regular invoice, do NOT include this field.
+Set "is_debit_invoice": true ONLY if the document is a debit invoice (debetinė sąskaita faktūra, debit note). Signs: title contains "Debetinė", "Debit note", reference to original invoice, additional charge. If the document is a regular invoice, do NOT include this field. A document cannot be both credit and debit at the same time.
 If the document displays amounts in multiple currencies, always extract the EUR amounts if available.
 For unit, try to identify any of these vnt kg g mg kompl t ct m cm mm km l ml m2 cm2 dm2 m3 cm3 dm3 val h min s d sav mėn metai pak kompl or similar. If units is not in Lithuanian, translate it (example: szt should be vnt). If can't identify unit, choose vnt.
 
@@ -287,7 +293,7 @@ If you cannot extract any documents, return exactly (one line):
 If you identified more than 1 document, return only the count (one line):
 {"docs":<number_of_documents>,"documents":[]}
 
-If you are very confident the document type is one of: Kreditinė sąskaita, Debetinė sąskaita, Išankstinė sąskaita, Pavedimo kopija, Delivery note / Važtaraštis / Packing slip (or closely related forms), then return ONLY this one-line JSON:
+If you are very confident the document type is one of: Išankstinė sąskaita, Pavedimo kopija, Delivery note / Važtaraštis / Packing slip (or closely related forms), then return ONLY this one-line JSON:
 {"docs":1,"netinkamas_dokumentas": true,"documents":[]}
 
 Make sure you don't consider receipt, pinigu priemimo kvitas or any other payment confirmation as a separate document. Invoice can come with receipt if it's been paid already.
@@ -571,6 +577,8 @@ ADDITIONAL RULES
   When separate_vat is true, omit document-level "vat_percent" (do NOT put a single rate like "21").
   You MUST include "vat_percent" for EACH line item, even if not explicitly shown in the row. Use VAT summary section to deduce rates: match line item subtotals to taxable bases in summary. Hint: packaging/deposit items ("skardinė", "tara", "užstatas") are usually 0% VAT; make sure you add them as separate lineitems.
 - Set "doc_96_str": true only if the document explicitly mentions Lietuvos PVM įstatymo 96 straipsnis, e.g. “PVM įstatymo 96 straipsnis”, “96 straipsnis”, “96 str.”, “taikomas 96 straipsnis”, “pagal PVMĮ 96 str.”. Otherwise set "doc_96_str": false.
+- Set "is_credit_invoice": true ONLY if the document is a credit invoice (kreditinė sąskaita faktūra, credit note, grąžinimas). Signs: title contains "Kreditinė", "Credit note", "Grąžinimas", negative amounts, reference to original invoice number. If the document is a regular invoice, do NOT include this field.
+  Set "is_debit_invoice": true ONLY if the document is a debit invoice (debetinė sąskaita faktūra, debit note). Signs: title contains "Debetinė", "Debit note", reference to original invoice, additional charge. If the document is a regular invoice, do NOT include this field. A document cannot be both credit and debit at the same time.
 - If the document is a kasos čekis (cash receipt), e.g. a fuel (kuro) receipt, buyer info is often at the bottom as a line
   with company name, company code, and VAT code — extract these as buyer details.
   For line items, find the quantity and unit next to the price (like “50,01 l” for litres).

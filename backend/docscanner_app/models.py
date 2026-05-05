@@ -212,6 +212,20 @@ class ScannedDocument(models.Model):
 
     # Поля из структурированных данных (для фильтрации/поиска)
     document_type = models.CharField(max_length=100, blank=True, null=True)
+    is_credit_invoice = models.BooleanField(
+        "Kreditinė SF",
+        null=True,
+        blank=True,
+        default=None,
+        help_text="True = kreditinė sąskaita faktūra (grąžinimas/nuolaida)",
+    )
+    is_debit_invoice = models.BooleanField(
+        "Debetinė SF",
+        null=True,
+        blank=True,
+        default=None,
+        help_text="True = debetinė sąskaita faktūra (papildomas mokestis)",
+    )
     similarity_percent = models.DecimalField(max_digits=5, decimal_places=2, blank=True, null=True)
     pirkimas_pardavimas = models.CharField(
         max_length=20,

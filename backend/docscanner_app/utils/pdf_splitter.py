@@ -441,6 +441,7 @@ def _clean_group(group: dict) -> dict:
         "pages": pages,
         "number": group.get("number"),
         "series": group.get("series"),
+        "invoice_date": group.get("invoice_date"),
         "numbers": numbers,
         "multiple_on_page": _as_bool(group.get("multiple_on_page"), False),
         "documents_on_page": _safe_int(group.get("documents_on_page"), 0),
@@ -536,11 +537,13 @@ def _collapse_same_page_multi_docs(groups: list[dict]) -> list[dict]:
                         collected_numbers.append({
                             "number": n["number"],
                             "series": n.get("series"),
+                            "invoice_date": n.get("invoice_date"),
                         })
             elif item.get("number"):
                 collected_numbers.append({
                     "number": item["number"],
                     "series": item.get("series"),
+                    "invoice_date": item.get("invoice_date"),
                 })
 
         collapsed = {
@@ -1280,6 +1283,7 @@ Respond ONLY in JSON format, no extra text, no markdown:
       "pages": [1, 2],
       "number": "SAN-001",
       "series": "VV",
+      "invoice_date": "2025-03-15",
       "multiple_on_page": false,
       "documents_on_page": 0,
       "numbers": []
@@ -1288,12 +1292,13 @@ Respond ONLY in JSON format, no extra text, no markdown:
       "pages": [3],
       "number": null,
       "series": null,
+      "invoice_date": "2025-03-15",
       "multiple_on_page": true,
       "documents_on_page": 3,
       "numbers": [
-        {{"number": "00220357", "series": null}},
-        {{"number": "01442796", "series": null}},
-        {{"number": "118127", "series": "SF"}}
+        {{"number": "00220357", "series": null, "invoice_date": "2025-03-15"}},
+        {{"number": "01442796", "series": null, "invoice_date": "2025-03-20"}},
+        {{"number": "118127", "series": "SF", "invoice_date": "2025-04-01"}}
       ]
     }}
   ]
@@ -1303,9 +1308,10 @@ Rules:
 - pages: visible page numbers starting from 1
 - number: document number (use only when multiple_on_page is false), or null
 - series: document series (use only when multiple_on_page is false), or null
+- invoice_date: document date in YYYY-MM-DD format (if visible), or null
 - multiple_on_page: true ONLY if one page contains multiple separate invoices (NOT invoice + receipt)
 - documents_on_page: count of separate documents, use only when multiple_on_page is true, otherwise 0
-- numbers: array of {{number, series}} for each document on the page, use only when multiple_on_page is true, otherwise empty array
+- numbers: array of {{number, series, invoice_date}} for each document on the page, use only when multiple_on_page is true, otherwise empty array
 - When multiple_on_page is true, return ONE entry for that page, not separate entries
 - If visible pages are less than total PDF pages, set needs_full_split: true
 - Do not guess pages that are not visible
@@ -1344,6 +1350,7 @@ Respond ONLY in JSON format, no extra text, no markdown:
       "complete": true,
       "number": "SAN-001",
       "series": "VV",
+      "invoice_date": "2025-03-15",
       "multiple_on_page": false,
       "documents_on_page": 0,
       "numbers": [],
@@ -1358,9 +1365,9 @@ Respond ONLY in JSON format, no extra text, no markdown:
       "multiple_on_page": true,
       "documents_on_page": 3,
       "numbers": [
-        {{"number": "00220357", "series": null}},
-        {{"number": "01442796", "series": null}},
-        {{"number": "118127", "series": "SF"}}
+        {{"number": "00220357", "series": null, "invoice_date": "2025-03-15"}},
+        {{"number": "01442796", "series": null, "invoice_date": "2025-03-20"}},
+        {{"number": "118127", "series": "SF", "invoice_date": "2025-04-01"}}
       ],
       "confidence": "medium"
     }}
@@ -1373,9 +1380,10 @@ Field rules:
 - complete: false only if the last document continues after page {end}
 - number: document number (only when multiple_on_page is false), otherwise null
 - series: document series (only when multiple_on_page is false), otherwise null
+- invoice_date: document date in YYYY-MM-DD format (if visible), or null
 - multiple_on_page: true ONLY if one page has multiple separate invoices (NOT invoice + receipt paired together)
 - documents_on_page: count of separate documents on that page, use only when multiple_on_page is true, otherwise 0
-- numbers: array of {{number, series}} for each document, use only when multiple_on_page is true, otherwise empty array
+- numbers: array of {{number, series, invoice_date}} for each document, use only when multiple_on_page is true, otherwise empty array
 - When multiple_on_page is true, return ONE entry for that page with the count and numbers
 - confidence: high, medium, or low
 - A receipt/payment confirmation attached to an invoice is part of that invoice, not a separate document
@@ -1527,6 +1535,7 @@ def pre_classify_pdf(pdf_path: str) -> dict:
                 "pages": pages,
                 "number": item.get("number"),
                 "series": item.get("series"),
+                "invoice_date": item.get("invoice_date"),
                 "numbers": item.get("numbers") or [],
                 "multiple_on_page": _as_bool(item.get("multiple_on_page"), False),
                 "documents_on_page": _safe_int(item.get("documents_on_page"), 0),

@@ -982,23 +982,23 @@ def process_uploaded_file_task(self, user_id, doc_id, scan_type,
             else:
                 logger.info("[TASK] No enhanced OCR needed: mode=%s collision=%.1f", ocr_mode, line_collision)
 
-            # 7) Ранний reject по типу документа (по склеенному тексту)
-            t0 = _t()
-            found_type = detect_doc_type(glued_text_for_db or "")
-            _log_t("Detect doc type", t0)
-            if found_type:
-                t0 = _t()
-                doc.status = 'rejected'
-                doc.error_message = f"Potenciali {found_type}"
-                doc.raw_text = raw_json_for_db
-                doc.glued_raw_text = gcv_joined_text
-                doc.preview_url = preview_url
-                doc.save(update_fields=['status', 'error_message', 'raw_text', 'glued_raw_text', 'preview_url'])
-                _settle_and_finish_if_session(doc)
-                _log_t("Save rejected (doc type)", t0)
-                logger.info(f"[TASK] Rejected due to type: {found_type}")
-                _log_t("TOTAL", total_start)
-                return
+            # # 7) Ранний reject по типу документа (по склеенному тексту)
+            # t0 = _t()
+            # found_type = detect_doc_type(glued_text_for_db or "")
+            # _log_t("Detect doc type", t0)
+            # if found_type:
+            #     t0 = _t()
+            #     doc.status = 'rejected'
+            #     doc.error_message = f"Potenciali {found_type}"
+            #     doc.raw_text = raw_json_for_db
+            #     doc.glued_raw_text = gcv_joined_text
+            #     doc.preview_url = preview_url
+            #     doc.save(update_fields=['status', 'error_message', 'raw_text', 'glued_raw_text', 'preview_url'])
+            #     _settle_and_finish_if_session(doc)
+            #     _log_t("Save rejected (doc type)", t0)
+            #     logger.info(f"[TASK] Rejected due to type: {found_type}")
+            #     _log_t("TOTAL", total_start)
+            #     return
 
             # 8) Сохранить OCR результаты
             t0 = _t()
@@ -1369,9 +1369,10 @@ def process_uploaded_file_task(self, user_id, doc_id, scan_type,
         doc_struct = documents[0]
         number = doc_struct.get("document_number")
         series = doc_struct.get("document_series")
+        invoice_date_for_dup = doc_struct.get("invoice_date") or None
 
         t0 = _t()
-        if is_duplicate_by_series_number(user, number, series, exclude_doc_id=doc.pk):
+        if is_duplicate_by_series_number(user, number, series, exclude_doc_id=doc.pk, invoice_date=invoice_date_for_dup):
             doc.status = 'rejected'
             if (series or "").strip():
                 doc.error_message = "Dublikatas: dokumentas su tokia serija ir numeriu jau buvo įkeltas"
@@ -4709,6 +4710,7 @@ def _create_children_from_groups_with_dup_check(
         docs_on_page = max(docs_on_page, 1)
         doc_number = normalize_code_field(group.get("number") or "") or None
         doc_series = normalize_code_field(group.get("series") or "") or None
+        doc_invoice_date = group.get("invoice_date") or None
  
         if is_multi and len(pages) == 1:
             page_pdf = extract_pages_as_pdf_bytes(pdf_path, pages)
@@ -4743,10 +4745,12 @@ def _create_children_from_groups_with_dup_check(
                 # Достаём number/series из pre-classify (если есть)
                 child_number = None
                 child_series = None
+                child_invoice_date = None
                 if doc_idx - 1 < len(doc_numbers):
                     entry = doc_numbers[doc_idx - 1]
                     child_number = normalize_code_field(entry.get("number") or "") or None
                     child_series = normalize_code_field(entry.get("series") or "") or None
+                    child_invoice_date = entry.get("invoice_date") or None
 
                 try:
                     child = ScannedDocument.objects.create(
@@ -4771,6 +4775,7 @@ def _create_children_from_groups_with_dup_check(
                             user, child_number, child_series,
                             exclude_doc_id=child.pk,
                             check_parties=False,
+                            invoice_date=child_invoice_date,
                         )
                         if is_dup:
                             child.status = "rejected"
@@ -4820,6 +4825,7 @@ def _create_children_from_groups_with_dup_check(
                         user, doc_number, doc_series,
                         exclude_doc_id=child.pk,
                         check_parties=False,
+                        invoice_date=doc_invoice_date,
                     )
                     if is_dup:
                         child.status = "rejected"

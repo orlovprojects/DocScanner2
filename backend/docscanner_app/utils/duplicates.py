@@ -81,7 +81,8 @@ def is_duplicate_by_series_number(
     seller_name: str | None = None,
     buyer_vat_code: str | None = None,
     seller_vat_code: str | None = None,
-    check_parties: bool = True  # ← НОВЫЙ параметр
+    check_parties: bool = True,
+    invoice_date: str | None = None
 ) -> bool:
     """
     Дубликат, если:
@@ -100,6 +101,7 @@ def is_duplicate_by_series_number(
     
     in_num = _canon(number)
     in_ser = _canon(series)
+    in_invoice_date = str(invoice_date or "").strip()
     
     if not in_num:
         return False
@@ -131,11 +133,22 @@ def is_duplicate_by_series_number(
         'document_number', 'document_series',
         'buyer_id', 'seller_id',
         'buyer_name', 'seller_name',
-        'buyer_vat_code', 'seller_vat_code'
+        'buyer_vat_code', 'seller_vat_code',
+        'invoice_date'
     ]
     
     for row in qs.values_list(*fields):
-        db_num, db_ser, db_buyer_id, db_seller_id, db_buyer_name, db_seller_name, db_buyer_vat_code, db_seller_vat_code = row
+        (
+            db_num,
+            db_ser,
+            db_buyer_id,
+            db_seller_id,
+            db_buyer_name,
+            db_seller_name,
+            db_buyer_vat_code,
+            db_seller_vat_code,
+            db_invoice_date,
+        ) = row
         
         # Проверяем совпадение серии/номера
         db_num_can = _canon(db_num)
@@ -152,6 +165,11 @@ def is_duplicate_by_series_number(
             buyer_id, seller_id, buyer_name, seller_name, buyer_vat_code, seller_vat_code,
             db_buyer_id, db_seller_id, db_buyer_name, db_seller_name, db_buyer_vat_code, db_seller_vat_code
         ):
+            return True
+        
+        db_invoice_date_str = str(db_invoice_date or "").strip()
+
+        if in_invoice_date and db_invoice_date_str and in_invoice_date == db_invoice_date_str:
             return True
     
     return False
