@@ -15,6 +15,7 @@ Workflow на пачку документов:
 """
 from __future__ import annotations
 
+import json
 import logging
 import uuid
 from dataclasses import dataclass, field
@@ -161,7 +162,7 @@ def _send_request(api_key: str, payload: dict, timeout: int = REQUEST_TIMEOUT) -
     Отправляет один POST запрос к Rivile API v2.
     Возвращает RivileApiResult.
     """
-    method_name = payload.get("method", "")
+    method_name = payload.get("method", "") if isinstance(payload, dict) else ""
     result = RivileApiResult(method=method_name)
 
     headers = {
@@ -193,35 +194,57 @@ def _send_request(api_key: str, payload: dict, timeout: int = REQUEST_TIMEOUT) -
     result.http_status = resp.status_code
     result.raw_response = resp.text[:3000]
 
-    # ─── Парсим JSON ответ ───
     try:
         data = resp.json()
     except Exception:
         result.error_message = f"JSON parse error, HTTP {resp.status_code}"
+        logger.warning(
+            "[RIVILE_API<-] method=%s status=%s non_json_response=%s",
+            method_name,
+            resp.status_code,
+            resp.text[:3000],
+        )
         return result
 
-    # ─── 200 OK — успех ───
+    try:
+        raw_preview = json.dumps(data, ensure_ascii=False)[:4000]
+    except Exception:
+        raw_preview = str(data)[:4000]
+
+    if resp.status_code != 200:
+        logger.warning(
+            "[RIVILE_API<-] method=%s status=%s data_type=%s raw=%s",
+            method_name,
+            resp.status_code,
+            type(data).__name__,
+            raw_preview,
+        )
+    else:
+        logger.debug(
+            "[RIVILE_API<-] method=%s status=%s data_type=%s raw=%s",
+            method_name,
+            resp.status_code,
+            type(data).__name__,
+            raw_preview,
+        )
+
     if resp.status_code == 200:
         result.success = True
         result.error_message = ""
-        # Извлекаем ID из ответа
         result.rivile_id = _extract_rivile_id(data, method_name)
         return result
 
-    # ─── 207 Multi-Status (FULL методы, частичный успех) ───
     if resp.status_code == 207:
-        result.success = True  # документ создан, но часть строк с ошибками
+        result.success = True
         result.rivile_id = _extract_rivile_id(data, method_name)
         result.errors = _extract_errors(data)
         result.error_message = "Partial success (207)"
         return result
 
-    # ─── 400 Bad Request — ошибка данных ───
     if resp.status_code == 400:
         result.errors = _extract_errors(data)
-        result.error_message = data.get("errorMessage", "Bad Request")
+        result.error_message = _extract_error_message(data) or "Bad Request"
 
-        # Проверяем на дубликат
         if _is_duplicate_error(result.errors):
             result.success = True
             result.is_duplicate = True
@@ -229,65 +252,253 @@ def _send_request(api_key: str, payload: dict, timeout: int = REQUEST_TIMEOUT) -
 
         return result
 
-    # ─── 401, 502, 504, 500 — инфраструктурные ───
-    result.error_message = data.get("errorMessage", "") or f"HTTP {resp.status_code}"
+    result.errors = _extract_errors(data)
+    result.error_message = _extract_error_message(data) or f"HTTP {resp.status_code}"
     return result
 
 
 def _extract_rivile_id(data: dict, method: str) -> str:
     """Извлекает ID созданной записи из ответа Rivile."""
-    # Для I06_FULL → ищем I06.I06_KODAS_PO
+    if not isinstance(data, dict):
+        return ""
+
     if "I06" in data:
         i06 = data["I06"]
         if isinstance(i06, dict):
             return _s(i06.get("I06_KODAS_PO", ""))
-    # Для N08 → N08.N08_KODAS_KS
+
     if "N08" in data:
         n08 = data["N08"]
         if isinstance(n08, dict):
             return _s(n08.get("N08_KODAS_KS", ""))
-    # Для N17 → N17.N17_KODAS_PS
+
     if "N17" in data:
         n17 = data["N17"]
         if isinstance(n17, dict):
             return _s(n17.get("N17_KODAS_PS", ""))
-    # Для N25 → N25.N25_KODAS_BS
+
     if "N25" in data:
         n25 = data["N25"]
         if isinstance(n25, dict):
             return _s(n25.get("N25_KODAS_BS", ""))
+
     return ""
 
 
-def _extract_errors(data: dict) -> list:
-    """Извлекает список ошибок из JSON ответа."""
+def _as_list(value) -> list:
+    if value is None:
+        return []
+
+    if isinstance(value, list):
+        return value
+
+    return [value]
+
+
+def _get_any(d: dict, *keys, default=None):
+    if not isinstance(d, dict):
+        return default
+
+    for key in keys:
+        if key in d and d[key] is not None:
+            return d[key]
+
+    return default
+
+
+def _make_error(tag="", code="", message="", raw=None) -> dict:
+    tag = _s(tag)
+    code = _s(code)
+    message = _s(message)
+
+    if not message and raw is not None:
+        if isinstance(raw, str):
+            message = raw
+        else:
+            try:
+                message = json.dumps(raw, ensure_ascii=False)
+            except Exception:
+                message = str(raw)
+
+    return {
+        "tag": tag,
+        "code": code,
+        "message": message,
+    }
+
+
+def _extract_error_message(data) -> str:
+    if isinstance(data, dict):
+        message = _get_any(
+            data,
+            "errorMessage",
+            "ErrorMessage",
+            "message",
+            "Message",
+            "error",
+            "Error",
+            default="",
+        )
+
+        if isinstance(message, str):
+            return _s(message)
+
+        if message:
+            try:
+                return json.dumps(message, ensure_ascii=False)
+            except Exception:
+                return str(message)
+
+    errors = _extract_errors(data)
+    if errors:
+        return errors[0].get("message", "") or errors[0].get("code", "")
+
+    return ""
+
+
+def _extract_errors(data) -> list:
+    """
+    Извлекает список ошибок из JSON ответа Rivile.
+
+    Поддерживает разные форматы:
+      {"errors": {"error": [...]}}
+      {"errors": {"error": {...}}}
+      {"errors": [...]}
+      {"error": [...]}
+      {"error": {...}}
+      {"errors": [{"error": {"dataErrors": {"dataError": [...]}}}]}
+      [...]
+      "error text"
+    """
     result = []
-    errors_block = data.get("errors", {})
 
-    # JSON: {"errors": {"error": [...]}} или {"errors": {"error": {...}}}
-    error_list = errors_block.get("error", [])
-    if isinstance(error_list, dict):
-        error_list = [error_list]
+    def append_error(tag="", code="", message="", raw=None):
+        err = _make_error(tag=tag, code=code, message=message, raw=raw)
+        if err.get("tag") or err.get("code") or err.get("message"):
+            result.append(err)
 
-    for err in error_list:
-        data_errors = err.get("dataErrors", {})
-        de_list = data_errors.get("dataError", [])
-        if isinstance(de_list, dict):
-            de_list = [de_list]
-        for de in de_list:
-            result.append({
-                "tag": _s(de.get("tag", "")),
-                "code": _s(de.get("code", "")),
-                "message": _s(de.get("message", "")),
-            })
+    def walk(node):
+        if node is None:
+            return
+
+        if isinstance(node, list):
+            for item in node:
+                walk(item)
+            return
+
+        if not isinstance(node, dict):
+            append_error(message=node, raw=node)
+            return
+
+        data_errors = _get_any(
+            node,
+            "dataErrors",
+            "DataErrors",
+            "dataError",
+            "DataError",
+            default=None,
+        )
+
+        if data_errors is not None:
+            if isinstance(data_errors, dict):
+                data_error_items = _get_any(
+                    data_errors,
+                    "dataError",
+                    "DataError",
+                    "error",
+                    "Error",
+                    default=None,
+                )
+
+                if data_error_items is None:
+                    data_error_items = data_errors
+            else:
+                data_error_items = data_errors
+
+            walk(data_error_items)
+            return
+
+        nested_errors = _get_any(
+            node,
+            "errors",
+            "Errors",
+            "error",
+            "Error",
+            default=None,
+        )
+
+        if nested_errors is not None:
+            walk(nested_errors)
+            return
+
+        tag = _get_any(node, "tag", "Tag", "field", "Field", default="")
+        code = _get_any(node, "code", "Code", "errorCode", "ErrorCode", "error_code", default="")
+        message = _get_any(
+            node,
+            "message",
+            "Message",
+            "text",
+            "Text",
+            "description",
+            "Description",
+            "errorMessage",
+            "ErrorMessage",
+            default="",
+        )
+
+        if tag or code or message:
+            append_error(tag=tag, code=code, message=message, raw=node)
+        else:
+            append_error(raw=node)
+
+    if isinstance(data, dict):
+        errors_block = _get_any(
+            data,
+            "errors",
+            "Errors",
+            "error",
+            "Error",
+            default=None,
+        )
+
+        if errors_block is not None:
+            walk(errors_block)
+        else:
+            message = _get_any(
+                data,
+                "errorMessage",
+                "ErrorMessage",
+                "message",
+                "Message",
+                default="",
+            )
+            code = _get_any(
+                data,
+                "code",
+                "Code",
+                "errorCode",
+                "ErrorCode",
+                "error_code",
+                default="",
+            )
+
+            if message or code:
+                append_error(code=code, message=message, raw=data)
+    else:
+        walk(data)
+
     return result
 
 
 def _is_duplicate_error(errors: list) -> bool:
-    """Проверяет, все ли ошибки — дубликаты."""
+    """Проверяет, все ли ошибки являются допустимыми дубликатами."""
     if not errors:
         return False
-    return all(e.get("code", "") in DUPLICATE_ERROR_CODES for e in errors)
+
+    return all(
+        isinstance(e, dict) and e.get("code", "") in DUPLICATE_ERROR_CODES
+        for e in errors
+    )
 
 
 # ═══════════════════════════════════════════════════════════
@@ -1072,7 +1283,8 @@ def _save_ref_log(api_key_obj, user, session_id: str, result: RivileApiResult):
     if result.errors:
         error_code = result.errors[0].get("code", "")
         error_message = "; ".join(
-            f"{e['tag']}: {e['message']}" for e in result.errors
+            f"{e.get('tag', '')}: {e.get('message', '')}".strip(": ")
+            for e in result.errors
         )
     elif result.error_message:
         error_message = result.error_message
@@ -1121,7 +1333,8 @@ def save_export_results(session: RivileExportSession, user, api_key_obj,
             inv_error = ""
             if inv_result.errors:
                 inv_error = "; ".join(
-                    f"{e['tag']}: {e['message']}" for e in inv_result.errors
+                    f"{e.get('tag', '')}: {e.get('message', '')}".strip(": ")
+                    for e in inv_result.errors
                 )
             elif inv_result.error_message and not inv_result.success:
                 inv_error = inv_result.error_message
@@ -1138,7 +1351,8 @@ def save_export_results(session: RivileExportSession, user, api_key_obj,
                 partner_status = "error"
                 if n08_res.errors:
                     partner_error = "; ".join(
-                        f"{e['tag']}: {e['message']}" for e in n08_res.errors
+                        f"{e.get('tag', '')}: {e.get('message', '')}".strip(": ")
+                        for e in n08_res.errors
                     )
                 elif n08_res.error_message:
                     partner_error = n08_res.error_message
