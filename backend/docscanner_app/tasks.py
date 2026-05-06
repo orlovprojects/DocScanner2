@@ -579,6 +579,7 @@ def process_uploaded_file_task(self, user_id, doc_id, scan_type,
                         pre_doc = pre_docs[0]
                         pre_number = normalize_code_field(pre_doc.get("number") or "") or None
                         pre_series = normalize_code_field(pre_doc.get("series") or "") or None
+                        pre_invoice_date = pre_doc.get("invoice_date") or None
 
                         if pre_number:
                             t_dup = _t()
@@ -588,8 +589,17 @@ def process_uploaded_file_task(self, user_id, doc_id, scan_type,
                                 pre_series,
                                 exclude_doc_id=doc.pk,
                                 check_parties=False,
+                                invoice_date=pre_invoice_date,
                             )
                             _log_t("Early pre-classify dup check", t_dup)
+
+                            logger.info(
+                                "[TASK] Early pre-classify duplicate check: number=%s series=%s invoice_date=%s dup=%s",
+                                pre_number,
+                                pre_series,
+                                pre_invoice_date,
+                                is_dup,
+                            )
 
                             if is_dup:
                                 doc.status = "rejected"
@@ -603,9 +613,10 @@ def process_uploaded_file_task(self, user_id, doc_id, scan_type,
                                 _settle_and_finish_if_session(doc)
 
                                 logger.info(
-                                    "[TASK] Early duplicate rejection before normalize: number=%s series=%s",
+                                    "[TASK] Early duplicate rejection before normalize: number=%s series=%s invoice_date=%s",
                                     pre_number,
                                     pre_series,
+                                    pre_invoice_date,
                                 )
                                 _log_t("TOTAL", total_start)
                                 return
@@ -1021,12 +1032,15 @@ def process_uploaded_file_task(self, user_id, doc_id, scan_type,
                 and normalize_code_field(
                     pre_classify_result["documents"][0].get("number") or ""
                 )
+                and (pre_classify_result["documents"][0].get("invoice_date") or None)
             )
         except Exception:
             _pre_checked_dup = False
 
         if _pre_checked_dup:
-            logger.info("[TASK] Skipping similarity & dup-check (pre-classify already checked)")
+            logger.info(
+                "[TASK] Skipping similarity & dup-check (pre-classify already checked with number/series/date)"
+            )
             similarity_percent = 0
             doc.similarity_percent = 0
             doc.save(update_fields=['similarity_percent'])
@@ -1049,9 +1063,10 @@ def process_uploaded_file_task(self, user_id, doc_id, scan_type,
                 t0 = _t()
                 prompt = (
                     "You are given OCRed text of a single Lithuanian accounting document (invoice/receipt).\n"
-                    "Extract two fields ONLY and return STRICT JSON with EXACT keys:\n"
-                    '{\n  "document_series": string|null,\n  "document_number": string|null\n}\n'
+                    "Extract three fields ONLY and return STRICT JSON with EXACT keys:\n"
+                    '{\n  "document_series": string|null,\n  "document_number": string|null,\n  "invoice_date": string|null\n}\n'
                     "Rules:\n"
+                    "- invoice_date must be in YYYY-MM-DD format if visible, otherwise null.\n"
                     "- If series is absent, set document_series to null.\n"
                     "- If number is absent, set document_number to null.\n"
                     "- Respond with pure JSON. Do NOT use markdown code fences."
@@ -1063,20 +1078,31 @@ def process_uploaded_file_task(self, user_id, doc_id, scan_type,
                         model="gemini-2.5-flash-lite",
                         logger=logger,
                     )
-                    _log_t("Gemini-lite extract (series/number, high-sim)", t0)
+                    _log_t("Gemini-lite extract (series/number/date, high-sim)", t0)
 
                     data = _extract_json_object(resp or "")
                     series_ex = normalize_code_field((data.get("document_series") or "")) or None
                     number_ex = normalize_code_field((data.get("document_number") or "")) or None
+                    invoice_date_ex = data.get("invoice_date") or None
+                    logger.info(
+                        "[DUP-CHECK] high-sim extracted: number=%s series=%s invoice_date=%s similarity=%s",
+                        number_ex,
+                        series_ex,
+                        invoice_date_ex,
+                        similarity_percent,
+                    )
 
                     if not series_ex and not number_ex:
                         logger.info("[DUP-CHECK] gemini-lite returned empty → skip duplicate check")
                     else:
                         t1 = _t()
                         is_dup = is_duplicate_by_series_number(
-                            user, number_ex, series_ex,
+                            user,
+                            number_ex,
+                            series_ex,
                             exclude_doc_id=doc.pk,
                             check_parties=False,
+                            invoice_date=invoice_date_ex,
                         )
 
                         if is_dup:
@@ -1090,10 +1116,10 @@ def process_uploaded_file_task(self, user_id, doc_id, scan_type,
                                 doc.preview_url = f"{settings.SITE_URL_BACKEND}/media/{doc.file.name}"
                             doc.save(update_fields=['status', 'error_message', 'preview_url'])
                             _settle_and_finish_if_session(doc)
-                            _log_t("Duplicate check (series/number @95%+)", t1)
+                            _log_t("Duplicate check (series/number/date @95%+)", t1)
                             _log_t("TOTAL", total_start)
                             return
-                        _log_t("Duplicate check (series/number passed @95%+)", t1)
+                        _log_t("Duplicate check (series/number/date passed @95%+)", t1)
 
                 except Exception as e:
                     logger.warning(f"[DUP-CHECK] gemini-lite extract failed: {e}")
@@ -1372,7 +1398,7 @@ def process_uploaded_file_task(self, user_id, doc_id, scan_type,
         invoice_date_for_dup = doc_struct.get("invoice_date") or None
 
         t0 = _t()
-        if is_duplicate_by_series_number(user, number, series, exclude_doc_id=doc.pk, invoice_date=invoice_date_for_dup):
+        if is_duplicate_by_series_number(user, number, series, exclude_doc_id=doc.pk, check_parties=False, invoice_date=invoice_date_for_dup):
             doc.status = 'rejected'
             if (series or "").strip():
                 doc.error_message = "Dublikatas: dokumentas su tokia serija ir numeriu jau buvo įkeltas"
@@ -1381,11 +1407,16 @@ def process_uploaded_file_task(self, user_id, doc_id, scan_type,
             doc.preview_url = preview_url
             doc.save(update_fields=['status', 'error_message', 'preview_url'])
             _settle_and_finish_if_session(doc)
-            _log_t("Duplicate check (number/series)", t0)  # <-- лог времени
-            logger.info("[TASK] Rejected as duplicate by number/series (no credits deducted)")
+            _log_t("Duplicate check (number/series/date)", t0)
+            logger.info(
+                "[TASK] Rejected as duplicate by number/series/date: number=%s series=%s invoice_date=%s",
+                number,
+                series,
+                invoice_date_for_dup,
+            )
             _log_t("TOTAL", total_start)
             return
-        _log_t("Duplicate check (number/series, passed)", t0)
+        _log_t("Duplicate check (number/series/date, passed)", t0)
 
         # # 13.2) Если отдельный VAT выключен, а у строк VAT пустой — раздать документный VAT по строкам
         # from .validators.amount_validator import distribute_vat_from_document
@@ -4789,8 +4820,11 @@ def _create_children_from_groups_with_dup_check(
                             child.preview_url = f"{settings.SITE_URL_BACKEND}/media/{child.file.name}"
                             child.save(update_fields=["status", "error_message", "preview_url"])
                             logger.info(
-                                "[MULTI-DOC] Multi-page child %d is duplicate: number=%s series=%s",
-                                child.id, child_number, child_series,
+                                "[MULTI-DOC] Multi-page child %d is duplicate: number=%s series=%s invoice_date=%s",
+                                child.id,
+                                child_number,
+                                child_series,
+                                child_invoice_date,
                             )
 
                     created.append((child.id, skip_ocr, is_dup))
@@ -4845,14 +4879,23 @@ def _create_children_from_groups_with_dup_check(
                         child.preview_url = f"{settings.SITE_URL_BACKEND}/media/{child.file.name}"
                         child.save(update_fields=["status", "error_message", "preview_url"])
                         logger.info(
-                            "[MULTI-DOC] Child %d is duplicate: number=%s series=%s",
-                            child.id, doc_number, doc_series,
+                            "[MULTI-DOC] Child %d is duplicate: number=%s series=%s invoice_date=%s",
+                            child.id,
+                            doc_number,
+                            doc_series,
+                            doc_invoice_date,
                         )
  
                 created.append((child.id, False, is_dup))
                 logger.info(
-                    "[MULTI-DOC] Created child doc_id=%d: %s (%d pages, number=%s, dup=%s)",
-                    child.id, child_name, len(pages), doc_number, is_dup,
+                    "[MULTI-DOC] Created child doc_id=%d: %s (%d pages, number=%s series=%s invoice_date=%s dup=%s)",
+                    child.id,
+                    child_name,
+                    len(pages),
+                    doc_number,
+                    doc_series,
+                    doc_invoice_date,
+                    is_dup,
                 )
             except Exception as e:
                 logger.error("[MULTI-DOC] Failed to create child %s: %s", child_name, e)

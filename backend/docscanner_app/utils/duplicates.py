@@ -13,6 +13,24 @@ def _canon(s: str | None) -> str:
     s = (s or "").casefold()
     return _ALNUM_RE.sub("", s)
 
+def _date_key(value) -> str:
+    if not value:
+        return ""
+
+    if hasattr(value, "date"):
+        value = value.date()
+
+    return str(value).strip()[:10]
+
+
+def _series_matches(in_ser: str, db_ser: str) -> bool:
+    # Если у входящего документа серии нет, дублем считаем только документ без серии.
+    # Если серия есть, она должна совпадать.
+    if not in_ser:
+        return not db_ser
+
+    return db_ser == in_ser
+
 
 def _check_party_match(
     in_buyer_id: str, in_seller_id: str,
@@ -71,9 +89,9 @@ def _check_party_match(
 
 
 def is_duplicate_by_series_number(
-    user, 
-    number: str | None, 
-    series: str | None, 
+    user,
+    number: str | None,
+    series: str | None,
     exclude_doc_id=None,
     buyer_id: str | None = None,
     seller_id: str | None = None,
@@ -86,57 +104,39 @@ def is_duplicate_by_series_number(
 ) -> bool:
     """
     Дубликат, если:
-    1. Совпадают серия/номер (по канонизированным значениям)
-    2. Если check_parties=True: И совпадает хотя бы одна пара buyer/seller (не пустая)
-    3. Если check_parties=False: Проверяем только серию/номер без контрагентов
-    
-    Сравнение ведётся по канонизированным/нормализованным значениям.
-    Документы со статусом 'rejected' не считаются источником дублей.
-    
-    Параметры:
-    - check_parties: если False, проверяется только серия/номер (для ранней проверки)
-                     если True, дополнительно проверяются контрагенты (полная проверка)
+    1. Совпадает номер
+    2. Совпадает серия, включая случай пустая серия == пустая серия
+    3. Совпадает invoice_date
+
+    Если check_parties=True, дополнительно дубликат может быть найден по совпадающим
+    buyer/seller данным, но только после совпадения номер/серия.
     """
     from ..models import ScannedDocument
-    
+
     in_num = _canon(number)
     in_ser = _canon(series)
-    in_invoice_date = str(invoice_date or "").strip()
-    
+    in_invoice_date = _date_key(invoice_date)
+
     if not in_num:
         return False
-    
-    qs = ScannedDocument.objects.filter(user=user).exclude(status='rejected')
+
+    qs = ScannedDocument.objects.filter(user=user).exclude(status="rejected")
+
     if exclude_doc_id:
         qs = qs.exclude(pk=exclude_doc_id)
-    
-    # Если проверка контрагентов отключена, проверяем только серию/номер
-    if not check_parties:
-        for row in qs.values_list('document_number', 'document_series'):
-            db_num, db_ser = row
-            
-            db_num_can = _canon(db_num)
-            db_ser_can = _canon(db_ser)
-            
-            if db_num_can != in_num:
-                continue
-            
-            if in_ser and db_ser_can != in_ser:
-                continue
-                
-            return True  # Найден дубликат только по серии/номеру
-        
-        return False
-    
-    # Полная проверка с контрагентами
+
     fields = [
-        'document_number', 'document_series',
-        'buyer_id', 'seller_id',
-        'buyer_name', 'seller_name',
-        'buyer_vat_code', 'seller_vat_code',
-        'invoice_date'
+        "document_number",
+        "document_series",
+        "buyer_id",
+        "seller_id",
+        "buyer_name",
+        "seller_name",
+        "buyer_vat_code",
+        "seller_vat_code",
+        "invoice_date",
     ]
-    
+
     for row in qs.values_list(*fields):
         (
             db_num,
@@ -149,27 +149,42 @@ def is_duplicate_by_series_number(
             db_seller_vat_code,
             db_invoice_date,
         ) = row
-        
-        # Проверяем совпадение серии/номера
+
         db_num_can = _canon(db_num)
         db_ser_can = _canon(db_ser)
-        
+        db_invoice_date_str = _date_key(db_invoice_date)
+
         if db_num_can != in_num:
             continue
-        
-        if in_ser and db_ser_can != in_ser:
+
+        if not _series_matches(in_ser, db_ser_can):
             continue
-        
-        # Серия/номер совпали, теперь проверяем buyer/seller
+
+        if not in_invoice_date or not db_invoice_date_str:
+            continue
+
+        if in_invoice_date != db_invoice_date_str:
+            continue
+
+        if not check_parties:
+            return True
+
         if _check_party_match(
-            buyer_id, seller_id, buyer_name, seller_name, buyer_vat_code, seller_vat_code,
-            db_buyer_id, db_seller_id, db_buyer_name, db_seller_name, db_buyer_vat_code, db_seller_vat_code
+            buyer_id,
+            seller_id,
+            buyer_name,
+            seller_name,
+            buyer_vat_code,
+            seller_vat_code,
+            db_buyer_id,
+            db_seller_id,
+            db_buyer_name,
+            db_seller_name,
+            db_buyer_vat_code,
+            db_seller_vat_code,
         ):
             return True
-        
-        db_invoice_date_str = str(db_invoice_date or "").strip()
 
-        if in_invoice_date and db_invoice_date_str and in_invoice_date == db_invoice_date_str:
-            return True
-    
+        return True
+
     return False
