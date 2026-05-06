@@ -215,6 +215,8 @@ class ScannedDocumentListSerializer(serializers.ModelSerializer):
             'dineta_last_try_date',
             "rivile_api_status",
             "rivile_api_last_try",
+            'is_credit_invoice',
+            'is_debit_invoice',
             # ...и т.п., без тяжелых полей и line_items
         ]
 
