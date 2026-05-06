@@ -53,7 +53,8 @@ CSV_HEADERS = [
     "L019",  # Įmonės kodas
     "L020",  # PVM kodas
     "L021",  # Adresas
-    "L022",  # Materialiai atsakingas
+    "L022",  # Materialiai atsakingo kodas
+    "L023",  # Materialiai atsakingo pavadinimas
     "L024",  # Padalinys
     "L026",  # Objektas
     "L059",  # Atskaitingas asmuo
@@ -709,7 +710,8 @@ def _generate_debetas_csv(documents: List, doc_type: str, user=None, own_company
             "L019": client["company_id"],
             "L020": client["vat"],
             "L021": client["address"],
-            "L022": mat_atsakingas,
+            "L022": "",
+            "L023": mat_atsakingas,
             "L024": padalinys,
             "L026": objektas,
             "L059": atskaitingas,
