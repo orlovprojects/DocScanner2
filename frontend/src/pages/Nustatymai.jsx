@@ -2901,6 +2901,11 @@ const PREKES_ASSEMBLY_OPTIONS = [
   { value: 8, label: "Tara" },
 ];
 
+const SUPPORTS_KODAS_TIPAS_PROGRAMS = ["rivile", "rivile_gama_api"];
+
+const supportsKodasTipas = (program) =>
+  SUPPORTS_KODAS_TIPAS_PROGRAMS.includes(program);
+
 /** ===== Reusable: import tab for XLSX ===== */
 function ImportTab({ label, url, templateFileName, videoUrl }) {
   const [file, setFile] = useState(null);
@@ -3028,7 +3033,7 @@ function ImportTab({ label, url, templateFileName, videoUrl }) {
 /** ===== Defaults fieldset (with company fields) ===== */
 const DefaultsFields = React.memo(function DefaultsFields({ mode, program, state, setState, touched }) {
   const isPurchase = mode === "pirkimas";
-  const showKodas = program === "rivile";
+  const showKodas = supportsKodasTipas(program);
 
   React.useEffect(() => {
     if (!showKodas && String(state.tipas || "").toLowerCase() === "kodas") {
@@ -3648,6 +3653,8 @@ export default function NustatymaiPage() {
     return 1;
   };
 
+  const showKodasTipas = supportsKodasTipas(program);
+
   useEffect(() => {
     api.get("/profile/", { withCredentials: true }).then(({ data }) => {
       setUser(data);
@@ -3878,13 +3885,20 @@ export default function NustatymaiPage() {
 
 
   useEffect(() => {
-    setRuleForm(prev => {
-      if (program !== "rivile" && prev.result_tipas === "Kodas") {
+    setRuleForm((prev) => {
+      if (!showKodasTipas && prev.result_tipas === "Kodas") {
         return { ...prev, result_tipas: "Prekė", result_kodas_kaip: "" };
       }
       return prev;
     });
-  }, [program]);
+
+    setSumiskaiApply((prev) => {
+      if (!showKodasTipas && prev.tipas === "Kodas") {
+        return { ...prev, tipas: "Prekė", kodas_kaip: "" };
+      }
+      return prev;
+    });
+  }, [showKodasTipas]);
 
   const handleChange = async (e) => {
     const newProgram = e.target.value;
@@ -3963,7 +3977,7 @@ export default function NustatymaiPage() {
       }
 
       // Rivilė + Kodas -> kodas_kaip обязателен
-      if ((sumiskaiApply.tipas || "").toLowerCase() === "kodas" && program === "rivile" && !sumiskaiApply.kodas_kaip) {
+      if ((sumiskaiApply.tipas || "").toLowerCase() === "kodas" && showKodasTipas && !sumiskaiApply.kodas_kaip) {
         setErrorDefaults("Pasirinkus Kodas, būtina nurodyti Nustatyti PVM klasifikatorių kaip.");
         setSavingDefaults(false);
         return;
@@ -4477,7 +4491,7 @@ export default function NustatymaiPage() {
 
       // Проверка: при Rivilė + Kodas нужно выбрать „kaip"
       if (
-        program === "rivile" &&
+        showKodasTipas &&
         ruleForm.result_tipas === "Kodas" &&
         !ruleForm.result_kodas_kaip
       ) {
@@ -4529,7 +4543,7 @@ export default function NustatymaiPage() {
 
         // Naujas laukas Rivile atvejui (back-end jo nebreakina, tiesiog ignoruos/naudos vėliau)
         result_kodas_kaip:
-          program === "rivile" && ruleForm.result_tipas === "Kodas"
+          showKodasTipas && ruleForm.result_tipas === "Kodas"
             ? ruleForm.result_kodas_kaip || ""
             : "",
 
@@ -4785,18 +4799,20 @@ export default function NustatymaiPage() {
       imones_pvm_kodas: item.imones_pvm_kodas || "",
     });
 
+    const isSavedKodas = item.tipas === 3 || item.tipas === 4;
+
     setSumiskaiApply({
       pavadinimas: item.pavadinimas || "",
       kodas: item.kodas || "",
       barkodas: item.barkodas || "",
       tipas:
         item.tipas === 2 ? "Paslauga"
-        : item.tipas === 3 || item.tipas === 4 ? "Kodas"
+        : isSavedKodas && showKodasTipas ? "Kodas"
         : "Prekė",
       kodas_kaip:
-        item.tipas === 4 ? "Paslaugai"
-        : item.tipas === 3 ? "Prekei"
-        : "",
+        isSavedKodas && showKodasTipas
+          ? item.tipas === 4 ? "Paslaugai" : "Prekei"
+          : "",
     });
 
     setEditingIndex(index);
@@ -5302,7 +5318,7 @@ export default function NustatymaiPage() {
                 >
                   <MenuItem value="Prekė">Prekė</MenuItem>
                   <MenuItem value="Paslauga">Paslauga</MenuItem>
-                  {program === "rivile" && <MenuItem value="Kodas">Kodas</MenuItem>}
+                  {showKodasTipas && <MenuItem value="Kodas">Kodas</MenuItem>}
                 </Select>
               </FormControl>
             </Stack>
@@ -5324,7 +5340,7 @@ export default function NustatymaiPage() {
               />
             </Stack>
 
-            {program === "rivile" && sumiskaiApply.tipas === "Kodas" && (
+            {showKodasTipas && sumiskaiApply.tipas === "Kodas" && (
               <FormControl size="small" sx={{ width: 260, mt: 2 }} required>
                 <InputLabel>Nustatyti PVM klasifikatorių kaip</InputLabel>
                 <Select
@@ -5755,7 +5771,7 @@ export default function NustatymaiPage() {
                 >
                   <MenuItem value="Prekė">Prekė</MenuItem>
                   <MenuItem value="Paslauga">Paslauga</MenuItem>
-                  {program === "rivile" && (
+                  {showKodasTipas && (
                     <MenuItem value="Kodas">Kodas</MenuItem>
                   )}
                 </Select>
@@ -5790,7 +5806,7 @@ export default function NustatymaiPage() {
             </Stack>
 
             {/* Papildomas dropdown tik Rivilė + Kodas */}
-            {program === "rivile" && ruleForm.result_tipas === "Kodas" && (
+            {showKodasTipas && ruleForm.result_tipas === "Kodas" && (
               <FormControl
                 size="small"
                 sx={{ width: 260, mt: 2 }}
@@ -5955,8 +5971,14 @@ export default function NustatymaiPage() {
                             seller_vat_code: r.seller_vat_code !== "" ? r.seller_vat_code : null,
                             apply_to_all: r.apply_to_all || false,
                             result_kodas: r.result_kodas || "",
-                            result_tipas: r.result_tipas || "Prekė",
-                            result_kodas_kaip: r.result_kodas_kaip || "",
+                            result_tipas:
+                              !showKodasTipas && r.result_tipas === "Kodas"
+                                ? "Prekė"
+                                : r.result_tipas || "Prekė",
+                            result_kodas_kaip:
+                              showKodasTipas && r.result_tipas === "Kodas"
+                                ? r.result_kodas_kaip || ""
+                                : "",
                             result_pavadinimas: r.result_pavadinimas || "",
                             result_barkodas: r.result_barkodas || "",
                           })
