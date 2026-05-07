@@ -601,7 +601,7 @@ def build_n08_full_payload(doc, direction: str) -> Optional[dict]:
     # N33 — банковские реквизиты
     n33_list = []
     if iban or country:
-        n33_entry = {"N33_NUTYL": "1", "N33_KODAS_KS": client_code}
+        n33_entry = {"N33_NUTYL": "1", "N33_KODAS_KS": client_code, "N33_KODAS_AK": "2"}
         if iban:
             n33_entry["N33_S_KODAS"] = iban
         if country:
