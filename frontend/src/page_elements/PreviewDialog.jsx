@@ -741,6 +741,7 @@ export default function PreviewDialog({
       prekes_kodas: valueObj.prekes_kodas || valueObj.code || "",
       prekes_pavadinimas: valueObj.prekes_pavadinimas || valueObj.name || "",
       prekes_barkodas: valueObj.prekes_barkodas || valueObj.barkodas || valueObj.barcode || "",
+      preke_paslauga: valueObj.preke_paslauga || null,
     };
 
     const res = await api.patch(
@@ -779,6 +780,7 @@ export default function PreviewDialog({
       prekes_kodas: valueObj.prekes_kodas || valueObj.code || "",
       prekes_pavadinimas: valueObj.prekes_pavadinimas || valueObj.name || "",
       prekes_barkodas: valueObj.prekes_barkodas || valueObj.barkodas || valueObj.barcode || "",
+      preke_paslauga: valueObj.preke_paslauga || null,
     };
 
     const res = await api.patch(

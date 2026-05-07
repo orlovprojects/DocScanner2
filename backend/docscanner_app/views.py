@@ -3248,7 +3248,7 @@ def autocomplete_products(request):
             "prekes_pavadinimas": prod.prekes_pavadinimas,
             "prekes_kodas": prod.prekes_kodas,
             "prekes_barkodas": prod.prekes_barkodas,
-            # добавь нужные поля!
+            "preke_paslauga": prod.preke_paslauga,
         }
         for prod in qs
     ]
