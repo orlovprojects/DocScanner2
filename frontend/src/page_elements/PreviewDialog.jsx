@@ -1094,6 +1094,15 @@ export default function PreviewDialog({
     const readyForExport = selected?.ready_for_export;
     const mathValidation = selected?.math_validation_passed;
 
+    const invoiceTypeChipSx = {
+      fontSize: isMobile ? "0.75rem" : "0.8125rem",
+      fontWeight: 700,
+      height: 24,
+      "& .MuiChip-label": {
+        px: 1,
+      },
+    };
+
     return (
       <Box sx={{ 
         mb: 2, 
@@ -1149,6 +1158,30 @@ export default function PreviewDialog({
             '& .MuiChip-icon': { fontSize: isMobile ? '1rem' : '1.1rem' },
           }}
         />
+
+        {selected?.is_credit_invoice && (
+          <Chip
+            label="Kreditinė"
+            size="small"
+            sx={{
+              ...invoiceTypeChipSx,
+              bgcolor: "#B7BDF7",
+              color: "#2D3282",
+            }}
+          />
+        )}
+
+        {selected?.is_debit_invoice && (
+          <Chip
+            label="Debetinė"
+            size="small"
+            sx={{
+              ...invoiceTypeChipSx,
+              bgcolor: "#BBDCE5",
+              color: "#1B4D5C",
+            }}
+          />
+        )}
       </Box>
     );
   };

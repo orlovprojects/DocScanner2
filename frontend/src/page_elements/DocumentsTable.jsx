@@ -45,6 +45,9 @@ import ShoppingCartIcon from "@mui/icons-material/ShoppingCart";
 import SellIcon from "@mui/icons-material/Sell";
 import RemoveCircleOutlineIcon from "@mui/icons-material/RemoveCircleOutline";
 
+import { CreditInvoiceIcon, DebitInvoiceIcon } from "../components/Icons";
+
+
 // Стилизованный контейнер поиска
 const SearchWrapper = styled(Box, {
   shouldForwardProp: (prop) => prop !== "focused",
@@ -647,16 +650,28 @@ export default function DocumentsTable({
     return d.scan_type === "sumiskai" && d.separate_vat === true;
   };
 
-  const renderWarningIcons = (d) => {
+  const renderStatusExtraIcons = (d) => {
     if (d.status !== "completed" && d.status !== "exported") return null;
-    
+
     const icons = [];
-    const iconSx = isMobile 
-      ? { fontSize: 16, verticalAlign: 'middle', cursor: 'pointer' }
-      : { verticalAlign: 'middle', cursor: 'pointer' };
+    const iconSx = isMobile
+      ? { fontSize: 16, verticalAlign: "middle", cursor: "pointer" }
+      : { verticalAlign: "middle", cursor: "pointer" };
+
+    const invoiceIconWrapSx = {
+      display: "inline-flex",
+      alignItems: "center",
+      justifyContent: "center",
+      lineHeight: 1,
+    };
+
+    const invoiceIconSx = isMobile
+      ? { fontSize: 18, display: "block", transform: "translateY(-1px)" }
+      : { fontSize: 21, display: "block", transform: "translateY(-1px)" };
+
     const iconFontSize = isMobile ? undefined : "small";
     const tooltipProps = isMobile ? { enterTouchDelay: 50, leaveTouchDelay: 1500 } : {};
-    
+
     if (d.ready_for_export === false) {
       icons.push(
         <Tooltip key="missing" title="Dokumente trūksta duomenų" {...tooltipProps}>
@@ -664,6 +679,7 @@ export default function DocumentsTable({
         </Tooltip>
       );
     }
+
     if (d.math_validation_passed === false) {
       icons.push(
         <Tooltip key="math" title="Sumos nesutampa" {...tooltipProps}>
@@ -671,6 +687,7 @@ export default function DocumentsTable({
         </Tooltip>
       );
     }
+
     if (hasSeparateVatWarning(d)) {
       icons.push(
         <Tooltip key="vat" title="Keli skirtingi PVM %" {...tooltipProps}>
@@ -678,6 +695,7 @@ export default function DocumentsTable({
         </Tooltip>
       );
     }
+
     if (d.buyer_vat_val === "invalid") {
       icons.push(
         <Tooltip key="buyer-vat" title="Negalioja pirkėjo PVM kodas" {...tooltipProps}>
@@ -685,6 +703,7 @@ export default function DocumentsTable({
         </Tooltip>
       );
     }
+
     if (d.seller_vat_val === "invalid") {
       icons.push(
         <Tooltip key="seller-vat" title="Negalioja pardavėjo PVM kodas" {...tooltipProps}>
@@ -692,6 +711,7 @@ export default function DocumentsTable({
         </Tooltip>
       );
     }
+
     if (
       (d.buyer_id && d.seller_id && d.buyer_id === d.seller_id) ||
       (d.buyer_name && d.seller_name && d.buyer_name.trim() === d.seller_name.trim()) ||
@@ -703,9 +723,33 @@ export default function DocumentsTable({
         </Tooltip>
       );
     }
-    
+
+    if (d.is_credit_invoice) {
+      icons.push(
+        <Box key="credit-invoice" component="span" sx={invoiceIconWrapSx}>
+          <CreditInvoiceIcon sx={invoiceIconSx} />
+        </Box>
+      );
+    }
+
+    if (d.is_debit_invoice) {
+      icons.push(
+        <Box key="debit-invoice" component="span" sx={invoiceIconWrapSx}>
+          <DebitInvoiceIcon sx={invoiceIconSx} />
+        </Box>
+      );
+    }
+
     return icons.length > 0 ? (
-      <Box sx={{ display: 'inline-flex', gap: 0.25, ml: 0.5 }}>
+      <Box
+        sx={{
+          display: "inline-flex",
+          gap: 0.25,
+          ml: 0.5,
+          alignItems: "center",
+          lineHeight: 1,
+        }}
+      >
         {icons}
       </Box>
     ) : null;
@@ -859,7 +903,7 @@ export default function DocumentsTable({
                       <Typography variant="caption" sx={{ fontWeight: 500 }}>
                         {statusLabel(d)}
                       </Typography>
-                      {renderWarningIcons(d)}
+                      {renderStatusExtraIcons(d)}
                       {/* API status icon inline on mobile */}
                       {showApiStatusCol && (
                         accountingProgram === "dineta"
@@ -1052,7 +1096,7 @@ export default function DocumentsTable({
                     <TableCell sx={{ verticalAlign: "middle", minHeight: 44 }}>
                       <Box display="flex" alignItems="center">
                         {iconForStatus(d)}&nbsp;{statusLabelFull(d)}
-                        {renderWarningIcons(d)}
+                        {renderStatusExtraIcons(d)}
                       </Box>
                     </TableCell>
 
