@@ -20,6 +20,7 @@ from django.http import FileResponse
 from django.db import models
 from django.core.mail import EmailMultiAlternatives
 from email.utils import formataddr
+from openpyxl import Workbook
 
 from django.core.files.base import ContentFile
 from .tasks import process_uploaded_file_task 
@@ -3465,6 +3466,121 @@ def import_clients_view(request):
         return Response(report, status=status.HTTP_200_OK)
     except Exception as e:
         return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+# --- Экспорт товаров ---
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def export_products_view(request):
+    from openpyxl.styles import Font
+
+    qs = ProductAutocomplete.objects.filter(user=request.user).order_by("prekes_pavadinimas")
+
+    COLUMNS = [
+        ("prekes_pavadinimas*", "prekes_pavadinimas"),
+        ("prekes_kodas*", "prekes_kodas"),
+        ("prekes_barkodas", "prekes_barkodas"),
+        ("preke_paslauga_kodas", "preke_paslauga"),
+    ]
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Prekės"
+
+    bold = Font(bold=True)
+    for col_idx, (col_name, _) in enumerate(COLUMNS, start=1):
+        cell = ws.cell(row=1, column=col_idx, value=col_name)
+        cell.font = bold
+
+    for p in qs:
+        ws.append([getattr(p, field, "") or "" for _, field in COLUMNS])
+
+    response = HttpResponse(
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+    response["Content-Disposition"] = 'attachment; filename="prekes_eksportas.xlsx"'
+    wb.save(response)
+    return response
+
+
+# --- Удалить все товары ---
+@api_view(["DELETE"])
+@permission_classes([IsAuthenticated])
+def delete_all_products_view(request):
+    count, _ = ProductAutocomplete.objects.filter(user=request.user).delete()
+    return Response({"deleted": count})
+
+
+# --- Счётчик товаров ---
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def products_count_view(request):
+    count = ProductAutocomplete.objects.filter(user=request.user).count()
+    return Response({"count": count})
+
+
+# --- Экспорт клиентов ---
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def export_clients_view(request):
+    qs = ClientAutocomplete.objects.filter(
+        user=request.user, source="imported"
+    ).order_by("pavadinimas")
+
+    COLUMNS = [
+        ("kodas", "imones_kodas"),
+        ("pavadinimas", "pavadinimas"),
+        ("pvm_kodas", "pvm_kodas"),
+        ("iban", "ibans"),
+        ("adresas", "address"),
+        ("salies_kodas", "country_iso"),
+        ("fizinis_asmuo", "is_person"),
+        ("kodas_programoje", "kodas_programoje"),
+    ]
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Klientai"
+    ws.append([col_name for col_name, _ in COLUMNS])
+
+    for c in qs:
+        row = []
+        for col_name, field in COLUMNS:
+            val = getattr(c, field, "") or ""
+            if field == "is_person":
+                val = "Taip" if val else ""
+            row.append(val)
+        ws.append(row)
+
+    response = HttpResponse(
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+    response["Content-Disposition"] = 'attachment; filename="klientu_eksportas.xlsx"'
+    wb.save(response)
+    return response
+
+
+# --- Удалить всех клиентов ---
+@api_view(["DELETE"])
+@permission_classes([IsAuthenticated])
+def delete_all_clients_view(request):
+    count, _ = ClientAutocomplete.objects.filter(
+        user=request.user, source="imported"
+    ).delete()
+    return Response({"deleted": count})
+
+
+# --- Счётчик клиентов ---
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def clients_count_view(request):
+    count = ClientAutocomplete.objects.filter(
+        user=request.user, source="imported"
+    ).count()
+    return Response({"count": count})
+
+
+
 
 
 

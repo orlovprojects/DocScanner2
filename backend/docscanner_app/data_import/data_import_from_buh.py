@@ -85,76 +85,76 @@ def _norm_preke_paslauga(value) -> str:
 
 
 def import_products_from_xlsx(user, file):
-    """
-    Importuoja prekes iš XLSX.
-    Palaikomas naujas stulpelis 'preke_paslauga_kodas' (nebūtinas).
-    """
     imported = 0
+    updated = 0
+    skipped_empty = 0
+    skipped_duplicate = 0
     total = 0
+    errors = []
+
     try:
         rows = _get_xlsx_rows(file, required_fields=["prekes_kodas", "prekes_pavadinimas"])
     except Exception as e:
         return {"error": str(e)}
 
+    seen_codes = set()
+
     with transaction.atomic():
-        for data in rows:
+        for row_num, data in enumerate(rows, start=2):
             total += 1
-            if not (data.get('prekes_kodas') or data.get('prekes_pavadinimas')):
-                continue
 
             prekes_kodas = (data.get('prekes_kodas') or '').strip()
-            # dublikatai pagal prekes_kodas
-            if prekes_kodas and ProductAutocomplete.objects.filter(user=user, prekes_kodas=prekes_kodas).exists():
+            prekes_pavadinimas = (data.get('prekes_pavadinimas') or '').strip()
+
+            # ── Валидация обязательных полей ──
+            missing = []
+            if not prekes_pavadinimas:
+                missing.append("prekes_pavadinimas")
+            if not prekes_kodas:
+                missing.append("prekes_kodas")
+            if missing:
+                skipped_empty += 1
+                errors.append(f"Eilutė {row_num}: trūksta {', '.join(missing)}")
                 continue
+
+            # ── Дубликат внутри файла ──
+            if prekes_kodas in seen_codes:
+                skipped_duplicate += 1
+                errors.append(f"Eilutė {row_num}: kodas '{prekes_kodas}' kartojasi faile")
+                continue
+            seen_codes.add(prekes_kodas)
 
             preke_paslauga = _norm_preke_paslauga(data.get('preke_paslauga_kodas'))
 
-            ProductAutocomplete.objects.create(
-                user=user,
-                prekes_kodas=prekes_kodas,
+            field_values = dict(
+                prekes_pavadinimas=prekes_pavadinimas,
                 prekes_barkodas=(data.get('prekes_barkodas') or '').strip(),
-                prekes_pavadinimas=(data.get('prekes_pavadinimas') or '').strip(),
                 preke_paslauga=preke_paslauga,
-
-                prekes_tipas=(data.get('prekes_tipas') or '').strip(),
-                sandelio_kodas=(data.get('sandelio_kodas') or '').strip(),
-                sandelio_pavadinimas=(data.get('sandelio_pavadinimas') or '').strip(),
-                objekto_kodas=(data.get('objekto_kodas') or '').strip(),
-                objekto_pavadinimas=(data.get('objekto_pavadinimas') or '').strip(),
-                padalinio_kodas=(data.get('padalinio_kodas') or '').strip(),
-                padalinio_pavadinimas=(data.get('padalinio_pavadinimas') or '').strip(),
-                mokescio_kodas=(data.get('mokescio_kodas') or '').strip(),
-                mokescio_pavadinimas=(data.get('mokescio_pavadinimas') or '').strip(),
-                atsakingo_asmens_kodas=(data.get('atsakingo_asmens_kodas') or '').strip(),
-                atsakingo_asmens_pavadinimas=(data.get('atsakingo_asmens_pavadinimas') or '').strip(),
-                operacijos_kodas=(data.get('operacijos_kodas') or '').strip(),
-                operacijos_pavadinimas=(data.get('operacijos_pavadinimas') or '').strip(),
-                islaidu_straipsnio_kodas=(data.get('islaidu_straipsnio_kodas') or '').strip(),
-                islaidu_straipsnio_pavadinimas=(data.get('islaidu_straipsnio_pavadinimas') or '').strip(),
-                pvm_kodas=(data.get('pvm_kodas') or '').strip(),
-                pvm_pavadinimas=(data.get('pvm_pavadinimas') or '').strip(),
-                tipo_kodas=(data.get('tipo_kodas') or '').strip(),
-                tipo_pavadinimas=(data.get('tipo_pavadinimas') or '').strip(),
-                zurnalo_kodas=(data.get('zurnalo_kodas') or '').strip(),
-                zurnalo_pavadinimas=(data.get('zurnalo_pavadinimas') or '').strip(),
-                projekto_kodas=(data.get('projekto_kodas') or '').strip(),
-                projekto_pavadinimas=(data.get('projekto_pavadinimas') or '').strip(),
-                projekto_vadovo_kodas=(data.get('projekto_vadovo_kodas') or '').strip(),
-                projekto_vadovo_pavadinimas=(data.get('projekto_vadovo_pavadinimas') or '').strip(),
-                skyrio_kodas=(data.get('skyrio_kodas') or '').strip(),
-                skyrio_pavadinimas=(data.get('skyrio_pavadinimas') or '').strip(),
-                partijos_nr_kodas=(data.get('partijos_nr_kodas') or '').strip(),
-                partijos_nr_pavadinimas=(data.get('partijos_nr_pavadinimas') or '').strip(),
-                korespondencijos_kodas=(data.get('korespondencijos_kodas') or '').strip(),
-                korespondencijos_pavadinimas=(data.get('korespondencijos_pavadinimas') or '').strip(),
-                serijos_kodas=(data.get('serijos_kodas') or '').strip(),
-                serijos_pavadinimas=(data.get('serijos_pavadinimas') or '').strip(),
-                centro_kodas=(data.get('centro_kodas') or '').strip(),
-                centro_pavadinimas=(data.get('centro_pavadinimas') or '').strip(),
             )
-            imported += 1
 
-    return {"imported": imported, "processed": total}
+            existing = ProductAutocomplete.objects.filter(
+                user=user, prekes_kodas=prekes_kodas
+            ).first()
+
+            if existing:
+                for attr, val in field_values.items():
+                    setattr(existing, attr, val)
+                existing.save()
+                updated += 1
+            else:
+                ProductAutocomplete.objects.create(
+                    user=user, prekes_kodas=prekes_kodas, **field_values
+                )
+                imported += 1
+
+    return {
+        "imported": imported,
+        "updated": updated,
+        "skipped_empty": skipped_empty,
+        "skipped_duplicate": skipped_duplicate,
+        "processed": total,
+        "errors": errors,
+    }
 
 
 def _norm_fizinis_asmuo(value) -> bool:
@@ -166,8 +166,11 @@ def _norm_fizinis_asmuo(value) -> bool:
 
 def import_clients_from_xlsx(user, file):
     imported = 0
-    skipped = 0
+    updated = 0
+    skipped_empty = 0
+    skipped_duplicate = 0
     errors = []
+
     try:
         rows = _get_xlsx_rows(file, required_fields=["kodas", "pavadinimas"])
     except Exception as e:
@@ -179,50 +182,77 @@ def import_clients_from_xlsx(user, file):
         for row_num, data in enumerate(rows, start=2):
             name = (data.get('pavadinimas') or '').strip()
             code = (data.get('kodas') or '').strip()
+            pvm = (data.get('pvm_kodas') or '').strip()
 
-            if not (code or name):
+            # ── Валидация обязательных полей ──
+            missing = []
+            if not name:
+                missing.append("pavadinimas")
+            if not code:
+                missing.append("kodas")
+            if missing:
+                skipped_empty += 1
+                errors.append(f"Eilutė {row_num}: trūksta {', '.join(missing)}")
                 continue
 
-            # дубликат внутри файла
-            if code and code in seen_codes:
-                skipped += 1
-                errors.append(f"Eilute {row_num}: kodas '{code}' kartojasi faile")
+            # ── Дубликат внутри файла ──
+            if code in seen_codes:
+                skipped_duplicate += 1
+                errors.append(f"Eilutė {row_num}: kodas '{code}' kartojasi faile")
                 continue
-            if code:
-                seen_codes.add(code)
-
-            # дубликат в БД
-            if code and ClientAutocomplete.objects.filter(user=user, imones_kodas=code).exists():
-                skipped += 1
-                errors.append(f"Eilute {row_num}: kodas '{code}' jau egzistuoja")
-                continue
+            seen_codes.add(code)
 
             country = (data.get('salies_kodas') or '').strip().upper()
             if len(country) != 2 or not country.isalpha():
                 country = "LT"
 
+            field_values = dict(
+                pavadinimas=name,
+                is_person=_norm_fizinis_asmuo(data.get('fizinis_asmuo')),
+                pvm_kodas=pvm,
+                ibans=(data.get('iban') or '').strip(),
+                address=(data.get('adresas') or '').strip(),
+                country_iso=country,
+                kodas_programoje=(data.get('kodas_programoje') or '').strip(),
+                name_normalized=normalize_name(name),
+            )
+
+            # ── Upsert ──
+            existing = None
+            if code:
+                existing = ClientAutocomplete.objects.filter(
+                    user=user, imones_kodas=code, source="imported"
+                ).first()
+            if not existing and pvm:
+                existing = ClientAutocomplete.objects.filter(
+                    user=user, pvm_kodas=pvm, source="imported"
+                ).first()
+
             try:
-                ClientAutocomplete.objects.create(
-                    user=user,
-                    imones_kodas=code,
-                    pavadinimas=name,
-                    is_person=_norm_fizinis_asmuo(data.get('fizinis_asmuo')),
-                    pvm_kodas=(data.get('pvm_kodas') or '').strip(),
-                    ibans=(data.get('iban') or '').strip(),
-                    address=(data.get('adresas') or '').strip(),
-                    country_iso=country,
-                    source="imported",
-                    doc_count=0,
-                    name_normalized=normalize_name(name),
-                )
-                imported += 1
+                if existing:
+                    for attr, val in field_values.items():
+                        setattr(existing, attr, val)
+                    if code:
+                        existing.imones_kodas = code
+                    existing.save()
+                    updated += 1
+                else:
+                    ClientAutocomplete.objects.create(
+                        user=user,
+                        imones_kodas=code,
+                        source="imported",
+                        doc_count=0,
+                        **field_values,
+                    )
+                    imported += 1
             except Exception as e:
-                errors.append(f"Eilute {row_num}: {str(e)}")
+                errors.append(f"Eilutė {row_num}: {str(e)}")
 
     return {
         "imported": imported,
-        "skipped": skipped,
+        "updated": updated,
+        "skipped_empty": skipped_empty,
+        "skipped_duplicate": skipped_duplicate,
         "processed": len(rows),
         "errors": errors,
     }
-

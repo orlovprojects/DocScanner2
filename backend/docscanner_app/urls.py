@@ -59,6 +59,12 @@ from .views import (
     VeiklosZurnalasGenerateView,
     VeiklosZurnalasExportView,
     NewsletterSendView,
+    export_products_view,
+    delete_all_products_view,
+    products_count_view,
+    export_clients_view,
+    delete_all_clients_view,
+    clients_count_view,
 )
 from .views import (
     counterparty_list_create,
@@ -198,6 +204,13 @@ urlpatterns = [
 
     path('data/import-products/', import_products_view, name='import_products_view'),
     path('data/import-clients/', import_clients_view, name='import_clients_view'),
+
+    path("data/export-products/", views.export_products_view),
+    path("data/delete-products/", views.delete_all_products_view),
+    path("data/products-count/", views.products_count_view),
+    path("data/export-clients/", views.export_clients_view),
+    path("data/delete-clients/", views.delete_all_clients_view),
+    path("data/clients-count/", views.clients_count_view),
 
 
     path('scanned-documents/<int:pk>/extra-fields/', update_scanned_document_extra_fields, name="update_scanned_document_extra_fields"),

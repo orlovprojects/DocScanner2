@@ -2867,6 +2867,9 @@ import DeleteOutlineIcon from "@mui/icons-material/DeleteOutline";
 import Autocomplete from "@mui/material/Autocomplete";
 import PlayCircleIcon from "@mui/icons-material/PlayCircle";
 import CloseIcon from "@mui/icons-material/Close";
+import DownloadIcon from "@mui/icons-material/Download";
+import UploadFileIcon from "@mui/icons-material/UploadFile";
+import FileUploadIcon from "@mui/icons-material/FileUpload";
 import { Dialog, DialogTitle, DialogContent } from "@mui/material";
 import { api } from "../api/endpoints";
 import { COUNTRY_OPTIONS } from "../page_elements/Countries";
@@ -2906,13 +2909,49 @@ const SUPPORTS_KODAS_TIPAS_PROGRAMS = ["rivile", "rivile_gama_api"];
 const supportsKodasTipas = (program) =>
   SUPPORTS_KODAS_TIPAS_PROGRAMS.includes(program);
 
+const irasaiLabel = (n) => {
+  if (n % 100 >= 11 && n % 100 <= 19) return "įrašų";
+  const last = n % 10;
+  if (last === 1) return "įrašas";
+  if (last >= 2 && last <= 9) return "įrašai";
+  return "įrašų";
+};
+
 /** ===== Reusable: import tab for XLSX ===== */
-function ImportTab({ label, url, templateFileName, videoUrl }) {
+function ImportTab({
+  label,
+  url,
+  templateFileName,
+  videoUrl,
+  exportUrl,
+  deleteUrl,
+  deleteConfirmText,
+  exportTooltip,
+  deleteTooltip,
+  countUrl,
+  upsertHint,
+}) {
   const [file, setFile] = useState(null);
   const [result, setResult] = useState(null);
-  const [error,   setError] = useState(null);
+  const [error, setError] = useState(null);
+  const [deleting, setDeleting] = useState(false);
+  const [recordCount, setRecordCount] = useState(null);
   const [videoOpen, setVideoOpen] = useState(false);
-  const inputRef  = React.useRef(null);
+  const inputRef = React.useRef(null);
+
+  const fetchCount = useCallback(async () => {
+    if (!countUrl) return;
+    try {
+      const { data } = await api.get(countUrl, { withCredentials: true });
+      setRecordCount(data?.count ?? null);
+    } catch {
+      /* ignore */
+    }
+  }, [countUrl]);
+
+  useEffect(() => {
+    fetchCount();
+  }, [fetchCount]);
 
   const handleFile = (e) => {
     setFile(e.target.files[0] || null);
@@ -2931,79 +2970,231 @@ function ImportTab({ label, url, templateFileName, videoUrl }) {
       });
       if (data?.error) {
         setError(data.error);
-        setResult({ imported: 0, processed: 0 });
+        setResult(null);
       } else {
-        setResult({
-          imported: Number(data?.imported) || 0,
-          processed: Number(data?.processed) || 0,
-        });
+        setResult(data);
         setError(null);
+        fetchCount();
       }
     } catch (err) {
       setError(err?.response?.data?.error || "Importo klaida");
-      setResult({ imported: 0, processed: 0 });
+      setResult(null);
     } finally {
       if (inputRef.current) inputRef.current.value = "";
       setFile(null);
     }
   };
 
-  const extractErrorMessage = (e, fallback) => {
-    const data = e?.response?.data;
-    let msg = data?.detail || data?.non_field_errors || data?.error || fallback;
-    if (Array.isArray(msg)) msg = msg.join(", ");
-    if (typeof msg === "object") {
-      try { msg = JSON.stringify(msg); } catch { msg = fallback; }
+  const handleExport = async () => {
+      try {
+        const response = await api.get(exportUrl, {
+          withCredentials: true,
+          responseType: "blob",
+        });
+        const blob = new Blob([response.data], {
+          type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        });
+        const link = document.createElement("a");
+        link.href = URL.createObjectURL(blob);
+        link.download = exportUrl.includes("product") ? "prekes_eksportas.xlsx" : "klientu_eksportas.xlsx";
+        link.click();
+        URL.revokeObjectURL(link.href);
+      } catch (err) {
+        alert(err?.response?.data?.error || "Eksporto klaida");
+      }
+    };
+
+  const handleDeleteAll = async () => {
+    if (!window.confirm(deleteConfirmText || "Ar tikrai norite ištrinti visus įrašus?")) return;
+    setDeleting(true);
+    try {
+      const { data } = await api.delete(deleteUrl, { withCredentials: true });
+      setResult(null);
+      setError(null);
+      setRecordCount(0);
+      alert(`Ištrinta įrašų: ${data?.deleted ?? 0}`);
+    } catch (err) {
+      alert(err?.response?.data?.error || "Klaida trinant įrašus");
+    } finally {
+      setDeleting(false);
     }
-    return String(msg || fallback);
   };
 
   const handleDownloadTemplate = () =>
-    window.open(`/templates/${templateFileName || "klientu_sablonas.xlsx"}`, "_blank");
+    window.open(`/templates/${templateFileName || "sablonas.xlsx"}`, "_blank");
 
   return (
-    <Paper sx={{ p: 2, mb: 2 }}>
-      <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 1 }}>
-        <Typography variant="subtitle1">{label}</Typography>
-        {videoUrl && (
-          <Typography
-            component="span"
-            variant="caption"
-            onClick={() => setVideoOpen(true)}
-            sx={{
-              display: "flex", alignItems: "center", gap: 0.5,
-              color: "text.secondary", textDecoration: "none", cursor: "pointer",
-              fontWeight: 600, "&:hover": { textDecoration: "underline" },
-            }}
-          >
-            <PlayCircleIcon sx={{ fontSize: 20, color: "error.main" }} />
-            Video instrukcija
-          </Typography>
+    <Paper sx={{ p: 3, mb: 2, borderRadius: 3 }}>
+      {/* ── Header ── */}
+      <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", mb: 2.5 }}>
+        <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+          <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>{label}</Typography>
+          {videoUrl && (
+            <Typography
+              component="span"
+              variant="caption"
+              onClick={() => setVideoOpen(true)}
+              sx={{
+                display: "flex", alignItems: "center", gap: 0.5,
+                color: "text.secondary", textDecoration: "none", cursor: "pointer",
+                fontWeight: 600, "&:hover": { textDecoration: "underline" },
+              }}
+            >
+              <PlayCircleIcon sx={{ fontSize: 20, color: "error.main" }} />
+              Video instrukcija
+            </Typography>
+          )}
+        </Box>
+        {recordCount !== null && (
+          <Chip
+            label={`${recordCount} ${irasaiLabel(recordCount)}`}
+            size="small"
+            variant="outlined"
+            sx={{ fontWeight: 600 }}
+          />
         )}
       </Box>
 
-      <Stack direction="row" spacing={2} alignItems="center" sx={{ mb: 2 }}>
-        <Button variant="outlined" component="label">
-          Pasirinkite failą
-          <input type="file" accept=".xlsx" hidden ref={inputRef} onChange={handleFile} />
-        </Button>
-        <Typography variant="body2">
-          {file ? file.name : "Niekas nepasirinkta"}
+      {/* ── Upload zone ── */}
+      <Box
+        onClick={() => inputRef.current?.click()}
+        sx={{
+          border: "2px dashed",
+          borderColor: file ? "primary.main" : "divider",
+          borderRadius: 2,
+          p: 3,
+          textAlign: "center",
+          backgroundColor: file
+            ? (theme) => alpha(theme.palette.primary.main, 0.04)
+            : "grey.50",
+          transition: "all 0.2s",
+          "&:hover": {
+            borderColor: "primary.light",
+            backgroundColor: (theme) => alpha(theme.palette.primary.main, 0.04),
+          },
+          cursor: "pointer",
+          mb: 1.5,
+        }}
+      >
+        <input type="file" accept=".xlsx" hidden ref={inputRef} onChange={handleFile} />
+        {file ? (
+          <>
+            <UploadFileIcon sx={{ fontSize: 36, color: "primary.main", mb: 0.5 }} />
+            <Typography variant="body2" sx={{ fontWeight: 600, color: "primary.main" }}>
+              {file.name}
+            </Typography>
+            <Typography variant="caption" sx={{ color: "text.secondary" }}>
+              Paspauskite „Importuoti" arba pasirinkite kitą failą
+            </Typography>
+          </>
+        ) : (
+          <>
+            <FileUploadIcon sx={{ fontSize: 36, color: "text.disabled", mb: 0.5 }} />
+            <Typography variant="body2" sx={{ fontWeight: 500, color: "text.secondary" }}>
+              Pasirinkite Excel failą (.xlsx)
+            </Typography>
+            <Typography variant="caption" sx={{ color: "text.disabled" }}>
+              Paspauskite čia arba nutempkite failą
+            </Typography>
+          </>
+        )}
+      </Box>
+
+      {upsertHint && (
+        <Typography variant="caption" sx={{ color: "text.secondary", display: "block", mb: 2 }}>
+          💡 {upsertHint}
         </Typography>
+      )}
+
+      {/* ── Actions ── */}
+      <Stack direction="row" spacing={1.5} alignItems="center" sx={{ flexWrap: "wrap", gap: 1 }}>
+        <Button
+          variant="contained"
+          disabled={!file}
+          onClick={handleImport}
+          size="small"
+          startIcon={file ? <FileUploadIcon /> : undefined}
+          sx={file ? {
+            backgroundColor: "#EAF3DE",
+            color: "#3B6D11",
+            border: "1.5px solid #97C459",
+            boxShadow: "none",
+            "&:hover": { backgroundColor: "#C0DD97", boxShadow: "none" },
+          } : {}}
+        >
+          Importuoti
+        </Button>
+
+        <Button
+          variant="outlined"
+          size="small"
+          onClick={handleDownloadTemplate}
+          startIcon={<DownloadIcon />}
+        >
+          Šablonas
+        </Button>
+
+        {exportUrl && (
+          <Tooltip title={exportTooltip || "Eksportuoti visus įrašus"}>
+            <Button
+              variant="outlined"
+              size="small"
+              onClick={handleExport}
+              startIcon={<DownloadIcon />}
+            >
+              Eksportuoti
+            </Button>
+          </Tooltip>
+        )}
+
+        {deleteUrl && (
+          <Tooltip title={deleteTooltip || "Ištrinti visus įrašus"}>
+            <Button
+              variant="outlined"
+              size="small"
+              color="error"
+              onClick={handleDeleteAll}
+              disabled={deleting}
+              startIcon={<DeleteOutlineIcon />}
+            >
+              Ištrinti visus
+            </Button>
+          </Tooltip>
+        )}
       </Stack>
 
-      <Button variant="contained" disabled={!file} onClick={handleImport}>Importuoti</Button>
-      <Button variant="outlined" size="small" sx={{ ml: 2 }} onClick={handleDownloadTemplate}>
-        Atsisiųsti Excel šabloną
-      </Button>
-
+      {/* ── Feedback ── */}
       {result && (
         <Alert severity="success" sx={{ mt: 2 }}>
-          Importuota įrašų: {result?.imported ?? 0} iš {result?.processed ?? 0}
+          <Box>
+            <Typography variant="body2" sx={{ fontWeight: 600 }}>
+              Apdorota eilučių: {result.processed ?? 0}
+            </Typography>
+            <Typography variant="body2">
+              ✅ Importuota naujų: {result.imported ?? 0}
+              {(result.updated ?? 0) > 0 && <> · 🔄 Atnaujinta: {result.updated}</>}
+              {(result.skipped_empty ?? 0) > 0 && (
+                <> · ⚠️ Praleista (nepilni duomenys): {result.skipped_empty}</>
+              )}
+              {(result.skipped_duplicate ?? 0) > 0 && (
+                <> · ⚠️ Praleista (dublikatai faile): {result.skipped_duplicate}</>
+              )}
+            </Typography>
+            {result.errors?.length > 0 && (
+              <Box sx={{ mt: 1, maxHeight: 120, overflowY: "auto" }}>
+                {result.errors.map((err, i) => (
+                  <Typography key={i} variant="caption" sx={{ display: "block", color: "warning.dark" }}>
+                    {err}
+                  </Typography>
+                ))}
+              </Box>
+            )}
+          </Box>
         </Alert>
       )}
       {error && <Alert severity="error" sx={{ mt: 2 }}>{error}</Alert>}
 
+      {/* ── Video dialog ── */}
       {videoUrl && (
         <Dialog open={videoOpen} onClose={() => setVideoOpen(false)} maxWidth="md" fullWidth disableScrollLock>
           <DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
@@ -5136,10 +5327,33 @@ export default function NustatymaiPage() {
           <Tab label="Prekės" /><Tab label="Įmonės" />
         </Tabs>
         {importTab === 0 && (
-          <ImportTab label="Importuoti prekes iš Excel" url="/data/import-products/" templateFileName="prekes_sablonas.xlsx" />
+          <ImportTab
+            label="Importuoti prekes iš Excel"
+            url="/data/import-products/"
+            templateFileName="prekes_sablonas.xlsx"
+            countUrl="/data/products-count/"
+            exportUrl="/data/export-products/"
+            deleteUrl="/data/delete-products/"
+            exportTooltip="Eksportuoti visas prekes"
+            deleteTooltip="Ištrinti visas prekes"
+            deleteConfirmText="Ar tikrai norite ištrinti visas prekes?"
+            upsertHint="Dublikatai atpažįstami pagal prekės kodą. Jei kodas jau yra duomenų bazėje, įrašas bus atnaujintas"
+          />
         )}
         {importTab === 1 && (
-          <ImportTab label="Importuoti įmones iš Excel" url="/data/import-clients/" templateFileName="klientu_sablonas.xlsx" videoUrl="https://www.youtube.com/embed/15v1CgS0Eaw" />
+          <ImportTab
+            label="Importuoti įmones iš Excel"
+            url="/data/import-clients/"
+            templateFileName="klientu_sablonas.xlsx"
+            videoUrl="https://www.youtube.com/embed/15v1CgS0Eaw"
+            countUrl="/data/clients-count/"
+            exportUrl="/data/export-clients/"
+            deleteUrl="/data/delete-clients/"
+            exportTooltip="Eksportuoti visus klientus"
+            deleteTooltip="Ištrinti visus klientus"
+            deleteConfirmText="Ar tikrai norite ištrinti visus importuotus klientus?"
+            upsertHint="Jei faile yra klientas su tuo pačiu įmonės kodu arba PVM kodu, įrašo duomenys bus atnaujinti"
+          />
         )}
       </Box>
 
