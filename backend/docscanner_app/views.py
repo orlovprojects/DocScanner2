@@ -3480,7 +3480,7 @@ def export_products_view(request):
         ("prekes_pavadinimas*", "prekes_pavadinimas"),
         ("prekes_kodas*", "prekes_kodas"),
         ("prekes_barkodas", "prekes_barkodas"),
-        ("preke_paslauga_kodas", "preke_paslauga"),
+        ("preke_paslauga_kodas* (galimos reikšmės: 1, 2, 3, 4)", "preke_paslauga"),
     ]
 
     wb = Workbook()
@@ -3491,9 +3491,17 @@ def export_products_view(request):
     for col_idx, (col_name, _) in enumerate(COLUMNS, start=1):
         cell = ws.cell(row=1, column=col_idx, value=col_name)
         cell.font = bold
+        ws.column_dimensions[cell.column_letter].width = max(len(col_name) + 4, 18)
 
     for p in qs:
-        ws.append([getattr(p, field, "") or "" for _, field in COLUMNS])
+        row = []
+        for _, field in COLUMNS:
+            val = getattr(p, field, None)
+            if val is None or str(val).strip() in ("", "None", "0"):
+                row.append("")
+            else:
+                row.append(str(val).strip())
+        ws.append(row)
 
     response = HttpResponse(
         content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -3523,33 +3531,43 @@ def products_count_view(request):
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 def export_clients_view(request):
+    from openpyxl.styles import Font
+
     qs = ClientAutocomplete.objects.filter(
         user=request.user, source="imported"
     ).order_by("pavadinimas")
 
     COLUMNS = [
-        ("kodas", "imones_kodas"),
-        ("pavadinimas", "pavadinimas"),
-        ("pvm_kodas", "pvm_kodas"),
-        ("iban", "ibans"),
-        ("adresas", "address"),
-        ("salies_kodas", "country_iso"),
-        ("fizinis_asmuo", "is_person"),
-        ("kodas_programoje", "kodas_programoje"),
+        ("Pavadinimas*", "pavadinimas"),
+        ("Kodas*", "imones_kodas"),
+        ("Fizinis_asmuo*", "is_person"),
+        ("PVM_kodas", "pvm_kodas"),
+        ("IBAN", "ibans"),
+        ("Adresas", "address"),
+        ("Salies_kodas*", "country_iso"),
+        ("Kodas_programoje", "kodas_programoje"),
     ]
 
     wb = Workbook()
     ws = wb.active
     ws.title = "Klientai"
-    ws.append([col_name for col_name, _ in COLUMNS])
+
+    bold = Font(bold=True)
+    for col_idx, (col_name, _) in enumerate(COLUMNS, start=1):
+        cell = ws.cell(row=1, column=col_idx, value=col_name)
+        cell.font = bold
+        ws.column_dimensions[cell.column_letter].width = max(len(col_name) + 4, 18)
 
     for c in qs:
         row = []
-        for col_name, field in COLUMNS:
-            val = getattr(c, field, "") or ""
+        for _, field in COLUMNS:
+            val = getattr(c, field, None)
             if field == "is_person":
-                val = "Taip" if val else ""
-            row.append(val)
+                row.append("Taip" if val else "")
+            elif val is None or str(val).strip() in ("", "None"):
+                row.append("")
+            else:
+                row.append(str(val).strip())
         ws.append(row)
 
     response = HttpResponse(

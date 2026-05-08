@@ -2938,6 +2938,38 @@ function ImportTab({
   const [recordCount, setRecordCount] = useState(null);
   const [videoOpen, setVideoOpen] = useState(false);
   const inputRef = React.useRef(null);
+  const [dragging, setDragging] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [deleteResult, setDeleteResult] = useState(null);
+
+    const handleDragOver = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+    };
+
+    const handleDragEnter = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setDragging(true);
+    };
+
+    const handleDragLeave = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setDragging(false);
+    };
+
+    const handleDrop = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setDragging(false);
+      const droppedFile = e.dataTransfer.files?.[0];
+      if (droppedFile && droppedFile.name.endsWith(".xlsx")) {
+        setFile(droppedFile);
+        setResult(null);
+        setError(null);
+      }
+    };
 
   const fetchCount = useCallback(async () => {
     if (!countUrl) return;
@@ -3005,16 +3037,17 @@ function ImportTab({
     };
 
   const handleDeleteAll = async () => {
-    if (!window.confirm(deleteConfirmText || "Ar tikrai norite ištrinti visus įrašus?")) return;
+    setDeleteDialogOpen(false);
     setDeleting(true);
+    setDeleteResult(null);
     try {
       const { data } = await api.delete(deleteUrl, { withCredentials: true });
       setResult(null);
       setError(null);
       setRecordCount(0);
-      alert(`Ištrinta įrašų: ${data?.deleted ?? 0}`);
+      setDeleteResult({ success: true, count: data?.deleted ?? 0 });
     } catch (err) {
-      alert(err?.response?.data?.error || "Klaida trinant įrašus");
+      setDeleteResult({ success: false, msg: err?.response?.data?.error || "Klaida trinant įrašus" });
     } finally {
       setDeleting(false);
     }
@@ -3058,13 +3091,19 @@ function ImportTab({
       {/* ── Upload zone ── */}
       <Box
         onClick={() => inputRef.current?.click()}
+        onDragOver={handleDragOver}
+        onDragEnter={handleDragEnter}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
         sx={{
           border: "2px dashed",
-          borderColor: file ? "primary.main" : "divider",
+          borderColor: dragging ? "primary.main" : file ? "primary.main" : "divider",
           borderRadius: 2,
           p: 3,
           textAlign: "center",
-          backgroundColor: file
+          backgroundColor: dragging
+            ? (theme) => alpha(theme.palette.primary.main, 0.08)
+            : file
             ? (theme) => alpha(theme.palette.primary.main, 0.04)
             : "grey.50",
           transition: "all 0.2s",
@@ -3089,9 +3128,9 @@ function ImportTab({
           </>
         ) : (
           <>
-            <FileUploadIcon sx={{ fontSize: 36, color: "text.disabled", mb: 0.5 }} />
-            <Typography variant="body2" sx={{ fontWeight: 500, color: "text.secondary" }}>
-              Pasirinkite Excel failą (.xlsx)
+            <FileUploadIcon sx={{ fontSize: 36, color: dragging ? "primary.main" : "text.disabled", mb: 0.5 }} />
+            <Typography variant="body2" sx={{ fontWeight: 500, color: dragging ? "primary.main" : "text.secondary" }}>
+              {dragging ? "Paleiskite failą čia" : "Pasirinkite Excel failą (.xlsx)"}
             </Typography>
             <Typography variant="caption" sx={{ color: "text.disabled" }}>
               Paspauskite čia arba nutempkite failą
@@ -3153,7 +3192,7 @@ function ImportTab({
               variant="outlined"
               size="small"
               color="error"
-              onClick={handleDeleteAll}
+              onClick={() => setDeleteDialogOpen(true)}
               disabled={deleting}
               startIcon={<DeleteOutlineIcon />}
             >
@@ -3193,6 +3232,16 @@ function ImportTab({
         </Alert>
       )}
       {error && <Alert severity="error" sx={{ mt: 2 }}>{error}</Alert>}
+      {deleteResult?.success && (
+        <Alert severity="success" sx={{ mt: 2 }}>
+          Ištrinta įrašų: {deleteResult.count}
+        </Alert>
+      )}
+      {deleteResult && !deleteResult.success && (
+        <Alert severity="error" sx={{ mt: 2 }}>
+          {deleteResult.msg}
+        </Alert>
+      )}
 
       {/* ── Video dialog ── */}
       {videoUrl && (
@@ -3217,6 +3266,38 @@ function ImportTab({
           </DialogContent>
         </Dialog>
       )}
+      <Dialog
+        open={deleteDialogOpen}
+        onClose={() => setDeleteDialogOpen(false)}
+        maxWidth="xs"
+        fullWidth
+        disableScrollLock
+      >
+        <DialogTitle sx={{ pb: 1 }}>Patvirtinkite ištrynimą</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" sx={{ color: "text.secondary" }}>
+            {deleteConfirmText || "Ar tikrai norite ištrinti visus įrašus? Šis veiksmas negrįžtamas."}
+          </Typography>
+        </DialogContent>
+        <Box sx={{ display: "flex", justifyContent: "flex-end", gap: 1, px: 3, pb: 2 }}>
+          <Button
+            variant="outlined"
+            size="small"
+            onClick={() => setDeleteDialogOpen(false)}
+          >
+            Atšaukti
+          </Button>
+          <Button
+            variant="contained"
+            size="small"
+            color="error"
+            onClick={handleDeleteAll}
+            startIcon={<DeleteOutlineIcon />}
+          >
+            Ištrinti
+          </Button>
+        </Box>
+      </Dialog>
     </Paper>
   );
 }

@@ -22,6 +22,9 @@ def _get_xlsx_rows(file, required_fields):
     # 2) normalizacija
     def norm(h: str) -> str:
         h = (h or "").strip()
+        if '(' in h:
+            h = h[:h.index('(')]
+        h = h.strip()                 
         if h.endswith("*"):
             h = h[:-1]
         return h.strip().lower()
@@ -64,7 +67,7 @@ def _norm_preke_paslauga(value) -> str:
     s_num = s.replace(",", ".")
     try:
         n = int(float(s_num))
-        if n in (1, 2, 3):
+        if n in (1, 2, 3, 4):
             return str(n)
     except ValueError:
         pass
@@ -106,12 +109,15 @@ def import_products_from_xlsx(user, file):
             prekes_kodas = (data.get('prekes_kodas') or '').strip()
             prekes_pavadinimas = (data.get('prekes_pavadinimas') or '').strip()
 
-            # ── Валидация обязательных полей ──
+            preke_paslauga = _norm_preke_paslauga(data.get('preke_paslauga_kodas'))
+
             missing = []
             if not prekes_pavadinimas:
                 missing.append("prekes_pavadinimas")
             if not prekes_kodas:
                 missing.append("prekes_kodas")
+            if not preke_paslauga:
+                missing.append("preke_paslauga_kodas")
             if missing:
                 skipped_empty += 1
                 errors.append(f"Eilutė {row_num}: trūksta {', '.join(missing)}")
@@ -157,11 +163,21 @@ def import_products_from_xlsx(user, file):
     }
 
 
-def _norm_fizinis_asmuo(value) -> bool:
+def _norm_fizinis_asmuo(value):
+    """
+    Grąžina True, False arba None (jei tuščia/neatpažinta).
+    Priima: Taip/Ne, True/False, 1/0, Yes/No, T/N, F ir t.t.
+    """
     if value is None:
-        return False
+        return None
     s = str(value).strip().lower()
-    return s in ("taip", "true", "1", "yes", "t")
+    if not s:
+        return None
+    if s in ("taip", "true", "1", "yes", "t"):
+        return True
+    if s in ("ne", "false", "0", "no", "n", "f"):
+        return False
+    return None  # neatpažinta reikšmė
 
 
 def import_clients_from_xlsx(user, file):
@@ -183,6 +199,7 @@ def import_clients_from_xlsx(user, file):
             name = (data.get('pavadinimas') or '').strip()
             code = (data.get('kodas') or '').strip()
             pvm = (data.get('pvm_kodas') or '').strip()
+            fizinis = _norm_fizinis_asmuo(data.get('fizinis_asmuo'))
 
             # ── Валидация обязательных полей ──
             missing = []
@@ -190,6 +207,15 @@ def import_clients_from_xlsx(user, file):
                 missing.append("pavadinimas")
             if not code:
                 missing.append("kodas")
+            if fizinis is None:
+                missing.append("fizinis_asmuo")
+
+            country = (data.get('salies_kodas') or '').strip().upper()
+            if len(country) != 2 or not country.isalpha():
+                country = ""
+            if not country:
+                missing.append("salies_kodas")
+
             if missing:
                 skipped_empty += 1
                 errors.append(f"Eilutė {row_num}: trūksta {', '.join(missing)}")
@@ -202,13 +228,9 @@ def import_clients_from_xlsx(user, file):
                 continue
             seen_codes.add(code)
 
-            country = (data.get('salies_kodas') or '').strip().upper()
-            if len(country) != 2 or not country.isalpha():
-                country = "LT"
-
             field_values = dict(
                 pavadinimas=name,
-                is_person=_norm_fizinis_asmuo(data.get('fizinis_asmuo')),
+                is_person=fizinis,
                 pvm_kodas=pvm,
                 ibans=(data.get('iban') or '').strip(),
                 address=(data.get('adresas') or '').strip(),
