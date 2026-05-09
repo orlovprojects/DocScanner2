@@ -286,6 +286,14 @@ const PROGRAM_FIELDS_CONFIG = {
     description: "Nurodykite numatytuosius sandėlio, korespondencijos schemos ir projekto kodus.",
     sections: [
       {
+        title: "DK sąskaitos",
+        fullWidth: true,
+        fields: [
+          { key: "sumos_deb_saskaita", label: "Debetinė sąskaita" },
+          { key: "sumos_kred_saskaita", label: "Kreditinė sąskaita" },
+        ],
+      },
+      {
         title: "Pirkimams",
         fields: [
           { key: "pirkimas_sandelis", label: "Sandėlis" },
@@ -501,12 +509,12 @@ function ProfileEditDialog({ open, onClose, programKey, editData, onSaved }) {
         {/* Поля программы — 2 колонки: Pirkimas / Pardavimas */}
         <Grid2 container spacing={3}>
           {config.sections.map((section) => (
-            <Grid2 key={section.title} size={{ xs: 12, md: 6 }}>
+            <Grid2 key={section.title} size={{ xs: 12, md: section.fullWidth ? 12 : 6 }}>
               <Typography variant="subtitle1" sx={{ mb: 1, fontWeight: 500 }}>
                 {section.title}
               </Typography>
-              <Stack spacing={1.5}>
-                {section.fields.map((f) => {
+                <Stack spacing={1.5} direction={section.fullWidth ? { xs: "column", sm: "row" } : "column"}>
+                  {section.fields.map((f) => {
                   const selectOptions = SELECT_FIELDS[f.key];
                   if (selectOptions) {
                     return (
@@ -922,11 +930,11 @@ export default function ExtraFieldsManager({ program, videoUrl }) {
         <Box sx={{ p: 2, backgroundColor: "white" }}>
           <Grid2 container spacing={3}>
             {config.sections.map((section) => (
-              <Grid2 key={section.title} size={{ xs: 12, md: 6 }}>
+              <Grid2 key={section.title} size={{ xs: 12, md: section.fullWidth ? 12 : 6 }}>
                 <Typography variant="subtitle1" sx={{ mb: 1, fontWeight: 500 }}>
                   {section.title}
                 </Typography>
-                <Stack spacing={1.5}>
+                <Stack spacing={1.5} direction={section.fullWidth ? { xs: "column", sm: "row" } : "column"}>
                   {section.fields.map((f) => {
                     const selectOptions = SELECT_FIELDS[f.key];
                     if (selectOptions) {

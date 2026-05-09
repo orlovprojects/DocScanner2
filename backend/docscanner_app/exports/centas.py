@@ -269,6 +269,31 @@ def _distribute_discount_to_centas_lines(document: ScannedDocument, items_list: 
 
         setattr(item, "_centas_price_after_discount", str(price_after))
 
+def _ensure_credit_sign(value, document):
+    """Для кредитных SF: если сумма положительная — делаем отрицательной."""
+    if getattr(document, 'is_credit_invoice', None) is not True:
+        return value
+    if value is None:
+        return value
+    try:
+        from decimal import Decimal
+        d = Decimal(str(value))
+        return -abs(d) if d > 0 else d
+    except Exception:
+        return value
+
+def _ensure_credit_abs_price(value, document):
+    """Для кредитных SF: цена всегда положительная (abs)."""
+    if getattr(document, 'is_credit_invoice', None) is not True:
+        return value
+    if value is None:
+        return value
+    try:
+        from decimal import Decimal
+        return abs(Decimal(str(value)))
+    except Exception:
+        return value
+
 
 # =========================
 # PVM Kodas helpers
@@ -374,9 +399,9 @@ def export_document_to_centras_xml(
 
     ET.SubElement(dok, 'data').text = format_date(invoice_date)
 
-    ET.SubElement(dok, 'dok_suma').text = get_price_or_zero(getattr(document, "amount_with_vat", None))
-    ET.SubElement(dok, 'pvm_suma').text = get_price_or_zero(getattr(document, "vat_amount", None))
-    ET.SubElement(dok, 'bepvm_suma').text = get_price_or_zero(getattr(document, "amount_wo_vat", None))
+    ET.SubElement(dok, 'dok_suma').text = get_price_or_zero(_ensure_credit_sign(getattr(document, "amount_with_vat", None), document))
+    ET.SubElement(dok, 'pvm_suma').text = get_price_or_zero(_ensure_credit_sign(getattr(document, "vat_amount", None), document))
+    ET.SubElement(dok, 'bepvm_suma').text = get_price_or_zero(_ensure_credit_sign(getattr(document, "amount_wo_vat", None), document))
 
     currency = (getattr(document, "currency", "") or "EUR").upper()
     ET.SubElement(dok, 'dok_val').text = smart_str(currency)
@@ -433,12 +458,13 @@ def export_document_to_centras_xml(
             ET.SubElement(eilute, "pavadinimas").text = smart_str(getattr(item, "prekes_pavadinimas", None) or "PIRKIMAS")
             ET.SubElement(eilute, "matovnt").text = smart_str(getattr(item, "unit", None) or "vnt")
             q = getattr(item, "quantity", None)
-            ET.SubElement(eilute, "kiekis").text = _fmt_qty(q if q is not None else 1)
+            q = q if q is not None else 1
+            ET.SubElement(eilute, "kiekis").text = _fmt_qty(_ensure_credit_sign(q, document))
 
             price_to_use = getattr(item, "_centas_price_after_discount", None)
             if price_to_use is None:
                 price_to_use = getattr(item, "price", None)
-            ET.SubElement(eilute, "kaina").text = get_price_or_zero(price_to_use)
+            ET.SubElement(eilute, "kaina").text = get_price_or_zero(_ensure_credit_abs_price(price_to_use, document))
 
             ET.SubElement(eilute, "pvmtar").text = vat_to_int_str(getattr(item, "vat_percent", None))
 
@@ -459,8 +485,8 @@ def export_document_to_centras_xml(
         ET.SubElement(eilute, "kodas").text = smart_str(code_val)
         ET.SubElement(eilute, "pavadinimas").text = smart_str(getattr(document, "prekes_pavadinimas", None) or "PIRKIMAS")
         ET.SubElement(eilute, "matovnt").text = "vnt"
-        ET.SubElement(eilute, "kiekis").text = _fmt_qty(1)
-        ET.SubElement(eilute, "kaina").text = get_price_or_zero(getattr(document, "amount_wo_vat", None))
+        ET.SubElement(eilute, "kiekis").text = _fmt_qty(_ensure_credit_sign(1, document))
+        ET.SubElement(eilute, "kaina").text = get_price_or_zero(_ensure_credit_abs_price(getattr(document, "amount_wo_vat", None), document))
         ET.SubElement(eilute, "pvmtar").text = vat_to_int_str(getattr(document, "vat_percent", None))
 
         mok_code = _get_pvm_kodas_for_doc(document, default="")

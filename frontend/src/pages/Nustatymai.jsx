@@ -3836,6 +3836,8 @@ export default function NustatymaiPage() {
 
   // --- Pragma 3 ---
   const [pragma3Fields, setPragma3Fields] = useState({
+    sumos_deb_saskaita: "",
+    sumos_kred_saskaita: "",
     pirkimas_sandelis: "",
     pirkimas_korespondencija: "",
     pirkimas_projektas: "",
@@ -4082,6 +4084,8 @@ export default function NustatymaiPage() {
 
       const pragma3 = data.pragma3_extra_fields || {};
       setPragma3Fields({
+        sumos_deb_saskaita: pragma3.sumos_deb_saskaita || "",
+        sumos_kred_saskaita: pragma3.sumos_kred_saskaita || "",
         pirkimas_sandelis: pragma3.pirkimas_sandelis || "",
         pirkimas_korespondencija: pragma3.pirkimas_korespondencija || "",
         pirkimas_projektas: pragma3.pirkimas_projektas || "",

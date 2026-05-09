@@ -1807,6 +1807,40 @@ export function AccountingProgramExtraSettings(props) {
           Nurodykite numatytuosius sandėlio, korespondencijos schemos ir projekto kodus pirkimams ir pardavimams.
         </Typography>
 
+        {/* DK sąskaitos — bendri laukai */}
+        <Grid2 container spacing={2} sx={{ mb: 3 }}>
+          <Grid2 size={{ xs: 12, md: 6 }}>
+            <TextField
+              label="Debetinė sąskaita"
+              size="small"
+              value={pragma3Fields.sumos_deb_saskaita}
+              onChange={(e) =>
+                setPragma3Fields((prev) => ({
+                  ...prev,
+                  sumos_deb_saskaita: e.target.value,
+                }))
+              }
+              fullWidth
+              helperText="Sumos deb. sąskaita (laukas 12)"
+            />
+          </Grid2>
+          <Grid2 size={{ xs: 12, md: 6 }}>
+            <TextField
+              label="Kreditinė sąskaita"
+              size="small"
+              value={pragma3Fields.sumos_kred_saskaita}
+              onChange={(e) =>
+                setPragma3Fields((prev) => ({
+                  ...prev,
+                  sumos_kred_saskaita: e.target.value,
+                }))
+              }
+              fullWidth
+              helperText="Sumos kred. sąskaita (laukas 13)"
+            />
+          </Grid2>
+        </Grid2>
+
         <Grid2 container spacing={3}>
           {/* Pirkimas */}
           <Grid2 size={{ xs: 12, md: 6 }}>
@@ -1920,7 +1954,7 @@ export function AccountingProgramExtraSettings(props) {
         </Stack>
       </Paper>
     );
-  }  
+  }
 
   // ---------- Site.pro ----------
   if (program === "site_pro") {

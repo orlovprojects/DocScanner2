@@ -202,6 +202,20 @@ def _get_preke_paslauga(value) -> str:
         pass
     return "0"
 
+def _ensure_credit_sign(value, doc):
+    """
+    Для кредитных SF: если сумма положительная — делаем отрицательной.
+    Если уже отрицательная или обычная SF — не трогаем.
+    """
+    if getattr(doc, 'is_credit_invoice', None) is not True:
+        return value
+    if value is None:
+        return value
+    try:
+        d = Decimal(str(value))
+        return -abs(d) if d > 0 else d
+    except Exception:
+        return value
 
 # =========================
 # PVM Kodas helpers
@@ -334,6 +348,17 @@ def _get_document_number(doc) -> str:
         return f"{series}{number}"
 
     return number or ""
+
+
+def _get_grazinimo_pozymis(doc) -> int:
+    """
+    Grąžinimo dok. požymis:
+    0 — grąžinimas (kreditinė SF)
+    1 — normalus dokumentas (обычная SF, debetinė SF)
+    """
+    if getattr(doc, 'is_credit_invoice', None) is True:
+        return 0
+    return 1
 
 
 # =========================
@@ -645,9 +670,9 @@ def _export_documents(documents, doc_type_filter, user, company_id_map, own_comp
         note = _s(getattr(doc, 'preview_url', ''))
         
         # Суммы
-        amount_with_vat = getattr(doc, 'amount_with_vat', None)
-        vat_amount = getattr(doc, 'vat_amount', None)
-        amount_wo_vat = getattr(doc, 'amount_wo_vat', None)
+        amount_with_vat = _ensure_credit_sign(getattr(doc, 'amount_with_vat', None), doc)
+        vat_amount = _ensure_credit_sign(getattr(doc, 'vat_amount', None), doc)
+        amount_wo_vat = _ensure_credit_sign(getattr(doc, 'amount_wo_vat', None), doc)
         
         total_with_vat = _format_decimal(amount_with_vat)
         vat_sum = _format_decimal(vat_amount)
@@ -676,7 +701,7 @@ def _export_documents(documents, doc_type_filter, user, company_id_map, own_comp
         line = _build_line(
             doc_id,                    # 1. Dokumento ID
             doc_type,                  # 2. Dokumento tipas
-            1,                         # 3. Grąžinimo dok. požymis (всегда 1)
+            _get_grazinimo_pozymis(doc),  # 3. Grąžinimo dok. požymis (0=grąžinimas, 1=normalus)
             _format_date(op_date),     # 4. Dokumento data
             _format_date(inv_date),    # 5. Sąskaitos išrašymo data
             doc_number[:35],           # 6. Dokumento numeris (max 35)
@@ -758,9 +783,9 @@ def _export_document_items(documents, doc_type_filter, user, product_id_map, own
                 product_numeric_id = product_id_map.get(product_code, "")
                 
                 quantity = _format_decimal(getattr(item, 'quantity', 1))
-                price = _format_decimal(getattr(item, 'price', 0))
+                price = _format_decimal(_ensure_credit_sign(getattr(item, 'price', 0), doc))
                 vat_percent = _s(getattr(item, 'vat_percent', 0)).replace('%', '').strip()
-                vat_sum = _format_decimal(getattr(item, 'vat', 0))
+                vat_sum = _format_decimal(_ensure_credit_sign(getattr(item, 'vat', 0), doc))
                 
                 if is_foreign_currency:
                     price_currency = price
@@ -784,8 +809,8 @@ def _export_document_items(documents, doc_type_filter, user, product_id_map, own
                     price_currency,         # 9. Kaina be PVM valiuta
                     vat_sum_currency,       # 10. PVM suma valiuta
                     "0",                    # 11. Nuolaidos suma valiuta
-                    "",                     # 12. Sumos deb. sąskaita
-                    "",                     # 13. Sumos kred. sąskaita
+                    _s(pragma3_fields.get('sumos_deb_saskaita', '')),   # 12. Sumos deb. sąskaita
+                    _s(pragma3_fields.get('sumos_kred_saskaita', '')),  # 13. Sumos kred. sąskaita
                     "",                     # 14. Savikainos deb. sąskaita
                     "",                     # 15. Savikainos kred. sąskaita
                     pvm_kodas[:6],          # 16. PVM kodas i.SAF (max 6)
@@ -801,14 +826,14 @@ def _export_document_items(documents, doc_type_filter, user, product_id_map, own
             product_numeric_id = product_id_map.get(product_code, "")
             
             quantity = "1.00"
-            price = _format_decimal(getattr(doc, 'amount_wo_vat', 0))
+            price = _format_decimal(_ensure_credit_sign(getattr(doc, 'amount_wo_vat', 0), doc))
             
             if separate_vat:
                 vat_percent = ""
             else:
                 vat_percent = _s(getattr(doc, 'vat_percent', 0)).replace('%', '').strip()
             
-            vat_sum = _format_decimal(getattr(doc, 'vat_amount', 0))
+            vat_sum = _format_decimal(_ensure_credit_sign(getattr(doc, 'vat_amount', 0), doc))
             
             if is_foreign_currency:
                 price_currency = price
@@ -832,8 +857,8 @@ def _export_document_items(documents, doc_type_filter, user, product_id_map, own
                 price_currency,         # 9. Kaina be PVM valiuta
                 vat_sum_currency,       # 10. PVM suma valiuta
                 "0",                    # 11. Nuolaidos suma valiuta
-                "",                     # 12. Sumos deb. sąskaita
-                "",                     # 13. Sumos kred. sąskaita
+                _s(pragma3_fields.get('sumos_deb_saskaita', '')),   # 12. Sumos deb. sąskaita
+                _s(pragma3_fields.get('sumos_kred_saskaita', '')),  # 13. Sumos kred. sąskaita
                 "",                     # 14. Savikainos deb. sąskaita
                 "",                     # 15. Savikainos kred. sąskaita
                 pvm_kodas[:6],          # 16. PVM kodas i.SAF (max 6)

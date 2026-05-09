@@ -609,23 +609,13 @@ def export_documents(request):
         if not invoices.exists():
             return Response({"error": "No invoices found"}, status=404)
 
-        # --- Block isankstine and kreditine ---
-        blocked = invoices.filter(invoice_type__in=["isankstine", "kreditine"])
+        # --- Block isankstine ---
+        blocked = invoices.filter(invoice_type__in=["isankstine"])
         if blocked.exists():
-            blocked_types = list(
-                blocked.values_list("invoice_type", flat=True).distinct()
-            )
-            msgs = []
-            if "isankstine" in blocked_types:
-                msgs.append(
-                    "Isankstines saskaitos negali buti eksportuojamos. "
-                    "Konvertuokite i SF arba PVM SF."
-                )
-            if "kreditine" in blocked_types:
-                msgs.append(
-                    "Kreditiniu saskaitu eksportas kol kas nepalaikomas."
-                )
-            return Response({"error": " ".join(msgs)}, status=400)
+            return Response({
+                "error": "Išankstinės sąskaitos negali būti eksportuojamos. "
+                         "Konvertuokite į SF arba PVM SF."
+            }, status=400)
 
         # --- Only issued/sent/paid ---
         not_ready = invoices.exclude(status__in=["issued", "sent", "paid"])
