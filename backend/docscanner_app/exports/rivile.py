@@ -178,6 +178,17 @@ def _safe_D(x):
     except Exception:
         return Decimal("0")
 
+def _abs_if_credit(value, doc):
+    """Для кредитных SF: суммы положительные (Rivile определяет возврат по OP_TIP)."""
+    if getattr(doc, 'is_credit_invoice', None) is not True:
+        return value
+    if value is None:
+        return value
+    try:
+        return abs(Decimal(str(value)))
+    except Exception:
+        return value
+
 
 def compute_global_invoice_discount_pct(doc):
     """
@@ -1010,7 +1021,7 @@ def export_pirkimai_group_to_rivile(documents, user, own_company_code=None):
         i06 = ET.Element("I06")
         currency = getattr(doc, 'currency', 'EUR') or 'EUR'
         op_date = getattr(doc, 'operation_date', None) or getattr(doc, 'invoice_date', None)
-        ET.SubElement(i06, "I06_OP_TIP").text = "1"
+        ET.SubElement(i06, "I06_OP_TIP").text = "2" if getattr(doc, 'is_credit_invoice', None) is True else "1"
 
         series = _s(getattr(doc, "document_series", "") or "")
         number = _s(getattr(doc, "document_number", "") or "")
@@ -1047,9 +1058,14 @@ def export_pirkimai_group_to_rivile(documents, user, own_company_code=None):
                     getattr(doc, "pk", None), seller_code, dok_num, currency, merge_vat)
 
         ET.SubElement(i06, "I06_DOK_REG").text = rivile_str(dok_num)
-        code_isaf = _pick_isaf_for_purchase(doc)
-        if code_isaf == "12":
-            ET.SubElement(i06, "I06_ISAF").text = "12"
+        if getattr(doc, 'is_credit_invoice', None) is True:
+            ET.SubElement(i06, "I06_ISAF").text = "5"
+        elif getattr(doc, 'is_debit_invoice', None) is True:
+            ET.SubElement(i06, "I06_ISAF").text = "2"
+        else:
+            code_isaf = _pick_isaf_for_purchase(doc)
+            if code_isaf == "12":
+                ET.SubElement(i06, "I06_ISAF").text = "12"
 
         ET.SubElement(i06, "I06_APRASYMAS1").text = rivile_str(getattr(doc, 'preview_url', '') or '')
 
@@ -1072,9 +1088,8 @@ def export_pirkimai_group_to_rivile(documents, user, own_company_code=None):
                 ET.SubElement(i07, "I07_TIPAS").text = rivile_str(tipas)
 
                 if merge_vat:
-                    # === merge_vat: цена gross (netto + PVM/qty), PVM=0 ===
-                    price_wo = _safe_D(getattr(item, "price", 0) or 0)
-                    vat_line = _safe_D(getattr(item, "vat", 0) or 0)
+                    price_wo = _safe_D(_abs_if_credit(getattr(item, "price", 0) or 0, doc))
+                    vat_line = _safe_D(_abs_if_credit(getattr(item, "vat", 0) or 0, doc))
                     qty_dec = _safe_D(getattr(item, "quantity", 1) or 1)
                     unit_vat = (vat_line / qty_dec) if qty_dec != 0 else Decimal("0")
                     gross_price = (price_wo + unit_vat).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
@@ -1102,15 +1117,15 @@ def export_pirkimai_group_to_rivile(documents, user, own_company_code=None):
                 else:
                     # === обычный режим (без merge_vat) ===
                     if currency.upper() == "EUR":
-                        ET.SubElement(i07, "I07_KAINA_BE").text = rivile_str(get_price_or_zero(getattr(item, "price", None)))
+                        ET.SubElement(i07, "I07_KAINA_BE").text = rivile_str(get_price_or_zero(_abs_if_credit(getattr(item, "price", None), doc)))
                         if discount_pct is None:
-                            ET.SubElement(i07, "I07_PVM").text  = rivile_str(get_price_or_zero(getattr(item, "vat", None)))
-                            ET.SubElement(i07, "I07_SUMA").text = rivile_str(get_price_or_zero(getattr(item, "subtotal", None)))
+                            ET.SubElement(i07, "I07_PVM").text  = rivile_str(get_price_or_zero(_abs_if_credit(getattr(item, "vat", None), doc)))
+                            ET.SubElement(i07, "I07_SUMA").text = rivile_str(get_price_or_zero(_abs_if_credit(getattr(item, "subtotal", None), doc)))
                     else:
-                        ET.SubElement(i07, "I07_VAL_KAINA").text = rivile_str(get_price_or_zero(getattr(item, "price", None)))
+                        ET.SubElement(i07, "I07_VAL_KAINA").text = rivile_str(get_price_or_zero(_abs_if_credit(getattr(item, "price", None), doc)))
                         if discount_pct is None:
-                            ET.SubElement(i07, "I07_PVM_VAL").text  = rivile_str(get_price_or_zero(getattr(item, "vat", None)))
-                            ET.SubElement(i07, "I07_SUMA_VAL").text = rivile_str(get_price_or_zero(getattr(item, "subtotal", None)))
+                            ET.SubElement(i07, "I07_PVM_VAL").text  = rivile_str(get_price_or_zero(_abs_if_credit(getattr(item, "vat", None), doc)))
+                            ET.SubElement(i07, "I07_SUMA_VAL").text = rivile_str(get_price_or_zero(_abs_if_credit(getattr(item, "subtotal", None), doc)))
 
                     if discount_pct is not None:
                         ET.SubElement(i07, "I07_NUOLAIDA").text = rivile_str(f"{discount_pct:.2f}")
@@ -1136,8 +1151,8 @@ def export_pirkimai_group_to_rivile(documents, user, own_company_code=None):
 
             if merge_vat:
                 # === merge_vat: sumiskai (без строк) ===
-                amount_wo = _safe_D(getattr(doc, "amount_wo_vat", None) or 0)
-                vat_amount = _safe_D(getattr(doc, "vat_amount", None) or 0)
+                amount_wo = _safe_D(_abs_if_credit(getattr(doc, "amount_wo_vat", None) or 0, doc))
+                vat_amount = _safe_D(_abs_if_credit(getattr(doc, "vat_amount", None) or 0, doc))
                 gross_total = (amount_wo + vat_amount).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
                 if currency.upper() == "EUR":
@@ -1160,15 +1175,15 @@ def export_pirkimai_group_to_rivile(documents, user, own_company_code=None):
             else:
                 # === обычный режим (без merge_vat) ===
                 if currency.upper() == "EUR":
-                    ET.SubElement(i07, "I07_KAINA_BE").text = rivile_str(get_price_or_zero(getattr(doc, "amount_wo_vat", None)))
+                    ET.SubElement(i07, "I07_KAINA_BE").text = rivile_str(get_price_or_zero(_abs_if_credit(getattr(doc, "amount_wo_vat", None), doc)))
                     if discount_pct is None:
-                        ET.SubElement(i07, "I07_PVM").text  = rivile_str(get_price_or_zero(getattr(doc, "vat_amount", None)))
-                        ET.SubElement(i07, "I07_SUMA").text = rivile_str(get_price_or_zero(getattr(doc, "amount_wo_vat", None)))
+                        ET.SubElement(i07, "I07_PVM").text  = rivile_str(get_price_or_zero(_abs_if_credit(getattr(doc, "vat_amount", None), doc)))
+                        ET.SubElement(i07, "I07_SUMA").text = rivile_str(get_price_or_zero(_abs_if_credit(getattr(doc, "amount_wo_vat", None), doc)))
                 else:
-                    ET.SubElement(i07, "I07_VAL_KAINA").text = rivile_str(get_price_or_zero(getattr(doc, "amount_wo_vat", None)))
+                    ET.SubElement(i07, "I07_VAL_KAINA").text  = rivile_str(get_price_or_zero(_abs_if_credit(getattr(doc, "amount_wo_vat", None), doc)))
                     if discount_pct is None:
-                        ET.SubElement(i07, "I07_PVM_VAL").text  = rivile_str(get_price_or_zero(getattr(doc, "vat_amount", None)))
-                        ET.SubElement(i07, "I07_SUMA_VAL").text = rivile_str(get_price_or_zero(getattr(doc, "amount_wo_vat", None)))
+                        ET.SubElement(i07, "I07_PVM_VAL").text    = rivile_str(get_price_or_zero(_abs_if_credit(getattr(doc, "vat_amount", None), doc)))
+                        ET.SubElement(i07, "I07_SUMA_VAL").text   = rivile_str(get_price_or_zero(_abs_if_credit(getattr(doc, "amount_wo_vat", None), doc)))
 
                 if discount_pct is not None:
                     ET.SubElement(i07, "I07_NUOLAIDA").text = rivile_str(f"{discount_pct:.2f}")
@@ -1244,6 +1259,10 @@ def export_pardavimai_group_to_rivile(documents, user, own_company_code=None):
                     getattr(doc, "pk", None), buyer_code, dok_num, currency, merge_vat)
 
         ET.SubElement(i06, "I06_DOK_REG").text = rivile_str(dok_num)
+        if getattr(doc, 'is_credit_invoice', None) is True:
+            ET.SubElement(i06, "I06_ISAF").text = "5"
+        elif getattr(doc, 'is_debit_invoice', None) is True:
+            ET.SubElement(i06, "I06_ISAF").text = "2"
         ET.SubElement(i06, "I06_APRASYMAS1").text = rivile_str(getattr(doc, 'preview_url', '') or '')
 
         _apply_header_extras(i06, user, direction="pardavimas", own_company_code=own_company_code)
@@ -1266,8 +1285,8 @@ def export_pardavimai_group_to_rivile(documents, user, own_company_code=None):
 
                 if merge_vat:
                     # === merge_vat: цена gross (netto + PVM/qty), PVM=0 ===
-                    price_wo = _safe_D(getattr(item, "price", 0) or 0)
-                    vat_line = _safe_D(getattr(item, "vat", 0) or 0)
+                    price_wo = _safe_D(_abs_if_credit(getattr(item, "price", 0) or 0, doc))
+                    vat_line = _safe_D(_abs_if_credit(getattr(item, "vat", 0) or 0, doc))
                     qty_dec = _safe_D(getattr(item, "quantity", 1) or 1)
                     unit_vat = (vat_line / qty_dec) if qty_dec != 0 else Decimal("0")
                     gross_price = (price_wo + unit_vat).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
@@ -1295,15 +1314,15 @@ def export_pardavimai_group_to_rivile(documents, user, own_company_code=None):
                 else:
                     # === обычный режим (без merge_vat) ===
                     if currency.upper() == "EUR":
-                        ET.SubElement(i07, "I07_KAINA_BE").text = rivile_str(get_price_or_zero(getattr(item, "price", None)))
+                        ET.SubElement(i07, "I07_KAINA_BE").text = rivile_str(get_price_or_zero(_abs_if_credit(getattr(item, "price", None), doc)))
                         if discount_pct is None:
-                            ET.SubElement(i07, "I07_PVM").text  = rivile_str(get_price_or_zero(getattr(item, "vat", None)))
-                            ET.SubElement(i07, "I07_SUMA").text = rivile_str(get_price_or_zero(getattr(item, "subtotal", None)))
+                            ET.SubElement(i07, "I07_PVM").text  = rivile_str(get_price_or_zero(_abs_if_credit(getattr(item, "vat", None), doc)))
+                            ET.SubElement(i07, "I07_SUMA").text = rivile_str(get_price_or_zero(_abs_if_credit(getattr(item, "subtotal", None), doc)))
                     else:
-                        ET.SubElement(i07, "I07_VAL_KAINA").text  = rivile_str(get_price_or_zero(getattr(item, "price", None)))
+                        ET.SubElement(i07, "I07_VAL_KAINA").text  = rivile_str(get_price_or_zero(_abs_if_credit(getattr(item, "price", None), doc)))
                         if discount_pct is None:
-                            ET.SubElement(i07, "I07_PVM_VAL").text    = rivile_str(get_price_or_zero(getattr(item, "vat", None)))
-                            ET.SubElement(i07, "I07_SUMA_VAL").text   = rivile_str(get_price_or_zero(getattr(item, "subtotal", None)))
+                            ET.SubElement(i07, "I07_PVM_VAL").text    = rivile_str(get_price_or_zero(_abs_if_credit(getattr(item, "vat", None), doc)))
+                            ET.SubElement(i07, "I07_SUMA_VAL").text   = rivile_str(get_price_or_zero(_abs_if_credit(getattr(item, "subtotal", None), doc)))
 
                     if discount_pct is not None:
                         ET.SubElement(i07, "I07_NUOLAIDA").text = rivile_str(f"{discount_pct:.2f}")
@@ -1330,8 +1349,8 @@ def export_pardavimai_group_to_rivile(documents, user, own_company_code=None):
 
             if merge_vat:
                 # === merge_vat: sumiskai (без строк) ===
-                amount_wo = _safe_D(getattr(doc, "amount_wo_vat", None) or 0)
-                vat_amount = _safe_D(getattr(doc, "vat_amount", None) or 0)
+                amount_wo = _safe_D(_abs_if_credit(getattr(doc, "amount_wo_vat", None) or 0, doc))
+                vat_amount = _safe_D(_abs_if_credit(getattr(doc, "vat_amount", None) or 0, doc))
                 gross_total = (amount_wo + vat_amount).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
                 if currency.upper() == "EUR":
@@ -1354,15 +1373,15 @@ def export_pardavimai_group_to_rivile(documents, user, own_company_code=None):
             else:
                 # === обычный режим (без merge_vat) ===
                 if currency.upper() == "EUR":
-                    ET.SubElement(i07, "I07_KAINA_BE").text = rivile_str(get_price_or_zero(getattr(doc, "amount_wo_vat", None)))
+                    ET.SubElement(i07, "I07_KAINA_BE").text = rivile_str(get_price_or_zero(_abs_if_credit(getattr(doc, "amount_wo_vat", None), doc)))
                     if discount_pct is None:
-                        ET.SubElement(i07, "I07_PVM").text  = rivile_str(get_price_or_zero(getattr(doc, "vat_amount", None)))
-                        ET.SubElement(i07, "I07_SUMA").text = rivile_str(get_price_or_zero(getattr(doc, "amount_wo_vat", None)))
+                        ET.SubElement(i07, "I07_PVM").text  = rivile_str(get_price_or_zero(_abs_if_credit(getattr(doc, "vat_amount", None), doc)))
+                        ET.SubElement(i07, "I07_SUMA").text = rivile_str(get_price_or_zero(_abs_if_credit(getattr(doc, "amount_wo_vat", None), doc)))
                 else:
-                    ET.SubElement(i07, "I07_VAL_KAINA").text  = rivile_str(get_price_or_zero(getattr(doc, "amount_wo_vat", None)))
+                    ET.SubElement(i07, "I07_VAL_KAINA").text  = rivile_str(get_price_or_zero(_abs_if_credit(getattr(doc, "amount_wo_vat", None), doc)))
                     if discount_pct is None:
-                        ET.SubElement(i07, "I07_PVM_VAL").text    = rivile_str(get_price_or_zero(getattr(doc, "vat_amount", None)))
-                        ET.SubElement(i07, "I07_SUMA_VAL").text   = rivile_str(get_price_or_zero(getattr(doc, "amount_wo_vat", None)))
+                        ET.SubElement(i07, "I07_PVM_VAL").text    = rivile_str(get_price_or_zero(_abs_if_credit(getattr(doc, "vat_amount", None), doc)))
+                        ET.SubElement(i07, "I07_SUMA_VAL").text   = rivile_str(get_price_or_zero(_abs_if_credit(getattr(doc, "amount_wo_vat", None), doc)))
 
                 if discount_pct is not None:
                     ET.SubElement(i07, "I07_NUOLAIDA").text = rivile_str(f"{discount_pct:.2f}")
