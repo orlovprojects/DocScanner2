@@ -107,6 +107,17 @@ def _safe_D(x: Any) -> Decimal:
         return Decimal(str(x))
     except Exception:
         return Decimal("0")
+    
+
+def _abs_if_credit(value, doc):
+    if getattr(doc, 'is_credit_invoice', None) is not True:
+        return value
+    if value is None:
+        return value
+    try:
+        return abs(Decimal(str(value)))
+    except Exception:
+        return value
 
 
 def safe_excel_text(value: Optional[str]) -> str:
@@ -857,7 +868,11 @@ def export_documents_to_rivile_erp_xlsx(
         )
         set_cell_date(ws_headers, header_row, HeaderCols.INV_DATE, getattr(doc, "invoice_date", None))
         ws_headers.cell(row=header_row, column=HeaderCols.DOC_NO, value=safe_excel_text(ref_id))
-        ws_headers.cell(row=header_row, column=HeaderCols.DOC_TYPE, value=0)
+        ws_headers.cell(
+            row=header_row,
+            column=HeaderCols.DOC_TYPE,
+            value=1 if getattr(doc, 'is_credit_invoice', None) is True else 0,
+        )
 
         if user_journal:
             zurnalo_kodas = user_journal
@@ -911,8 +926,8 @@ def export_documents_to_rivile_erp_xlsx(
 
                 if merge_vat:
                     qty_dec = _safe_D(qty_val)
-                    price_wo = _safe_D(getattr(item, "price", 0) or 0)
-                    vat_line = _safe_D(getattr(item, "vat", 0) or 0)
+                    price_wo = _safe_D(_abs_if_credit(getattr(item, "price", 0) or 0, doc))
+                    vat_line = _safe_D(_abs_if_credit(getattr(item, "vat", 0) or 0, doc))
 
                     unit_vat = (vat_line / qty_dec) if qty_dec != 0 else Decimal("0")
                     price_gross = price_wo + unit_vat
@@ -925,12 +940,12 @@ def export_documents_to_rivile_erp_xlsx(
                     ws_lines.cell(row=line_idx, column=LineCols.VAT_CODE, value="")
                     set_cell_money(ws_lines, line_idx, LineCols.VAT_AMOUNT, 0)
                 else:
-                    set_cell_price(ws_lines, line_idx, LineCols.PRICE, getattr(item, "price", None) or 0)
+                    set_cell_price(ws_lines, line_idx, LineCols.PRICE, _abs_if_credit(getattr(item, "price", None) or 0, doc))
 
                     if discount_pct is not None:
                         ws_lines.cell(row=line_idx, column=LineCols.DISCOUNT_PCT, value=float(discount_pct))
                     else:
-                        set_cell_money(ws_lines, line_idx, LineCols.VAT_AMOUNT, getattr(item, "vat", None) or 0)
+                        set_cell_money(ws_lines, line_idx, LineCols.VAT_AMOUNT, _abs_if_credit(getattr(item, "vat", None) or 0, doc))
 
                     pvm_code = _get_pvm_kodas_for_export(doc, item=item, line_map=line_map)
                     ws_lines.cell(row=line_idx, column=LineCols.VAT_CODE, value=safe_excel_text(pvm_code))
@@ -976,8 +991,8 @@ def export_documents_to_rivile_erp_xlsx(
 
             set_cell_qty(ws_lines, line_idx, LineCols.QTY, getattr(doc, "quantity", None) or 1)
 
-            amount_wo = _safe_D(getattr(doc, "amount_wo_vat", None) or 0)
-            vat_amount = _safe_D(getattr(doc, "vat_amount", None) or 0)
+            amount_wo = _safe_D(_abs_if_credit(getattr(doc, "amount_wo_vat", None) or 0, doc))
+            vat_amount = _safe_D(_abs_if_credit(getattr(doc, "vat_amount", None) or 0, doc))
 
             if merge_vat:
                 amount_gross = amount_wo + vat_amount

@@ -1233,7 +1233,7 @@ def export_pardavimai_group_to_rivile(documents, user, own_company_code=None):
         else:
             discount_pct = compute_global_invoice_discount_pct(doc)
 
-        ET.SubElement(i06, "I06_OP_TIP").text = "51"
+        ET.SubElement(i06, "I06_OP_TIP").text = "52" if getattr(doc, 'is_credit_invoice', None) is True else "51"
         if currency.upper() != "EUR":
             ET.SubElement(i06, "I06_VAL_POZ").text = "1"
             ET.SubElement(i06, "I06_KODAS_VL").text = rivile_str(currency.upper())

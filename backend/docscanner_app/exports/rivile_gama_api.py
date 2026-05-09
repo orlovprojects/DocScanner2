@@ -41,6 +41,7 @@ from .rivile import (
     _get_pvm_kodas_for_doc,
     _pick_isaf_for_purchase,
     _scale_qty,
+    _abs_if_credit,
 )
 
 logger = logging.getLogger("docscanner_app")
@@ -781,13 +782,13 @@ def build_i06_full_payload(doc, direction: str, user=None, merge_vat: bool = Fal
             doc, role="seller", id_field="seller_id",
             vat_field="seller_vat_code", id_programoje_field="seller_id_programoje",
         )
-        op_tip = "1"
+        op_tip = "2" if getattr(doc, 'is_credit_invoice', None) is True else "1"
     else:
         party_code = get_party_code(
             doc, role="buyer", id_field="buyer_id",
             vat_field="buyer_vat_code", id_programoje_field="buyer_id_programoje",
         )
-        op_tip = "51"
+        op_tip = "52" if getattr(doc, 'is_credit_invoice', None) is True else "51"
 
     # ─── Шапка I06 ───
     i06 = {
@@ -831,7 +832,11 @@ def build_i06_full_payload(doc, direction: str, user=None, merge_vat: bool = Fal
         i06["I06_KODAS_LS_1"] = log
 
     # i.SAF
-    if direction == "pirkimas":
+    if getattr(doc, 'is_credit_invoice', None) is True:
+        i06["I06_ISAF"] = "5"
+    elif getattr(doc, 'is_debit_invoice', None) is True:
+        i06["I06_ISAF"] = "2"
+    elif direction == "pirkimas":
         code_isaf = _pick_isaf_for_purchase(doc)
         if code_isaf == "12":
             i06["I06_ISAF"] = "12"
@@ -895,8 +900,8 @@ def _build_i07(doc, item, currency, direction, user, extras, prefix,
 
     # Цены и суммы
     if merge_vat:
-        price_wo = _safe_D(getattr(item, "price", 0) or 0)
-        vat_line = _safe_D(getattr(item, "vat", 0) or 0)
+        price_wo = _safe_D(_abs_if_credit(getattr(item, "price", 0) or 0, doc))
+        vat_line = _safe_D(_abs_if_credit(getattr(item, "vat", 0) or 0, doc))
         qty_dec = _safe_D(getattr(item, "quantity", 1) or 1)
         unit_vat = (vat_line / qty_dec) if qty_dec != 0 else Decimal("0")
         gross_price = (price_wo + unit_vat).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
@@ -918,13 +923,13 @@ def _build_i07(doc, item, currency, direction, user, extras, prefix,
         i07["I07_KODAS_KL"] = ""
     else:
         price_field = "I07_KAINA_BE" if currency == "EUR" else "I07_VAL_KAINA"
-        i07[price_field] = _to_decimal_str(getattr(item, "price", 0))
+        i07[price_field] = _to_decimal_str(_abs_if_credit(getattr(item, "price", 0), doc))
 
         if discount_pct is None:
             pvm_field = "I07_PVM" if currency == "EUR" else "I07_PVM_VAL"
             suma_field = "I07_SUMA" if currency == "EUR" else "I07_SUMA_VAL"
-            i07[pvm_field] = _to_decimal_str(getattr(item, "vat", 0))
-            i07[suma_field] = _to_decimal_str(getattr(item, "subtotal", 0))
+            i07[pvm_field] = _to_decimal_str(_abs_if_credit(getattr(item, "vat", 0), doc))
+            i07[suma_field] = _to_decimal_str(_abs_if_credit(getattr(item, "subtotal", 0), doc))
         else:
             i07["I07_NUOLAIDA"] = f"{discount_pct:.2f}"
 
@@ -972,8 +977,8 @@ def _build_i07_sumiskai(doc, currency, direction, user, extras, prefix,
         i07["I07_KODAS_OS"] = obj
 
     if merge_vat:
-        amount_wo = _safe_D(getattr(doc, "amount_wo_vat", 0) or 0)
-        vat_amount = _safe_D(getattr(doc, "vat_amount", 0) or 0)
+        amount_wo = _safe_D(_abs_if_credit(getattr(doc, "amount_wo_vat", 0) or 0, doc))
+        vat_amount = _safe_D(_abs_if_credit(getattr(doc, "vat_amount", 0) or 0, doc))
         gross_total = (amount_wo + vat_amount).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
         price_field = "I07_KAINA_BE" if currency == "EUR" else "I07_VAL_KAINA"
@@ -992,13 +997,13 @@ def _build_i07_sumiskai(doc, currency, direction, user, extras, prefix,
         i07["I07_KODAS_KL"] = ""
     else:
         price_field = "I07_KAINA_BE" if currency == "EUR" else "I07_VAL_KAINA"
-        i07[price_field] = _to_decimal_str(getattr(doc, "amount_wo_vat", 0))
+        i07[price_field] = _to_decimal_str(_abs_if_credit(getattr(doc, "amount_wo_vat", 0), doc))
 
         if discount_pct is None:
             pvm_field = "I07_PVM" if currency == "EUR" else "I07_PVM_VAL"
             suma_field = "I07_SUMA" if currency == "EUR" else "I07_SUMA_VAL"
-            i07[pvm_field] = _to_decimal_str(getattr(doc, "vat_amount", 0))
-            i07[suma_field] = _to_decimal_str(getattr(doc, "amount_wo_vat", 0))
+            i07[pvm_field] = _to_decimal_str(_abs_if_credit(getattr(doc, "vat_amount", 0), doc))
+            i07[suma_field] = _to_decimal_str(_abs_if_credit(getattr(doc, "amount_wo_vat", 0), doc))
         else:
             i07["I07_NUOLAIDA"] = f"{discount_pct:.2f}"
 
