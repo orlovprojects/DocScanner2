@@ -18,7 +18,7 @@ from datetime import date, datetime
 from typing import List, Dict, Optional
 import xml.etree.ElementTree as ET
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("docscanner_app")
 
 
 # =============================================================================
@@ -157,6 +157,15 @@ def _format_datetime(dt=None) -> str:
     if dt is None:
         dt = datetime.now()
     return dt.strftime("%Y-%m-%dT%H:%M:%S")
+
+
+def _get_invoice_type(doc) -> str:
+    """SF/KS/DS по типу документа."""
+    if getattr(doc, 'is_credit_invoice', None) is True:
+        return "KS"
+    if getattr(doc, 'is_debit_invoice', None) is True:
+        return "DS"
+    return "SF"
 
 
 # =============================================================================
@@ -511,8 +520,13 @@ def _build_document_totals(parent: ET.Element, doc, is_sales: bool, pvm_resolver
     doc_total = _create_element(totals, "DocumentTotal")
     
     # TaxableValue = doc.amount_wo_vat
-    _create_element(doc_total, "TaxableValue", 
-                   _format_decimal(getattr(doc, "amount_wo_vat", 0)))
+    amount_wo = getattr(doc, "amount_wo_vat", 0)
+    if getattr(doc, 'is_credit_invoice', None) is True and amount_wo is not None:
+        try:
+            amount_wo = abs(_safe_decimal(amount_wo))
+        except Exception:
+            pass
+    _create_element(doc_total, "TaxableValue", _format_decimal(amount_wo))
     
     # TaxCode и TaxPercentage
     tax_fields = _get_tax_fields(doc, pvm_resolver)
@@ -528,8 +542,13 @@ def _build_document_totals(parent: ET.Element, doc, is_sales: bool, pvm_resolver
         _create_nillable_element(doc_total, "TaxPercentage", None)
     
     # Amount = doc.vat_amount
-    _create_nillable_element(doc_total, "Amount",
-                            _format_decimal(getattr(doc, "vat_amount", 0)))
+    vat_amt = getattr(doc, "vat_amount", 0)
+    if getattr(doc, 'is_credit_invoice', None) is True and vat_amt is not None:
+        try:
+            vat_amt = abs(_safe_decimal(vat_amt))
+        except Exception:
+            pass
+    _create_nillable_element(doc_total, "Amount", _format_decimal(vat_amt))
     
     # VATPointDate2 (только Sales)
     if is_sales:
@@ -554,7 +573,7 @@ def _build_purchase_invoice(parent: ET.Element, doc, pvm_resolver: dict = None) 
     _build_supplier_info(invoice, doc)
     
     _create_element(invoice, "InvoiceDate", _format_date(getattr(doc, "invoice_date", None)))
-    _create_element(invoice, "InvoiceType", "SF")
+    _create_element(invoice, "InvoiceType", _get_invoice_type(doc))
     _create_element(invoice, "SpecialTaxation", "")
     _create_element(invoice, "References")
     
@@ -582,7 +601,7 @@ def _build_sales_invoice(parent: ET.Element, doc, pvm_resolver: dict = None) -> 
     _build_customer_info(invoice, doc)
     
     _create_element(invoice, "InvoiceDate", _format_date(getattr(doc, "invoice_date", None)))
-    _create_element(invoice, "InvoiceType", "SF")
+    _create_element(invoice, "InvoiceType", _get_invoice_type(doc))
     _create_element(invoice, "SpecialTaxation", "")
     _create_element(invoice, "References")
     

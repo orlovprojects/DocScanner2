@@ -58,6 +58,7 @@ CSV_HEADERS = [
     "L024",  # Padalinys
     "L026",  # Objektas
     "L059",  # Atskaitingas asmuo
+    "L064",  # Dokumento tipas: ""-įprastas, "K"-kreditinis, "D"-debetinis
     "L071",  # Pirkėjo banko sąskaita
     "L072",  # Tiekėjo banko sąskaita
     "L075",  # Apmokėti iki
@@ -100,6 +101,27 @@ def _safe_D(x) -> Decimal:
         return Decimal(str(x))
     except Exception:
         return Decimal("0")
+    
+
+def _ensure_credit_sign(value, doc):
+    """Для кредитных SF: если сумма положительная — делаем отрицательной."""
+    if getattr(doc, 'is_credit_invoice', None) is not True:
+        return value
+    if value is None:
+        return value
+    try:
+        d = Decimal(str(value))
+        return -abs(d) if d > 0 else d
+    except Exception:
+        return value
+
+def _get_doc_type_credit(doc) -> str:
+    """L064: K/D/пусто."""
+    if getattr(doc, 'is_credit_invoice', None) is True:
+        return "K"
+    if getattr(doc, 'is_debit_invoice', None) is True:
+        return "D"
+    return ""
 
 
 def _s(v) -> str:
@@ -715,6 +737,7 @@ def _generate_debetas_csv(documents: List, doc_type: str, user=None, own_company
             "L024": padalinys,
             "L026": objektas,
             "L059": atskaitingas,
+            "L064": _get_doc_type_credit(doc),
             "L071": _s(getattr(doc, "buyer_iban", "")),
             "L072": _s(getattr(doc, "seller_iban", "")),
             "L075": _format_date_debetas(getattr(doc, "due_date", None)),
@@ -751,6 +774,7 @@ def _generate_debetas_csv(documents: List, doc_type: str, user=None, own_company
                         price = _safe_D(getattr(item, "price", 0) or 0)
                         vat_line = _safe_D(getattr(item, "vat", 0) or 0)
                         gross = price * qty + vat_line
+                    gross = _ensure_credit_sign(gross, doc)
 
                     row = {
                         **doc_common,
@@ -769,10 +793,12 @@ def _generate_debetas_csv(documents: List, doc_type: str, user=None, own_company
                     if subtotal is None:
                         price = Decimal(str(getattr(item, "price", 0) or 0))
                         subtotal = price * qty
+                    subtotal = _ensure_credit_sign(subtotal, doc)
 
                     vat_amount = getattr(item, "_debetas_vat_after_discount", None)
                     if vat_amount is None:
                         vat_amount = Decimal(str(getattr(item, "vat", 0) or 0))
+                    vat_amount = _ensure_credit_sign(vat_amount, doc)
 
                     vat_percent = Decimal(str(getattr(item, "vat_percent", 0) or 0))
 
@@ -811,8 +837,9 @@ def _generate_debetas_csv(documents: List, doc_type: str, user=None, own_company
                 discount = _safe_D(getattr(doc, "invoice_discount_wo_vat", 0) or 0)
 
                 gross_after_discount = amount_wo + vat_amount - discount
-                if gross_after_discount < 0:
+                if gross_after_discount < 0 and getattr(doc, 'is_credit_invoice', None) is not True:
                     gross_after_discount = Decimal("0")
+                gross_after_discount = _ensure_credit_sign(gross_after_discount, doc)
 
                 row = {
                     **doc_common,
@@ -835,9 +862,9 @@ def _generate_debetas_csv(documents: List, doc_type: str, user=None, own_company
                     "L012": "vnt",
                     "L013": "0",
                     "L014": _multiply_for_debetas(1, 1000),
-                    "L015": _multiply_for_debetas(getattr(doc, "amount_wo_vat", 0), 100),
+                    "L015": _multiply_for_debetas(_ensure_credit_sign(getattr(doc, "amount_wo_vat", 0), doc), 100),
                     "L016": _multiply_for_debetas(getattr(doc, "vat_percent", 0), 100),
-                    "L017": _multiply_for_debetas(getattr(doc, "vat_amount", 0), 100),
+                    "L017": _multiply_for_debetas(_ensure_credit_sign(getattr(doc, "vat_amount", 0), doc), 100),
                 }
 
             rows.append(row)
