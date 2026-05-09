@@ -72,8 +72,9 @@ class HeaderCols:
     OP_DATE = 3
     INV_DATE = 4
     DOC_NO = 5
-    DOC_TYPE = 6
+    IS_TAX_INCLUDED = 6
     JOURNAL = 7
+    TYPE_ID = 8
     CURRENCY = 9
     DEPARTMENT = 20
     OBJECT = 21
@@ -110,7 +111,7 @@ def _safe_D(x: Any) -> Decimal:
     
 
 def _abs_if_credit(value, doc):
-    if getattr(doc, 'is_credit_invoice', None) is not True:
+    if not bool(getattr(doc, "is_credit_invoice", False)):
         return value
     if value is None:
         return value
@@ -867,11 +868,14 @@ def export_documents_to_rivile_erp_xlsx(
             getattr(doc, "operation_date", None) or getattr(doc, "invoice_date", None),
         )
         set_cell_date(ws_headers, header_row, HeaderCols.INV_DATE, getattr(doc, "invoice_date", None))
+        is_credit = bool(getattr(doc, "is_credit_invoice", False))
+
         ws_headers.cell(row=header_row, column=HeaderCols.DOC_NO, value=safe_excel_text(ref_id))
+        ws_headers.cell(row=header_row, column=HeaderCols.IS_TAX_INCLUDED, value=0)
         ws_headers.cell(
             row=header_row,
-            column=HeaderCols.DOC_TYPE,
-            value=1 if getattr(doc, 'is_credit_invoice', None) is True else 0,
+            column=HeaderCols.TYPE_ID,
+            value=1 if doc_type == "pirkimai" and is_credit else 0,
         )
 
         if user_journal:
