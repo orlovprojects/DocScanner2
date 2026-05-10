@@ -70,6 +70,16 @@ def _D(x) -> Decimal:
     except Exception:
         return Decimal("0")
 
+def _ensure_credit_sign(value, doc):
+    if getattr(doc, 'is_credit_invoice', None) is not True:
+        return value
+    if value is None:
+        return value
+    try:
+        d = _D(value)
+        return -abs(d) if d > 0 else d
+    except Exception:
+        return value
 
 def _fmt(value, decimals=2) -> str:
     try:
@@ -462,7 +472,12 @@ def _build_info(invoice_el, doc):
     if due_date:
         ET.SubElement(info, "DueDate").text = due_date
 
-    ET.SubElement(info, "InvoiceType").text = "SF"
+    if getattr(doc, 'is_credit_invoice', None) is True:
+        ET.SubElement(info, "InvoiceType").text = "KS"
+    elif getattr(doc, 'is_debit_invoice', None) is True:
+        ET.SubElement(info, "InvoiceType").text = "DS"
+    else:
+        ET.SubElement(info, "InvoiceType").text = "SF"
     ET.SubElement(info, "Registry").text = _isaf_flag(doc)
 
 
@@ -472,8 +487,8 @@ def _build_info(invoice_el, doc):
 def _build_sum_group(invoice_el, doc, items_list=None):
     sg = ET.SubElement(invoice_el, "InvoiceSumGroup")
 
-    vat_amount = _D(getattr(doc, "vat_amount", 0) or 0)
-    amount_with = _D(getattr(doc, "amount_with_vat", 0) or 0)
+    vat_amount = _D(_ensure_credit_sign(getattr(doc, "vat_amount", 0) or 0, doc))
+    amount_with = _D(_ensure_credit_sign(getattr(doc, "amount_with_vat", 0) or 0, doc))
     currency = (_s(getattr(doc, "currency", "")) or "EUR").upper()
 
     if items_list:
@@ -481,13 +496,13 @@ def _build_sum_group(invoice_el, doc, items_list=None):
         inv_sum = Decimal("0")
         for i, it in enumerate(items_list):
             qty = _D(getattr(it, "quantity", 1) or 1)
-            price = _D(getattr(it, "price", 0) or 0)
+            price = _D(_ensure_credit_sign(getattr(it, "price", 0) or 0, doc))
             inv_sum += (price * qty) - discounts.get(i, Decimal("0"))
         ET.SubElement(sg, "InvoiceSum").text = _fmt(inv_sum)
         vat_rate = _most_common_vat(items_list)
     else:
         ET.SubElement(sg, "InvoiceSum").text = _fmt(
-            _D(getattr(doc, "amount_wo_vat", 0) or 0)
+            _D(_ensure_credit_sign(getattr(doc, "amount_wo_vat", 0) or 0, doc))
         )
         vat_rate = _vat_rate_str(getattr(doc, "vat_percent", None))
 
@@ -537,13 +552,15 @@ def _item_entry_detaliai(group, item, row, doc, line_disc, ex_prefix, ex):
     )
 
     qty = _D(getattr(item, "quantity", 1) or 1)
+    if getattr(doc, 'is_credit_invoice', None) is True:
+        qty = -abs(qty) if qty > 0 else qty
     ET.SubElement(detail, "ItemAmount").text = _fmt(qty, 4)
 
-    price = _D(getattr(item, "price", 0) or 0)
+    price = abs(_D(getattr(item, "price", 0) or 0))
     orig_sum = price * qty
     new_sum = orig_sum - line_disc
 
-    if qty > 0:
+    if qty != 0:
         new_price = (new_sum / qty).quantize(Decimal("0.00000001"), rounding=ROUND_HALF_UP)
     else:
         new_price = Decimal("0")
@@ -599,23 +616,23 @@ def _item_entry_sumiskai(group, doc, ex_prefix, ex):
     ET.SubElement(detail, "ItemUnit").text = _truncate(
         _normalize_unit(_s(getattr(doc, "unit", ""))), 10
     )
-    ET.SubElement(detail, "ItemAmount").text = "1.0000"
+    ET.SubElement(detail, "ItemAmount").text = "-1.0000" if getattr(doc, 'is_credit_invoice', None) is True else "1.0000"
 
-    amount_wo = _D(getattr(doc, "amount_wo_vat", 0) or 0)
-    ET.SubElement(detail, "ItemPrice").text = _fmt(amount_wo, 8)
-    ET.SubElement(entry, "ItemSum").text = _fmt(amount_wo)
+    amount_wo_abs = abs(_D(getattr(doc, "amount_wo_vat", 0) or 0))
+    ET.SubElement(detail, "ItemPrice").text = _fmt(amount_wo_abs, 8)
+    amount_wo_signed = _D(_ensure_credit_sign(getattr(doc, "amount_wo_vat", 0) or 0, doc))
+    ET.SubElement(entry, "ItemSum").text = _fmt(amount_wo_signed)
 
     vat = ET.SubElement(entry, "VAT")
-    ET.SubElement(vat, "SumBeforeVAT").text = _fmt(amount_wo)
+    ET.SubElement(vat, "SumBeforeVAT").text = _fmt(amount_wo_signed)
 
     separate = getattr(doc, "separate_vat", False)
     ET.SubElement(vat, "VATRate").text = "0" if separate else _vat_rate_str(
         getattr(doc, "vat_percent", None)
     )
 
-    ET.SubElement(vat, "VATSum").text = _fmt(_D(getattr(doc, "vat_amount", 0) or 0))
-    ET.SubElement(vat, "SumAfterVAT").text = _fmt(_D(getattr(doc, "amount_with_vat", 0) or 0))
-
+    ET.SubElement(vat, "VATSum").text = _fmt(_D(_ensure_credit_sign(getattr(doc, "vat_amount", 0) or 0, doc)))
+    ET.SubElement(vat, "SumAfterVAT").text = _fmt(_D(_ensure_credit_sign(getattr(doc, "amount_with_vat", 0) or 0, doc)))
 
 # =========================================================
 # InvoiceItem
@@ -653,7 +670,7 @@ def _build_payment(invoice_el, doc, doc_type, cp):
         ET.SubElement(pay, "PayDueDate").text = due_date
 
     ET.SubElement(pay, "PaymentTotalSum").text = _fmt(
-        _D(getattr(doc, "amount_with_vat", 0) or 0)
+        _D(_ensure_credit_sign(getattr(doc, "amount_with_vat", 0) or 0, doc))
     )
 
     if doc_type == "pardavimas":
@@ -738,7 +755,7 @@ def _build_xml(documents: list, cp, user=None, type_filter: Optional[str] = None
         root.append(inv)
 
         total_count += 1
-        total_amount += _D(getattr(doc, "amount_with_vat", 0) or 0)
+        total_amount += _D(_ensure_credit_sign(getattr(doc, "amount_with_vat", 0) or 0, doc))
         idx += 1
 
     footer = ET.SubElement(root, "Footer")

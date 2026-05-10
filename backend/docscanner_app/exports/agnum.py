@@ -173,6 +173,18 @@ def normalize_preke_paslauga_tipas(value: object) -> str:
     return "1"
 
 
+def _ensure_credit_sign(value, doc):
+    if getattr(doc, 'is_credit_invoice', None) is not True:
+        return value
+    if value is None:
+        return value
+    try:
+        d = Decimal(str(value))
+        return -abs(d) if d > 0 else d
+    except Exception:
+        return value
+
+
 # =========================
 # Per-company extra fields helper
 # =========================
@@ -543,6 +555,7 @@ def _build_agnum_good_from_item(doc, item, user_defaults=None, line_map=None, di
         kn0 = (raw_price * discount_factor).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
     else:
         kn0 = raw_price
+    kn0 = _ensure_credit_sign(kn0, doc)
 
     attrs = {
         "KOD": kod, "SND_KOD": snd_kod, "PAVAD": name,
@@ -592,6 +605,8 @@ def _build_agnum_rows_for_pirkimas(doc, line_items, user_defaults=None, line_map
         vat_pct = getattr(item, "vat_percent", None)
 
         adj_price, adj_vat = _apply_line_discount(price, qty, vat, vat_pct, discount_factor)
+        adj_price = _ensure_credit_sign(adj_price, doc)
+        adj_vat = _ensure_credit_sign(adj_vat, doc)
 
         item_okod = _s(getattr(item, "okod", "") or getattr(item, "objekto_kodas", ""))
         doc_okod = _s(getattr(doc, "okod", ""))
@@ -743,14 +758,14 @@ def export_pirkimai_group_to_agnum(documents, user, own_company_code=None):
             "TR_TIP": "0",
             "NUOL1": "0",
             "NUOL2": "0",
-            "SUMA": _format_price_agnum(amount_wo),
+            "SUMA": _format_price_agnum(_ensure_credit_sign(amount_wo, doc)),
             "MT": "0", "AKC": "0",
-            "PVM": _format_price_agnum(vat_amount),
+            "PVM": _format_price_agnum(_ensure_credit_sign(vat_amount, doc)),
             "PVM_KL": "0", "KT": "0", "PR": "0",
             "SUMAP": "0", "TRANSP": "0",
-            "SUMVISO": _format_price_agnum(amount_wo),
+            "SUMVISO": _format_price_agnum(_ensure_credit_sign(amount_wo, doc)),
             "DRB": "",
-            "SKOLA": _format_price_agnum(skola),
+            "SKOLA": _format_price_agnum(_ensure_credit_sign(skola, doc)),
             "TERM": "0", "APMSUM": "0",
             "SANDORIS": "", "PRISTSAL": "", "TRANSPORTAS": "",
             "SALISSIUNT": _s(getattr(doc, "seller_country_iso", "")).upper(),
@@ -763,7 +778,7 @@ def export_pirkimai_group_to_agnum(documents, user, own_company_code=None):
             "SPEC_TAX": "N",
             "REF_DOK_DATA": _agnum_empty_date(),
             "REF_DOK_NR": "",
-            "SF_TIP": "SF",
+            "SF_TIP": "KS" if getattr(doc, 'is_credit_invoice', None) is True else "DS" if getattr(doc, 'is_debit_invoice', None) is True else "SF",
             "MEMO": _s(getattr(doc, "comment", "")),
             "NUM1": "0", "NUM2": "0", "NUM3": "0", "NUM4": "0", "NUM5": "0",
             "TXT1": "", "TXT2": "", "TXT3": "", "TXT4": "", "TXT5": "",
@@ -824,6 +839,8 @@ def _build_agnum_rows_for_pardavimas(doc, line_items, user_defaults=None, line_m
         vat_pct = getattr(item, "vat_percent", None)
 
         adj_price, adj_vat = _apply_line_discount(price, qty, vat, vat_pct, discount_factor)
+        adj_price = _ensure_credit_sign(adj_price, doc)
+        adj_vat = _ensure_credit_sign(adj_vat, doc)
 
         item_okod = _s(getattr(item, "okod", "") or getattr(item, "objekto_kodas", ""))
         doc_okod = _s(getattr(doc, "okod", ""))
@@ -992,13 +1009,13 @@ def export_pardavimai_group_to_agnum(documents, user, own_company_code=None):
             "KURS": _format_decimal_agnum(rate if rate else 1, precision=6),
             "NUOLPROC": "0",
             "NUOL": "0",
-            "SUMA": _format_price_agnum(amount_wo),
+            "SUMA": _format_price_agnum(_ensure_credit_sign(amount_wo, doc)),
             "SUMAP": "0",
             "PVMPROC": "0",
-            "PVM": _format_price_agnum(vat_amount),
+            "PVM": _format_price_agnum(_ensure_credit_sign(vat_amount, doc)),
             "MOK0": "0",
-            "SUMVISO": _format_price_agnum(amount_wo),
-            "SKOLA": _format_price_agnum(skola),
+            "SUMVISO": _format_price_agnum(_ensure_credit_sign(amount_wo, doc)),
+            "SKOLA": _format_price_agnum(_ensure_credit_sign(skola, doc)),
             "APMSUM": "0",
             "APM_SAL": apm_sal,
             "TERM": term,
@@ -1026,7 +1043,7 @@ def export_pardavimai_group_to_agnum(documents, user, own_company_code=None):
             "SPEC_TAX": "N",
             "REF_DOK_DATA": _agnum_empty_date(),
             "REF_DOK_NR": "",
-            "SF_TIP": "SF",
+            "SF_TIP": "KS" if getattr(doc, 'is_credit_invoice', None) is True else "DS" if getattr(doc, 'is_debit_invoice', None) is True else "SF",
             "POINTS_USED": "0", "POINTS_ADDED": "0",
             "DOK_USER": _s(getattr(doc, "db_user", "")) or "1",
             "DOK_USER0": _s(getattr(doc, "db_user_created", "")) or "1",
