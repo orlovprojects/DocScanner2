@@ -20,18 +20,22 @@ LOGGER = logging.getLogger("docscanner_app")
 # =========================
 # 1) КЛИЕНТ GEMINI c таймаутом
 # =========================
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-if not GEMINI_API_KEY:
-    raise RuntimeError("Не найден GEMINI_API_KEY в переменных окружения.")
 
-# таймаут по умолчанию 300 секунд (5 минут); для нового SDK — в миллисекундах
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+
 GEMINI_TIMEOUT_SECONDS = float(os.getenv("GEMINI_TIMEOUT_SECONDS", "300"))
 GEMINI_TIMEOUT_MS = int(GEMINI_TIMEOUT_SECONDS * 1000)
 
-gemini_client = genai.Client(
-    api_key=GEMINI_API_KEY,
-    http_options=types.HttpOptions(timeout=GEMINI_TIMEOUT_MS)  # глобальный таймаут
-)
+DIRECT_GEMINI_LITE_MODEL = os.getenv("DIRECT_GEMINI_LITE_MODEL", "gemini-3.1-flash-lite").strip()
+
+if GEMINI_API_KEY:
+    gemini_client = genai.Client(
+        api_key=GEMINI_API_KEY,
+        http_options=types.HttpOptions(timeout=GEMINI_TIMEOUT_MS)
+    )
+else:
+    LOGGER.warning("GEMINI_API_KEY not set. Direct Gemini client disabled.")
+    gemini_client = None
 
 
 # =========================
@@ -612,12 +616,24 @@ DATA TO USE
 # 3) ОСНОВНЫЕ ФУНКЦИИ
 # =========================
 
+# def _client_with_timeout(timeout_seconds: float | int | None) -> genai.Client:
+#     """
+#     Возвращает глобальный клиент, либо создаёт временный клиент с другим таймаутом.
+#     """
+#     if timeout_seconds is None:
+#         return gemini_client
+#     return genai.Client(
+#         api_key=GEMINI_API_KEY,
+#         http_options=types.HttpOptions(timeout=int(float(timeout_seconds) * 1000))
+#     )
+
 def _client_with_timeout(timeout_seconds: float | int | None) -> genai.Client:
-    """
-    Возвращает глобальный клиент, либо создаёт временный клиент с другим таймаутом.
-    """
+    if not GEMINI_API_KEY:
+        raise RuntimeError("GEMINI_API_KEY not set. Direct Gemini client disabled.")
+
     if timeout_seconds is None:
         return gemini_client
+
     return genai.Client(
         api_key=GEMINI_API_KEY,
         http_options=types.HttpOptions(timeout=int(float(timeout_seconds) * 1000))
@@ -637,6 +653,8 @@ def ask_gemini(
     timeout_seconds — локальный таймаут в секундах (если None, берём глобальный из клиента).
     """
     log = logger or LOGGER
+    prompt = prompt or ""
+    text = text or ""
     full_prompt = prompt + "\n\n" + text
     eff_timeout = timeout_seconds if timeout_seconds is not None else GEMINI_TIMEOUT_SECONDS
     log.info(
@@ -667,7 +685,7 @@ def ask_gemini(
 def ask_gemini_with_retry(
     text: str,
     prompt: str,
-    model: str = "gemini-2.5-flash-lite",
+    model: str = "gemini-3.1-flash-lite",
     max_retries: int = 2,
     wait_seconds: int = 60,
     temperature: float = 1.0,
@@ -935,7 +953,7 @@ def repair_truncated_json_with_gemini_lite(*, broken_json: str, glued_raw_text: 
     return ask_gemini_with_retry(
         text=text,
         prompt=prompt,
-        model="gemini-2.5-flash-lite",   # оставил твой вариант; поменяй при необходимости
+        model=DIRECT_GEMINI_LITE_MODEL,   # оставил твой вариант; поменяй при необходимости
         temperature=0.0,
         max_output_tokens=20000,
         timeout_seconds=300,
@@ -978,7 +996,7 @@ def request_full_json_with_gemini_lite(
     return ask_gemini_with_retry(
         text=text,
         prompt=prompt,
-        model="gemini-2.5-flash-lite",
+        model=DIRECT_GEMINI_LITE_MODEL,
         temperature=0.2,
         max_output_tokens=30000,
         timeout_seconds=300,

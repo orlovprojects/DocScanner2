@@ -25,15 +25,20 @@ from .utils.ocr import get_ocr_text as get_ocr_text_gcv
 from .utils.gemini_ocr import get_ocr_text_gemini
 from .utils.doc_type import detect_doc_type
 
-from .utils.gpt import ask_gpt_with_retry, DEFAULT_PROMPT, DETAILED_PROMPT
-from .utils.gemini import (
-    GEMINI_DEFAULT_PROMPT,
-    GEMINI_DETAILED_PROMPT,
+from .utils.gpt import ask_gpt_with_retry
+
+from .utils.kie import (
     ask_gemini_with_retry,
-    is_truncated_json,
+    ask_llm_with_fallback as kie_ask_llm_with_fallback,
     repair_truncated_json_with_gemini_lite,
     request_full_json_with_gemini_lite,
+    is_truncated_json,
+    GEMINI_DEFAULT_PROMPT,
+    GEMINI_DETAILED_PROMPT,
 )
+
+DEFAULT_PROMPT = GEMINI_DEFAULT_PROMPT
+DETAILED_PROMPT = GEMINI_DETAILED_PROMPT
 from .utils.mercury import ask_mercury_with_retry
 
 from .utils.grok import (
@@ -1128,7 +1133,7 @@ def process_uploaded_file_task(self, user_id, doc_id, scan_type,
         # 10) LLM: Gemini → GPT fallback (скармливаем склеенный текст)
         t0 = _t()
         try:
-            llm_resp, source_model = ask_llm_with_fallback(glued_text_for_db or "", scan_type, logger)
+            llm_resp, source_model = kie_ask_llm_with_fallback(glued_text_for_db or "", scan_type, logger)
         except Exception as e:
             logger.warning(f"[TASK] Gemini request failed: {e}")
             llm_resp = None
