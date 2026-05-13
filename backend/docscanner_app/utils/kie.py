@@ -459,7 +459,7 @@ def ask_llm_with_fallback(text: str, scan_type: str, logger: logging.Logger | No
         prompt=prompt,
         model=DIRECT_GEMINI_MAIN_MODEL,
         max_retries=2,
-        wait_seconds=60,
+        wait_seconds=5,
         temperature=1.0,
         max_output_tokens=30000 if scan_type == "detaliai" else 20000,
         timeout_seconds=300,
