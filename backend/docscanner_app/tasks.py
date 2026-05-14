@@ -2567,7 +2567,7 @@ def monitor_stuck_sessions():
     recent_activity = ScannedDocument.objects.filter(
         status__in=["completed", "exported", "rejected"],
         counted_in_session=True,
-        updated_at__gte=now - timedelta(minutes=30),
+        uploaded_at__gte=now - timedelta(minutes=30),
     ).exists()
 
     # ─── 1. uploading > 1 часа — авто-фейл ───
