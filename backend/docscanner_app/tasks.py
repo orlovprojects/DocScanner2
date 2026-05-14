@@ -1066,6 +1066,7 @@ def process_uploaded_file_task(self, user_id, doc_id, scan_type,
             # Если похожесть высокая (>=95%), вытаскиваем серию/номер
             if similarity_percent >= 95:
                 t0 = _t()
+                logger.info("[DUP-CHECK] High-sim %.1f%% → extracting series/number/date via gemini-lite", similarity_percent)
                 prompt = (
                     "You are given OCRed text of a single Lithuanian accounting document (invoice/receipt).\n"
                     "Extract three fields ONLY and return STRICT JSON with EXACT keys:\n"
@@ -1307,6 +1308,9 @@ def process_uploaded_file_task(self, user_id, doc_id, scan_type,
         # 13) Проверка результата LLM и количества документов
         t0 = _t()
 
+        if isinstance(structured, list):
+            structured = {"docs": len(structured), "documents": structured}
+
         try:
             docs_count = int(structured.get("docs") or 1)
         except Exception:
@@ -1543,8 +1547,8 @@ def process_uploaded_file_task(self, user_id, doc_id, scan_type,
             doc = ScannedDocument.objects.filter(pk=doc_id).first()
             if doc:
                 doc.status = 'rejected'
-                doc.error_message = str(e)
-                doc.save(update_fields=["status", "error_message"])  # фиксируем ошибку
+                doc.error_message = "Dokumento apdorojimo klaida. Bandykite ištrinti ir įkelti pakartotinai"
+                doc.save(update_fields=["status", "error_message"])
                 _settle_and_finish_if_session(doc)
             _log_t("Save rejected (exception path)", t0)
         finally:
@@ -2564,10 +2568,9 @@ def monitor_stuck_sessions():
     fixes = []
 
     # ─── 0. Проверка: система вообще обрабатывает? ───
-    recent_activity = ScannedDocument.objects.filter(
-        status__in=["completed", "exported", "rejected"],
-        counted_in_session=True,
-        uploaded_at__gte=now - timedelta(minutes=30),
+    recent_activity = UploadSession.objects.filter(
+        stage__in=["processing", "done"],
+        updated_at__gte=now - timedelta(minutes=30),
     ).exists()
 
     # ─── 1. uploading > 1 часа — авто-фейл ───
