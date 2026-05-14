@@ -229,89 +229,107 @@ def _gemini_client():
     return gemini_client
 
 
-def _ask_gemini_pdf(pdf_bytes: bytes, prompt: str, model: str = "gemini-flash-lite-latest") -> str:
-    """Отправляет PDF + текстовый промпт в Gemini с retry при rate limit."""
+_SPLIT_PRIMARY = "gemini-3.1-flash-lite"
+_SPLIT_FALLBACK = "gemini-2.5-flash-lite"
+
+def _ask_gemini_pdf(pdf_bytes: bytes, prompt: str, model: str = None) -> str:
+    """
+    Отправляет PDF + промпт в Gemini.
+    Primary → fallback модель, 1 rate-limit retry с коротким sleep.
+    """
     from google.genai import types
     import time as _time
 
     pdf_bytes = _maybe_compress_pdf_bytes(pdf_bytes)
 
     client = _gemini_client()
-    max_retries = 2
+
+    contents = [
+        types.Content(
+            role="user",
+            parts=[
+                types.Part.from_bytes(data=pdf_bytes, mime_type="application/pdf"),
+                types.Part.from_text(text=prompt),
+            ],
+        )
+    ]
+
+    models_to_try = [model] if model else [_SPLIT_PRIMARY, _SPLIT_FALLBACK]
     last_exc = None
 
-    for attempt in range(max_retries + 1):
-        try:
-            t0 = _time.perf_counter()
-            response = client.models.generate_content(
-                model=model,
-                contents=[
-                    types.Content(
-                        role="user",
-                        parts=[
-                            types.Part.from_bytes(data=pdf_bytes, mime_type="application/pdf"),
-                            types.Part.from_text(text=prompt),
-                        ],
-                    )
-                ],
-                config={"temperature": 0, "max_output_tokens": 4096},
-            )
-            elapsed = _time.perf_counter() - t0
-            result = (getattr(response, "text", "") or "").strip()
-            logger.info(
-                "[PDF-SPLIT] Gemini response: model=%s attempt=%d elapsed=%.2fs len=%d",
-                model, attempt + 1, elapsed, len(result),
-            )
-            return result
-
-        except Exception as e:
-            last_exc = e
-            msg = str(e).lower()
-            is_rate_limit = any(k in msg for k in ("429", "resource_exhausted", "rate limit", "too many"))
-
-            if is_rate_limit and attempt < max_retries:
-                wait = 30 * (attempt + 1)
-                logger.warning(
-                    "[PDF-SPLIT] Rate limit (attempt %d/%d), waiting %ds: %s",
-                    attempt + 1, max_retries + 1, wait, e,
+    for current_model in models_to_try:
+        for attempt in range(2):  # 1 retry на rate limit
+            try:
+                t0 = _time.perf_counter()
+                response = client.models.generate_content(
+                    model=current_model,
+                    contents=contents,
+                    config={"temperature": 0, "max_output_tokens": 4096},
                 )
-                _time.sleep(wait)
-                continue
+                elapsed = _time.perf_counter() - t0
+                result = (getattr(response, "text", "") or "").strip()
+                logger.info(
+                    "[PDF-SPLIT] Gemini response: model=%s attempt=%d elapsed=%.2fs len=%d",
+                    current_model, attempt + 1, elapsed, len(result),
+                )
+                return result
 
-            logger.error("[PDF-SPLIT] Gemini failed (attempt %d/%d): %s", attempt + 1, max_retries + 1, e)
-            raise
+            except Exception as e:
+                last_exc = e
+                msg = str(e).lower()
+                is_rate_limit = any(k in msg for k in ("429", "resource_exhausted", "rate limit", "too many"))
+
+                if is_rate_limit and attempt == 0:
+                    logger.warning("[PDF-SPLIT] Rate limit %s attempt 1, wait 10s: %s", current_model, e)
+                    _time.sleep(10)
+                    continue
+
+                logger.warning("[PDF-SPLIT] %s failed: %s → next model", current_model, e)
+                break  # переходим к fallback модели
 
     raise last_exc
 
 
 def _ask_gemini_image(file_bytes: bytes, mime_type: str, prompt: str,
-                      model: str = "gemini-flash-lite-latest") -> str:
-    """Отправляет изображение/PDF + промпт в Gemini для OCR-разделения."""
+                      model: str = None) -> str:
+    """Отправляет изображение/PDF + промпт в Gemini. Primary → fallback."""
     from google.genai import types
 
     client = _gemini_client()
 
-    t0 = time.perf_counter()
-    response = client.models.generate_content(
-        model=model,
-        contents=[
-            types.Content(
-                role="user",
-                parts=[
-                    types.Part.from_bytes(data=file_bytes, mime_type=mime_type),
-                    types.Part.from_text(text=prompt),
-                ],
+    contents = [
+        types.Content(
+            role="user",
+            parts=[
+                types.Part.from_bytes(data=file_bytes, mime_type=mime_type),
+                types.Part.from_text(text=prompt),
+            ],
+        )
+    ]
+
+    models_to_try = [model] if model else [_SPLIT_PRIMARY, _SPLIT_FALLBACK]
+    last_exc = None
+
+    for current_model in models_to_try:
+        try:
+            t0 = time.perf_counter()
+            response = client.models.generate_content(
+                model=current_model,
+                contents=contents,
+                config={"temperature": 0, "max_output_tokens": 16000},
             )
-        ],
-        config={"temperature": 0, "max_output_tokens": 16000},
-    )
-    elapsed = time.perf_counter() - t0
-    result = (getattr(response, "text", "") or "").strip()
-    logger.info(
-        "[PDF-SPLIT] Gemini OCR separate: model=%s elapsed=%.2fs len=%d",
-        model, elapsed, len(result),
-    )
-    return result
+            elapsed = time.perf_counter() - t0
+            result = (getattr(response, "text", "") or "").strip()
+            logger.info(
+                "[PDF-SPLIT] Gemini OCR separate: model=%s elapsed=%.2fs len=%d",
+                current_model, elapsed, len(result),
+            )
+            return result
+        except Exception as e:
+            last_exc = e
+            logger.warning("[PDF-SPLIT] %s failed: %s → next model", current_model, e)
+
+    raise last_exc
 
 
 def _parse_split_json(raw: str) -> dict:

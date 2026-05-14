@@ -62,31 +62,50 @@ def get_enhanced_ocr_text(data: bytes, filename: str = None, logger=None) -> tup
     mime_type = mime_map.get(ext, "image/jpeg")
 
     try:
-        client = genai.Client(api_key=api_key)
+        PRIMARY_MODEL = "gemini-3.1-flash-lite"
+        FALLBACK_MODEL = "gemini-2.5-flash-lite"
+        TIMEOUT_MS = 60_000  # 60 секунд
 
-        if logger:
-            logger.info(
-                "[ENHANCED-OCR] Sending %s (%d bytes, mime=%s) to gemini-flash-lite-latest",
-                filename or "unknown", len(data), mime_type,
-            )
-
-        response = client.models.generate_content(
-            model="gemini-flash-lite-latest",
-            contents=[
-                types.Content(
-                    role="user",
-                    parts=[
-                        types.Part.from_bytes(data=data, mime_type=mime_type),
-                        types.Part.from_text(text=ENHANCED_OCR_PROMPT),
-                    ],
-                )
-            ],
+        client = genai.Client(
+            api_key=api_key,
+            http_options=types.HttpOptions(timeout=TIMEOUT_MS),
         )
 
-        text = response.text or ""
+        contents = [
+            types.Content(
+                role="user",
+                parts=[
+                    types.Part.from_bytes(data=data, mime_type=mime_type),
+                    types.Part.from_text(text=ENHANCED_OCR_PROMPT),
+                ],
+            )
+        ]
 
-        if not text.strip():
-            return None, "Gemini enhanced OCR returned empty text"
+        text = None
+        for model in (PRIMARY_MODEL, FALLBACK_MODEL):
+            try:
+                if logger:
+                    logger.info(
+                        "[ENHANCED-OCR] Sending %s (%d bytes, mime=%s) to %s",
+                        filename or "unknown", len(data), mime_type, model,
+                    )
+
+                response = client.models.generate_content(
+                    model=model,
+                    contents=contents,
+                )
+
+                text = (response.text or "").strip()
+                if text:
+                    break
+                if logger:
+                    logger.warning("[ENHANCED-OCR] %s returned empty → trying fallback", model)
+            except Exception as e:
+                if logger:
+                    logger.warning("[ENHANCED-OCR] %s failed: %s → trying fallback", model, e)
+
+        if not text:
+            return None, "Gemini enhanced OCR: both models failed"
 
         if logger:
             logger.info(

@@ -23,7 +23,8 @@ LOGGER = logging.getLogger("docscanner_app")
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
-GEMINI_TIMEOUT_SECONDS = float(os.getenv("GEMINI_TIMEOUT_SECONDS", "300"))
+MAX_SDK_TIMEOUT = 180  # потолок для SDK tenacity
+GEMINI_TIMEOUT_SECONDS = min(float(os.getenv("GEMINI_TIMEOUT_SECONDS", "300")), MAX_SDK_TIMEOUT)
 GEMINI_TIMEOUT_MS = int(GEMINI_TIMEOUT_SECONDS * 1000)
 
 DIRECT_GEMINI_LITE_MODEL = os.getenv("DIRECT_GEMINI_LITE_MODEL", "gemini-3.1-flash-lite").strip()
@@ -632,11 +633,13 @@ def _client_with_timeout(timeout_seconds: float | int | None) -> genai.Client:
         raise RuntimeError("GEMINI_API_KEY not set. Direct Gemini client disabled.")
 
     if timeout_seconds is None:
-        return gemini_client
+        eff = MAX_SDK_TIMEOUT
+    else:
+        eff = min(float(timeout_seconds), MAX_SDK_TIMEOUT)
 
     return genai.Client(
         api_key=GEMINI_API_KEY,
-        http_options=types.HttpOptions(timeout=int(float(timeout_seconds) * 1000))
+        http_options=types.HttpOptions(timeout=int(eff * 1000))
     )
 
 def ask_gemini(
@@ -687,10 +690,10 @@ def ask_gemini_with_retry(
     prompt: str,
     model: str = "gemini-3.1-flash-lite",
     max_retries: int = 2,
-    wait_seconds: int = 60,
+    wait_seconds: int = 10,
     temperature: float = 1.0,
     max_output_tokens: int = 20000,
-    timeout_seconds: float | int = 300,
+    timeout_seconds: float | int = 90,
     logger: logging.Logger | None = None,
 ) -> str:
     """
@@ -752,9 +755,19 @@ def ask_gemini_with_retry(
         except Exception as e:
             elapsed_attempt = time.perf_counter() - t_attempt
             msg = str(e).lower()
-            if "rate limit" in msg or "429" in msg or "too many requests" in msg:
+            retryable = (
+                "rate limit" in msg
+                or "429" in msg
+                or "too many requests" in msg
+                or "502" in msg
+                or "503" in msg
+                or "bad gateway" in msg
+                or "server error" in msg
+                or "overloaded" in msg
+            )
+            if retryable:
                 log.warning(
-                    "[Gemini] Probable rate limit. attempt=%d/%d elapsed=%.2fs wait=%ds err=%s",
+                    "[Gemini] Retryable error. attempt=%d/%d elapsed=%.2fs wait=%ds err=%s",
                     attempt + 1, max_retries + 1, elapsed_attempt, wait_seconds, e,
                     exc_info=True,
                 )
@@ -765,7 +778,7 @@ def ask_gemini_with_retry(
                     continue
                 break
             else:
-                log.exception("[Gemini] Unexpected error after %.2fs", elapsed_attempt)
+                log.exception("[Gemini] Non-retryable error after %.2fs", elapsed_attempt)
                 raise
 
     # Все retry исчерпаны — шлём критический Telegram
@@ -883,6 +896,44 @@ def is_truncated_json(s: str) -> bool:
         return any(k in m for k in ("eof while parsing", "unterminated", "expecting value"))
 
 
+def ask_gemini_lite_with_model_fallback(
+    text: str,
+    prompt: str,
+    primary_model: str,
+    fallback_model: str,
+    temperature: float = 0.0,
+    max_output_tokens: int = 20000,
+    timeout_seconds: float = 60,
+    logger: logging.Logger | None = None,
+) -> str:
+    """
+    Утилитный вызов: 1 попытка primary → 1 попытка fallback → raise.
+    Без retry, короткий timeout. Для pre_classify, enhanced_ocr, dup_check и т.д.
+    """
+    log = logger or LOGGER
+
+    # Primary — 1 попытка
+    try:
+        result = ask_gemini(
+            text=text, prompt=prompt, model=primary_model,
+            temperature=temperature, max_output_tokens=max_output_tokens,
+            timeout_seconds=timeout_seconds, logger=log,
+        )
+        if result and result.strip():
+            return result
+        log.warning("[UTIL-LLM] Primary %s returned empty → fallback %s", primary_model, fallback_model)
+    except Exception as e:
+        log.warning("[UTIL-LLM] Primary %s failed: %s → fallback %s", primary_model, e, fallback_model)
+
+    # Fallback — 1 попытка
+    result = ask_gemini(
+        text=text, prompt=prompt, model=fallback_model,
+        temperature=temperature, max_output_tokens=max_output_tokens,
+        timeout_seconds=timeout_seconds, logger=log,
+    )
+    return result
+
+
 # --- Retry prompt builder -----------------------------------------------------
 
 def build_repair_prompt(new_prompt: str, glued_raw_text: str, broken_json: str) -> tuple[str, str]:
@@ -936,7 +987,7 @@ def build_repair_prompt(new_prompt: str, glued_raw_text: str, broken_json: str) 
 
 # --- Gemini-lite repair wrapper ----------------------------------------------
 
-def repair_truncated_json_with_gemini_lite(*, broken_json: str, glued_raw_text: str, logger=None) -> str:
+def repair_truncated_json_with_gemini_lite(*, broken_json, glued_raw_text, logger=None):
     """
     Делает повторный запрос к Gemini 2.5 Lite с обновлённым промптом:
     - объясняем, что это вторая попытка и JSON был обрезан,
@@ -950,13 +1001,14 @@ def repair_truncated_json_with_gemini_lite(*, broken_json: str, glued_raw_text: 
         "Your task is to carefully finish, extract missing data and repair the JSON without altering any information that was already extracted."
     )
     prompt, text = build_repair_prompt(new_retry_prompt, glued_raw_text, broken_json)
-    return ask_gemini_with_retry(
+    return ask_gemini_lite_with_model_fallback(
         text=text,
         prompt=prompt,
-        model=DIRECT_GEMINI_LITE_MODEL,   # оставил твой вариант; поменяй при необходимости
+        primary_model="gemini-2.5-flash-lite",
+        fallback_model="gemini-3.1-flash-lite",
         temperature=0.0,
         max_output_tokens=20000,
-        timeout_seconds=300,
+        timeout_seconds=60,
         logger=logger,
     )
 
@@ -993,13 +1045,14 @@ def request_full_json_with_gemini_lite(
     Возвращает строку с ОДНОЛИНЕЙНЫМ валидным JSON (как модель ответит).
     """
     prompt, text = build_truncated_followup_prompt(glued_raw_text, previous_json)
-    return ask_gemini_with_retry(
+    return ask_gemini_lite_with_model_fallback(
         text=text,
         prompt=prompt,
-        model=DIRECT_GEMINI_LITE_MODEL,
+        primary_model="gemini-2.5-flash-lite",
+        fallback_model="gemini-3.1-flash-lite",
         temperature=0.2,
         max_output_tokens=30000,
-        timeout_seconds=300,
+        timeout_seconds=90,
         logger=logger,
     )
 

@@ -240,12 +240,17 @@ def ask_kie_with_retry(
     prompt: str,
     model: str = "gemini-2.5-flash",
     max_retries: int = 2,
-    wait_seconds: int = 60,
+    wait_seconds: int = 3,
     temperature: float = 1.0,
     max_output_tokens: int = 20000,
-    timeout_seconds: float | int = 300,
+    timeout_seconds: float | int = 90,
+    slow_error_threshold: float = 30,
     logger: logging.Logger | None = None,
 ) -> str:
+    """
+    slow_error_threshold: если ошибка пришла дольше чем за N секунд,
+    не ретраим — сразу выбрасываем для перехода на fallback.
+    """
     log = logger or LOGGER
     last_exc = None
 
@@ -294,7 +299,16 @@ def ask_kie_with_retry(
                 exc_info=True,
             )
 
-            _notify_kie_api_error(e, model, log, attempt=attempt + 1)
+            if attempt >= 1:  # не шлём на первой попытке
+                _notify_kie_api_error(e, model, log, attempt=attempt + 1)
+
+            # Медленная ошибка = сразу fallback, не тратим время на retry
+            if elapsed_attempt > slow_error_threshold:
+                log.warning(
+                    "[KIE Gemini] Slow error (%.1fs > %ds), skip retries → fallback",
+                    elapsed_attempt, slow_error_threshold,
+                )
+                break
 
             retryable = (
                 code in KIE_RETRY_CODES
@@ -314,6 +328,13 @@ def ask_kie_with_retry(
         except Exception as e:
             elapsed_attempt = time.perf_counter() - t_attempt
             last_exc = e
+
+            if elapsed_attempt > slow_error_threshold:
+                log.warning(
+                    "[KIE Gemini] Slow error (%.1fs > %ds), skip retries → fallback",
+                    elapsed_attempt, slow_error_threshold,
+                )
+                break
 
             msg = str(e).lower()
             retryable = (
@@ -404,8 +425,8 @@ def ask_llm_provider_with_retry(
                 text=text,
                 prompt=prompt,
                 model=direct_model,
-                max_retries=max_retries,
-                wait_seconds=wait_seconds,
+                max_retries=0,
+                wait_seconds=0,
                 temperature=temperature,
                 max_output_tokens=max_output_tokens,
                 timeout_seconds=timeout_seconds,
@@ -459,10 +480,10 @@ def ask_llm_with_fallback(text: str, scan_type: str, logger: logging.Logger | No
         prompt=prompt,
         model=DIRECT_GEMINI_MAIN_MODEL,
         max_retries=2,
-        wait_seconds=5,
+        wait_seconds=3,
         temperature=1.0,
         max_output_tokens=30000 if scan_type == "detaliai" else 20000,
-        timeout_seconds=300,
+        timeout_seconds=180 if scan_type == "detaliai" else 90,
         logger=log,
     )
 
@@ -470,7 +491,7 @@ def ask_llm_with_fallback(text: str, scan_type: str, logger: logging.Logger | No
     return result, source_model
 
 
-def repair_truncated_json_with_gemini_lite(*, broken_json: str, glued_raw_text: str, logger=None) -> str:
+def repair_truncated_json_with_gemini_lite(*, broken_json, glued_raw_text, logger=None):
     """
     Drop-in replacement. Сначала KIE, fallback на direct Gemini.
     """
@@ -483,13 +504,14 @@ def repair_truncated_json_with_gemini_lite(*, broken_json: str, glued_raw_text: 
 
     prompt, text = build_repair_prompt(new_retry_prompt, glued_raw_text, broken_json)
 
-    return ask_gemini_with_retry(
+    return direct_gemini.ask_gemini_lite_with_model_fallback(
         text=text,
         prompt=prompt,
-        model=DIRECT_GEMINI_LITE_MODEL,
+        primary_model="gemini-2.5-flash-lite",
+        fallback_model="gemini-3.1-flash-lite",
         temperature=0.0,
-        max_output_tokens=30000,
-        timeout_seconds=300,
+        max_output_tokens=20000,
+        timeout_seconds=60,
         logger=logger,
     )
 
@@ -505,13 +527,14 @@ def request_full_json_with_gemini_lite(
     """
     prompt, text = build_truncated_followup_prompt(glued_raw_text, previous_json)
 
-    return ask_gemini_with_retry(
+    return direct_gemini.ask_gemini_lite_with_model_fallback(
         text=text,
         prompt=prompt,
-        model=DIRECT_GEMINI_LITE_MODEL,
+        primary_model="gemini-2.5-flash-lite",
+        fallback_model="gemini-3.1-flash-lite",
         temperature=0.2,
         max_output_tokens=30000,
-        timeout_seconds=300,
+        timeout_seconds=90,
         logger=logger,
     )
 
@@ -535,7 +558,7 @@ def ask_gemini(
         wait_seconds=0,
         temperature=temperature,
         max_output_tokens=max_output_tokens,
-        timeout_seconds=timeout_seconds or 300,
+        timeout_seconds=timeout_seconds or 90,
         logger=logger,
     )
     return result
@@ -546,10 +569,10 @@ def ask_gemini_with_retry(
     prompt: str,
     model: str = "gemini-3.1-flash-lite",
     max_retries: int = 2,
-    wait_seconds: int = 60,
+    wait_seconds: int = 10,
     temperature: float = 1.0,
     max_output_tokens: int = 20000,
-    timeout_seconds: float | int = 300,
+    timeout_seconds: float | int = 90,
     logger: logging.Logger | None = None,
 ) -> str:
     result, _source = ask_llm_provider_with_retry(
