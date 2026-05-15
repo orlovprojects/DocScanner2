@@ -1103,39 +1103,39 @@ def export_documents(request):
             # Pirkimai (если есть)
             if export_data.get('pirkimai'):
                 files_to_export.append((
-                    f'{today_str}_pirkimai.txt',
+                    'Pirkimai.txt',
                     export_data['pirkimai']
                 ))
-            
+
             if export_data.get('pirkimai_det'):
                 files_to_export.append((
-                    f'{today_str}_pirkimai_det.txt',
+                    'Pirkimai_Prekes.txt',
                     export_data['pirkimai_det']
                 ))
 
             # Pardavimai (если есть)
             if export_data.get('pardavimai'):
                 files_to_export.append((
-                    f'{today_str}_pardavimai.txt',
+                    'PARDAVIMAI.txt',
                     export_data['pardavimai']
                 ))
-            
+
             if export_data.get('pardavimai_det'):
                 files_to_export.append((
-                    f'{today_str}_pardavimai_det.txt',
+                    'PARDAVIMAI_PREKES.txt',
                     export_data['pardavimai_det']
                 ))
-            
+
             # Справочники (общие)
             if export_data.get('companies'):
                 files_to_export.append((
-                    f'{today_str}_Imones.txt',
+                    'Imones.txt',
                     export_data['companies']
                 ))
-            
+
             if export_data.get('products'):
                 files_to_export.append((
-                    f'{today_str}_Prekes.txt',
+                    'Prekes.txt',
                     export_data['products']
                 ))
 
