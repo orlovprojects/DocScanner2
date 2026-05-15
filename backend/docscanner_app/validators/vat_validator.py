@@ -272,7 +272,7 @@ def validate_vat(raw_code: str | None, country_iso: str | None) -> dict:
           "invalid_format" – невозможно/бессмысленно отправлять в VIES
           "unavailable"   – VIES/MS_UNAVAILABLE или другие тех. проблемы
           "valid"         – VIES говорит, что номер действителен
-          "invalid"       – VIES говорит, что номер не действителен
+          "invalid"       – VIES говорит, что номер не действителен (подтверждено дважды)
       - country_code  – код страны, который реально отправили/хотели
       - vat_number    – номер без префикса страны
       - api_called    – True/False, вызывали ли VIES вообще
@@ -303,11 +303,38 @@ def validate_vat(raw_code: str | None, country_iso: str | None) -> dict:
     country_code = parsed["country_code"]
     vat_number = parsed["vat_number"]
 
-    # 2) зовём VIES
-    try:
-        vies_res = check_vat(country_code, vat_number)
-    except Exception as e:
-        logger.warning("VIES call failed for %s%s: %s", country_code, vat_number, e)
+    # 2) зовём VIES (с retry при valid=false или ошибке)
+    vies_res = None
+    for attempt in range(2):
+        try:
+            vies_res = check_vat(country_code, vat_number)
+        except Exception as e:
+            logger.warning("VIES attempt %d exception for %s%s: %s", attempt + 1, country_code, vat_number, e)
+            vies_res = None
+            continue
+
+        if not vies_res.get("success"):
+            logger.warning(
+                "VIES attempt %d failed for %s%s: error=%s fault=%s",
+                attempt + 1, country_code, vat_number,
+                vies_res.get("error"),
+                vies_res.get("faultstring"),
+            )
+            continue
+
+        # success=true, valid=true → готово
+        if vies_res.get("valid"):
+            break
+
+        # success=true, valid=false → retry один раз
+        if attempt == 0:
+            logger.info("VIES valid=false for %s%s, retrying once", country_code, vat_number)
+            continue
+        # attempt==1 → подтверждено дважды, выходим
+
+    # 3) Обработка финального результата
+    if vies_res is None:
+        # оба запроса упали с exception
         return {
             "status": "unavailable",
             "country_code": country_code,
@@ -316,21 +343,23 @@ def validate_vat(raw_code: str | None, country_iso: str | None) -> dict:
         }
 
     if not vies_res.get("success"):
-        fault = (vies_res.get("faultstring") or "").upper()
-        err = (vies_res.get("error") or "").upper()
-        if "MS_UNAVAILABLE" in fault or "SERVICE_UNAVAILABLE" in fault:
-            status = "unavailable"
-        else:
-            status = "unavailable"  # можно потом раздробить на отдельные ошибки
+        # последний ответ — ошибка VIES
         return {
-            "status": status,
+            "status": "unavailable",
             "country_code": country_code,
             "vat_number": vat_number,
             "api_called": True,
         }
 
-    # success == True → смотрим valid
+    # success=true
     is_valid = bool(vies_res.get("valid"))
+    logger.info(
+        "VIES result for %s%s: valid=%s name=%r address=%r",
+        country_code, vat_number,
+        is_valid,
+        vies_res.get("name", ""),
+        vies_res.get("address", ""),
+    )
     return {
         "status": "valid" if is_valid else "invalid",
         "country_code": country_code,
