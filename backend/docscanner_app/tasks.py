@@ -350,6 +350,18 @@ def _count_line_items(structured: dict) -> int:
     except Exception:
         return 0
 
+def _is_response_truncated(resp: str) -> bool:
+    """Ответ LLM обрезан: нет открывающей или закрывающей скобки."""
+    if not resp or not resp.strip():
+        return False
+    s = resp.strip()
+    if '{' not in s and '[' not in s:
+        return True
+    if s[0] not in ('{', '['):
+        return True
+    if s[-1] not in ('}', ']'):
+        return True
+    return False
 
 def _t():
     return time.perf_counter()
@@ -488,8 +500,7 @@ def start_session_processing(session_id: str):
 
 
 @shared_task(bind=True, soft_time_limit=450, time_limit=480, acks_late=True, reject_on_worker_lost=True)
-def process_uploaded_file_task(self, user_id, doc_id, scan_type,
-                                split_depth=0, skip_ocr=False):
+def process_uploaded_file_task(self, user_id, doc_id, scan_type, split_depth=0, skip_ocr=False):
     """
     Полный пайплайн:
     - OCR: Google Vision (компактный JSON параграфов + склеенный текст) → fallback Gemini OCR (только текст)
@@ -499,6 +510,32 @@ def process_uploaded_file_task(self, user_id, doc_id, scan_type,
     - LLM: Gemini → GPT fallback
     - Парсинг JSON, валидации, сохранение
     """
+
+    from django.core.cache import cache
+
+    # ── Guard: hard-limit requeue → reject на 2-й попытке ──
+    attempt_key = f"proc_attempt:{doc_id}"
+    attempt = cache.get(attempt_key, 0)
+    if attempt >= 1:
+        cache.delete(attempt_key)
+        logger.error("[TASK] Requeued after hard kill (attempt=%d), rejecting doc_id=%s", attempt, doc_id)
+        try:
+            doc = ScannedDocument.objects.filter(pk=doc_id).first()
+            if doc and doc.status == "processing":
+                doc.status = "rejected"
+                doc.error_message = "Operacija nutraukta: viršytas laiko limitas"
+                if not doc.preview_url:
+                    try:
+                        doc.preview_url = f"{settings.SITE_URL_BACKEND}/media/{doc.file.name}"
+                    except Exception:
+                        pass
+                doc.save(update_fields=["status", "error_message", "preview_url"])
+                _settle_and_finish_if_session(doc)
+        except Exception as e:
+            logger.exception("[TASK] Failed to reject requeued doc_id=%s: %s", doc_id, e)
+        return
+    cache.set(attempt_key, attempt + 1, timeout=600)  # TTL 10 мин
+
     total_start = _t()
     logger.info(
         "[TASK] Celery limits: soft=%ss hard=%ss",
@@ -1143,6 +1180,27 @@ def process_uploaded_file_task(self, user_id, doc_id, scan_type,
             llm_resp = None
             source_model = "gemini-error"
         _log_t("LLM wrapper (with fallback)", t0)
+
+        # ── RETRY если ответ обрезан (начало или конец потеряны) ──
+        if llm_resp and _is_response_truncated(llm_resp):
+            logger.warning(
+                "[TASK] LLM response looks truncated (len=%d, start=%.40s…, end=…%.40s), retrying once",
+                len(llm_resp),
+                llm_resp.strip()[:40],
+                llm_resp.strip()[-40:],
+            )
+            t_retry = _t()
+            try:
+                llm_resp2, source_model2 = kie_ask_llm_with_fallback(glued_text_for_db or "", scan_type, logger)
+                if llm_resp2 and not _is_response_truncated(llm_resp2):
+                    llm_resp = llm_resp2
+                    source_model = source_model2
+                    logger.info("[TASK] Retry succeeded, got valid response (len=%d)", len(llm_resp))
+                else:
+                    logger.warning("[TASK] Retry also truncated/empty, keeping original")
+            except Exception as e:
+                logger.warning("[TASK] Retry failed: %s, keeping original", e)
+            _log_t("LLM retry (truncated response)", t_retry)
 
         if not llm_resp:
             # Доп. попытка GPT (одна быстрая)
