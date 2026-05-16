@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, forwardRef, useCallback } from 'react';
 import {
   Box, Typography, Divider, Table, TableBody, TableCell, TableContainer,
   TableHead, TableRow, Button, Dialog, DialogContent, IconButton,
-  CircularProgress, Snackbar, Alert,
+  CircularProgress, Snackbar, Alert, useTheme, useMediaQuery,
 } from '@mui/material';
 import {
   PictureAsPdf as PdfIcon, Close as CloseIcon, Download as DownloadIcon,
@@ -696,6 +696,9 @@ const usePrintInvoice = (printRef, invoice) => {
 
 const InvoicePreviewDialog = ({ open, onClose, invoiceId, invoiceData }) => {
   const printRef = useRef(null);
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down('md'));
+
   const [invoice, setInvoice] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -704,6 +707,31 @@ const InvoicePreviewDialog = ({ open, onClose, invoiceId, invoiceData }) => {
   const [snack, setSnack] = useState({ open: false, msg: '', severity: 'success' });
   const [watermark, setWatermark] = useState(false);
   const handlePrint = usePrintInvoice(printRef, invoice);
+
+  // ── Container ref for scale calc ──
+  const containerRef = useRef(null);
+  const [scale, setScale] = useState(1);
+
+  useEffect(() => {
+    if (!open || !isMobile) { setScale(1); return; }
+
+    const calcScale = () => {
+      const cw = containerRef.current?.clientWidth;
+      if (cw && cw < PAGE_W) {
+        setScale(Math.floor((cw / PAGE_W) * 1000) / 1000);
+      } else {
+        setScale(1);
+      }
+    };
+
+    // Delay to let dialog render
+    const raf = requestAnimationFrame(() => setTimeout(calcScale, 50));
+    window.addEventListener('resize', calcScale);
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener('resize', calcScale);
+    };
+  }, [open, isMobile]);
 
   useEffect(() => { if (!open) return; getInvSubscription().then((data) => setWatermark(data?.features?.watermark || false)).catch(() => setWatermark(false)); }, [open]);
   useEffect(() => { if (!open) return; invoicingApi.getSettings().then(({ data }) => setLogoUrl(data.logo_url || null)).catch(() => setLogoUrl(null)); }, [open]);
@@ -724,21 +752,83 @@ const InvoicePreviewDialog = ({ open, onClose, invoiceId, invoiceData }) => {
 
   return (
     <>
-      <Dialog open={open} onClose={onClose} maxWidth={false} disableScrollLock PaperProps={{ sx: { maxWidth: 920, width: '100%', maxHeight: '95vh', borderRadius: 3 } }}>
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', px: 3, py: 1.5, borderBottom: '1px solid #eee', flexWrap: 'wrap', gap: 1 }}>
-          <Typography sx={{ fontWeight: 700, fontSize: 16 }}>{fullNum || 'Peržiūra'}</Typography>
-          <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
-            <Button size="small" startIcon={<PrintIcon />} onClick={handlePrint} variant="outlined" disabled={!invoice}>Spausdinti</Button>
-            <Button size="small" startIcon={pdfLoading ? <CircularProgress size={16} /> : <DownloadIcon />} onClick={handleDownloadPdf} variant="contained" disabled={pdfLoading || !invoice}>Atsisiųsti PDF</Button>
-            <IconButton onClick={onClose} size="small"><CloseIcon /></IconButton>
+      <Dialog
+        open={open}
+        onClose={onClose}
+        maxWidth={false}
+        fullScreen={isMobile}
+        disableScrollLock
+        PaperProps={{
+          sx: isMobile
+            ? { borderRadius: 0 }
+            : { maxWidth: 920, width: '100%', maxHeight: '95vh', borderRadius: 3 },
+        }}
+      >
+        {/* ── Header ── */}
+        <Box sx={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          px: isMobile ? 1.5 : 3,
+          py: isMobile ? 1 : 1.5,
+          borderBottom: '1px solid #eee',
+          gap: 1,
+          minHeight: isMobile ? 48 : 'auto',
+        }}>
+          <Typography sx={{ fontWeight: 700, fontSize: isMobile ? 15 : 16, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            {fullNum || 'Peržiūra'}
+          </Typography>
+          <Box sx={{ display: 'flex', gap: isMobile ? 0.25 : 1, alignItems: 'center', flexShrink: 0 }}>
+            {isMobile ? (
+              <>
+                <IconButton size="small" onClick={handlePrint} disabled={!invoice}>
+                  <PrintIcon fontSize="small" />
+                </IconButton>
+                <IconButton size="small" onClick={handleDownloadPdf} disabled={pdfLoading || !invoice}>
+                  {pdfLoading ? <CircularProgress size={16} /> : <DownloadIcon fontSize="small" />}
+                </IconButton>
+                <IconButton onClick={onClose} size="small">
+                  <CloseIcon fontSize="small" />
+                </IconButton>
+              </>
+            ) : (
+              <>
+                <Button size="small" startIcon={<PrintIcon />} onClick={handlePrint} variant="outlined" disabled={!invoice}>Spausdinti</Button>
+                <Button size="small" startIcon={pdfLoading ? <CircularProgress size={16} /> : <DownloadIcon />} onClick={handleDownloadPdf} variant="contained" disabled={pdfLoading || !invoice}>Atsisiųsti PDF</Button>
+                <IconButton onClick={onClose} size="small"><CloseIcon /></IconButton>
+              </>
+            )}
           </Box>
         </Box>
-        <DialogContent sx={{ p: 3, backgroundColor: '#e0e0e0', display: 'flex', justifyContent: 'center', overflow: 'auto' }}>
+
+        {/* ── Content ── */}
+        <DialogContent
+          ref={containerRef}
+          sx={{
+            p: isMobile ? 0 : 3,
+            backgroundColor: '#e0e0e0',
+            display: 'flex',
+            justifyContent: 'center',
+            overflow: 'auto',
+            touchAction: 'pinch-zoom',
+            WebkitOverflowScrolling: 'touch',
+          }}
+        >
           {loading && <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: 400 }}><CircularProgress /></Box>}
           {error && <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: 200 }}><Typography color="error">{error}</Typography></Box>}
           {invoice && !loading && (
-            <Box sx={{ width: '100%', display: 'flex', justifyContent: 'center', alignItems: 'flex-start', py: 2 }}>
-              <Box sx={{ width: PAGE_W }}>
+            <Box sx={{
+              width: isMobile ? PAGE_W * scale : '100%',
+              display: 'flex',
+              justifyContent: 'center',
+              alignItems: isMobile ? 'flex-start' : 'flex-start',
+              py: isMobile ? 0 : 2,
+            }}>
+              <Box sx={{
+                width: PAGE_W,
+                transformOrigin: 'top left',
+                transform: isMobile ? `scale(${scale})` : 'none',
+              }}>
                 <PaginatedInvoice ref={printRef} invoice={invoice} logoUrl={logoUrl} watermark={watermark} />
               </Box>
             </Box>
