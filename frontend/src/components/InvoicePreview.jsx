@@ -703,79 +703,108 @@ const InvoicePreviewDialog = ({ open, onClose, invoiceId, invoiceData }) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [logoUrl, setLogoUrl] = useState(null);
-  const { downloadPdf: _downloadPdf, pdfLoading } = useInvoicePdf();
+  const { downloadPdf: _dl, pdfLoading } = useInvoicePdf();
   const [snack, setSnack] = useState({ open: false, msg: '', severity: 'success' });
   const [watermark, setWatermark] = useState(false);
   const [pdfSaving, setPdfSaving] = useState(false);
   const handlePrint = usePrintInvoice(printRef, invoice);
 
-  // ── Mobile scale — recalculates on resize/orientation ──
-  const [scale, setScale] = useState(1);
+  // ── Mobile: PDF blob for native iOS rendering ──
+  const pdfBlobUrlRef = useRef(null);
+  const [pdfBlobUrl, setPdfBlobUrl] = useState(null);
+  const [pdfBlobLoading, setPdfBlobLoading] = useState(false);
 
-  useEffect(() => {
-    if (!open || !isMobile) { setScale(1); return; }
+  // ── Cleanup helper ──
+  const revokePdfBlob = useCallback(() => {
+    if (pdfBlobUrlRef.current) {
+      URL.revokeObjectURL(pdfBlobUrlRef.current);
+      pdfBlobUrlRef.current = null;
+      setPdfBlobUrl(null);
+    }
+  }, []);
 
-    const calc = () => {
-      const w = window.innerWidth;
-      setScale(w >= PAGE_W ? 1 : Math.floor((w / PAGE_W) * 1000) / 1000);
-    };
-
-    calc();
-    window.addEventListener('resize', calc);
-    return () => window.removeEventListener('resize', calc);
-  }, [open, isMobile]);
-
-  useEffect(() => { if (!open) return; getInvSubscription().then((data) => setWatermark(data?.features?.watermark || false)).catch(() => setWatermark(false)); }, [open]);
+  // ── Data: subscription + logo ──
+  useEffect(() => { if (!open) return; getInvSubscription().then((d) => setWatermark(d?.features?.watermark || false)).catch(() => setWatermark(false)); }, [open]);
   useEffect(() => { if (!open) return; invoicingApi.getSettings().then(({ data }) => setLogoUrl(data.logo_url || null)).catch(() => setLogoUrl(null)); }, [open]);
+
+  // ── Data: invoice (for desktop HTML preview + header) ──
   useEffect(() => {
     if (!open) return;
     if (invoiceData) { setInvoice(invoiceData); return; }
     if (!invoiceId) return;
-    (async () => { setLoading(true); setError(''); try { const { data } = await invoicingApi.getInvoice(invoiceId); setInvoice(data); } catch { setError('Nepavyko įkelti sąskaitos'); } finally { setLoading(false); } })();
+    (async () => {
+      setLoading(true); setError('');
+      try { const { data } = await invoicingApi.getInvoice(invoiceId); setInvoice(data); }
+      catch { setError('Nepavyko įkelti sąskaitos'); }
+      finally { setLoading(false); }
+    })();
   }, [open, invoiceId, invoiceData]);
 
-  // ── iOS-friendly PDF download ──
+  // ── Mobile: fetch PDF blob for native <iframe> ──
+  useEffect(() => {
+    if (!open || !isMobile) { revokePdfBlob(); return; }
+    const id = invoiceData?.id || invoiceId;
+    if (!id) return;
+
+    setPdfBlobLoading(true);
+    invoicingApi.getInvoicePdf(id)
+      .then((res) => {
+        revokePdfBlob();
+        const blob = new Blob([res.data], { type: 'application/pdf' });
+        const url = URL.createObjectURL(blob);
+        pdfBlobUrlRef.current = url;
+        setPdfBlobUrl(url);
+      })
+      .catch(() => setError('Nepavyko įkelti PDF'))
+      .finally(() => setPdfBlobLoading(false));
+
+    return revokePdfBlob;
+  }, [open, isMobile, invoiceId, invoiceData?.id, revokePdfBlob]);
+
+  // ── iOS-friendly PDF save ──
   const handleDownloadPdf = async () => {
-    if (!invoice?.id && !invoiceId) return;
     const id = invoice?.id || invoiceId;
+    if (!id) return;
     const fn = `${invoice?.full_number || `saskaita-${id}`}.pdf`;
 
     setPdfSaving(true);
     try {
-      const response = await invoicingApi.getInvoicePdf(id);
-      const blob = new Blob([response.data], { type: 'application/pdf' });
+      let blob;
+      if (pdfBlobUrlRef.current) {
+        const r = await fetch(pdfBlobUrlRef.current);
+        blob = await r.blob();
+      } else {
+        const response = await invoicingApi.getInvoicePdf(id);
+        blob = new Blob([response.data], { type: 'application/pdf' });
+      }
 
-      // iOS Safari: navigator.share with File for native "Save to Files"
       const isIos = /iPad|iPhone|iPod/.test(navigator.userAgent);
-      if (isIos && navigator.share && typeof File !== 'undefined') {
+      if (isIos && navigator.share) {
         try {
           const file = new File([blob], fn, { type: 'application/pdf' });
           await navigator.share({ files: [file] });
           return;
-        } catch (shareErr) {
-          // User cancelled share or not supported — fall through to default
-          if (shareErr.name === 'AbortError') return;
-        }
+        } catch (e) { if (e.name === 'AbortError') return; }
       }
 
-      // Default: <a download> (works on Android/desktop)
-      const url = window.URL.createObjectURL(blob);
+      const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
-      a.href = url;
-      a.download = fn;
-      document.body.appendChild(a);
-      a.click();
+      a.href = url; a.download = fn;
+      document.body.appendChild(a); a.click();
       document.body.removeChild(a);
-      window.URL.revokeObjectURL(url);
+      URL.revokeObjectURL(url);
     } catch {
       setSnack({ open: true, msg: 'Nepavyko atsisiųsti PDF', severity: 'error' });
-    } finally {
-      setPdfSaving(false);
-    }
+    } finally { setPdfSaving(false); }
+  };
+
+  const handleMobilePrint = () => {
+    if (pdfBlobUrl) window.open(pdfBlobUrl, '_blank');
   };
 
   const fullNum = invoice?.full_number || `${invoice?.document_series || ''}${invoice?.document_number || ''}`;
   const isSaving = pdfLoading || pdfSaving;
+  const mobileContentLoading = pdfBlobLoading || loading;
 
   return (
     <>
@@ -787,7 +816,7 @@ const InvoicePreviewDialog = ({ open, onClose, invoiceId, invoiceData }) => {
         disableScrollLock
         PaperProps={{
           sx: isMobile
-            ? { borderRadius: 0 }
+            ? { borderRadius: 0, display: 'flex', flexDirection: 'column' }
             : { maxWidth: 920, width: '100%', maxHeight: '95vh', borderRadius: 3 },
         }}
       >
@@ -814,10 +843,10 @@ const InvoicePreviewDialog = ({ open, onClose, invoiceId, invoiceData }) => {
           <Box sx={{ display: 'flex', gap: isMobile ? 0.25 : 1, alignItems: 'center', flexShrink: 0 }}>
             {isMobile ? (
               <>
-                <IconButton size="small" onClick={handlePrint} disabled={!invoice}>
+                <IconButton size="small" onClick={handleMobilePrint} disabled={!pdfBlobUrl}>
                   <PrintIcon fontSize="small" />
                 </IconButton>
-                <IconButton size="small" onClick={handleDownloadPdf} disabled={isSaving || !invoice}>
+                <IconButton size="small" onClick={handleDownloadPdf} disabled={isSaving || (!invoice && !invoiceId)}>
                   {isSaving ? <CircularProgress size={16} /> : <DownloadIcon fontSize="small" />}
                 </IconButton>
                 <IconButton onClick={onClose} size="small">
@@ -835,33 +864,51 @@ const InvoicePreviewDialog = ({ open, onClose, invoiceId, invoiceData }) => {
         </Box>
 
         {/* ── Content ── */}
-        <DialogContent sx={{
-          p: isMobile ? 0 : 3,
-          backgroundColor: '#e0e0e0',
-          overflow: 'auto',
-          WebkitOverflowScrolling: 'touch',
-        }}>
-          {loading && <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: 400 }}><CircularProgress /></Box>}
-          {error && <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: 200 }}><Typography color="error">{error}</Typography></Box>}
-          {invoice && !loading && (
-            isMobile ? (
-              <Box sx={{ py: 1 }}>
-                <Box sx={{
-                  width: PAGE_W,
-                  zoom: scale,
-                }}>
-                  <PaginatedInvoice ref={printRef} invoice={invoice} logoUrl={logoUrl} watermark={watermark} />
-                </Box>
+        {isMobile ? (
+          /* ═══ Mobile: native PDF via <iframe> ═══ */
+          <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', backgroundColor: '#f5f5f5' }}>
+            {mobileContentLoading ? (
+              <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', flex: 1 }}>
+                <CircularProgress />
               </Box>
+            ) : error ? (
+              <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', flex: 1, p: 3 }}>
+                <Typography color="error">{error}</Typography>
+              </Box>
+            ) : pdfBlobUrl ? (
+              <iframe
+                src={pdfBlobUrl}
+                title="PDF peržiūra"
+                style={{
+                  width: '100%',
+                  flex: 1,
+                  border: 'none',
+                  backgroundColor: '#fff',
+                }}
+              />
             ) : (
+              <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flex: 1, gap: 2, p: 3 }}>
+                <Typography color="text.secondary">Nepavyko atidaryti PDF peržiūros</Typography>
+                <Button variant="contained" size="small" onClick={handleDownloadPdf}>
+                  Atsisiųsti PDF
+                </Button>
+              </Box>
+            )}
+          </Box>
+        ) : (
+          /* ═══ Desktop: HTML preview ═══ */
+          <DialogContent sx={{ p: 3, backgroundColor: '#e0e0e0', display: 'flex', justifyContent: 'center', overflow: 'auto' }}>
+            {loading && <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: 400 }}><CircularProgress /></Box>}
+            {error && <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: 200 }}><Typography color="error">{error}</Typography></Box>}
+            {invoice && !loading && (
               <Box sx={{ width: '100%', display: 'flex', justifyContent: 'center', alignItems: 'flex-start', py: 2 }}>
                 <Box sx={{ width: PAGE_W }}>
                   <PaginatedInvoice ref={printRef} invoice={invoice} logoUrl={logoUrl} watermark={watermark} />
                 </Box>
               </Box>
-            )
-          )}
-        </DialogContent>
+            )}
+          </DialogContent>
+        )}
       </Dialog>
       <Snackbar open={snack.open} autoHideDuration={4000} onClose={() => setSnack((s) => ({ ...s, open: false }))} anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}>
         <Alert severity={snack.severity} variant="filled" onClose={() => setSnack((s) => ({ ...s, open: false }))}>{snack.msg}</Alert>
