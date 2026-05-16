@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, forwardRef, useCallback } from 'react';
+import { useState, useRef, useEffect, forwardRef, useCallback, useMemo } from 'react';
 import {
   Box, Typography, Divider, Table, TableBody, TableCell, TableContainer,
   TableHead, TableRow, Button, Dialog, DialogContent, IconButton,
@@ -708,30 +708,12 @@ const InvoicePreviewDialog = ({ open, onClose, invoiceId, invoiceData }) => {
   const [watermark, setWatermark] = useState(false);
   const handlePrint = usePrintInvoice(printRef, invoice);
 
-  // ── Container ref for scale calc ──
-  const containerRef = useRef(null);
-  const [scale, setScale] = useState(1);
-
-  useEffect(() => {
-    if (!open || !isMobile) { setScale(1); return; }
-
-    const calcScale = () => {
-      const cw = containerRef.current?.clientWidth;
-      if (cw && cw < PAGE_W) {
-        setScale(Math.floor((cw / PAGE_W) * 1000) / 1000);
-      } else {
-        setScale(1);
-      }
-    };
-
-    // Delay to let dialog render
-    const raf = requestAnimationFrame(() => setTimeout(calcScale, 50));
-    window.addEventListener('resize', calcScale);
-    return () => {
-      cancelAnimationFrame(raf);
-      window.removeEventListener('resize', calcScale);
-    };
-  }, [open, isMobile]);
+  const scale = useMemo(() => {
+    if (!isMobile || !open) return 1;
+    const screenW = window.innerWidth;
+    if (screenW >= PAGE_W) return 1;
+    return Math.floor((screenW / PAGE_W) * 1000) / 1000;
+  }, [isMobile, open]);
 
   useEffect(() => { if (!open) return; getInvSubscription().then((data) => setWatermark(data?.features?.watermark || false)).catch(() => setWatermark(false)); }, [open]);
   useEffect(() => { if (!open) return; invoicingApi.getSettings().then(({ data }) => setLogoUrl(data.logo_url || null)).catch(() => setLogoUrl(null)); }, [open]);
@@ -770,12 +752,18 @@ const InvoicePreviewDialog = ({ open, onClose, invoiceId, invoiceData }) => {
           justifyContent: 'space-between',
           alignItems: 'center',
           px: isMobile ? 1.5 : 3,
-          py: isMobile ? 1 : 1.5,
+          py: isMobile ? 0.75 : 1.5,
           borderBottom: '1px solid #eee',
-          gap: 1,
-          minHeight: isMobile ? 48 : 'auto',
+          minHeight: isMobile ? 44 : 'auto',
+          flexShrink: 0,
         }}>
-          <Typography sx={{ fontWeight: 700, fontSize: isMobile ? 15 : 16, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+          <Typography sx={{
+            fontWeight: 700,
+            fontSize: isMobile ? 15 : 16,
+            whiteSpace: 'nowrap',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+          }}>
             {fullNum || 'Peržiūra'}
           </Typography>
           <Box sx={{ display: 'flex', gap: isMobile ? 0.25 : 1, alignItems: 'center', flexShrink: 0 }}>
@@ -802,36 +790,38 @@ const InvoicePreviewDialog = ({ open, onClose, invoiceId, invoiceData }) => {
         </Box>
 
         {/* ── Content ── */}
-        <DialogContent
-          ref={containerRef}
-          sx={{
-            p: isMobile ? 0 : 3,
-            backgroundColor: '#e0e0e0',
-            display: 'flex',
-            justifyContent: 'center',
-            overflow: 'auto',
-            touchAction: 'pinch-zoom',
-            WebkitOverflowScrolling: 'touch',
-          }}
-        >
+        <DialogContent sx={{
+          p: isMobile ? 0 : 3,
+          backgroundColor: '#e0e0e0',
+          overflow: 'auto',
+          touchAction: 'pinch-zoom',
+          WebkitOverflowScrolling: 'touch',
+        }}>
           {loading && <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: 400 }}><CircularProgress /></Box>}
           {error && <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: 200 }}><Typography color="error">{error}</Typography></Box>}
           {invoice && !loading && (
-            <Box sx={{
-              width: isMobile ? PAGE_W * scale : '100%',
-              display: 'flex',
-              justifyContent: 'center',
-              alignItems: isMobile ? 'flex-start' : 'flex-start',
-              py: isMobile ? 0 : 2,
-            }}>
+            isMobile ? (
               <Box sx={{
-                width: PAGE_W,
-                transformOrigin: 'top left',
-                transform: isMobile ? `scale(${scale})` : 'none',
+                width: PAGE_W * scale,
+                py: 1,
+                mx: 'auto',
               }}>
-                <PaginatedInvoice ref={printRef} invoice={invoice} logoUrl={logoUrl} watermark={watermark} />
+                <Box sx={{
+                  width: PAGE_W,
+                  transformOrigin: 'top left',
+                  transform: `scale(${scale})`,
+                  height: 'fit-content',
+                }}>
+                  <PaginatedInvoice ref={printRef} invoice={invoice} logoUrl={logoUrl} watermark={watermark} />
+                </Box>
               </Box>
-            </Box>
+            ) : (
+              <Box sx={{ width: '100%', display: 'flex', justifyContent: 'center', alignItems: 'flex-start', py: 2 }}>
+                <Box sx={{ width: PAGE_W }}>
+                  <PaginatedInvoice ref={printRef} invoice={invoice} logoUrl={logoUrl} watermark={watermark} />
+                </Box>
+              </Box>
+            )
           )}
         </DialogContent>
       </Dialog>
