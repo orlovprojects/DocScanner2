@@ -703,17 +703,27 @@ const InvoicePreviewDialog = ({ open, onClose, invoiceId, invoiceData }) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [logoUrl, setLogoUrl] = useState(null);
-  const { downloadPdf, pdfLoading } = useInvoicePdf();
+  const { downloadPdf: _downloadPdf, pdfLoading } = useInvoicePdf();
   const [snack, setSnack] = useState({ open: false, msg: '', severity: 'success' });
   const [watermark, setWatermark] = useState(false);
+  const [pdfSaving, setPdfSaving] = useState(false);
   const handlePrint = usePrintInvoice(printRef, invoice);
 
-  const scale = useMemo(() => {
-    if (!isMobile || !open) return 1;
-    const screenW = window.innerWidth;
-    if (screenW >= PAGE_W) return 1;
-    return Math.floor((screenW / PAGE_W) * 1000) / 1000;
-  }, [isMobile, open]);
+  // ── Mobile scale — recalculates on resize/orientation ──
+  const [scale, setScale] = useState(1);
+
+  useEffect(() => {
+    if (!open || !isMobile) { setScale(1); return; }
+
+    const calc = () => {
+      const w = window.innerWidth;
+      setScale(w >= PAGE_W ? 1 : Math.floor((w / PAGE_W) * 1000) / 1000);
+    };
+
+    calc();
+    window.addEventListener('resize', calc);
+    return () => window.removeEventListener('resize', calc);
+  }, [open, isMobile]);
 
   useEffect(() => { if (!open) return; getInvSubscription().then((data) => setWatermark(data?.features?.watermark || false)).catch(() => setWatermark(false)); }, [open]);
   useEffect(() => { if (!open) return; invoicingApi.getSettings().then(({ data }) => setLogoUrl(data.logo_url || null)).catch(() => setLogoUrl(null)); }, [open]);
@@ -724,13 +734,48 @@ const InvoicePreviewDialog = ({ open, onClose, invoiceId, invoiceData }) => {
     (async () => { setLoading(true); setError(''); try { const { data } = await invoicingApi.getInvoice(invoiceId); setInvoice(data); } catch { setError('Nepavyko įkelti sąskaitos'); } finally { setLoading(false); } })();
   }, [open, invoiceId, invoiceData]);
 
+  // ── iOS-friendly PDF download ──
   const handleDownloadPdf = async () => {
     if (!invoice?.id && !invoiceId) return;
-    try { const id = invoice?.id || invoiceId; const fn = invoice?.full_number || `saskaita-${id}`; await downloadPdf(id, `${fn}.pdf`); }
-    catch { setSnack({ open: true, msg: 'Nepavyko atsisiųsti PDF', severity: 'error' }); }
+    const id = invoice?.id || invoiceId;
+    const fn = `${invoice?.full_number || `saskaita-${id}`}.pdf`;
+
+    setPdfSaving(true);
+    try {
+      const response = await invoicingApi.getInvoicePdf(id);
+      const blob = new Blob([response.data], { type: 'application/pdf' });
+
+      // iOS Safari: navigator.share with File for native "Save to Files"
+      const isIos = /iPad|iPhone|iPod/.test(navigator.userAgent);
+      if (isIos && navigator.share && typeof File !== 'undefined') {
+        try {
+          const file = new File([blob], fn, { type: 'application/pdf' });
+          await navigator.share({ files: [file] });
+          return;
+        } catch (shareErr) {
+          // User cancelled share or not supported — fall through to default
+          if (shareErr.name === 'AbortError') return;
+        }
+      }
+
+      // Default: <a download> (works on Android/desktop)
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = fn;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(url);
+    } catch {
+      setSnack({ open: true, msg: 'Nepavyko atsisiųsti PDF', severity: 'error' });
+    } finally {
+      setPdfSaving(false);
+    }
   };
 
   const fullNum = invoice?.full_number || `${invoice?.document_series || ''}${invoice?.document_number || ''}`;
+  const isSaving = pdfLoading || pdfSaving;
 
   return (
     <>
@@ -772,8 +817,8 @@ const InvoicePreviewDialog = ({ open, onClose, invoiceId, invoiceData }) => {
                 <IconButton size="small" onClick={handlePrint} disabled={!invoice}>
                   <PrintIcon fontSize="small" />
                 </IconButton>
-                <IconButton size="small" onClick={handleDownloadPdf} disabled={pdfLoading || !invoice}>
-                  {pdfLoading ? <CircularProgress size={16} /> : <DownloadIcon fontSize="small" />}
+                <IconButton size="small" onClick={handleDownloadPdf} disabled={isSaving || !invoice}>
+                  {isSaving ? <CircularProgress size={16} /> : <DownloadIcon fontSize="small" />}
                 </IconButton>
                 <IconButton onClick={onClose} size="small">
                   <CloseIcon fontSize="small" />
@@ -782,7 +827,7 @@ const InvoicePreviewDialog = ({ open, onClose, invoiceId, invoiceData }) => {
             ) : (
               <>
                 <Button size="small" startIcon={<PrintIcon />} onClick={handlePrint} variant="outlined" disabled={!invoice}>Spausdinti</Button>
-                <Button size="small" startIcon={pdfLoading ? <CircularProgress size={16} /> : <DownloadIcon />} onClick={handleDownloadPdf} variant="contained" disabled={pdfLoading || !invoice}>Atsisiųsti PDF</Button>
+                <Button size="small" startIcon={isSaving ? <CircularProgress size={16} /> : <DownloadIcon />} onClick={handleDownloadPdf} variant="contained" disabled={isSaving || !invoice}>Atsisiųsti PDF</Button>
                 <IconButton onClick={onClose} size="small"><CloseIcon /></IconButton>
               </>
             )}
@@ -794,23 +839,16 @@ const InvoicePreviewDialog = ({ open, onClose, invoiceId, invoiceData }) => {
           p: isMobile ? 0 : 3,
           backgroundColor: '#e0e0e0',
           overflow: 'auto',
-          touchAction: 'pinch-zoom',
           WebkitOverflowScrolling: 'touch',
         }}>
           {loading && <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: 400 }}><CircularProgress /></Box>}
           {error && <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: 200 }}><Typography color="error">{error}</Typography></Box>}
           {invoice && !loading && (
             isMobile ? (
-              <Box sx={{
-                width: PAGE_W * scale,
-                py: 1,
-                mx: 'auto',
-              }}>
+              <Box sx={{ py: 1 }}>
                 <Box sx={{
                   width: PAGE_W,
-                  transformOrigin: 'top left',
-                  transform: `scale(${scale})`,
-                  height: 'fit-content',
+                  zoom: scale,
                 }}>
                   <PaginatedInvoice ref={printRef} invoice={invoice} logoUrl={logoUrl} watermark={watermark} />
                 </Box>
