@@ -52,6 +52,7 @@ class PrekesCols:
     CODE = 3
     NAME = 4
     BASE_UOM = 5
+    COMPANY_NAME = 7
 
 
 class ClientCols:
@@ -656,14 +657,30 @@ def _get_vat_percent_for_export(doc, item=None) -> Any:
 # =========================================================
 # 1) PREKĖS / PASLAUGOS
 # =========================================================
-def export_prekes_and_paslaugos_to_rivile_erp_xlsx(documents: Iterable[Any], output_path: str | Path) -> Path:
+def export_prekes_and_paslaugos_to_rivile_erp_xlsx(
+    documents: Iterable[Any],
+    output_path: str | Path,
+    user: Any = None,
+    company_name_map: Optional[dict] = None,
+) -> Path:
     wb = _load_template(PREKES_TEMPLATE_FILE)
     ws = wb.active
+
+    # --- Проверяем настройку rivile_erp_add_company ---
+    extra_settings = _get_user_extra_settings(user=user)
+    add_company = (
+        str(extra_settings.get("rivile_erp_add_company", "0")).strip() == "1"
+        and isinstance(company_name_map, dict)
+        and bool(company_name_map)
+    )
 
     prekes_rows: list[list[str]] = []
     seen: set[str] = set()
 
     for doc in documents or []:
+        doc_pk = getattr(doc, "pk", None) or getattr(doc, "id", None)
+        doc_company = _s(company_name_map.get(doc_pk)) if add_company and doc_pk else ""
+
         line_items = getattr(doc, "line_items", None)
         has_items = bool(line_items and hasattr(line_items, "all") and line_items.exists())
 
@@ -678,7 +695,7 @@ def export_prekes_and_paslaugos_to_rivile_erp_xlsx(documents: Iterable[Any], out
                 unit = normalize_code(getattr(item, "unit", None) or DEFAULT_UNIT)
                 pavadinimas = safe_excel_text(getattr(item, "prekes_pavadinimas", None) or "Prekė")
 
-                prekes_rows.append([kodas, tipas, kodas, pavadinimas, unit])
+                prekes_rows.append([kodas, tipas, kodas, pavadinimas, unit, doc_company])
                 seen.add(kodas)
         else:
             kodas_raw = getattr(doc, "prekes_kodas", None) or getattr(doc, "prekes_barkodas", None)
@@ -690,7 +707,7 @@ def export_prekes_and_paslaugos_to_rivile_erp_xlsx(documents: Iterable[Any], out
             unit = normalize_code(getattr(doc, "unit", None) or DEFAULT_UNIT)
             pavadinimas = safe_excel_text(getattr(doc, "prekes_pavadinimas", None) or "Prekė")
 
-            prekes_rows.append([kodas, tipas, kodas, pavadinimas, unit])
+            prekes_rows.append([kodas, tipas, kodas, pavadinimas, unit, doc_company])
             seen.add(kodas)
 
     start_row = 6
@@ -701,6 +718,9 @@ def export_prekes_and_paslaugos_to_rivile_erp_xlsx(documents: Iterable[Any], out
         ws.cell(row=r, column=PrekesCols.CODE, value=row_data[2])
         ws.cell(row=r, column=PrekesCols.NAME, value=row_data[3])
         ws.cell(row=r, column=PrekesCols.BASE_UOM, value=row_data[4])
+
+        if add_company and row_data[5]:
+            ws.cell(row=r, column=PrekesCols.COMPANY_NAME, value=safe_excel_text(row_data[5]))
 
     wb.save(output_path)
     return Path(output_path)

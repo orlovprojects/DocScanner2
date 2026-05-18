@@ -1788,6 +1788,18 @@ def export_documents(request):
         logger.info("[EXP] RIVILE_ERP klientai=%d docs_pirk=%d docs_pard=%d",
                     len(klientai), len(pirkimai_docs), len(pardavimai_docs))
 
+        # --- Company name map для prekės/paslaugos файла ---
+        company_name_map = {}
+        if str(user_extra_settings.get("rivile_erp_add_company", "0")).strip() == "1":
+            for pack in (prepared.get("pirkimai", []) + prepared.get("pardavimai", [])):
+                doc = pack["doc"]
+                dir_ = pack.get("direction")
+                doc_pk = doc.pk
+                if dir_ == "pirkimas":
+                    company_name_map[doc_pk] = doc.buyer_name or ""
+                elif dir_ == "pardavimas":
+                    company_name_map[doc_pk] = doc.seller_name or ""
+
         files_to_export = []
 
         if klientai:
@@ -1798,7 +1810,12 @@ def export_documents(request):
             files_to_export.append((f'klientai_{today_str}.xlsx', klientai_xlsx_bytes))
 
         with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp:
-            export_prekes_and_paslaugos_to_rivile_erp_xlsx(documents, tmp.name)
+            export_prekes_and_paslaugos_to_rivile_erp_xlsx(
+                documents,
+                tmp.name,
+                user=request.user,
+                company_name_map=company_name_map,
+            )
             tmp.seek(0)
             prekes_xlsx_bytes = tmp.read()
         files_to_export.append((f'prekes_paslaugos_{today_str}.xlsx', prekes_xlsx_bytes))

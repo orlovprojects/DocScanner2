@@ -5307,6 +5307,39 @@ export default function NustatymaiPage() {
             </Box>
           </Box>
 
+          {program === "rivile_erp" && (
+            <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+              <Switch
+                checked={String(extraSettings?.rivile_erp_add_company ?? "0").trim() === "1"}
+                onChange={async (e) => {
+                  const checked = e.target.checked;
+                  const prev = extraSettings || {};
+                  const next = { ...prev };
+                  if (checked) next.rivile_erp_add_company = "1";
+                  else delete next.rivile_erp_add_company;
+                  setExtraSettings(next);
+                  try {
+                    await api.patch("/profile/", { extra_settings: next }, { withCredentials: true });
+                  } catch {
+                    setExtraSettings(prev);
+                    alert("Nepavyko išsaugoti nustatymo.");
+                  }
+                }}
+              />
+              <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
+                <Typography variant="body2">Įtraukti įmonės pavadinimą į prekių failą</Typography>
+                <Tooltip
+                  arrow
+                  enterTouchDelay={0}
+                  leaveTouchDelay={4000}
+                  title="Prie prekių ir paslaugų prisidės pirkėjo įmonės pavadinimas pirkimams bei pardavėjo įmonės pavadinimas pardavimams."
+                >
+                  <HelpOutlineIcon fontSize="small" sx={{ color: "text.secondary" }} />
+                </Tooltip>
+              </Box>
+            </Box>
+          )}
+
           {program === "centas" && (
             <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
               <Switch
