@@ -24,6 +24,7 @@ if KIE_API_KEY.lower().startswith("bearer "):
     KIE_API_KEY = KIE_API_KEY[7:].strip()
 
 KIE_GEMINI_FLASH_URL = "https://api.kie.ai/gemini-2.5-flash/v1/chat/completions"
+KIE_GEMINI_3_FLASH_URL = "https://api.kie.ai/gemini-3-flash/v1/chat/completions"
 
 KIE_TIMEOUT_SECONDS = float(os.getenv("KIE_TIMEOUT_SECONDS", "300"))
 
@@ -151,21 +152,21 @@ def ask_kie(
     temperature: float = 1.0,
     max_output_tokens: int = 20000,
     timeout_seconds: float | int | None = None,
+    endpoint_url: str | None = None,
     logger: logging.Logger | None = None,
 ) -> str:
     """
-    Один запрос к KIE Gemini 2.5 Flash OpenAI-compatible endpoint.
-
-    model оставлен для совместимости со старым ask_gemini().
-    KIE модель выбирается endpoint-ом: /gemini-2.5-flash/v1/chat/completions
+    Один запрос к KIE Gemini OpenAI-compatible endpoint.
     """
     log = logger or LOGGER
 
     full_prompt = prompt + "\n\n" + text
     eff_timeout = timeout_seconds if timeout_seconds is not None else KIE_TIMEOUT_SECONDS
+    eff_url = endpoint_url or KIE_GEMINI_FLASH_URL
 
     log.info(
-        "[KIE Gemini] Request start endpoint=gemini-2.5-flash requested_model=%s len_text=%d len_prompt=%d total_len=%d timeout=%ss",
+        "[KIE Gemini] Request start endpoint=%s requested_model=%s len_text=%d len_prompt=%d total_len=%d timeout=%ss",
+        eff_url.split("/api.kie.ai/")[-1].split("/v1")[0] if "api.kie.ai" in eff_url else eff_url,
         model,
         len(text or ""),
         len(prompt or ""),
@@ -195,7 +196,7 @@ def ask_kie(
 
     try:
         resp = requests.post(
-            KIE_GEMINI_FLASH_URL,
+            eff_url,
             headers=_kie_headers(),
             json=payload,
             timeout=float(eff_timeout),
@@ -250,16 +251,24 @@ def ask_kie_with_retry(
     """
     slow_error_threshold: если ошибка пришла дольше чем за N секунд,
     не ретраим — сразу выбрасываем для перехода на fallback.
+
+    Стратегия:
+    - attempt 0..max_retries-1: KIE gemini-2.5-flash
+    - attempt max_retries (последний): KIE gemini-3-flash
     """
     log = logger or LOGGER
     last_exc = None
 
     for attempt in range(max_retries + 1):
+        is_last_attempt = attempt == max_retries
+        eff_endpoint = KIE_GEMINI_3_FLASH_URL if is_last_attempt else KIE_GEMINI_FLASH_URL
+        eff_model_label = "gemini-3-flash" if is_last_attempt else model
+
         log.info(
-            "[KIE Gemini] Attempt %d/%d requested_model=%s timeout=%ss",
+            "[KIE Gemini] Attempt %d/%d endpoint=%s timeout=%ss",
             attempt + 1,
             max_retries + 1,
-            model,
+            eff_model_label,
             timeout_seconds,
         )
 
@@ -269,15 +278,16 @@ def ask_kie_with_retry(
             result = ask_kie(
                 text=text,
                 prompt=prompt,
-                model=model,
+                model=eff_model_label,
                 temperature=temperature,
                 max_output_tokens=max_output_tokens,
                 timeout_seconds=timeout_seconds,
+                endpoint_url=eff_endpoint,
                 logger=log,
             )
 
             elapsed_attempt = time.perf_counter() - t_attempt
-            log.info("[KIE Gemini] Attempt %d succeeded in %.2fs", attempt + 1, elapsed_attempt)
+            log.info("[KIE Gemini] Attempt %d succeeded in %.2fs (endpoint=%s)", attempt + 1, elapsed_attempt, eff_model_label)
 
             return result
 
@@ -289,9 +299,10 @@ def ask_kie_with_retry(
             status_code = getattr(e, "status_code", None)
 
             log.warning(
-                "[KIE Gemini] Error attempt=%d/%d elapsed=%.2fs code=%s http=%s err=%s",
+                "[KIE Gemini] Error attempt=%d/%d endpoint=%s elapsed=%.2fs code=%s http=%s err=%s",
                 attempt + 1,
                 max_retries + 1,
+                eff_model_label,
                 elapsed_attempt,
                 code,
                 status_code,
@@ -299,10 +310,9 @@ def ask_kie_with_retry(
                 exc_info=True,
             )
 
-            if attempt >= 1:  # не шлём на первой попытке
-                _notify_kie_api_error(e, model, log, attempt=attempt + 1)
+            if attempt >= 1:
+                _notify_kie_api_error(e, eff_model_label, log, attempt=attempt + 1)
 
-            # Медленная ошибка = сразу fallback, не тратим время на retry
             if elapsed_attempt > slow_error_threshold:
                 log.warning(
                     "[KIE Gemini] Slow error (%.1fs > %ds), skip retries → fallback",
@@ -346,9 +356,10 @@ def ask_kie_with_retry(
             )
 
             log.warning(
-                "[KIE Gemini] Unexpected error attempt=%d/%d elapsed=%.2fs retryable=%s err=%s",
+                "[KIE Gemini] Unexpected error attempt=%d/%d endpoint=%s elapsed=%.2fs retryable=%s err=%s",
                 attempt + 1,
                 max_retries + 1,
+                eff_model_label,
                 elapsed_attempt,
                 retryable,
                 e,
@@ -363,18 +374,19 @@ def ask_kie_with_retry(
 
     log.error("[KIE Gemini] Exhausted retries. Raising last exception: %r", last_exc)
 
-    try:
-        _send_telegram(
-            f"🚨 <b>KIE Gemini: все retry исчерпаны</b>\n"
-            f"<b>Endpoint:</b> <code>gemini-2.5-flash</code>\n"
-            f"<b>Requested model:</b> <code>{model}</code>\n"
-            f"<b>Attempts:</b> {max_retries + 1}\n"
-            f"<b>Last error:</b> {str(last_exc)[:300]}",
-            dedup_key="kie_gemini_retries_exhausted",
-            dedup_ttl=600,
-        )
-    except Exception:
-        pass
+    if KIE_ERROR_TELEGRAM:
+        try:
+            _send_telegram(
+                f"🚨 <b>KIE Gemini: все retry исчерпаны</b>\n"
+                f"<b>Endpoint:</b> <code>gemini-2.5-flash → gemini-3-flash</code>\n"
+                f"<b>Requested model:</b> <code>{model}</code>\n"
+                f"<b>Attempts:</b> {max_retries + 1}\n"
+                f"<b>Last error:</b> {str(last_exc)[:300]}",
+                dedup_key="kie_gemini_retries_exhausted",
+                dedup_ttl=600,
+            )
+        except Exception:
+            pass
 
     raise last_exc
 
@@ -412,7 +424,7 @@ def ask_llm_provider_with_retry(
                 timeout_seconds=timeout_seconds,
                 logger=log,
             )
-            return result, "kie-gemini-2.5-flash"
+            return result, "kie-gemini"
         except Exception as e:
             last_exc = e
             log.warning("[LLM] KIE failed, will try direct Gemini fallback: %s", e, exc_info=True)
@@ -450,7 +462,7 @@ def _notify_kie_api_error(exc: Exception, model: str, log, *, attempt: int | Non
     try:
         _send_telegram(
             f"🚨 <b>KIE API error</b>\n"
-            f"<b>Endpoint:</b> <code>gemini-2.5-flash</code>\n"
+            f"<b>Endpoint:</b> <code>{model}</code>\n"
             f"<b>Requested model:</b> <code>{model}</code>\n"
             f"<b>Attempt:</b> {attempt if attempt is not None else '-'}\n"
             f"<b>Code:</b> <code>{code}</code>\n"
