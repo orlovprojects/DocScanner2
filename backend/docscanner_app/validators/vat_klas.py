@@ -125,7 +125,7 @@ def auto_select_pvm_code(
             if pirkimas_pardavimas == "pirkimas" and buyer_country_iso == "LT":
                 if seller_country_iso == "LT": return "PVM5"
                 if seller_in_eu and seller_country_iso != "LT":
-                    return "PVM41"  # pirkimas из ЕС (0% ветка как у тебя)
+                    return "PVM21"  # pirkimas из ЕС (0% ветка как у тебя)
                 if (not seller_in_eu) and seller_country_iso != "LT":
                     return "PVM38"  # как у тебя было
 
