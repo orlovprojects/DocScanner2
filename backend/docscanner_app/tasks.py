@@ -9,6 +9,8 @@ import logging.config
 from django.db.models import F
 from decimal import Decimal
 import fitz
+from django.db.models import Count
+
 
 from celery import shared_task
 from celery.exceptions import SoftTimeLimitExceeded
@@ -2661,6 +2663,65 @@ def monitor_stuck_sessions():
                 f"   fix failed: {str(e)[:200]}"
             )
 
+    # ─── 1b. ПРИЗРАЧНЫЕ сессии: processing/queued > 20 мин, но 0 документов ───
+    # Файл не загрузился до конца → ScannedDocument не создался → сессия висит вечно
+    # и блокирует очередь юзера (секция 5 видит has_active=True).
+    ghost_sessions = (
+        UploadSession.objects
+        .filter(
+            stage__in=["processing", "queued"],
+            updated_at__lt=now - timedelta(minutes=20),
+        )
+        .annotate(doc_count=Count("documents"))
+        .filter(doc_count=0)
+    )
+    ghost_user_ids = set()
+    for s in ghost_sessions:
+        try:
+            with transaction.atomic():
+                ss = UploadSession.objects.select_for_update().get(id=s.id)
+                if ss.stage not in ("processing", "queued"):
+                    continue
+
+                if ss.reserved_credits > 0:
+                    u = CustomUser.objects.select_for_update().get(id=ss.user_id)
+                    u.credits_reserved = max(
+                        (u.credits_reserved or Decimal("0")) - ss.reserved_credits,
+                        Decimal("0"),
+                    )
+                    u.save(update_fields=["credits_reserved"])
+                    ss.reserved_credits = Decimal("0")
+
+                ss.stage = "failed"
+                ss.finished_at = now
+                ss.error_message = (
+                    "Automatiškai atšaukta: failas nepasiekė serverio "
+                    "(įkėlimas nutrūko)"
+                )
+                ss.save(update_fields=[
+                    "stage", "finished_at", "error_message",
+                    "reserved_credits", "updated_at",
+                ])
+                ghost_user_ids.add(ss.user_id)
+
+            fixes.append(
+                f"👻 Ghost session <code>{str(s.id)[:8]}</code> → failed\n"
+                f"   {s.stage} >20min with 0 docs, user_id={s.user_id}"
+            )
+        except Exception as e:
+            alerts.append(
+                f"👻 Ghost session <code>{str(s.id)[:8]}</code> fix failed: "
+                f"{str(e)[:200]}"
+            )
+
+    # Сразу пинаем queued сессии юзеров, чьи призраки закрыли
+    for uid in ghost_user_ids:
+        try:
+            kick_next_session_task.delay(uid)
+            fixes.append(f"🚀 Kicked user {uid} after ghost cleanup")
+        except Exception as e:
+            logger.error("[WATCHDOG] Kick after ghost cleanup user %s: %s", uid, e)
+
     # ─── 2. processing > 30 мин — WATCHDOG ───
     stuck_processing = UploadSession.objects.filter(
         stage="processing",
@@ -2796,6 +2857,9 @@ def monitor_stuck_sessions():
         updated_at__lt=now - timedelta(minutes=10),
     )
     for sq in stuck_queued:
+        # Уже пнули после очистки призрака — пропускаем
+        if sq.user_id in ghost_user_ids:
+            continue
         has_active = UploadSession.objects.filter(
             user_id=sq.user_id,
             stage="processing",
