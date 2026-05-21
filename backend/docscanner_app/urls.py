@@ -58,6 +58,9 @@ from .views import (
     VeiklosContractorSearchView,
     VeiklosZurnalasGenerateView,
     VeiklosZurnalasExportView,
+    OSSReportGenerateView,
+    OSSReportExportView,
+    OSSContractorSearchView,
     NewsletterSendView,
     export_products_view,
     delete_all_products_view,
@@ -471,5 +474,9 @@ urlpatterns = [
     path('veiklos-zurnalas/contractors/', VeiklosContractorSearchView.as_view()),
     path('veiklos-zurnalas/generate/', VeiklosZurnalasGenerateView.as_view()),
     path('veiklos-zurnalas/export/', VeiklosZurnalasExportView.as_view()),
+
+    path('oss-report/contractors/', OSSContractorSearchView.as_view()),
+    path('oss-report/generate/', OSSReportGenerateView.as_view()),
+    path('oss-report/export/', OSSReportExportView.as_view()),
 
 ]

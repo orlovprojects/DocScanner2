@@ -73,6 +73,7 @@ import ProductsPage from './pages/ProductsPage';
 import BankStatementsPage from './pages/BankStatementsPage';
 import InvoicePublicPage from './pages/InvoicePublicPage';
 import VeiklosZurnalasPage from './pages/VeiklosZurnalasPage';
+import OSSReportPage from './pages/Ossreportpage';
 
 
 function App() {
@@ -169,6 +170,7 @@ function App() {
         <Route path="/prisijungti" element={<RedirectIfAuthenticated><Login /></RedirectIfAuthenticated>} />
         <Route path="/registruotis" element={<RedirectIfAuthenticated><Register /></RedirectIfAuthenticated>} />
         <Route path="/veiklos-zurnalas" element={<PrivateRoute><VeiklosZurnalasPage /></PrivateRoute>} />
+        <Route path="/oss-zurnalas" element={<PrivateRoute><OSSReportPage /></PrivateRoute>} />
         <Route path="/papildyti" element={<Subscribe />} />
         <Route path="/susisiekti" element={<Contact />} />
         <Route path="/nustatymai" element={<PrivateRoute><NustatymaiPage /></PrivateRoute>} />
