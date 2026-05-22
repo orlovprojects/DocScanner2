@@ -4,1236 +4,745 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 
-    <title>Išmanus sąskaitų išrašymas internetu - saskaituisrasymas.lt</title>
-    <meta name="description" content="Išrašyk sąskaitas faktūras išmaniai internetu. Duomenis galėsi eksportuoti į savo apskaitos programą, tad nereikės vesti ranka." />
+    <title>Išmanus sąskaitų išrašymas internetu - Sąskaitų išrašymas LT</title>
+    <meta name="description" content="Išrašyk sąskaitas faktūras išmaniai internetu. Tinka individualiai veiklai, MB ir UAB. Eksportuok duomenis į apskaitos programą." />
     <link rel="canonical" href="https://saskaituisrasymas.lt/" />
 
-    <meta name="theme-color" content="#0b3d2e" />
-    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'%3E%3Crect x='3' y='3' width='42' height='42' rx='10' fill='%230b3d2e'/%3E%3Cpath d='M14 14h16l5 5v15H14z' fill='%23f6f1e7'/%3E%3Cpath d='M30 14v5h5' stroke='%230b3d2e' stroke-width='1.5' fill='none'/%3E%3Cline x1='18' y1='24' x2='31' y2='24' stroke='%230b3d2e' stroke-width='2' stroke-linecap='round'/%3E%3Cline x1='18' y1='28' x2='31' y2='28' stroke='%230b3d2e' stroke-width='2' stroke-linecap='round'/%3E%3Cline x1='18' y1='32' x2='26' y2='32' stroke='%230b3d2e' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E" />
-    <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'%3E%3Crect x='3' y='3' width='42' height='42' rx='10' fill='%230b3d2e'/%3E%3Cpath d='M14 14h16l5 5v15H14z' fill='%23f6f1e7'/%3E%3Cpath d='M30 14v5h5' stroke='%230b3d2e' stroke-width='1.5' fill='none'/%3E%3Cline x1='18' y1='24' x2='31' y2='24' stroke='%230b3d2e' stroke-width='2' stroke-linecap='round'/%3E%3Cline x1='18' y1='28' x2='31' y2='28' stroke='%230b3d2e' stroke-width='2' stroke-linecap='round'/%3E%3Cline x1='18' y1='32' x2='26' y2='32' stroke='%230b3d2e' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E" />
+    <meta name="theme-color" content="#1e3a5f" />
+    <link rel="icon" type="image/svg+xml" sizes="any" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2048%2048%22%3E%0A%20%20%3Crect%20width%3D%2248%22%20height%3D%2248%22%20rx%3D%2212%22%20fill%3D%22%23ffffff%22%2F%3E%0A%20%20%3Crect%20x%3D%224%22%20y%3D%224%22%20width%3D%2240%22%20height%3D%2240%22%20rx%3D%229%22%20fill%3D%22%23FDB913%22%2F%3E%0A%20%20%3Crect%20x%3D%224%22%20y%3D%2217.33%22%20width%3D%2240%22%20height%3D%2213.34%22%20fill%3D%22%23006A44%22%2F%3E%0A%20%20%3Cpath%20d%3D%22M4%2030.67h40V35a9%209%200%200%201-9%209H13a9%209%200%200%201-9-9z%22%20fill%3D%22%23C1272D%22%2F%3E%0A%20%20%3Crect%20x%3D%224%22%20y%3D%224%22%20width%3D%2240%22%20height%3D%2240%22%20rx%3D%229%22%20fill%3D%22none%22%20stroke%3D%22%23d0d7e2%22%20stroke-width%3D%221%22%2F%3E%0A%3C%2Fsvg%3E" />
+    <link rel="shortcut icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2048%2048%22%3E%0A%20%20%3Crect%20width%3D%2248%22%20height%3D%2248%22%20rx%3D%2212%22%20fill%3D%22%23ffffff%22%2F%3E%0A%20%20%3Crect%20x%3D%224%22%20y%3D%224%22%20width%3D%2240%22%20height%3D%2240%22%20rx%3D%229%22%20fill%3D%22%23FDB913%22%2F%3E%0A%20%20%3Crect%20x%3D%224%22%20y%3D%2217.33%22%20width%3D%2240%22%20height%3D%2213.34%22%20fill%3D%22%23006A44%22%2F%3E%0A%20%20%3Cpath%20d%3D%22M4%2030.67h40V35a9%209%200%200%201-9%209H13a9%209%200%200%201-9-9z%22%20fill%3D%22%23C1272D%22%2F%3E%0A%20%20%3Crect%20x%3D%224%22%20y%3D%224%22%20width%3D%2240%22%20height%3D%2240%22%20rx%3D%229%22%20fill%3D%22none%22%20stroke%3D%22%23d0d7e2%22%20stroke-width%3D%221%22%2F%3E%0A%3C%2Fsvg%3E" />
 
     <meta property="og:title" content="Išmanus sąskaitų išrašymas internetu" />
-    <meta property="og:description" content="Išrašyk sąskaitas faktūras išmaniai internetu. Duomenis galėsi eksportuoti į savo apskaitos programą, tad nereikės vesti ranka." />
+    <meta property="og:description" content="Išrašyk sąskaitas faktūras išmaniai internetu. Tinka individualiai veiklai, MB ir UAB." />
     <meta property="og:url" content="https://saskaituisrasymas.lt/" />
     <meta property="og:type" content="website" />
     <meta property="og:locale" content="lt_LT" />
 
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,500;0,600;0,700;0,800;1,400;1,500;1,600;1,700&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="preload" href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap" as="style" onload="this.onload=null;this.rel='stylesheet'" />
+    <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap" /></noscript>
 
     <style>
+
         :root {
-            --bg: #f5f7f6;
-            --bg-alt: #eef3f1;
+            --bg: #f6f8fb;
+            --bg-alt: #eef4ff;
             --surface: #ffffff;
-            --surface-soft: #f8fbfa;
-            --ink: #13211d;
-            --ink-soft: #42524d;
-            --muted: #6c7a75;
-            --line: #d9e2de;
-            --accent: #0f766e;
-            --accent-2: #0b5e58;
-            --accent-soft: #dff2ef;
-            --highlight: #ea580c;
-            --card: #ffffff;
-            --shadow: 0 12px 36px rgba(15, 23, 42, 0.08);
-            --shadow-lg: 0 24px 60px rgba(15, 23, 42, 0.12);
-            --radius: 18px;
-            --radius-sm: 12px;
-            --container: 1180px;
-            --serif: "Playfair Display", Georgia, "Times New Roman", serif;
-            --sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            --surface-soft: rgba(255,255,255,0.72);
+            --ink: #0b1220;
+            --ink-soft: #23324a;
+            --muted: #64748b;
+            --line: rgba(15,23,42,0.10);
+            --line-soft: rgba(15,23,42,0.06);
+            --accent: #2563eb;
+            --accent-dark: #1d4ed8;
+            --accent-strong: #1746d1;
+            --accent-soft: #dbeafe;
+            --accent-glow: rgba(37,99,235,0.16);
+            --success: #10b981;
+            --success-soft: #dcfce7;
+            --highlight: #f59e0b;
+            --shadow: 0 18px 55px rgba(15,23,42,0.08);
+            --shadow-lg: 0 28px 80px rgba(15,23,42,0.14);
+            --radius: 24px;
+            --radius-sm: 14px;
+            --container: 1140px;
+            --sans: "DM Sans",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
         }
 
-        * { box-sizing: border-box; }
-        html { scroll-behavior: smooth; }
-
-        body {
-            margin: 0;
-            font-family: var(--sans);
-            color: var(--ink);
-            background: linear-gradient(180deg, #fbfcfc 0%, var(--bg) 100%);
-            line-height: 1.55;
-            -webkit-font-smoothing: antialiased;
+        *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+        html{scroll-behavior:smooth;text-rendering:optimizeLegibility}
+        body{
+            font-family:var(--sans);
+            color:var(--ink);
+            background:linear-gradient(180deg,#fbfdff 0%,var(--bg) 42%,#fff 100%);
+            line-height:1.6;
+            -webkit-font-smoothing:antialiased;
+            min-width:320px;
         }
-
-        a { color: inherit; text-decoration: none; }
-        img, svg { display: block; max-width: 100%; }
-
-        h1, h2, h3 {
-            font-family: var(--serif);
-            font-weight: 600;
-            letter-spacing: -0.02em;
-            line-height: 1.08;
-        }
-
-        .container {
-            width: min(var(--container), calc(100% - 32px));
-            margin: 0 auto;
-        }
-
-        .section { padding: 84px 0; }
-
-        .section-head {
-            max-width: 700px;
-            margin: 0 0 48px;
-        }
-
-        .section-head.center {
-            margin-left: auto;
-            margin-right: auto;
-            text-align: center;
-        }
-
-        .section-head h2 {
-            margin: 0 0 12px;
-            font-size: clamp(30px, 4vw, 48px);
-        }
-
-        .section-head p {
-            margin: 0;
-            font-size: 17px;
-            color: var(--muted);
-            max-width: 620px;
-        }
-
-        .section-head.center p { margin: 0 auto; }
-
-        .eyebrow {
-            display: inline-flex;
-            align-items: center;
-            gap: 10px;
-            font-family: var(--sans);
-            font-size: 12px;
-            font-weight: 700;
-            text-transform: uppercase;
-            letter-spacing: 0.12em;
-            color: var(--accent);
-            margin-bottom: 18px;
-        }
-
-        .eyebrow::before {
-            content: "";
-            width: 24px;
-            height: 1px;
-            background: var(--accent);
-        }
-
-        /* Buttons */
-        .btn {
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            gap: 8px;
-            min-height: 48px;
-            padding: 0 22px;
-            border-radius: 999px;
-            font-family: var(--sans);
-            font-weight: 700;
-            font-size: 14px;
-            border: 1px solid transparent;
-            cursor: pointer;
-            transition: all 0.22s ease;
-            white-space: nowrap;
-        }
-
-        .btn-primary {
-            background: var(--accent);
-            color: #fff;
-            box-shadow: 0 10px 22px rgba(15, 118, 110, 0.18);
-        }
-
-        .btn-primary:hover {
-            background: var(--accent-2);
-            transform: translateY(-1px);
-        }
-
-        .btn-ghost {
-            background: transparent;
-            color: var(--ink);
-            border-color: var(--line);
-        }
-
-        .btn-ghost:hover {
-            background: var(--surface);
-            border-color: var(--accent);
-            color: var(--accent);
-        }
-
-        .btn-large {
-            min-height: 52px;
-            padding: 0 26px;
-            font-size: 15px;
-        }
+        a{color:inherit;text-decoration:none}
+        img,svg{display:block;max-width:100%}
+        .container{width:min(var(--container),100% - 40px);margin:0 auto}
+        .section{padding:96px 0;position:relative}
+        ::selection{background:var(--accent-soft);color:var(--accent-dark)}
 
         /* Header */
-        .site-header {
-            position: sticky;
-            top: 0;
-            z-index: 60;
-            background: rgba(255, 255, 255, 0.88);
-            backdrop-filter: blur(16px);
-            border-bottom: 1px solid rgba(217, 226, 222, 0.9);
+        .site-header{
+            position:sticky;
+            top:0;
+            z-index:60;
+            background:rgba(255,255,255,0.78);
+            backdrop-filter:blur(12px);
+            -webkit-backdrop-filter:blur(12px);
+            border-bottom:1px solid rgba(15,23,42,0.08);
         }
+        .header-inner{display:flex;align-items:center;justify-content:space-between;gap:22px;min-height:72px}
+        .logo{display:inline-flex;align-items:center;gap:11px;font-size:17px;font-weight:800;color:var(--ink);letter-spacing:-0.02em;white-space:nowrap}
+        .logo-mark{width:38px;height:38px;flex:0 0 38px}
+        .nav{display:flex;align-items:center;gap:6px;padding:5px;border:1px solid rgba(15,23,42,0.08);background:rgba(255,255,255,0.66);border-radius:999px}
+        .nav-link{color:var(--muted);font-weight:700;font-size:14px;padding:9px 13px;border-radius:999px;transition:color .2s, background .2s}
+        .nav-link:hover{color:var(--accent);background:#fff}
+        .header-cta{display:flex;align-items:center;gap:10px}
+        .login-text{color:var(--ink-soft);font-weight:700;font-size:14px;padding:9px 4px}
+        .login-text:hover{color:var(--accent)}
 
-        .header-inner {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            gap: 24px;
-            min-height: 76px;
+        /* Buttons */
+        .btn{
+            display:inline-flex;
+            align-items:center;
+            justify-content:center;
+            gap:8px;
+            min-height:46px;
+            padding:0 22px;
+            border-radius:999px;
+            font-family:var(--sans);
+            font-weight:800;
+            font-size:14px;
+            border:1px solid transparent;
+            cursor:pointer;
+            transition:transform .2s ease, box-shadow .2s ease, background .2s ease, color .2s ease, border-color .2s ease;
+            white-space:nowrap;
         }
-
-        .logo {
-            display: inline-flex;
-            align-items: center;
-            gap: 12px;
-            font-family: var(--serif);
-            font-size: 20px;
-            font-weight: 700;
-            color: var(--ink);
-            letter-spacing: -0.02em;
+        .btn:focus-visible,.nav-link:focus-visible,.login-text:focus-visible,.faq-item summary:focus-visible{
+            outline:3px solid rgba(37,99,235,0.26);
+            outline-offset:3px;
         }
-
-        .logo-mark {
-            width: 40px;
-            height: 40px;
-            flex: 0 0 40px;
+        .btn-primary{
+            background:linear-gradient(135deg,var(--accent) 0%,var(--accent-dark) 100%);
+            color:#fff;
+            box-shadow:0 14px 30px rgba(37,99,235,0.24);
         }
+        .btn-primary:hover{transform:translateY(-2px);box-shadow:0 20px 38px rgba(37,99,235,0.30)}
+        .btn-ghost{background:rgba(255,255,255,0.78);color:var(--ink);border-color:rgba(15,23,42,0.10);box-shadow:0 10px 22px rgba(15,23,42,0.04)}
+        .btn-ghost:hover{background:#fff;border-color:rgba(37,99,235,0.35);color:var(--accent);transform:translateY(-2px)}
+        .btn-large{min-height:54px;padding:0 30px;font-size:15px}
 
-        .nav {
-            display: flex;
-            align-items: center;
-            gap: 26px;
+        /* Section Head */
+        .section-head{max-width:720px;margin:0 0 44px}
+        .section-head.center{margin-left:auto;margin-right:auto;text-align:center}
+        .section-head h2{margin:0 0 14px;font-size:clamp(30px,4.2vw,46px);font-weight:800;letter-spacing:-0.045em;line-height:1.07}
+        .section-head p{margin:0;font-size:17px;color:var(--muted);max-width:610px;line-height:1.72}
+        .section-head.center p{margin:0 auto}
+        .eyebrow{
+            display:inline-flex;
+            align-items:center;
+            gap:9px;
+            font-size:12px;
+            font-weight:800;
+            text-transform:uppercase;
+            letter-spacing:.12em;
+            color:var(--accent);
+            margin-bottom:14px;
         }
-
-        .nav-link {
-            color: var(--ink-soft);
-            font-weight: 500;
-            font-size: 14px;
-            transition: color 0.2s;
-        }
-
-        .nav-link:hover { color: var(--accent); }
-
-        .header-cta {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-        }
-
-        .login-text {
-            color: var(--ink);
-            font-weight: 600;
-            font-size: 14px;
-        }
-
-        .login-text:hover { color: var(--accent); }
-
-        /* Tech News */
-        .tech-news-section {
-            width: 100%;
-            background: #e8ecea;
-            border-bottom: 1px solid #d6dfdb;
-            padding: 40px 0 52px;
-        }
-
-        .tech-news-inner {
-            max-width: 1040px;
-            margin: 0 auto;
-        }
-
-        .tech-news-label {
-            display: inline-flex;
-            align-items: center;
-            padding: 6px 12px;
-            margin-bottom: 16px;
-            border-radius: 999px;
-            background: #d6ddda;
-            color: #182320;
-            font-family: var(--sans);
-            font-size: 11px;
-            font-weight: 800;
-            letter-spacing: 0.08em;
-            text-transform: uppercase;
-        }
-
-        .tech-article-card {
-            background: #ffffff;
-            border: 1px solid #dde4e1;
-            border-radius: 18px;
-            overflow: hidden;
-            box-shadow: 0 20px 50px rgba(15, 23, 42, 0.08);
-        }
-
-        .tech-article-card + .tech-article-card {
-            margin-top: 34px;
-        }
-
-        .tech-article-card::before {
-            content: "";
-            display: block;
-            height: 6px;
-            background: linear-gradient(90deg, var(--accent) 0%, #38b2ac 100%);
-        }
-
-        .tech-article-content {
-            max-width: 790px;
-            margin: 0 auto;
-            padding: 44px 34px 68px;
-            font-family: Helvetica, Arial, sans-serif;
-            color: #101010;
-        }
-
-        .tech-article-content h2 {
-            margin: 0 0 22px;
-            font-family: Helvetica, Arial, sans-serif;
-            font-size: clamp(28px, 3.4vw, 42px);
-            font-weight: 800;
-            line-height: 1.12;
-            letter-spacing: -0.03em;
-        }
-
-        .tech-article-date {
-            margin: -6px 0 32px;
-            font-family: Helvetica, Arial, sans-serif;
-            font-size: 15px;
-            font-style: italic;
-            font-weight: 300;
-            color: #555555;
-        }
-
-        .tech-article-content h3 {
-            margin: 44px 0 16px;
-            font-family: Helvetica, Arial, sans-serif;
-            font-size: clamp(24px, 2.5vw, 32px);
-            font-weight: 800;
-            line-height: 1.18;
-            letter-spacing: -0.02em;
-        }
-
-        .tech-article-content p {
-            margin: 0 0 14px;
-            font-size: 16px;
-            line-height: 1.65;
-            letter-spacing: 0.01em;
-            color: #111111;
-        }
-
-        .tech-article-content a {
-            color: inherit;
-            text-decoration: none;
-            border-bottom: 1px solid currentColor;
-        }
-
-        .tech-article-content a:hover {
-            color: var(--accent);
-        }
-
-        .tech-article-content figure {
-            margin: 26px 0 30px;
-            text-align: center;
-        }
-
-        .tech-article-content img {
-            width: 100%;
-            height: auto;
-            display: block;
-            margin: 0 auto;
-            border-radius: 12px;
-        }
-
-        .tech-article-content figcaption {
-            margin-top: 10px;
-            text-align: left;
-            font-size: 14px;
-            line-height: 1.5;
-            color: #596560;
-        }
-
-        .tech-article-content ul {
-            margin: 0 0 28px;
-            padding-left: 22px;
-            font-size: 16px;
-            line-height: 1.65;
-            color: #111111;
-        }
-
-        .tech-article-content li {
-            margin-bottom: 8px;
-        }
-
-        .tech-editor-note {
-            margin-top: 44px;
-            padding: 20px 22px;
-            background: #f3f5f4;
-            border: 1px solid #e3e8e6;
-            border-radius: 12px;
-            font-size: 15px;
-            line-height: 1.65;
-            color: #111111;
-        }
+        .eyebrow::before{content:"";width:26px;height:2px;background:linear-gradient(90deg,var(--accent),#60a5fa);border-radius:99px}
 
         /* Hero */
-        .hero {
-            position: relative;
-            padding: 72px 0 64px;
-            overflow: hidden;
-            background: transparent;
+        .hero{position:relative;padding:82px 0 72px;overflow:hidden}
+        .hero::before{
+            content:"";
+            position:absolute;
+            inset:20px auto auto 50%;
+            width:600px;
+            height:400px;
+            border-radius:50%;
+            background:radial-gradient(circle,rgba(37,99,235,0.10),transparent 64%);
+            transform:translateX(-8%);
+            pointer-events:none;
         }
-
-        .hero::before {
-            content: "";
-            position: absolute;
-            top: -160px;
-            right: -140px;
-            width: 460px;
-            height: 460px;
-            background: radial-gradient(circle, rgba(15, 118, 110, 0.08), transparent 72%);
-            border-radius: 50%;
-            pointer-events: none;
+        .hero::after{
+            content:"";
+            position:absolute;
+            left:0;
+            right:0;
+            bottom:0;
+            height:1px;
+            background:linear-gradient(90deg,transparent,rgba(15,23,42,0.10),transparent);
         }
-
-        .hero-inner {
-            position: relative;
-            display: grid;
-            grid-template-columns: 1.08fr 0.92fr;
-            gap: 48px;
-            align-items: center;
+        .hero-inner{position:relative;display:grid;grid-template-columns:minmax(0,1.03fr) minmax(360px,.97fr);gap:56px;align-items:center}
+        .hero h1{font-size:clamp(42px,5.5vw,68px);font-weight:800;letter-spacing:-0.055em;line-height:.99;margin:0 0 20px}
+        .hero h1 em{
+            font-style:normal;
+            color:var(--accent);
+            background:linear-gradient(135deg,var(--accent) 0%,#0ea5e9 100%);
+            -webkit-background-clip:text;
+            background-clip:text;
+            color:transparent;
         }
-
-        .hero h1 {
-            font-size: clamp(40px, 5.6vw, 68px);
-            margin: 0 0 18px;
+        .hero-sub{
+            width:fit-content;
+            font-size:13px;
+            color:var(--accent-dark);
+            font-weight:800;
+            margin:0 0 18px;
+            display:flex;
+            align-items:center;
+            gap:8px;
+            padding:8px 12px;
+            border-radius:999px;
+            background:rgba(219,234,254,0.86);
+            border:1px solid rgba(37,99,235,0.14);
         }
-
-        .hero h1 em {
-            font-style: italic;
-            font-weight: 500;
-            color: var(--accent);
+        .hero-sub svg{width:17px;height:17px;flex-shrink:0}
+        .hero-lead{font-size:18px;color:var(--ink-soft);max-width:560px;margin:0 0 30px;line-height:1.7}
+        .hero-actions{display:flex;flex-wrap:wrap;gap:12px;margin-bottom:30px}
+        .hero-proof{
+            display:grid;
+            grid-template-columns:repeat(3,minmax(0,1fr));
+            gap:10px;
+            max-width:560px;
         }
-
-        .hero-lead {
-            font-size: 18px;
-            color: var(--ink-soft);
-            max-width: 560px;
-            margin: 0 0 28px;
-            line-height: 1.65;
+        .hero-proof-item{
+            background:rgba(255,255,255,0.72);
+            border:1px solid rgba(15,23,42,0.08);
+            border-radius:18px;
+            padding:16px 16px 14px;
+            box-shadow:0 14px 34px rgba(15,23,42,0.05);
         }
+        .hero-proof-item strong{display:block;font-size:28px;font-weight:800;color:var(--ink);line-height:1;margin-bottom:6px;letter-spacing:-0.04em}
+        .hero-proof-item span{font-size:12px;color:var(--muted);line-height:1.35;display:block;font-weight:700}
 
-        .hero-actions {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 12px;
-            margin-bottom: 30px;
+        /* Invoice Card */
+        .hero-visual{position:relative}
+        .hero-visual::before{
+            content:"";
+            position:absolute;
+            inset:44px -18px -24px 28px;
+            background:rgba(37,99,235,0.08);
+            border-radius:34px;
+            transform:rotate(3deg);
+            z-index:-1;
         }
-
-        .hero-proof {
-            display: flex;
-            gap: 30px;
-            padding-top: 24px;
-            border-top: 1px solid var(--line);
-            max-width: 540px;
+        .invoice{
+            background:#fff;
+            border:1px solid rgba(15,23,42,0.08);
+            border-radius:28px;
+            box-shadow:0 20px 50px rgba(15,23,42,0.10);
+            padding:30px 30px 24px;
+            font-size:11px;
+            line-height:1.5;
+            position:relative;
+            overflow:hidden;
         }
+        .invoice::before{content:"";position:absolute;top:0;left:0;right:0;height:6px;background:linear-gradient(90deg,var(--accent) 0%,#38bdf8 46%,var(--success) 100%)}
+        .inv-top{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:22px;position:relative}
+        .inv-title{font-size:20px;font-weight:800;letter-spacing:-0.035em;margin:0 0 4px}
+        .inv-num{font-size:10px;color:var(--muted);font-family:"SF Mono","Courier New",monospace;letter-spacing:.02em}
+        .inv-logo{width:42px;height:42px;border-radius:14px;background:linear-gradient(135deg,var(--accent),#0ea5e9);display:grid;place-items:center;color:#fff;font-size:16px;font-weight:800;box-shadow:0 14px 28px rgba(37,99,235,0.25)}
+        .inv-parties{display:grid;grid-template-columns:1fr 1fr;gap:18px;padding:16px;border:1px solid rgba(15,23,42,0.07);background:rgba(248,250,252,0.72);border-radius:18px;margin-bottom:16px}
+        .inv-party-label{font-size:9px;text-transform:uppercase;letter-spacing:.12em;color:var(--muted);font-weight:800;margin-bottom:6px}
+        .inv-party-name{font-weight:800;font-size:12px;margin-bottom:3px;color:var(--ink)}
+        .inv-party-line{font-size:10px;color:var(--muted);line-height:1.4}
+        .inv-meta{display:flex;gap:24px;margin-bottom:16px;font-size:10px;padding:0 3px}
+        .inv-meta div strong{display:block;color:var(--ink);font-weight:800;margin-top:2px}
+        .inv-meta div span{color:var(--muted);font-size:8px;text-transform:uppercase;letter-spacing:.12em;font-weight:800}
+        .inv-table{width:100%;border-collapse:collapse;margin-bottom:16px}
+        .inv-table thead th{text-align:left;font-size:8px;text-transform:uppercase;letter-spacing:.12em;color:var(--muted);font-weight:800;padding:0 0 10px;border-bottom:1px solid rgba(15,23,42,0.10)}
+        .inv-table thead th:last-child,.inv-table tbody td:last-child{text-align:right}
+        .inv-table tbody td{padding:10px 0;border-bottom:1px solid var(--line-soft);font-size:11px;vertical-align:top}
+        .inv-table tbody tr:last-child td{border-bottom:none}
+        .inv-table .desc{font-weight:700;color:var(--ink)}
+        .inv-table .qty,.inv-table .price{color:var(--muted)}
+        .inv-table .amt{font-weight:800;color:var(--ink)}
 
-        .hero-proof-item strong {
-            display: block;
-            font-family: var(--serif);
-            font-size: 24px;
-            font-weight: 700;
-            color: var(--accent);
-            line-height: 1;
-            margin-bottom: 6px;
+        /* Typing animation */
+        .type{display:inline-block;overflow:hidden;white-space:nowrap;max-width:0;vertical-align:bottom;animation:typing 1s steps(18,end) forwards}
+        @keyframes typing{from{max-width:0}to{max-width:300px}}
+        .inv-table tbody tr:nth-child(1) .type{animation-delay:.45s;animation-duration:.85s}
+        .inv-table tbody tr:nth-child(1) .t2{animation-delay:1.4s;animation-duration:.28s}
+        .inv-table tbody tr:nth-child(1) .t3{animation-delay:1.72s;animation-duration:.28s}
+        .inv-table tbody tr:nth-child(1) .t4{animation-delay:2.04s;animation-duration:.28s}
+        .inv-table tbody tr:nth-child(2) .type{animation-delay:2.45s;animation-duration:.85s}
+        .inv-table tbody tr:nth-child(2) .t2{animation-delay:3.4s;animation-duration:.28s}
+        .inv-table tbody tr:nth-child(2) .t3{animation-delay:3.72s;animation-duration:.28s}
+        .inv-table tbody tr:nth-child(2) .t4{animation-delay:4.04s;animation-duration:.28s}
+        .inv-table tbody tr:nth-child(3) .type{animation-delay:4.45s;animation-duration:.7s}
+        .inv-table tbody tr:nth-child(3) .t2{animation-delay:5.24s;animation-duration:.28s}
+        .inv-table tbody tr:nth-child(3) .t3{animation-delay:5.56s;animation-duration:.28s}
+        .inv-table tbody tr:nth-child(3) .t4{animation-delay:5.88s;animation-duration:.28s}
+
+        .inv-sum{margin-left:auto;width:58%;font-size:10px;opacity:0;animation:fadeIn .45s ease 6.2s forwards}
+        .inv-sum-row{display:flex;justify-content:space-between;padding:5px 0;color:var(--muted)}
+        .inv-sum-row strong{color:var(--ink);font-weight:800}
+        .inv-sum-row.total{margin-top:7px;padding:12px 0 0;border-top:2px solid var(--ink);font-size:13px}
+        .inv-sum-row.total span:first-child{font-weight:800;color:var(--ink)}
+        .inv-sum-row.total span:last-child{font-size:19px;font-weight:800;color:var(--accent);letter-spacing:-0.03em}
+        @keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+
+        .inv-pay{
+            display:flex;
+            align-items:center;
+            justify-content:space-between;
+            gap:12px;
+            margin-top:18px;
+            padding:12px 12px 12px 16px;
+            background:linear-gradient(135deg,var(--accent),var(--accent-dark));
+            border-radius:16px;
+            color:#fff;
+            transition:all .2s;
+            box-shadow:0 18px 34px rgba(37,99,235,0.24);
+            opacity:0;
+            animation:fadeIn .45s ease 6.65s forwards;
         }
+        .inv-pay:hover{transform:translateY(-1px)}
+        .inv-pay-text{display:flex;flex-direction:column;gap:1px}
+        .inv-pay-text small{font-size:8px;text-transform:uppercase;letter-spacing:.12em;opacity:.82;font-weight:800}
+        .inv-pay-text strong{font-size:12px;font-weight:800}
+        .inv-pay-btn{background:#fff;color:var(--accent);font-size:11px;font-weight:800;padding:9px 12px;border-radius:11px;display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+        .inv-pay-btn svg{width:14px;height:14px}
 
-        .hero-proof-item span {
-            font-size: 12px;
-            color: var(--muted);
-            line-height: 1.45;
-            display: block;
+        .inv-float{
+            position:absolute;
+            top:18px;
+            right:-10px;
+            background:#fff;
+            color:var(--success);
+            font-size:10px;
+            font-weight:800;
+            text-transform:uppercase;
+            letter-spacing:.12em;
+            padding:9px 13px;
+            border-radius:999px;
+            box-shadow:0 18px 38px rgba(15,23,42,0.12);
+            border:1px solid rgba(16,185,129,0.18);
+            display:inline-flex;
+            align-items:center;
+            gap:7px;
+            z-index:2;
+            opacity:0;
+            animation:popIn .35s cubic-bezier(.34,1.56,.64,1) 6.95s forwards;
         }
+        .inv-float::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--success);box-shadow:0 0 0 5px rgba(16,185,129,0.14)}
+        @keyframes popIn{from{opacity:0;transform:translateY(5px) scale(.88)}to{opacity:1;transform:translateY(0) scale(1)}}
 
-        /* Invoice */
-        .hero-visual {
-            position: relative;
+        /* Features Bento */
+        .bento{display:grid;grid-template-columns:repeat(4,1fr);gap:18px}
+        .bento-item{
+            background:rgba(255,255,255,0.84);
+            border:1px solid rgba(15,23,42,0.08);
+            border-radius:var(--radius);
+            padding:30px 26px;
+            transition:transform .22s ease, box-shadow .22s ease, border-color .22s ease, background .22s ease;
+            position:relative;
+            overflow:hidden;
+            box-shadow:0 10px 28px rgba(15,23,42,0.04);
         }
-
-        .invoice {
-            background: #ffffff;
-            border: 1px solid var(--line);
-            border-radius: 18px;
-            box-shadow: var(--shadow-lg);
-            padding: 30px 30px 26px;
-            font-family: var(--sans);
-            color: var(--ink);
-            position: relative;
-            font-size: 11px;
-            line-height: 1.5;
+        .bento-item:hover{transform:translateY(-4px);box-shadow:var(--shadow);border-color:rgba(37,99,235,0.24);background:#fff}
+        .bento-item.span2{grid-column:span 2}
+        .bento-item.span3{grid-column:span 3}
+        .bento-item.span4{grid-column:span 4}
+        .bento-icon{
+            width:46px;
+            height:46px;
+            border-radius:16px;
+            background:linear-gradient(135deg,var(--accent-soft),#eef6ff);
+            display:grid;
+            place-items:center;
+            margin-bottom:18px;
+            color:var(--accent);
         }
-
-        .invoice::before {
-            content: "";
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            height: 5px;
-            background: linear-gradient(90deg, var(--accent) 0%, #34d399 100%);
-            border-radius: 18px 18px 0 0;
-        }
-
-        .inv-top {
-            display: flex;
-            justify-content: space-between;
-            align-items: flex-start;
-            margin-bottom: 22px;
-        }
-
-        .inv-title {
-            font-family: var(--serif);
-            font-size: 20px;
-            font-weight: 700;
-            letter-spacing: -0.02em;
-            margin: 0 0 4px;
-        }
-
-        .inv-num {
-            font-size: 10px;
-            color: var(--muted);
-            font-family: "SF Mono", "Courier New", monospace;
-            letter-spacing: 0.02em;
-        }
-
-        .inv-logo {
-            width: 40px;
-            height: 40px;
-            border-radius: 12px;
-            background: var(--accent);
-            display: grid;
-            place-items: center;
-            color: #fff;
-            font-family: var(--serif);
-            font-size: 17px;
-            font-weight: 700;
-            font-style: italic;
-        }
-
-        .inv-parties {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 20px;
-            padding-bottom: 18px;
-            border-bottom: 1px solid var(--line);
-            margin-bottom: 18px;
-        }
-
-        .inv-party-label {
-            font-size: 9px;
-            text-transform: uppercase;
-            letter-spacing: 0.12em;
-            color: var(--muted);
-            font-weight: 700;
-            margin-bottom: 7px;
-        }
-
-        .inv-party-name {
-            font-weight: 700;
-            font-size: 12px;
-            margin-bottom: 4px;
-            line-height: 1.3;
-        }
-
-        .inv-party-line {
-            font-size: 10px;
-            color: var(--muted);
-            line-height: 1.45;
-        }
-
-        .inv-meta {
-            display: flex;
-            gap: 18px;
-            margin-bottom: 18px;
-            font-size: 10px;
-        }
-
-        .inv-meta div strong {
-            display: block;
-            color: var(--ink);
-            font-weight: 600;
-            margin-top: 2px;
-        }
-
-        .inv-meta div span {
-            color: var(--muted);
-            font-size: 8px;
-            text-transform: uppercase;
-            letter-spacing: 0.1em;
-            font-weight: 700;
-        }
-
-        .inv-table {
-            width: 100%;
-            border-collapse: collapse;
-            margin-bottom: 18px;
-        }
-
-        .inv-table thead th {
-            text-align: left;
-            font-size: 8px;
-            text-transform: uppercase;
-            letter-spacing: 0.1em;
-            color: var(--muted);
-            font-weight: 700;
-            padding: 0 0 10px;
-            border-bottom: 1px solid var(--line);
-        }
-
-        .inv-table thead th:last-child,
-        .inv-table tbody td:last-child { text-align: right; }
-
-        .inv-table tbody td {
-            padding: 10px 0;
-            border-bottom: 1px solid #edf2f0;
-            font-size: 11px;
-        }
-
-        .inv-table tbody tr:last-child td { border-bottom: none; }
-
-        .inv-table .desc { font-weight: 500; }
-        .inv-table .qty, .inv-table .price { color: var(--muted); }
-        .inv-table .amt { font-weight: 600; }
-
-        .inv-sum {
-            margin-left: auto;
-            width: 56%;
-            font-size: 10px;
-        }
-
-        .inv-sum-row {
-            display: flex;
-            justify-content: space-between;
-            padding: 5px 0;
-            color: var(--muted);
-        }
-
-        .inv-sum-row strong { color: var(--ink); font-weight: 600; }
-
-        .inv-sum-row.total {
-            margin-top: 6px;
-            padding-top: 12px;
-            border-top: 2px solid var(--ink);
-            font-size: 13px;
-        }
-
-        .inv-sum-row.total span:first-child {
-            font-family: var(--serif);
-            font-weight: 700;
-            color: var(--ink);
-        }
-
-        .inv-sum-row.total span:last-child {
-            font-family: var(--serif);
-            font-size: 18px;
-            font-weight: 700;
-            color: var(--accent);
-            letter-spacing: -0.01em;
-        }
-
-        .inv-pay {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            gap: 12px;
-            margin-top: 20px;
-            padding: 12px 12px 12px 16px;
-            background: var(--accent);
-            border-radius: 14px;
-            color: #fff;
-            text-decoration: none;
-            transition: all 0.25s ease;
-            box-shadow: 0 10px 22px rgba(15, 118, 110, 0.22);
-        }
-
-        .inv-pay:hover {
-            background: var(--accent-2);
-            transform: translateY(-1px);
-        }
-
-        .inv-pay-text {
-            display: flex;
-            flex-direction: column;
-            gap: 2px;
-        }
-
-        .inv-pay-text small {
-            font-size: 8px;
-            text-transform: uppercase;
-            letter-spacing: 0.12em;
-            opacity: 0.75;
-            font-weight: 700;
-        }
-
-        .inv-pay-text strong {
-            font-size: 13px;
-            font-weight: 700;
-        }
-
-        .inv-pay-btn {
-            background: #fff;
-            color: var(--accent);
-            font-size: 11px;
-            font-weight: 700;
-            padding: 9px 14px;
-            border-radius: 10px;
-            display: inline-flex;
-            align-items: center;
-            gap: 6px;
-            white-space: nowrap;
-        }
-
-        .inv-pay-btn svg {
-            width: 14px;
-            height: 14px;
-        }
-
-        .inv-float {
-            position: absolute;
-            top: 18px;
-            right: -10px;
-            background: var(--accent-soft);
-            color: var(--accent);
-            font-size: 9px;
-            font-weight: 800;
-            text-transform: uppercase;
-            letter-spacing: 0.14em;
-            padding: 8px 12px;
-            border-radius: 999px;
-            box-shadow: 0 8px 18px rgba(15, 118, 110, 0.14);
-            display: inline-flex;
-            align-items: center;
-            gap: 6px;
-            z-index: 2;
-        }
-
-        .inv-float::before {
-            content: "";
-            width: 6px;
-            height: 6px;
-            border-radius: 50%;
-            background: var(--accent);
-            box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.14);
-        }
-
-        /* Bento */
-        .bento {
-            display: grid;
-            grid-template-columns: repeat(6, 1fr);
-            gap: 18px;
-        }
-
-        .bento-item {
-            background: var(--surface);
-            border: 1px solid var(--line);
-            border-radius: var(--radius);
-            padding: 28px;
-            transition: all 0.25s ease;
-            position: relative;
-            overflow: hidden;
-            box-shadow: 0 6px 18px rgba(15, 23, 42, 0.03);
-        }
-
-        .bento-item:hover {
-            transform: translateY(-3px);
-            box-shadow: var(--shadow);
-            border-color: rgba(15, 118, 110, 0.26);
-        }
-
-        .bento-item.wide { grid-column: span 4; }
-        .bento-item.half { grid-column: span 2; }
-        .bento-item.third { grid-column: span 2; }
-        .bento-item.big { grid-column: span 3; }
-
-        .bento-num {
-            font-family: var(--serif);
-            font-size: 13px;
-            font-weight: 600;
-            color: var(--accent);
-            letter-spacing: 0.1em;
-            margin-bottom: 14px;
-            display: block;
-        }
-
-        .bento-item h3 {
-            margin: 0 0 10px;
-            font-size: 22px;
-        }
-
-        .bento-item.wide h3 { font-size: 28px; }
-
-        .bento-item p {
-            margin: 0;
-            color: var(--muted);
-            font-size: 14px;
-            line-height: 1.65;
-        }
-
-        .bento-item.accent {
-            background: linear-gradient(135deg, var(--accent) 0%, #0b5e58 100%);
-            color: #fff;
-            border-color: transparent;
-        }
-
-        .bento-item.accent h3,
-        .bento-item.accent .bento-num { color: #fff; }
-
-        .bento-item.accent p { color: rgba(255, 255, 255, 0.78); }
+        .bento-icon svg{width:22px;height:22px}
+        .bento-item h3{margin:0 0 9px;font-size:18px;font-weight:800;letter-spacing:-0.025em;line-height:1.2}
+        .bento-item.span2 h3,.bento-item.span3 h3{font-size:23px}
+        .bento-item p{margin:0;color:var(--muted);font-size:14px;line-height:1.68}
+        .bento-item.accent{background:linear-gradient(135deg,#1d4ed8 0%,#2563eb 58%,#0ea5e9 100%);color:#fff;border-color:transparent;box-shadow:0 12px 32px rgba(37,99,235,0.18)}
+        .bento-item.accent .bento-icon{background:rgba(255,255,255,0.18);color:#fff}
+        .bento-item.accent h3{color:#fff}
+        .bento-item.accent p{color:rgba(255,255,255,0.84)}
 
         /* Steps */
-        .steps-section {
-            background: linear-gradient(135deg, #15312c 0%, #102823 100%);
-            color: #f5f7f6;
+        .steps-section{
+            background:linear-gradient(135deg,#08111f 0%,#0f172a 48%,#172554 100%);
+            color:#f1f5f9;
+            overflow:hidden;
         }
-
-        .steps-section .section-head h2 { color: #ffffff; }
-        .steps-section .section-head p { color: rgba(255, 255, 255, 0.72); }
-        .steps-section .eyebrow { color: #8fd3cb; }
-        .steps-section .eyebrow::before { background: #8fd3cb; }
-
-        .steps-grid {
-            display: grid;
-            grid-template-columns: repeat(3, 1fr);
-            gap: 32px;
-            margin-top: 8px;
+        .steps-section .section-head h2{color:#fff}
+        .steps-section .section-head p{color:rgba(255,255,255,0.68)}
+        .steps-section .eyebrow{color:#93c5fd}
+        .steps-section .eyebrow::before{background:#60a5fa}
+        .steps-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:22px;position:relative}
+        .step{
+            padding:30px 26px;
+            border-radius:var(--radius);
+            background:rgba(255,255,255,0.07);
+            border:1px solid rgba(255,255,255,0.11);
+            box-shadow:0 8px 24px rgba(0,0,0,0.12);
+            transition:transform .22s ease, background .22s ease, border-color .22s ease;
         }
-
-        .step {
-            padding-top: 24px;
-            border-top: 1px solid rgba(255, 255, 255, 0.16);
+        .step:hover{transform:translateY(-5px);background:rgba(255,255,255,0.10);border-color:rgba(147,197,253,0.34)}
+        .step-num{
+            width:54px;
+            height:54px;
+            border-radius:18px;
+            display:grid;
+            place-items:center;
+            font-size:24px;
+            font-weight:800;
+            line-height:1;
+            color:#fff;
+            background:linear-gradient(135deg,var(--accent),#38bdf8);
+            box-shadow:0 8px 20px rgba(37,99,235,0.22);
+            margin-bottom:18px;
         }
-
-        .step-num {
-            font-family: var(--serif);
-            font-size: 56px;
-            font-weight: 300;
-            line-height: 1;
-            color: #8fd3cb;
-            margin-bottom: 16px;
-            font-style: italic;
-        }
-
-        .step h3 {
-            margin: 0 0 10px;
-            font-size: 24px;
-            color: #ffffff;
-        }
-
-        .step p {
-            margin: 0;
-            color: rgba(255, 255, 255, 0.72);
-            font-size: 14px;
-            line-height: 1.65;
-        }
+        .step h3{margin:0 0 9px;font-size:23px;font-weight:800;color:#fff;letter-spacing:-0.025em}
+        .step p{margin:0;color:rgba(255,255,255,0.68);font-size:14px;line-height:1.68}
 
         /* Pricing */
-        .pricing {
-            background: transparent;
+        .pricing-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:22px;max-width:880px;margin:0 auto;align-items:stretch}
+        .plan{
+            background:rgba(255,255,255,0.88);
+            border:1px solid rgba(15,23,42,0.08);
+            border-radius:28px;
+            padding:34px 30px 30px;
+            display:flex;
+            flex-direction:column;
+            position:relative;
+            box-shadow:0 14px 38px rgba(15,23,42,0.06);
+            transition:transform .22s ease, box-shadow .22s ease, border-color .22s ease;
         }
-
-        .pricing-grid {
-            display: grid;
-            grid-template-columns: repeat(2, 1fr);
-            gap: 22px;
-            align-items: stretch;
+        .plan:hover{transform:translateY(-4px);box-shadow:var(--shadow);border-color:rgba(37,99,235,0.20)}
+        .plan.featured{
+            background:linear-gradient(180deg,#ffffff 0%,#f8fbff 100%);
+            color:var(--ink);
+            border:2px solid rgba(37,99,235,0.38);
+            box-shadow:0 16px 40px rgba(37,99,235,0.14);
+            transform:translateY(-10px);
         }
-
-        .plan {
-            background: var(--surface);
-            border: 1px solid var(--line);
-            border-radius: var(--radius);
-            padding: 34px 30px;
-            display: flex;
-            flex-direction: column;
-            position: relative;
-            box-shadow: 0 8px 24px rgba(15, 23, 42, 0.04);
+        .plan.featured:hover{transform:translateY(-14px)}
+        .plan-tag{
+            position:absolute;
+            top:18px;
+            right:18px;
+            background:linear-gradient(135deg,var(--highlight),#fb7185);
+            color:#fff;
+            font-size:10px;
+            font-weight:800;
+            letter-spacing:.09em;
+            text-transform:uppercase;
+            padding:7px 11px;
+            border-radius:999px;
+            box-shadow:0 12px 24px rgba(245,158,11,0.24);
         }
-
-        .plan.featured {
-            background: linear-gradient(135deg, #15312c 0%, #102823 100%);
-            color: #f7faf9;
-            border-color: transparent;
+        .plan h3{margin:0 0 6px;font-size:28px;font-weight:800;letter-spacing:-0.035em}
+        .plan-sub{color:var(--muted);font-size:14px;margin-bottom:22px;font-weight:600}
+        .plan.featured .plan-sub{color:var(--muted)}
+        .plan-price{margin-bottom:22px;padding-bottom:22px;border-bottom:1px solid rgba(15,23,42,0.08)}
+        .plan.featured .plan-price{border-color:rgba(37,99,235,0.18)}
+        .plan-price strong{font-size:48px;font-weight:800;line-height:1;letter-spacing:-0.055em}
+        .plan-price .per{color:var(--muted);font-size:15px;font-weight:700;margin-left:3px}
+        .plan.featured .plan-price .per{color:var(--muted)}
+        .plan-features{list-style:none;padding:0;margin:0 0 26px;display:grid;gap:11px;flex:1}
+        .plan-features li{position:relative;padding-left:28px;font-size:14px;line-height:1.48;color:var(--ink-soft);font-weight:600}
+        .plan-features li::before{
+            content:"";
+            position:absolute;
+            left:0;
+            top:4px;
+            width:18px;
+            height:18px;
+            border-radius:50%;
+            background:var(--success-soft);
         }
-
-        .plan-tag {
-            position: absolute;
-            top: 20px;
-            right: 20px;
-            background: var(--highlight);
-            color: #fff;
-            font-size: 10px;
-            font-weight: 800;
-            letter-spacing: 0.1em;
-            text-transform: uppercase;
-            padding: 7px 10px;
-            border-radius: 999px;
+        .plan-features li::after{
+            content:"";
+            position:absolute;
+            left:5px;
+            top:9px;
+            width:8px;
+            height:5px;
+            border-left:2px solid var(--success);
+            border-bottom:2px solid var(--success);
+            transform:rotate(-45deg);
         }
-
-        .plan h3 {
-            margin: 0 0 8px;
-            font-size: 28px;
-        }
-
-        .plan-sub {
-            color: var(--muted);
-            font-size: 14px;
-            margin-bottom: 22px;
-        }
-
-        .plan.featured .plan-sub { color: rgba(255, 255, 255, 0.68); }
-
-        .plan-price {
-            font-family: var(--serif);
-            margin-bottom: 22px;
-            padding-bottom: 22px;
-            border-bottom: 1px solid var(--line);
-        }
-
-        .plan.featured .plan-price { border-color: rgba(255, 255, 255, 0.14); }
-
-        .plan-price strong {
-            font-size: 48px;
-            font-weight: 700;
-            line-height: 1;
-            letter-spacing: -0.03em;
-        }
-
-        .plan-price .per {
-            color: var(--muted);
-            font-size: 15px;
-            font-family: var(--sans);
-            font-weight: 500;
-            margin-left: 4px;
-        }
-
-        .plan.featured .plan-price .per { color: rgba(255, 255, 255, 0.68); }
-
-        .plan-features {
-            list-style: none;
-            padding: 0;
-            margin: 0 0 28px;
-            display: grid;
-            gap: 12px;
-            flex: 1;
-        }
-
-        .plan-features li {
-            position: relative;
-            padding-left: 26px;
-            font-size: 14px;
-            line-height: 1.55;
-        }
-
-        .plan-features li::before {
-            content: "";
-            position: absolute;
-            left: 0;
-            top: 8px;
-            width: 14px;
-            height: 8px;
-            border-left: 2px solid var(--accent);
-            border-bottom: 2px solid var(--accent);
-            transform: rotate(-45deg);
-        }
-
-        .plan.featured .plan-features li::before {
-            border-color: #8fd3cb;
-        }
-
-        .plan .btn {
-            width: 100%;
-        }
-
-        .plan.featured .btn-ghost {
-            color: #ffffff;
-            border-color: rgba(255, 255, 255, 0.28);
-        }
-
-        .plan.featured .btn-ghost:hover {
-            background: #ffffff;
-            color: #102823;
-        }
+        .plan.featured .plan-features li::before{background:var(--accent-soft)}
+        .plan.featured .plan-features li::after{border-color:var(--accent)}
+        .plan .btn{width:100%}
+        .plan.featured .btn-ghost{background:linear-gradient(135deg,var(--accent),var(--accent-dark));color:#fff;border-color:transparent;box-shadow:0 16px 32px rgba(37,99,235,0.24)}
+        .plan.featured .btn-ghost:hover{color:#fff;box-shadow:0 20px 38px rgba(37,99,235,0.30)}
 
         /* FAQ */
-        .faq-wrap {
-            max-width: 820px;
-            margin: 0 auto;
-            background: var(--surface);
-            border: 1px solid var(--line);
-            border-radius: var(--radius);
-            padding: 8px 24px;
-            box-shadow: 0 8px 24px rgba(15, 23, 42, 0.04);
+        .faq-wrap{
+            max-width:800px;
+            margin:0 auto;
+            background:rgba(255,255,255,0.86);
+            border:1px solid rgba(15,23,42,0.08);
+            border-radius:28px;
+            padding:8px 22px;
+            box-shadow:0 18px 46px rgba(15,23,42,0.06);
         }
-
-        .faq-item {
-            border-bottom: 1px solid var(--line);
-            padding: 4px 0;
+        .faq-item{border-bottom:1px solid rgba(15,23,42,0.08);padding:2px 0}
+        .faq-item:last-child{border-bottom:none}
+        .faq-item summary{
+            list-style:none;
+            cursor:pointer;
+            padding:18px 0;
+            font-size:17px;
+            font-weight:800;
+            display:flex;
+            justify-content:space-between;
+            align-items:center;
+            gap:18px;
+            transition:color .2s;
+            letter-spacing:-0.015em;
         }
-
-        .faq-item:last-child {
-            border-bottom: none;
+        .faq-item summary:hover{color:var(--accent)}
+        .faq-item summary::-webkit-details-marker{display:none}
+        .faq-item summary::after{
+            content:"+";
+            width:30px;
+            height:30px;
+            border-radius:50%;
+            display:grid;
+            place-items:center;
+            background:var(--accent-soft);
+            color:var(--accent);
+            font-weight:800;
+            font-size:20px;
+            line-height:1;
+            transition:transform .24s ease, background .24s ease;
+            flex-shrink:0;
         }
-
-        .faq-item summary {
-            list-style: none;
-            cursor: pointer;
-            padding: 18px 0;
-            font-family: var(--serif);
-            font-size: 20px;
-            font-weight: 600;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            gap: 20px;
-            transition: color 0.2s;
-        }
-
-        .faq-item summary:hover { color: var(--accent); }
-        .faq-item summary::-webkit-details-marker { display: none; }
-
-        .faq-item summary::after {
-            content: "+";
-            font-family: var(--sans);
-            font-weight: 300;
-            font-size: 28px;
-            color: var(--accent);
-            transition: transform 0.3s;
-            flex-shrink: 0;
-        }
-
-        .faq-item[open] summary::after {
-            transform: rotate(45deg);
-        }
-
-        .faq-item p {
-            margin: 0 0 18px;
-            color: var(--muted);
-            font-size: 15px;
-            max-width: 680px;
-            line-height: 1.65;
-        }
+        .faq-item[open] summary::after{transform:rotate(45deg);background:#fff}
+        .faq-item p{margin:0 0 18px;color:var(--muted);font-size:14px;max-width:660px;line-height:1.72}
 
         /* Final CTA */
-        .final {
-            background: linear-gradient(135deg, var(--accent) 0%, #115e59 100%);
-            color: #ffffff;
-            position: relative;
-            overflow: hidden;
+        .final{
+            background:
+                radial-gradient(circle at 20% 20%,rgba(255,255,255,0.16),transparent 28%),
+                linear-gradient(135deg,var(--accent) 0%,#1d4ed8 58%,#172554 100%);
+            color:#fff;
+            position:relative;
+            overflow:hidden;
         }
-
-        .final::before {
-            content: "";
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            width: 120%;
-            height: 120%;
-            background: radial-gradient(ellipse at center, rgba(255, 255, 255, 0.08), transparent 60%);
-            transform: translate(-50%, -50%);
-            pointer-events: none;
-        }
-
-        .final-inner {
-            position: relative;
-            text-align: center;
-            max-width: 720px;
-            margin: 0 auto;
-        }
-
-        .final h2 {
-            font-size: clamp(34px, 5vw, 56px);
-            margin: 0 0 16px;
-            color: #ffffff;
-        }
-
-        .final h2 em {
-            font-style: italic;
-            color: #d4f3ee;
-            font-weight: 500;
-        }
-
-        .final p {
-            font-size: 17px;
-            color: rgba(255, 255, 255, 0.84);
-            margin: 0 0 30px;
-        }
-
-        .final .btn-primary {
-            background: #ffffff;
-            color: var(--accent);
-        }
-
-        .final .btn-primary:hover {
-            background: #f4fffd;
-            color: var(--accent-2);
-        }
-
-        .final .btn-ghost {
-            color: #ffffff;
-            border-color: rgba(255, 255, 255, 0.34);
-        }
-
-        .final .btn-ghost:hover {
-            background: #ffffff;
-            color: var(--accent);
-        }
-
-        .final-actions {
-            display: flex;
-            justify-content: center;
-            flex-wrap: wrap;
-            gap: 12px;
-        }
+        .final::before{content:"";position:absolute;top:50%;left:50%;width:600px;height:400px;background:radial-gradient(ellipse at center,rgba(255,255,255,0.08),transparent 60%);transform:translate(-50%,-50%);pointer-events:none}
+        .final-inner{position:relative;text-align:center;max-width:700px;margin:0 auto}
+        .final h2{font-size:clamp(32px,4.8vw,52px);font-weight:800;margin:0 0 16px;color:#fff;letter-spacing:-0.045em;line-height:1.05}
+        .final p{font-size:17px;color:rgba(255,255,255,0.85);margin:0 0 30px}
+        .final .btn-primary{background:#fff;color:var(--accent);box-shadow:0 18px 40px rgba(0,0,0,0.16)}
+        .final .btn-primary:hover{background:#f6f9ff;color:var(--accent-dark)}
+        .final .btn-ghost{color:#fff;border-color:rgba(255,255,255,0.34);background:rgba(255,255,255,0.10);box-shadow:none}
+        .final .btn-ghost:hover{background:#fff;color:var(--accent)}
+        .final-actions{display:flex;justify-content:center;flex-wrap:wrap;gap:12px}
 
         /* Footer */
-        .site-footer {
-            background: #12211d;
-            color: rgba(255, 255, 255, 0.72);
-            padding: 58px 0 28px;
-        }
+        .site-footer{background:#07111f;color:rgba(255,255,255,0.66);padding:58px 0 26px}
+        .footer-top{display:grid;grid-template-columns:1.5fr 1fr 1fr;gap:42px;padding-bottom:38px;border-bottom:1px solid rgba(255,255,255,0.09)}
+        .site-footer .logo{color:#fff}
+        .footer-brand p{margin:16px 0 0;max-width:350px;font-size:13px;line-height:1.7}
+        .footer-col h4{font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.12em;color:#fff;margin:0 0 14px}
+        .footer-col a{display:block;padding:5px 0;font-size:13px;transition:color .2s, transform .2s}
+        .footer-col a:hover{color:#fff;transform:translateX(2px)}
+        .footer-bottom{padding-top:22px;display:flex;justify-content:space-between;align-items:center;font-size:12px;gap:20px}
 
-        .footer-top {
-            display: grid;
-            grid-template-columns: 1.4fr 1fr 1fr;
-            gap: 40px;
-            padding-bottom: 40px;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-        }
-
-        .site-footer .logo { color: #ffffff; }
-
-        .footer-brand p {
-            margin: 18px 0 0;
-            max-width: 340px;
-            font-size: 14px;
-            line-height: 1.65;
-        }
-
-        .footer-col h4 {
-            font-family: var(--sans);
-            font-size: 12px;
-            font-weight: 700;
-            text-transform: uppercase;
-            letter-spacing: 0.12em;
-            color: #ffffff;
-            margin: 0 0 18px;
-        }
-
-        .footer-col a {
-            display: block;
-            padding: 5px 0;
-            font-size: 14px;
-            transition: color 0.2s;
-        }
-
-        .footer-col a:hover { color: #ffffff; }
-
-        .footer-bottom {
-            padding-top: 22px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            font-size: 12px;
-        }
 
         /* Responsive */
-        @media (max-width: 1024px) {
-            .bento { grid-template-columns: repeat(4, 1fr); }
-            .bento-item.wide { grid-column: span 4; }
-            .bento-item.big { grid-column: span 4; }
-            .bento-item.half { grid-column: span 2; }
-            .bento-item.third { grid-column: span 2; }
+        @media(max-width:980px){
+            .container{width:min(var(--container),100% - 32px)}
+            .section{padding:76px 0}
+            .hero{padding:56px 0 52px}
+            .hero-inner{grid-template-columns:1fr;gap:42px}
+            .hero-lead{max-width:680px}
+            .hero-visual{max-width:560px;margin:0 auto}
+            .steps-grid{grid-template-columns:1fr;gap:18px}
+            .pricing-grid{grid-template-columns:1fr;max-width:640px}
+            .plan.featured{transform:none}
+            .plan.featured:hover{transform:translateY(-4px)}
+            .footer-top{grid-template-columns:1fr;gap:26px}
+            .nav{display:none}
+            .bento{grid-template-columns:repeat(2,1fr)}
+            .bento-item.span3{grid-column:span 2}
+            .bento-item.span4{grid-column:span 2}
+        }
+        @media(max-width:640px){
+            .container{width:min(var(--container),100% - 22px)}
+            .header-inner{min-height:62px}
+            .logo{font-size:15px}
+            .logo-mark{width:32px;height:32px;flex-basis:32px}
+            .login-text{display:none}
+            .header-cta .btn{min-height:40px;padding:0 15px;font-size:13px}
+            .hero h1{font-size:clamp(36px,11vw,46px)}
+            .hero-sub{font-size:11px}
+            .hero-lead{font-size:16px}
+            .hero-actions .btn{width:100%}
+            .section-head{margin-bottom:30px}
+            .section-head p{font-size:15px}
+            .hero-proof{grid-template-columns:1fr;gap:9px}
+            .hero-proof-item{display:flex;justify-content:space-between;align-items:center;padding:14px 15px}
+            .hero-proof-item strong{font-size:24px;margin:0}
+            .hero-proof-item span{text-align:right;max-width:130px}
+            .bento{grid-template-columns:1fr;gap:13px}
+            .bento-item,.bento-item.span2,.bento-item.span3,.bento-item.span4{grid-column:span 1}
+            .bento-item{padding:24px 20px}
+            .bento-item.span2 h3,.bento-item.span3 h3{font-size:20px}
+            .plan{padding:28px 22px}
+            .plan-tag{position:static;width:fit-content;margin-bottom:14px}
+            .footer-bottom{flex-direction:column;gap:10px;text-align:center}
+            .invoice{padding:24px 18px 18px;border-radius:22px}
+            .inv-parties{grid-template-columns:1fr;gap:12px;padding:14px}
+            .inv-meta{gap:16px;flex-wrap:wrap}
+            .inv-sum{width:100%}
+            .inv-pay{flex-direction:column;align-items:stretch}
+            .inv-pay-btn{justify-content:center}
+            .inv-float{right:8px;top:10px;font-size:9px}
+            .step{padding:24px 20px}
+            .final-actions .btn{width:100%}
         }
 
-        @media (max-width: 900px) {
-            .section { padding: 68px 0; }
-            .hero { padding: 56px 0; }
-            .hero-inner { grid-template-columns: 1fr; gap: 40px; }
-            .steps-grid { grid-template-columns: 1fr; gap: 34px; }
-            .pricing-grid { grid-template-columns: 1fr; }
-            .footer-top { grid-template-columns: 1fr; gap: 28px; }
-            .nav { display: none; }
-            .hero-proof { max-width: none; }
-            .inv-float { right: 0; }
-        }
-
-        @media (max-width: 640px) {
-            .container {
-                width: min(var(--container), calc(100% - 20px));
-            }
-
-            .header-inner { min-height: 68px; }
-            .logo { font-size: 17px; }
-            .logo-mark { width: 36px; height: 36px; flex-basis: 36px; }
-            .login-text { display: none; }
-
-            .section-head { margin-bottom: 36px; }
-
-            .tech-news-section {
-                padding: 24px 0 34px;
-            }
-
-            .tech-article-content {
-                padding: 28px 18px 44px;
-            }
-
-            .tech-article-content p,
-            .tech-article-content ul {
-                font-size: 15px;
-            }
-
-            .tech-editor-note {
-                font-size: 14px;
-            }
-
-            .bento { grid-template-columns: 1fr; }
-
-            .bento-item,
-            .bento-item.wide,
-            .bento-item.big,
-            .bento-item.half,
-            .bento-item.third {
-                grid-column: span 1;
-            }
-
-            .bento-item { padding: 24px; }
-            .plan { padding: 28px 22px; }
-            .hero-proof { gap: 18px; flex-wrap: wrap; }
-            .footer-bottom { flex-direction: column; gap: 12px; text-align: center; }
-
-            .invoice {
-                padding: 24px 20px 20px;
-            }
-
-            .inv-parties {
-                grid-template-columns: 1fr;
-                gap: 14px;
-            }
-
-            .inv-sum {
-                width: 100%;
-            }
-
-            .inv-pay {
-                flex-direction: column;
-                align-items: stretch;
-            }
-
-            .inv-pay-btn {
-                justify-content: center;
-            }
+        @media(prefers-reduced-motion:reduce){
+            html{scroll-behavior:auto}
+            *,*::before,*::after{animation-duration:.001ms!important;animation-iteration-count:1!important;transition-duration:.001ms!important}
+            .type{max-width:300px}
+            .inv-sum,.inv-pay,.inv-float{opacity:1}
         }
     </style>
-    <!-- <link rel="stylesheet" href="assets/style.css?v=2"> -->
+
+    <script type="application/ld+json">
+{
+        "@context": "https://schema.org",
+        "@graph": [
+                {
+                        "@type": "Organization",
+                        "@id": "https://saskaituisrasymas.lt/#organization",
+                        "name": "Sąskaitų Išrašymas",
+                        "url": "https://saskaituisrasymas.lt/",
+                        "logo": {
+                                "@type": "ImageObject",
+                                "url": "https://saskaituisrasymas.lt/favicon.svg"
+                        },
+                        "areaServed": "LT"
+                },
+                {
+                        "@type": "WebSite",
+                        "@id": "https://saskaituisrasymas.lt/#website",
+                        "url": "https://saskaituisrasymas.lt/",
+                        "name": "Sąskaitų Išrašymas",
+                        "inLanguage": "lt-LT",
+                        "publisher": {
+                                "@id": "https://saskaituisrasymas.lt/#organization"
+                        }
+                },
+                {
+                        "@type": "SoftwareApplication",
+                        "@id": "https://saskaituisrasymas.lt/#softwareapplication",
+                        "name": "Sąskaitų Išrašymas",
+                        "url": "https://saskaituisrasymas.lt/",
+                        "description": "Sąskaitų faktūrų išrašymas internetu individualiai veiklai, MB ir UAB. PDF generavimas, siuntimas el. paštu, apmokėjimo nuorodos, i.SAF ir eksportas į apskaitos programas.",
+                        "applicationCategory": "BusinessApplication",
+                        "operatingSystem": "Web",
+                        "inLanguage": "lt-LT",
+                        "publisher": {
+                                "@id": "https://saskaituisrasymas.lt/#organization"
+                        },
+                        "featureList": [
+                                "Sąskaitų faktūrų išrašymas internetu",
+                                "PDF sąskaitų generavimas",
+                                "Sąskaitų siuntimas el. paštu",
+                                "Apmokėjimo nuorodos per Montonio arba Paysera",
+                                "Įmonių rekvizitų užpildymas iš Registrų centro",
+                                "Prekių ir paslaugų katalogas",
+                                "Banko išrašų importas ir apmokėjimų kontrolė",
+                                "Eksportas į i.SAF ir apskaitos programas",
+                                "Individualios veiklos pajamų bei išlaidų žurnalas",
+                                "OSS suvestinė"
+                        ],
+                        "offers": [
+                                {
+                                        "@type": "Offer",
+                                        "name": "Pradžiai",
+                                        "url": "https://atlyginimoskaiciuokle.com/registruotis",
+                                        "price": "0",
+                                        "priceCurrency": "EUR",
+                                        "availability": "https://schema.org/InStock"
+                                },
+                                {
+                                        "@type": "Offer",
+                                        "name": "Verslui",
+                                        "url": "https://atlyginimoskaiciuokle.com/registruotis",
+                                        "price": "9.99",
+                                        "priceCurrency": "EUR",
+                                        "availability": "https://schema.org/InStock",
+                                        "priceSpecification": {
+                                                "@type": "UnitPriceSpecification",
+                                                "price": "9.99",
+                                                "priceCurrency": "EUR",
+                                                "unitText": "mėn."
+                                        }
+                                }
+                        ]
+                },
+                {
+                        "@type": "FAQPage",
+                        "@id": "https://saskaituisrasymas.lt/#faq",
+                        "inLanguage": "lt-LT",
+                        "mainEntity": [
+                                {
+                                        "@type": "Question",
+                                        "name": "Ar tinka individualiai veiklai?",
+                                        "acceptedAnswer": {
+                                                "@type": "Answer",
+                                                "text": "Taip. Galėsi įvesti individualios veiklos pažymėjimo numerį ir visus reikiamus duomenis. Taip pat galėsi suformuoti individualios veiklos pajamų bei išlaidų žurnalą."
+                                        }
+                                },
+                                {
+                                        "@type": "Question",
+                                        "name": "Ar tikrai galima naudotis nemokamai?",
+                                        "acceptedAnswer": {
+                                                "@type": "Answer",
+                                                "text": "Taip. Užsiregistravęs iš karto gauni prieigą prie nemokamo plano su neribotu sąskaitų kiekiu. Kai kurios funkcijos, pvz. el. pašto siuntimas ir eksportas, yra ribotos."
+                                        }
+                                },
+                                {
+                                        "@type": "Question",
+                                        "name": "Ar reikės kiekvieną kartą iš naujo vesti duomenis?",
+                                        "acceptedAnswer": {
+                                                "@type": "Answer",
+                                                "text": "Ne. Pirmą kartą supildęs duomenis išsaugai juos paskyroje. Kitą kartą tiesiog dublikuok jau išrašytą sąskaitą. Įmonių rekvizitai importuojami iš Registrų Centro."
+                                        }
+                                },
+                                {
+                                        "@type": "Question",
+                                        "name": "Kaip duomenys pasiekia buhalterį?",
+                                        "acceptedAnswer": {
+                                                "@type": "Answer",
+                                                "text": "Išrašytų sąskaitų duomenis eksportuok į i.SAF ir 15+ apskaitos programų: Rivilę, Finvaldą, Centą, Pragma, Apskaita5 ir kitas. Tavo buhalteris neturės vesti sąskaitų ranka."
+                                        }
+                                },
+                                {
+                                        "@type": "Question",
+                                        "name": "Ar galima naudoti nestandartinį PVM tarifą?",
+                                        "acceptedAnswer": {
+                                                "@type": "Answer",
+                                                "text": "Taip. Be įprastų 21 %, 9 %, 5 % ir 0 % tarifų, gali įvesti savo tarifą konkrečiai eilutei arba visai sąskaitai."
+                                        }
+                                },
+                                {
+                                        "@type": "Question",
+                                        "name": "Ar klientas gali apmokėti sąskaitą tiesiogiai?",
+                                        "acceptedAnswer": {
+                                                "@type": "Answer",
+                                                "text": "Taip. Pridėk apmokėjimo mygtuką per Montonio arba Paysera. Klientas gaus el. laišką su nuoroda ir galės atsiskaityti per banką arba kortele."
+                                        }
+                                },
+                                {
+                                        "@type": "Question",
+                                        "name": "Kas yra OSS suvestinė?",
+                                        "acceptedAnswer": {
+                                                "@type": "Answer",
+                                                "text": "One Stop Shop (OSS) yra schema pardavimams ES fiziniams asmenims. Jei pardavinėji prekes ar paslaugas kitų ES šalių pirkėjams, sistema suformuos kvartalo suvestinę deklaracijai."
+                                        }
+                                },
+                                {
+                                        "@type": "Question",
+                                        "name": "Ar mano duomenys saugūs?",
+                                        "acceptedAnswer": {
+                                                "@type": "Answer",
+                                                "text": "Visi duomenys saugomi ES serveriuose, perdavimas šifruojamas (HTTPS). Prieigą prie paskyros turėsi tik tu ar tavo buhalteris."
+                                        }
+                                }
+                        ]
+                }
+        ]
+}
+    </script>
+
     <script src="https://analytics.ahrefs.com/analytics.js" data-key="ngIR7YSjMxqnY+34SqLL6g" async></script>
 </head>
 <body>
@@ -1241,19 +750,24 @@
 <header class="site-header">
     <div class="container header-inner">
         <a href="/" class="logo">
-            <svg class="logo-mark" viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-                <rect x="3" y="3" width="42" height="42" rx="10" fill="#0b3d2e"/>
-                <path d="M14 14h16l5 5v15H14z" fill="#f6f1e7"/>
-                <path d="M30 14v5h5" stroke="#0b3d2e" stroke-width="1.5" fill="none"/>
-                <line x1="18" y1="24" x2="31" y2="24" stroke="#0b3d2e" stroke-width="2" stroke-linecap="round"/>
-                <line x1="18" y1="28" x2="31" y2="28" stroke="#0b3d2e" stroke-width="2" stroke-linecap="round"/>
-                <line x1="18" y1="32" x2="26" y2="32" stroke="#0b3d2e" stroke-width="2" stroke-linecap="round"/>
+            <svg class="logo-mark lt-flag" viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                <rect x="3" y="3" width="42" height="42" rx="12" fill="#ffffff"/>
+                <rect x="5" y="5" width="38" height="38" rx="10" fill="#FDB913"/>
+                <clipPath id="lt-flag-header-clip">
+                    <rect x="5" y="5" width="38" height="38" rx="10"/>
+                </clipPath>
+                <g clip-path="url(#lt-flag-header-clip)">
+                    <rect x="5" y="5" width="38" height="12.67" fill="#FDB913"/>
+                    <rect x="5" y="17.67" width="38" height="12.66" fill="#006A44"/>
+                    <rect x="5" y="30.33" width="38" height="12.67" fill="#C1272D"/>
+                </g>
+                <rect x="5" y="5" width="38" height="38" rx="10" fill="none" stroke="rgba(15,23,42,0.12)" stroke-width="1"/>
             </svg>
-            <span>saskaituisrasymas.lt</span>
+            <span>Sąskaitų Išrašymas</span>
         </a>
 
         <nav class="nav">
-            <a href="#galimybes" class="nav-link">Galimybės</a>
+            <a href="#galimybes" class="nav-link">Funkcijos</a>
             <a href="#procesas" class="nav-link">Procesas</a>
             <a href="#kainos" class="nav-link">Kainos</a>
             <a href="#duk" class="nav-link">DUK</a>
@@ -1261,355 +775,36 @@
 
         <div class="header-cta">
             <a href="https://atlyginimoskaiciuokle.com/prisijungti" class="login-text">Prisijungti</a>
-            <a href="https://atlyginimoskaiciuokle.com/registruotis" class="btn btn-primary">Pradėti dabar</a>
+            <a href="https://atlyginimoskaiciuokle.com/registruotis" class="btn btn-primary">Pradėti nemokamai</a>
         </div>
     </div>
 </header>
 
 <main>
 
-    <!-- TECH NEWS -->
-    <section id="tech-news" class="tech-news-section">
-        <div class="container">
-            <div class="tech-news-inner">
-                <div class="tech-news-label">Tech News</div>
-
-                <article class="tech-article-card">
-                    <div class="tech-article-content">
-                        <h2>Samsung Galaxy Z Trifold 2 Might Come With S Pen Pocket in Hinge</h2>
-
-                        <div class="tech-article-date">Published: 11 May 2026</div>
-
-                        <p>
-                            Samsung's first Galaxy Z TriFold is exciting because it opens into a much larger screen, but there is one big disappointment:
-                            Samsung's own product page says the Galaxy Z TriFold does not support S Pen.
-                        </p>
-
-                        <p>
-                            That is a strange gap, because a trifold phone is exactly the kind of device where a stylus would make sense.
-                        </p>
-
-                        <p>
-                            A bigger screen is better for drawing, notes, signing documents, multitasking, and productivity.
-                        </p>
-
-                        <p>
-                            This
-                            <strong>
-                                <a href="/pdfs/samsung_galaxy_z_trifold_2_s_pen.pdf" target="_blank" rel="noopener">
-                                    Samsung patent
-                                </a>
-                            </strong>,
-                            thanks to our collab with <strong>David from @xleaks7</strong>, appears to solve that problem by giving the digital pen
-                            its own storage space inside the hinge area instead of forcing users to carry it separately.
-                        </p>
-
-                        <figure>
-                            <img
-                                src="/assets/images/folded_samsung_galaxy_trifold_with_s_pen_inside.jpg"
-                                alt="Samsung Galaxy Z Trifold 2 with S Pen pocket inside the hinge"
-                                decoding="async"
-                                fetchpriority="high"
-                            />
-                            <figcaption>
-                                Samsung Galaxy Z Trifold 2 with S Pen pocket inside the hinge | Image: Saskaitu Israsymas
-                            </figcaption>
-                        </figure>
-
-                        <h3>The Patent</h3>
-
-                        <p>
-                            Samsung's patent describes a foldable electronic device with multiple panels, hinge areas, and a digital pen
-                            that can be stored in an internal space created when the device is folded.
-                        </p>
-
-                        <p>
-                            In simple words, Samsung is looking at a future trifold-style phone where the S Pen could live inside the hinge area,
-                            almost like a hidden pocket.
-                        </p>
-
-                        <p>
-                            The patent also talks about magnets, charging, and detecting whether the pen is properly stored.
-                        </p>
-
-                        <p>
-                            To fit the S Pen, Samsung may need to make one side of the trifold slightly narrower, which could make the phone
-                            look less balanced.
-                        </p>
-
-                        <figure>
-                            <img
-                                src="/assets/images/new_samsung_galaxy_trifold_with_s_pen_pocket.jpg"
-                                alt="Magnet holds S Pen on the screen"
-                                loading="lazy"
-                                decoding="async"
-                            />
-                            <figcaption>
-                                Magnet holds S Pen on the screen | Image: Saskaitu Israsymas
-                            </figcaption>
-                        </figure>
-
-                        <h3>Key Points</h3>
-
-                        <ul>
-                            <li><strong>Built-in S Pen pocket</strong> inside the hinge area</li>
-                            <li><strong>Designed for a future Samsung Galaxy Trifold-style device</strong></li>
-                            <li><strong>Fixes the first Trifold's biggest issue:</strong> no S Pen support</li>
-                            <li><strong>The phone may fold around the pen</strong> when closed</li>
-                            <li><strong>One side panel could be slightly narrower</strong> to make space</li>
-                            <li><strong>Magnets may hold the S Pen securely</strong> in place</li>
-                            <li><strong>The device may detect</strong> when the S Pen is stored or removed</li>
-                            <li><strong>The S Pen could charge</strong> while inside the phone</li>
-                            <li><strong>Turns the Trifold into a more Note-like productivity device</strong></li>
-                            <li><strong>Possible trade-off:</strong> thicker body or less symmetrical design</li>
-                        </ul>
-
-                        <figure>
-                            <img
-                                src="/assets/images/drawings_of_samsung_galaxy_trifold_with_s_pen_support.jpg"
-                                alt="Drawings of Samsung Galaxy Trifold with S Pen support"
-                                loading="lazy"
-                                decoding="async"
-                            />
-                            <figcaption>
-                                Drawings | Image: Saskaitu Israsymas
-                            </figcaption>
-                        </figure>
-
-                        <h3>Release Date</h3>
-
-                        <p>
-                            The first Galaxy Z TriFold was launched in Korea on December 12, 2025, and later arrived in the U.S. on
-                            January 30, 2026.
-                        </p>
-
-                        <p>
-                            But it did not stay on sale for long. Reports in March 2026 said Samsung had already started discontinuing the
-                            Galaxy Z TriFold in Korea, with U.S. sales expected to end after remaining stock was sold.
-                        </p>
-
-                        <p>
-                            As for the new S Pen version, there is no official release date yet. Rumors suggest that Samsung's next Trifold
-                            could arrive in early 2027.
-                        </p>
-
-                        <div class="tech-editor-note">
-                            <strong>NOTE TO EDITORS:</strong>
-                            The text and visuals of this article are the intellectual property of
-                            <strong>Saskaituisrasymas.lt</strong>. If you want to share the content, please give a proper clickable credit.
-                            Thanks for understanding.
-                        </div>
-                    </div>
-                </article>
-
-                <article class="tech-article-card">
-                    <div class="tech-article-content">
-                        <h2>Samsung Galaxy Book with Hands Sensing Areas</h2>
-
-                        <div class="tech-article-date">Published: 6 May 2026</div>
-
-                        <p>
-                            Samsung may be looking at a smarter way to use the empty space around a laptop keyboard.
-                        </p>
-
-                        <p>
-                            A newly published
-                            <strong>
-                                <a href="/pdfs/samsung_galaxy_book_patent.pdf" target="_blank" rel="noopener">
-                                    Samsung patent
-                                </a>
-                            </strong>,
-                            thanks to our collab with <strong>David from @xleaks7</strong>, shows an electronic device
-                            that can sense where the user's hands are touching the body.
-                        </p>
-
-                        <p>
-                            In simple words, a future Galaxy Book could know not only which button you pressed, but also
-                            where your hand was resting when you pressed it.
-                        </p>
-
-                        <p>
-                            That could make laptop controls feel more natural.
-                        </p>
-
-                        <p>
-                            Instead of pressing extra key combinations like "Fn + key", the laptop could use hand position
-                            to understand what function you want.
-                        </p>
-
-                        <p>
-                            The idea is interesting because it turns the laptop body itself into part of the control system.
-                        </p>
-
-                        <figure>
-                            <img
-                                src="/assets/images/samsung_galaxy_book_hands_sensing.jpg"
-                                alt="Samsung Galaxy Book with hands sensing areas"
-                                loading="lazy"
-                                decoding="async"
-                            />
-                            <figcaption>
-                                Samsung Galaxy Book with hands sensing areas | Image: Saskaitu Israsymas
-                            </figcaption>
-                        </figure>
-
-                        <h3>The Problem</h3>
-
-                        <p>
-                            Laptops are getting thinner, cleaner, and more minimal. That looks great, but it also creates
-                            a problem.
-                        </p>
-
-                        <p>
-                            There is not much room for extra buttons.
-                        </p>
-
-                        <p>
-                            At the same time, users still want quick controls for brightness, volume, keyboard lighting,
-                            screen modes, apps, and other shortcuts.
-                        </p>
-
-                        <p>
-                            Most laptops solve this with function keys and key combinations, but those are not always easy
-                            to remember.
-                        </p>
-
-                        <p>
-                            Samsung's patent suggests a different approach.
-                        </p>
-
-                        <p>
-                            Instead of adding more buttons, the device could use sensors around the body to detect hand
-                            contact.
-                        </p>
-
-                        <p>
-                            So one button could do different things depending on where your hand is placed.
-                        </p>
-
-                        <figure>
-                            <img
-                                src="/assets/images/samsung_laptop_equipped_with_hands_monitoring_sensors.jpg"
-                                alt="Samsung Galaxy Book equipped with hands position monitoring sensors"
-                                loading="lazy"
-                                decoding="async"
-                            />
-                            <figcaption>
-                                Samsung Galaxy Book equipped with hands position monitoring sensors | Image: Saskaitu Israsymas
-                            </figcaption>
-                        </figure>
-
-                        <h3>Commands</h3>
-
-                        <p>
-                            Samsung is not just talking about a sensor for the sake of it.
-                        </p>
-
-                        <p>
-                            The idea is that hand contact could work like an invisible shortcut key.
-                        </p>
-
-                        <p>
-                            In the patent, Samsung gives a few examples. So, depending on where the user's hand is placed, the
-                            same button could perform commands like:
-                        </p>
-
-                        <ul>
-                            <li><strong>Normal key input</strong> when no special hand contact is detected</li>
-                            <li><strong>Fn-style shortcut</strong> without needing to physically press the Fn key</li>
-                            <li><strong>Volume control</strong>, for example changing sound volume through an Fn + F5-style command</li>
-                            <li><strong>Shift-style typing</strong>, for example turning "1" into "!"</li>
-                            <li><strong>A second function assigned to the same key</strong>, depending on whether the hand is touching or released from a sensing area</li>
-                            <li><strong>A third function</strong>, if the device detects contact in another sensing zone</li>
-                            <li><strong>Custom laptop shortcuts</strong>, such as brightness, keyboard backlight, screen mode, or quick settings</li>
-                            <li><strong>Virtual keyboard controls</strong> on a foldable or dual-screen device</li>
-                            <li><strong>Touchpad behavior changes</strong>, since the patent also talks about adjusting touchpad sensitivity based on detected hand contact</li>
-                            <li><strong>Preventing accidental commands</strong>, by refusing to run a shortcut if the right hand position is not detected</li>
-                        </ul>
-
-                        <figure>
-                            <img
-                                src="/assets/images/both_hands_detected.jpg"
-                                alt="Both hands detected"
-                                loading="lazy"
-                                decoding="async"
-                            />
-                            <figcaption>
-                                Both hands detected | Image: Saskaitu Israsymas
-                            </figcaption>
-                        </figure>
-
-                        <figure>
-                            <img
-                                src="/assets/images/only_right_hand_detected.jpg"
-                                alt="Only right hand detected"
-                                loading="lazy"
-                                decoding="async"
-                            />
-                            <figcaption>
-                                Only right hand detected | Image: Saskaitu Israsymas
-                            </figcaption>
-                        </figure>
-
-                        <h3>What to Expect in Future</h3>
-
-                        <p>
-                            Companies are trying to make devices thinner while also making them smarter. Hand-sensing zones
-                            could help add more controls without adding more buttons.
-                        </p>
-
-                        <p>
-                            If Samsung brings this to a real Galaxy Book, it may start with simple actions like volume,
-                            brightness, keyboard backlight, app shortcuts, or gaming controls.
-                        </p>
-
-                        <p>
-                            The best version would feel invisible and natural. You rest your hand, press a button, and the
-                            laptop understands what you meant.
-                        </p>
-
-                        <p>
-                            The worst version would feel confusing if the button changes behavior when you did not expect it.
-                        </p>
-
-                        <p>
-                            So the real question is not whether Samsung can build it. The question is whether Samsung can
-                            make it feel simple.
-                        </p>
-
-                        <div class="tech-editor-note">
-                            <strong>NOTE TO EDITORS:</strong>
-                            The text and visuals of this article are the intellectual property of
-                            <strong>Saskaituisrasymas.lt</strong>. If you want to share the content, please give a proper
-                            clickable credit. Thanks for understanding.
-                        </div>
-                    </div>
-                </article>
-            </div>
-        </div>
-    </section>    
-
     <!-- HERO -->
     <section class="hero">
         <div class="container">
             <div class="hero-inner">
                 <div>
-                    <div class="eyebrow">Išrašyk šiuolaikiškai · Pradėk nemokamai</div>
-                    <h1>Išmanus sąskaitų išrašymas <em>per pusę minutės</em></h1>
+                    <p class="hero-sub">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 11-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+                        Tinka individualiai veiklai, MB ir UAB
+                    </p>
+                    <h1>Sąskaitų išrašymas be Excel bei rankinio suvedimo</h1>
                     <p class="hero-lead">
-                        Užpildyk, atsisiųsk arba išsiųsk su apmokėjimo nuoroda el. paštu klientui.
-                        Jokio instaliavimo, jokio popieriaus, jokio galvos skausmo.
+                        Greitai išrašyk sąskaitą, išsiųsk ją klientui su apmokėjimo nuoroda ir eksportuok duomenis į apskaitą.
                     </p>
 
                     <div class="hero-actions">
                         <a href="https://atlyginimoskaiciuokle.com/registruotis" class="btn btn-primary btn-large">Susikurti paskyrą →</a>
-                        <a href="#kainos" class="btn btn-ghost btn-large">Kainos</a>
+                        <a href="#kainos" class="btn btn-ghost btn-large">Planai</a>
                     </div>
 
                     <div class="hero-proof">
                         <div class="hero-proof-item">
                             <strong>0 €</strong>
-                            <span>pradėk nemokamai</span>
+                            <span>nemokamas planas</span>
                         </div>
                         <div class="hero-proof-item">
                             <strong>~30 s</strong>
@@ -1617,7 +812,7 @@
                         </div>
                         <div class="hero-proof-item">
                             <strong>15+</strong>
-                            <span>apskaitos programų</span>
+                            <span>eksporto formatų</span>
                         </div>
                     </div>
                 </div>
@@ -1636,13 +831,13 @@
                         <div class="inv-parties">
                             <div>
                                 <div class="inv-party-label">Pardavėjas</div>
-                                <div class="inv-party-name">MB Pardavejas1</div>
-                                <div class="inv-party-line">Įm. k. 305412667</div>
+                                <div class="inv-party-name">Jonas Jonaitis</div>
+                                <div class="inv-party-line">Individualios veiklos nr. 123456</div>
                                 <div class="inv-party-line">PVM LT10012345678</div>
                             </div>
                             <div>
                                 <div class="inv-party-label">Pirkėjas</div>
-                                <div class="inv-party-name">UAB Pirkejas2</div>
+                                <div class="inv-party-name">UAB Pirkėjas</div>
                                 <div class="inv-party-line">Įm. k. 302984120</div>
                                 <div class="inv-party-line">Vilnius, Lietuva</div>
                             </div>
@@ -1651,11 +846,11 @@
                         <div class="inv-meta">
                             <div>
                                 <span>Data</span>
-                                <strong>2026-04-29</strong>
+                                <strong>2026-05-22</strong>
                             </div>
                             <div>
                                 <span>Apmokėti iki</span>
-                                <strong>2026-05-29</strong>
+                                <strong>2026-06-22</strong>
                             </div>
                         </div>
 
@@ -1670,29 +865,29 @@
                             </thead>
                             <tbody>
                                 <tr>
-                                    <td class="desc">Ąžuolo stalo plokštė, 200x90</td>
-                                    <td class="qty">1</td>
-                                    <td class="price">320,00 €</td>
-                                    <td class="amt">320,00 €</td>
+                                    <td class="desc"><span class="type">Ąžuolo stalo plokštė, 200×90</span></td>
+                                    <td class="qty"><span class="type t2">1</span></td>
+                                    <td class="price"><span class="type t3">320,00 €</span></td>
+                                    <td class="amt"><span class="type t4">320,00 €</span></td>
                                 </tr>
                                 <tr>
-                                    <td class="desc">Metalinės kojos, komplektas</td>
-                                    <td class="qty">1</td>
-                                    <td class="price">85,00 €</td>
-                                    <td class="amt">85,00 €</td>
+                                    <td class="desc"><span class="type">Metalinės kojos, komplektas</span></td>
+                                    <td class="qty"><span class="type t2">1</span></td>
+                                    <td class="price"><span class="type t3">85,00 €</span></td>
+                                    <td class="amt"><span class="type t4">85,00 €</span></td>
                                 </tr>
                                 <tr>
-                                    <td class="desc">Pristatymas</td>
-                                    <td class="qty">1</td>
-                                    <td class="price">25,00 €</td>
-                                    <td class="amt">25,00 €</td>
+                                    <td class="desc"><span class="type">Pristatymas</span></td>
+                                    <td class="qty"><span class="type t2">1</span></td>
+                                    <td class="price"><span class="type t3">25,00 €</span></td>
+                                    <td class="amt"><span class="type t4">25,00 €</span></td>
                                 </tr>
                             </tbody>
                         </table>
 
                         <div class="inv-sum">
                             <div class="inv-sum-row"><span>Tarpinė suma</span><strong>430,00 €</strong></div>
-                            <div class="inv-sum-row"><span>PVM 21%</span><strong>90,30 €</strong></div>
+                            <div class="inv-sum-row"><span>PVM 21 %</span><strong>90,30 €</strong></div>
                             <div class="inv-sum-row total"><span>Mokėtina</span><span>520,30 €</span></div>
                         </div>
 
@@ -1720,45 +915,76 @@
         <div class="container">
             <div class="section-head">
                 <div class="eyebrow">Ką gauni</div>
-                <h2>Sąskaitų išrašymas ir apmokėjimų susiejimas</h2>
-                <p>Atsisakyk sąskaitų Excel'yje. </p>
+                <h2>Sąskaitų išrašymas ir apmokėjimų kontrolė</h2>
+                <p>Nustok pildyti sąskaitas Excel'yje. Viskas vienoje vietoje: nuo išrašymo iki eksporto į apskaitą.</p>
             </div>
 
             <div class="bento">
-                <div class="bento-item wide accent">
-                    <span class="bento-num">- 01</span>
-                    <h3>Sąskaita išrašoma akimirksniu</h3>
-                    <p>Pasirenki klientą, įvedi prekes ar paslaugas - sąskaita išrašoma ir išsiunčiama tą pačią sekundę. Dublikuok ir koreguok esamas sąskaitas vienu paspaudimu, nereikės visko pildyti iš naujo.</p>
+                <!-- Row 1: 2+2 -->
+                <div class="bento-item span2 accent">
+                    <div class="bento-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V9z"/><polyline points="13 2 13 9 20 9"/></svg>
+                    </div>
+                    <h3>Sąskaita per kelias sekundes</h3>
+                    <p>Pasirenki klientą, įvedi prekes ar paslaugas, sąskaita išrašoma akimirksniu. Dublikuok esamas vienu paspaudimu.</p>
                 </div>
 
-                <div class="bento-item half">
-                    <span class="bento-num">- 02</span>
+                <div class="bento-item span2">
+                    <div class="bento-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z"/><circle cx="12" cy="10" r="3"/></svg>
+                    </div>
                     <h3>Įmonių rekvizitai</h3>
-                    <p>Klientų duomenys imami tiesiai iš Registrų Centro - mažiau klaidų, nulis perrašinėjimo.</p>
+                    <p>Klientų duomenys imami tiesiai iš Registrų Centro, todėl mažiau klaidų ir nereikia perrašinėti ranka.</p>
                 </div>
 
-                <div class="bento-item third">
-                    <span class="bento-num">- 03</span>
+                <!-- Row 2: 1+1+1+1 -->
+                <div class="bento-item">
+                    <div class="bento-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+                    </div>
                     <h3>Siuntimas el. paštu</h3>
-                    <p>Išrašytas sąskaitas siųskite el. paštu bei automatiškai priminkite, jei apmokėjimas pradelstas.</p>
+                    <p>Išsiųsk sąskaitą klientui ir automatiškai primink, jei apmokėjimas pradelstas.</p>
                 </div>
 
-                <div class="bento-item third">
-                    <span class="bento-num">- 04</span>
-                    <h3>Katalogas</h3>
-                    <p>Išsaugok dažniausias naudojamas prekes ar paslaugas ir kitą kartą jas pridėk iš sąrašo, o ne rašyk iš naujo.</p>
+                <div class="bento-item">
+                    <div class="bento-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+                    </div>
+                    <h3>Prekių katalogas</h3>
+                    <p>Išsaugok dažniausias prekes ar paslaugas ir kitą kartą pridėk iš sąrašo.</p>
                 </div>
 
-                <div class="bento-item big">
-                    <span class="bento-num">- 05</span>
+                <div class="bento-item">
+                    <div class="bento-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="4" width="22" height="16" rx="2" ry="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>
+                    </div>
                     <h3>Apmokėjimų kontrolė</h3>
-                    <p>Iš karto matysi, kurios sąskaitos apmokėtos, kurios dar ne, o kurios pradelstos. Importuok banko išrašą ir leisk sistemai pačiai susieti pavedimus su sąskaitomis.</p>
+                    <p>Matysi, kurios sąskaitos apmokėtos, o kurios pradelstos. Importuok banko išrašą, sistema susies pavedimus.</p>
                 </div>
 
-                <div class="bento-item big">
-                    <span class="bento-num">- 06</span>
+                <div class="bento-item">
+                    <div class="bento-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+                    </div>
                     <h3>Eksportas į apskaitą</h3>
-                    <p>Duomenys paruošiami importui į i.SAF ir populiariausias Lietuvos apskaitos sistemas - Rivilę, Finvaldą, Centą ir dar tuziną kitų. Jokio rankinio sąskaitų vedimo.</p>
+                    <p>Duomenis eksportuok į i.SAF ir 15+ apskaitos programų: Rivilę, Finvaldą, Centą ir kitas.</p>
+                </div>
+
+                <!-- Row 3: 2+2 -->
+                <div class="bento-item span2">
+                    <div class="bento-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 014 4v14a3 3 0 00-3-3H2z"/><path d="M22 3h-6a4 4 0 00-4 4v14a3 3 0 013-3h7z"/></svg>
+                    </div>
+                    <h3>Individualios veiklos žurnalas</h3>
+                    <p>Automatiškai suformuok pajamų-išlaidų žurnalą pagal išrašytas sąskaitas. Nereikia pildyti atskirai.</p>
+                </div>
+
+                <div class="bento-item span2">
+                    <div class="bento-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z"/></svg>
+                    </div>
+                    <h3>OSS suvestinė</h3>
+                    <p>Pardavinėji ES pirkėjams? Suformuok One Stop Shop kvartalo suvestinę deklaracijai keliais paspaudimais.</p>
                 </div>
             </div>
         </div>
@@ -1770,44 +996,44 @@
             <div class="section-head">
                 <div class="eyebrow">Trys žingsniai</div>
                 <h2>Nuo šablono iki apmokėtos sąskaitos</h2>
-                <p>Pirmą kartą užtruksi kelias minutes. Antrą - vos kelias sekundes.</p>
+                <p>Pirmą kartą užtruksi kelias minutes. Kitą kartą, vos kelias sekundes.</p>
             </div>
 
             <div class="steps-grid">
                 <div class="step">
-                    <div class="step-num">i.</div>
+                    <div class="step-num">1</div>
                     <h3>Užpildyk</h3>
-                    <p>Pasirink klientą, surašyk prekes ar paslaugas. Sistema pati paskaičiuoja PVM ir galutinę sumą.</p>
+                    <p>Pasirink klientą, surašyk prekes ar paslaugas. Sistema pati apskaičiuoja PVM ir galutinę sumą.</p>
                 </div>
 
                 <div class="step">
-                    <div class="step-num">ii.</div>
+                    <div class="step-num">2</div>
                     <h3>Išsiųsk</h3>
-                    <p>Vienu mygtuku išsiųsk klientui el. paštu arba atsisiųsk PDF. Gali iš karto siųsti su Montonio ar Paysera apmokėjimo nuorodomis.</p>
+                    <p>Vienu mygtuku išsiųsk klientui el. paštu arba atsisiųsk PDF. Pridėk Montonio ar Paysera apmokėjimo nuorodą.</p>
                 </div>
 
                 <div class="step">
-                    <div class="step-num">iii.</div>
+                    <div class="step-num">3</div>
                     <h3>Stebėk</h3>
-                    <p>Matysi, kas apmokėta, kas vėluoja. Banko išrašas automatiškai susieja pavedimus su sąskaitymus. Duomenis eksportuok į savo apskaitos programą.</p>
+                    <p>Matysi, kas apmokėta, kas vėluoja. Banko išrašas automatiškai susieja pavedimus. Eksportuok į apskaitą.</p>
                 </div>
             </div>
         </div>
     </section>
 
     <!-- PRICING -->
-    <section id="kainos" class="section pricing">
+    <section id="kainos" class="section">
         <div class="container">
             <div class="section-head center">
                 <div class="eyebrow">Kainos</div>
-                <h2>Pradėk be mokesčio. Automatizuok, kai reikės.</h2>
-                <p>Du aiškūs planai be paslėptų sąlygų. Jokių pradinių mokesčių, jokių ilgų įsipareigojimų.</p>
+                <h2>Pradėk nemokamai. Automatizuok, kai reikės.</h2>
+                <p>Du planai be paslėptų mokesčių ir ilgų įsipareigojimų.</p>
             </div>
 
             <div class="pricing-grid">
                 <div class="plan">
                     <h3>Pradžiai</h3>
-                    <p class="plan-sub">Tinka savarankiškai veiklai ar išrašant rečiau</p>
+                    <p class="plan-sub">Tinka pradžiai</p>
 
                     <div class="plan-price">
                         <strong>0 €</strong>
@@ -1829,7 +1055,7 @@
                 </div>
 
                 <div class="plan featured">
-                    <div class="plan-tag">Išmaniam versui</div>
+                    <div class="plan-tag">Populiariausias</div>
                     <h3>Verslui</h3>
                     <p class="plan-sub">Neribotas planas</p>
 
@@ -1841,78 +1067,69 @@
                     <ul class="plan-features">
                         <li>Viskas, kas yra nemokamame plane</li>
                         <li>Neribotas siuntimas el. paštu</li>
-                        <li>Neribotas eksportas į i.SAF ir 15+ apskaitos programų</li>
+                        <li>Neribotas eksportas į i.SAF ir 15+ programų</li>
                         <li>Pasikartojančios (periodinės) sąskaitos</li>
-                        <li>Apmokėjimo mygtukas per Montonio arba Paysera</li>
+                        <li>Apmokėjimo mygtukas per Montonio / Paysera</li>
                         <li>Banko išrašų importas ir automatinis sutapatinimas</li>
-                        <li>Automatiniai priminimai vėluojantiems mokėtojams</li>
-                        <li>Tavo prekės ženklo logotipas sąskaitose</li>
-                        <li>Be mūsų logotipo dokumente</li>
+                        <li>Automatiniai priminimai vėluojantiems</li>
+                        <li>Individualios veiklos žurnalas</li>
+                        <li>OSS suvestinė</li>
+                        <li>Tavo logotipas, be mūsų branding'o</li>
                     </ul>
 
-                    <a href="https://atlyginimoskaiciuokle.com/registruotis" class="btn btn-primary">Rinktis Verslui</a>
+                    <a href="https://atlyginimoskaiciuokle.com/registruotis" class="btn btn-ghost btn-large">Rinktis Verslui →</a>
                 </div>
             </div>
         </div>
     </section>
 
     <!-- FAQ -->
-    <section id="duk" class="section">
+    <section id="duk" class="section" style="background:var(--bg-alt)">
         <div class="container">
             <div class="section-head center">
                 <div class="eyebrow">Klausimai</div>
-                <h2>Klausimai ir atsakymai</h2>
+                <h2>Dažniausi klausimai</h2>
             </div>
 
             <div class="faq-wrap">
                 <details class="faq-item">
-                    <summary>Ar tikrai galima naudotis be jokio mokesčio?</summary>
-                    <p>Taip. Užsiregistravęs iš karto gauni prieigą prie nemokamo plano, tačiau kai kurios funkcijos bus ribojamos.</p>
+                    <summary>Ar tinka individualiai veiklai?</summary>
+                    <p>Taip. Galėsi įvesti individualios veiklos pažymėjimo numerį ir visus reikiamus duomenis. Taip pat galėsi suformuoti individualios veiklos pajamų bei išlaidų žurnalą.</p>
                 </details>
 
                 <details class="faq-item">
-                    <summary>Tinka individualiai veiklai ir dirbant pagal verslo liudijimui?</summary>
-                    <p>Tinka visiems. Į pardavėjo rekvizitus galėsi įvesti tiek savo įmonę, tiek vardą ir pavardę.</p>
+                    <summary>Ar tikrai galima naudotis nemokamai?</summary>
+                    <p>Taip. Užsiregistravęs iš karto gauni prieigą prie nemokamo plano su neribotu sąskaitų kiekiu. Kai kurios funkcijos, pvz. el. pašto siuntimas ir eksportas, yra ribotos.</p>
                 </details>
 
                 <details class="faq-item">
                     <summary>Ar reikės kiekvieną kartą iš naujo vesti duomenis?</summary>
-                    <p>Ne. Pirmą kartą supildęs duomenis išsaugai juos paskyroje. Kitą kartą galėsi tiesiog dublikuoti jau išrašytą sąskaitą arba išsaugotą šabloną. Įmonių rekvizitai lengvai importuojami iš Registro Centro duomenų bazės.</p>
+                    <p>Ne. Pirmą kartą supildęs duomenis išsaugai juos paskyroje. Kitą kartą tiesiog dublikuok jau išrašytą sąskaitą. Įmonių rekvizitai importuojami iš Registrų Centro.</p>
                 </details>
 
                 <details class="faq-item">
-                    <summary>Kaip viskas pasiekia buhalterį?</summary>
-                    <p>Išrašytų sąskaitų duomenis gali eksportuoti į i.SAF ir dar 15 skirtingų apskaitos programų, tokių kaip Rivilė, Finvalda, Centas, Pragma, Apskaita5 ir kitos. Tai reiškia, kad tavo buhalteris neturės vesti sąskaitų ranka. Taip sumažinsi darbo naštą bei išlaidas buhalterijai.</p>
+                    <summary>Kaip duomenys pasiekia buhalterį?</summary>
+                    <p>Išrašytų sąskaitų duomenis eksportuok į i.SAF ir 15+ apskaitos programų: Rivilę, Finvaldą, Centą, Pragma, Apskaita5 ir kitas. Tavo buhalteris neturės vesti sąskaitų ranka.</p>
                 </details>
 
                 <details class="faq-item">
                     <summary>Ar galima naudoti nestandartinį PVM tarifą?</summary>
-                    <p>Taip. Be įprastų 21%, 9%, 5% ir 0% tarifų, gali įvesti savo, tiek konkrečiai eilutei, tiek visai sąskaitai. Sistema perskaičiuos sumas automatiškai.</p>
-                </details>
-
-                <details class="faq-item">
-                    <summary>Ar sistema priskiria PVM klasifikatorius?</summary>
-                    <p>Taip. Eksportuoti duomenys jau turės priskirtus PVM klasifikatorius, kurie importuosis į jūsų apskaitos programas.</p>
-                </details>
-
-                <details class="faq-item">
-                    <summary>Ar galima priskirti sandėlį, objektą ir kitus papildomus laukus?</summary>
-                    <p>Taip. Prieš eksportuojant duomenis galėsi susivesti reikšmes papildomų laukų, tokių kaip sandėlis, objektas, atskaitingas asmuo, projektas, logistika ir kitus, priklausomai nuo tavo pasirinktos apskaitos programos. Reikšmės importuosis į tavo apskaitos programą.</p>
-                </details>
-
-                <details class="faq-item">
-                    <summary>Ar sąskaitą galima išsiųsti klientui iš paties įrankio?</summary>
-                    <p>Taip. Paspaudęs "Išrašyti ir siųsti" klientas automatiškai gaus elektroninį laišką su nuorodą į sąskaitą, kartu su tiesioginio apmokėjimo nuoroda, jei ją pridėjai. Taip pat sistema išsiunčia automatinius apmokėjimo priminimus.</p>
+                    <p>Taip. Be įprastų 21 %, 9 %, 5 % ir 0 % tarifų, gali įvesti savo tarifą konkrečiai eilutei arba visai sąskaitai.</p>
                 </details>
 
                 <details class="faq-item">
                     <summary>Ar klientas gali apmokėti sąskaitą tiesiogiai?</summary>
-                    <p>Taip. Galėsi pridėti apmokėjimo mygtuką per Montonio arba Paysera. O klientas atidaręs el. laišką, galės iš karto atsiskaityti banko pavedimu arba kortele. Po apmokėjimo sąskaitos iš karto pasižymės, kaip apmokėtos.</p>
+                    <p>Taip. Pridėk apmokėjimo mygtuką per Montonio arba Paysera. Klientas gaus el. laišką su nuoroda ir galės atsiskaityti per banką arba kortele.</p>
+                </details>
+
+                <details class="faq-item">
+                    <summary>Kas yra OSS suvestinė?</summary>
+                    <p>One Stop Shop (OSS) yra schema pardavimams ES fiziniams asmenims. Jei pardavinėji prekes ar paslaugas kitų ES šalių pirkėjams, sistema suformuos kvartalo suvestinę deklaracijai.</p>
                 </details>
 
                 <details class="faq-item">
                     <summary>Ar mano duomenys saugūs?</summary>
-                    <p>Visi duomenys saugomi Europos Sąjungos serveriuose, perdavimas šifruojamas (HTTPS), o prieigą prie paskyros turėsi tik tu ar tavo buhalteris. Jokių duomenų tretiesiems asmenims neperduodame, o sąskaitų istorija esant poreikiui galėsi panaikinti.</p>
+                    <p>Visi duomenys saugomi ES serveriuose, perdavimas šifruojamas (HTTPS). Prieigą prie paskyros turėsi tik tu ar tavo buhalteris.</p>
                 </details>
             </div>
         </div>
@@ -1922,10 +1139,10 @@
     <section class="section final">
         <div class="container">
             <div class="final-inner">
-                <h2>Pirmą sąskaitą išrašyk <em>jau šiandien</em></h2>
-                <p>Registracija trunka mažiau nei sąskaitos numerio sugalvojimas.</p>
+                <h2>Pirmą sąskaitą išrašyk jau šiandien</h2>
+                <p>Kartą pabandęs, daugiau nenorėsi kurti sąskaitų Excel'yje</p>
                 <div class="final-actions">
-                    <a href="https://atlyginimoskaiciuokle.com/registruotis" class="btn btn-primary btn-large">Susikurti paskyrą</a>
+                    <a href="https://atlyginimoskaiciuokle.com/registruotis" class="btn btn-primary btn-large">Susikurti paskyrą →</a>
                     <a href="https://atlyginimoskaiciuokle.com/prisijungti" class="btn btn-ghost btn-large">Jau turiu paskyrą</a>
                 </div>
             </div>
@@ -1939,22 +1156,27 @@
         <div class="footer-top">
             <div class="footer-brand">
                 <a href="/" class="logo">
-                    <svg class="logo-mark" viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-                        <rect x="3" y="3" width="42" height="42" rx="10" fill="#f6f1e7"/>
-                        <path d="M14 14h16l5 5v15H14z" fill="#0b3d2e"/>
-                        <path d="M30 14v5h5" stroke="#f6f1e7" stroke-width="1.5" fill="none"/>
-                        <line x1="18" y1="24" x2="31" y2="24" stroke="#f6f1e7" stroke-width="2" stroke-linecap="round"/>
-                        <line x1="18" y1="28" x2="31" y2="28" stroke="#f6f1e7" stroke-width="2" stroke-linecap="round"/>
-                        <line x1="18" y1="32" x2="26" y2="32" stroke="#f6f1e7" stroke-width="2" stroke-linecap="round"/>
-                    </svg>
-                    <span>saskaituisrasymas.lt</span>
+                    <svg class="logo-mark lt-flag" viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                <rect x="3" y="3" width="42" height="42" rx="12" fill="#ffffff"/>
+                <rect x="5" y="5" width="38" height="38" rx="10" fill="#FDB913"/>
+                <clipPath id="lt-flag-footer-clip">
+                    <rect x="5" y="5" width="38" height="38" rx="10"/>
+                </clipPath>
+                <g clip-path="url(#lt-flag-footer-clip)">
+                    <rect x="5" y="5" width="38" height="12.67" fill="#FDB913"/>
+                    <rect x="5" y="17.67" width="38" height="12.66" fill="#006A44"/>
+                    <rect x="5" y="30.33" width="38" height="12.67" fill="#C1272D"/>
+                </g>
+                <rect x="5" y="5" width="38" height="38" rx="10" fill="none" stroke="rgba(15,23,42,0.12)" stroke-width="1"/>
+            </svg>
+                    <span>Sąskaitų Išrašymas</span>
                 </a>
-                <p>Išmanus sąskaitų išrašymas internetu, skirtas skirtingų dydžių Lietuvos verslams bei įmonėms. Sąskaitų duomenys lengvai eksportuojami į apskaitos programas.</p>
+                <p>Išmanus sąskaitų išrašymas internetu, tinkantis individualiai veiklai, MB ir UAB. Eksportuok duomenis į 15+ apskaitos programų.</p>
             </div>
 
             <div class="footer-col">
                 <h4>Produktas</h4>
-                <a href="#galimybes">Galimybės</a>
+                <a href="#galimybes">Funkcijos</a>
                 <a href="#procesas">Kaip veikia</a>
                 <a href="#kainos">Kainos</a>
                 <a href="#duk">DUK</a>
@@ -1970,11 +1192,13 @@
         </div>
 
         <div class="footer-bottom">
-            <span>© 2026 SaskaituIsrasymas.lt | Visos teisės saugomos</span>
-            <span>Pagaminta Lietuvoje</span>
+            <span>© 2026 Sąskaitų Išrašymas · Visos teisės saugomos</span>
+            <span>Sukurta Lietuvoje</span>
         </div>
     </div>
 </footer>
+
+
 
 </body>
 </html>
