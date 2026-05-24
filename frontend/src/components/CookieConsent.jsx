@@ -49,7 +49,7 @@ export default function CookieConsent() {
 
   useEffect(() => {
     if (!getConsentCookie()) {
-      const t = setTimeout(() => setVisible(true), 800);
+      const t = setTimeout(() => setVisible(true), 2500);
       return () => clearTimeout(t);
     }
   }, []);
