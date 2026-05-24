@@ -134,6 +134,11 @@ async function prerender() {
   try {
     const page = await browser.newPage();
 
+    // Флаг чтобы CookieConsent не рендерился при пререндере
+    await page.evaluateOnNewDocument(() => {
+      window.__PRERENDER = true;
+    });
+
     // Включаем логирование console из браузера
     page.on('console', msg => {
       if (msg.type() === 'error') {

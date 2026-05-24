@@ -48,6 +48,7 @@ export default function CookieConsent() {
   const [toggles, setToggles] = useState({ analytics: true, marketing: true });
 
   useEffect(() => {
+    if (typeof window !== 'undefined' && window.__PRERENDER) return;
     if (!getConsentCookie()) {
       const t = setTimeout(() => setVisible(true), 2500);
       return () => clearTimeout(t);
