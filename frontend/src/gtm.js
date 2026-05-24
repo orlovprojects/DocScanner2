@@ -2,9 +2,6 @@ let gtmInited = false;
 
 const COOKIE_NAME = "cookie_consent";
 
-/**
- * Читает consent cookie → { analytics: bool, marketing: bool } | null
- */
 export function getConsentCookie() {
   const match = document.cookie.match(/(?:^|;\s*)cookie_consent=([^;]+)/);
   if (!match) return null;
@@ -15,9 +12,6 @@ export function getConsentCookie() {
   }
 }
 
-/**
- * Сохраняет consent cookie на 365 дней
- */
 export function setConsentCookie(value) {
   const d = new Date();
   d.setTime(d.getTime() + 365 * 86400000);
@@ -25,17 +19,19 @@ export function setConsentCookie(value) {
   document.cookie = `${COOKIE_NAME}=${encoded};expires=${d.toUTCString()};path=/;SameSite=Lax`;
 }
 
-/**
- * Пушит consent update в dataLayer (вызывается из CookieConsent.jsx)
- */
+// gtag helper — пушит arguments object, не отдельные строки
+function gtag() {
+  window.dataLayer = window.dataLayer || [];
+  window.dataLayer.push(arguments);
+}
+
 export function updateConsent(consent) {
   if (typeof window === "undefined") return;
-  window.dataLayer = window.dataLayer || [];
 
   const analyticsStatus = consent.analytics ? "granted" : "denied";
   const marketingStatus = consent.marketing ? "granted" : "denied";
 
-  window.dataLayer.push("consent", "update", {
+  gtag("consent", "update", {
     analytics_storage: analyticsStatus,
     ad_storage: marketingStatus,
     ad_user_data: marketingStatus,
@@ -50,12 +46,11 @@ export function initGTM(containerId) {
 
   window.dataLayer = window.dataLayer || [];
 
-  // ── Consent Mode v2: default BEFORE gtm.js loads ──
   const saved = getConsentCookie();
   const analyticsStatus = saved?.analytics ? "granted" : "denied";
   const marketingStatus = saved?.marketing ? "granted" : "denied";
 
-  window.dataLayer.push("consent", "default", {
+  gtag("consent", "default", {
     ad_storage: marketingStatus,
     ad_user_data: marketingStatus,
     ad_personalization: marketingStatus,
@@ -65,8 +60,7 @@ export function initGTM(containerId) {
     wait_for_update: saved ? 0 : 500,
   });
 
-  // ── GTM init ──
-  window.dataLayer.push({ "gtm.start": Date.now(), event: "gtm.js" });
+  gtag("js", new Date());
 
   const src = `https://www.googletagmanager.com/gtm.js?id=${encodeURIComponent(
     containerId
