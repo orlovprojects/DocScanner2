@@ -219,7 +219,7 @@ def _merge_images_vertically(images: List[Image.Image]) -> Image.Image:
     return merged
 
 def _pdf_to_image(pdf_bytes: bytes, dpi: int = PDF_CONVERT_DPI, max_pages: int = PDF_MAX_PAGES) -> Image.Image:
-    pages = convert_from_bytes(pdf_bytes, dpi=dpi, poppler_path=POPPLER_PATH)
+    pages = convert_from_bytes(pdf_bytes, dpi=dpi, poppler_path=POPPLER_PATH, timeout=120)
     if max_pages and len(pages) > max_pages:
         pages = pages[:max_pages]
     return _merge_images_vertically(pages)
