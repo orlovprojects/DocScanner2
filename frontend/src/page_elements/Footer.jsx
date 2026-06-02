@@ -184,6 +184,9 @@ const Footer = () => {
                   <Link href="/2025" underline="none" color="inherit" sx={linkSx}>
                     Atlyginimo skaičiuoklė 2025
                   </Link>
+                  <Link href="/individualios-veiklos-skaiciuokle" underline="none" color="inherit" sx={linkSx}>
+                    Individualios veiklos skaičiuoklė 2026
+                  </Link>
                   <Link href="/gpm-skaiciuokle" underline="none" color="inherit" sx={linkSx}>
                     GPM skaičiuoklė
                   </Link>
