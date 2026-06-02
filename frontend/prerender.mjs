@@ -33,6 +33,7 @@ const routesToPrerender = [
   '/pragma',
   '/debetas',
   '/finvalda',
+  '/individualios-veiklos-skaiciuokle',
 ];
 
 const distDir = path.resolve(__dirname, 'dist');

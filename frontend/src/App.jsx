@@ -28,6 +28,7 @@ const Terms = lazy(() => import('./pages/Terms'));
 const Privacy = lazy(() => import('./pages/Privacy'));
 const AtlyginimoSkaiciuokle2025 = lazy(() => import('./pages/AtlyginimoSkaiciuokle2025'));
 const AtlyginimoSkaiciuokle2026 = lazy(() => import('./pages/AtlyginimoSkaiciuokle2026'));
+const IndividualiosVeiklosSkaiciuokle2026 = lazy(() => import('./pages/IndividualiosVeiklosSkaiciuokle2026'));
 const InvoiceGenerator = lazy(() => import('./pages/InvoiceGenerator'));
 const BuhalterinenApskaita = lazy(() => import('./pages/BuhalterineApskaita'));
 const SumaZodziais = lazy(() => import('./pages/SumaZodziais'));
@@ -154,6 +155,7 @@ function App() {
           <Route path="/apie-mus" element={<AboutUs />} />
           <Route path="/2025" element={<AtlyginimoSkaiciuokle2025 />} />
           <Route path="/2026" element={<Navigate to="/" replace />} />
+          <Route path="/individualios-veiklos-skaiciuokle" element={<IndividualiosVeiklosSkaiciuokle2026 />} />
           <Route path="/saskaitu-skaitmenizavimas-dokskenas" element={<Dokskenas />} />
           <Route path="/pvm-skaiciuokle" element={<PvmCalculator />} />
           <Route path="/gpm-skaiciuokle" element={<GpmSkaiciuokle />} />
