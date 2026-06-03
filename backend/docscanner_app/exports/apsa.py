@@ -17,6 +17,8 @@ from decimal import Decimal, ROUND_HALF_UP
 from datetime import date, datetime
 from typing import List, Dict, Optional
 import xml.etree.ElementTree as ET
+from collections import defaultdict
+from calendar import monthrange
 
 logger = logging.getLogger("docscanner_app")
 
@@ -659,65 +661,34 @@ def _serialize_xml(root: ET.Element) -> str:
 # MAIN EXPORT FUNCTION
 # =============================================================================
 
-def export_to_apsa(
-    documents: List,
-    registration_number: str,
-    pvm_resolver: dict = None,
-) -> dict:
-    """
-    Экспортирует документы в i.SAF XML для APSA.
-
-    Args:
-        documents: список документов (с полем direction='pirkimas'/'pardavimas')
-        registration_number: код выбранного контрагента (company) из CP
-        pvm_resolver: dict {doc_id: {item_id: {"vat_percent": ..., "pvm_kodas": ...}}}
-
-    Returns:
-        {"isaf": bytes} - XML файл
-    """
-    logger.info("[APSA] Starting export, docs=%d", len(documents))
-
-    if not documents:
-        raise ValueError("No documents provided for export")
-
-    if not registration_number:
-        raise ValueError("Registration number (company code) is required")
-
-    reg_num = validate_registration_number(registration_number)
-    if not reg_num:
-        raise ValueError(f"Invalid registration number: {registration_number}")
-
-    if pvm_resolver is None:
-        pvm_resolver = {}
-
-    # Разделяем на pirkimas/pardavimas
-    purchase_docs = []
-    sales_docs = []
-    all_dates = []
-
-    for doc in documents:
-        direction = _s(getattr(doc, "direction", "")) or _s(getattr(doc, "pirkimas_pardavimas", ""))
-        direction = direction.lower()
-        
-        inv_date = getattr(doc, "invoice_date", None)
-        if inv_date:
-            all_dates.append(inv_date)
-        
-        if direction == "pardavimas":
-            sales_docs.append(doc)
+def _get_invoice_month(doc) -> tuple:
+    """Возвращает (year, month) из invoice_date."""
+    inv_date = getattr(doc, "invoice_date", None)
+    if not inv_date:
+        today = date.today()
+        return (today.year, today.month)
+    if isinstance(inv_date, str):
+        parsed = _format_date(inv_date)
+        if parsed:
+            inv_date = datetime.strptime(parsed, "%Y-%m-%d").date()
         else:
-            purchase_docs.append(doc)
+            today = date.today()
+            return (today.year, today.month)
+    return (inv_date.year, inv_date.month)
 
-    logger.info("[APSA] Split: purchases=%d, sales=%d", len(purchase_docs), len(sales_docs))
 
-    # SelectionStartDate/EndDate = min/max invoice_date
-    if all_dates:
-        start_date = min(all_dates)
-        end_date = max(all_dates)
-    else:
-        start_date = end_date = date.today()
+def _build_isaf_for_month(
+    purchase_docs: list,
+    sales_docs: list,
+    registration_number: str,
+    year: int,
+    month: int,
+    pvm_resolver: dict,
+) -> bytes:
+    """Формирует один i.SAF XML за конкретный календарный месяц."""
+    start_date = date(year, month, 1)
+    end_date = date(year, month, monthrange(year, month)[1])
 
-    # DataType
     if purchase_docs and sales_docs:
         data_type = DATA_TYPE_FULL
     elif sales_docs:
@@ -725,13 +696,11 @@ def export_to_apsa(
     else:
         data_type = DATA_TYPE_PURCHASE
 
-    # XML
     root = ET.Element("iSAFFile")
     root.set("xmlns", ISAF_NAMESPACE)
     root.set("xmlns:xsi", "http://www.w3.org/2001/XMLSchema-instance")
 
-    _build_header(root, reg_num, start_date, end_date, data_type)
-
+    _build_header(root, registration_number, start_date, end_date, data_type)
     _build_masterfiles(root, purchase_docs, sales_docs)
 
     source_docs = _create_element(root, "SourceDocuments")
@@ -749,8 +718,81 @@ def export_to_apsa(
             _build_sales_invoice(sales_invoices, doc, doc_pvm)
 
     xml_string = _serialize_xml(root)
-    xml_bytes = xml_string.encode('utf-8')
+    return xml_string.encode("utf-8")
 
-    logger.info("[APSA] Export completed, size=%d bytes", len(xml_bytes))
 
-    return {"isaf": xml_bytes}
+def export_to_apsa(
+    documents: List,
+    registration_number: str,
+    pvm_resolver: dict = None,
+) -> dict:
+    """
+    Экспортирует документы в i.SAF XML для APSA.
+    Группирует по календарным месяцам — один файл на месяц.
+
+    Args:
+        documents: список документов (с полем direction='pirkimas'/'pardavimas')
+        registration_number: код выбранного контрагента (company) из CP
+        pvm_resolver: dict {doc_id: {item_id: {"vat_percent": ..., "pvm_kodas": ...}}}
+
+    Returns:
+        {"isaf": bytes}                          — если один месяц
+        {"isaf_YYYY-MM": bytes, ...}             — если несколько месяцев
+    """
+    logger.info("[APSA] Starting export, docs=%d", len(documents))
+
+    if not documents:
+        raise ValueError("No documents provided for export")
+
+    if not registration_number:
+        raise ValueError("Registration number (company code) is required")
+
+    reg_num = validate_registration_number(registration_number)
+    if not reg_num:
+        raise ValueError(f"Invalid registration number: {registration_number}")
+
+    if pvm_resolver is None:
+        pvm_resolver = {}
+
+    # Группируем по (year, month) и direction
+    months_purchase = defaultdict(list)
+    months_sales = defaultdict(list)
+
+    for doc in documents:
+        ym = _get_invoice_month(doc)
+
+        direction = _s(getattr(doc, "direction", "")) or _s(getattr(doc, "pirkimas_pardavimas", ""))
+        direction = direction.lower()
+
+        if direction == "pardavimas":
+            months_sales[ym].append(doc)
+        else:
+            months_purchase[ym].append(doc)
+
+    all_months = sorted(set(months_purchase.keys()) | set(months_sales.keys()))
+
+    logger.info("[APSA] Months found: %s", all_months)
+
+    result = {}
+    for (year, month) in all_months:
+        p_docs = months_purchase.get((year, month), [])
+        s_docs = months_sales.get((year, month), [])
+
+        xml_bytes = _build_isaf_for_month(
+            p_docs, s_docs, reg_num, year, month, pvm_resolver,
+        )
+
+        key = f"isaf_{year}-{month:02d}"
+        result[key] = xml_bytes
+
+        logger.info(
+            "[APSA] Month %04d-%02d: purchases=%d, sales=%d, size=%d bytes",
+            year, month, len(p_docs), len(s_docs), len(xml_bytes),
+        )
+
+    # Обратная совместимость: один месяц → "isaf"
+    if len(result) == 1:
+        only_key = next(iter(result))
+        return {"isaf": result[only_key]}
+
+    return result

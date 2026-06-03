@@ -1708,15 +1708,27 @@ def export_documents(request):
                 registration_number=registration_number,
                 pvm_resolver=pvm_resolver,
             )
-            
-            xml_bytes = result["isaf"]
-            
-            response = HttpResponse(xml_bytes, content_type='application/xml')
-            response['Content-Disposition'] = f'attachment; filename=isaf_{today_str}.xml'
-            export_success = True
-            
-            logger.info("[EXP] APSA export completed, size=%d", len(xml_bytes))
-            
+
+            if "isaf" in result:
+                # Один месяц — один файл
+                xml_bytes = result["isaf"]
+                response = HttpResponse(xml_bytes, content_type='application/xml')
+                response['Content-Disposition'] = f'attachment; filename=isaf_{today_str}.xml'
+                export_success = True
+                logger.info("[EXP] APSA export completed (single month), size=%d", len(xml_bytes))
+            else:
+                # Несколько месяцев — ZIP
+                zip_buffer = io.BytesIO()
+                with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+                    for key, xml_bytes in sorted(result.items()):
+                        zf.writestr(f"{key}.xml", xml_bytes)
+                        logger.info("[EXP] APSA added to ZIP: %s.xml size=%d", key, len(xml_bytes))
+                zip_buffer.seek(0)
+                response = HttpResponse(zip_buffer.read(), content_type='application/zip')
+                response['Content-Disposition'] = f'attachment; filename=isaf_{today_str}.zip'
+                export_success = True
+                logger.info("[EXP] APSA export completed (%d months)", len(result))
+
         except ValueError as e:
             logger.error("[EXP] APSA export error: %s", str(e))
             return Response({"error": str(e)}, status=400)
