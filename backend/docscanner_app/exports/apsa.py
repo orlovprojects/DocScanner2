@@ -790,9 +790,4 @@ def export_to_apsa(
             year, month, len(p_docs), len(s_docs), len(xml_bytes),
         )
 
-    # Обратная совместимость: один месяц → "isaf"
-    if len(result) == 1:
-        only_key = next(iter(result))
-        return {"isaf": result[only_key]}
-
     return result

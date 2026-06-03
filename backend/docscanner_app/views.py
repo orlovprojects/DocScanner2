@@ -1709,13 +1709,14 @@ def export_documents(request):
                 pvm_resolver=pvm_resolver,
             )
 
-            if "isaf" in result:
-                # Один месяц — один файл
-                xml_bytes = result["isaf"]
+            if len(result) == 1:
+                # Один месяц — один файл (ключ = "isaf_2026-04")
+                key, xml_bytes = next(iter(result.items()))
+                filename = f"{key}.xml"
                 response = HttpResponse(xml_bytes, content_type='application/xml')
-                response['Content-Disposition'] = f'attachment; filename=isaf_{today_str}.xml'
+                response['Content-Disposition'] = f'attachment; filename={filename}'
                 export_success = True
-                logger.info("[EXP] APSA export completed (single month), size=%d", len(xml_bytes))
+                logger.info("[EXP] APSA export completed (single month), file=%s size=%d", filename, len(xml_bytes))
             else:
                 # Несколько месяцев — ZIP
                 zip_buffer = io.BytesIO()
