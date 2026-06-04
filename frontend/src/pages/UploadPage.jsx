@@ -57,6 +57,10 @@ const EXPORT_TUTORIALS = {
     label: "Apskaita5",
     url: "https://www.youtube.com/embed/_HeD_TKUsl0",
   },
+  centas: {
+    label: "Centas",
+    url: "https://www.youtube.com/embed/mL-X8AhQc94",
+  },
 };
 
 // Onboarding video URL
