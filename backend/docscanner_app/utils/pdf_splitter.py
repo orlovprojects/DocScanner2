@@ -91,21 +91,94 @@ def _count_pages_in_bytes(pdf_bytes: bytes) -> int:
         return 0
 
 
+# def _maybe_compress_pdf_bytes(pdf_bytes: bytes) -> bytes:
+#     """
+#     Если PDF-батч слишком большой для Gemini inline (>20MB),
+#     рендерим страницы в пониженном DPI и пересобираем в новый PDF.
+#     Пробуем 150 → 100 → 72 DPI пока не влезет.
+#     """
+#     if len(pdf_bytes) <= MAX_GEMINI_BATCH_BYTES:
+#         return pdf_bytes
+
+#     page_count = _count_pages_in_bytes(pdf_bytes)
+
+#     for dpi in (150, 100, 72):
+#         logger.info(
+#             "[PDF-SPLIT] Batch too large (%d bytes, %d pages), compressing to %d DPI",
+#             len(pdf_bytes), page_count, dpi,
+#         )
+
+#         try:
+#             src = fitz.open(stream=pdf_bytes, filetype="pdf")
+#             dst = fitz.open()
+
+#             zoom = dpi / 72
+#             mat = fitz.Matrix(zoom, zoom)
+
+#             for page in src:
+#                 pix = page.get_pixmap(matrix=mat, alpha=False)
+
+#                 img_pdf = fitz.open()
+#                 img_page = img_pdf.new_page(
+#                     width=pix.width * 72 / dpi,
+#                     height=pix.height * 72 / dpi,
+#                 )
+#                 img_page.insert_image(img_page.rect, pixmap=pix)
+
+#                 dst.insert_pdf(img_pdf)
+#                 img_pdf.close()
+
+#             compressed = dst.tobytes(deflate=True)
+#             dst.close()
+#             src.close()
+
+#             logger.info(
+#                 "[PDF-SPLIT] Compressed at %d DPI: %d → %d bytes (%.0f%% reduction)",
+#                 dpi, len(pdf_bytes), len(compressed),
+#                 (1 - len(compressed) / len(pdf_bytes)) * 100,
+#             )
+
+#             if len(compressed) <= MAX_GEMINI_BATCH_BYTES:
+#                 return compressed
+
+#             # Не влезло — пробуем ещё ниже
+#             logger.warning(
+#                 "[PDF-SPLIT] Still too large at %d DPI (%d bytes), trying lower",
+#                 dpi, len(compressed),
+#             )
+
+#         except Exception as e:
+#             logger.warning("[PDF-SPLIT] Compression at %d DPI failed: %s", dpi, e)
+#             break
+
+#     logger.warning("[PDF-SPLIT] Could not compress below %d bytes, using last result", MAX_GEMINI_BATCH_BYTES)
+#     return compressed
+
+
 def _maybe_compress_pdf_bytes(pdf_bytes: bytes) -> bytes:
     """
     Если PDF-батч слишком большой для Gemini inline (>20MB),
-    рендерим страницы в пониженном DPI и пересобираем в новый PDF.
-    Пробуем 150 → 100 → 72 DPI пока не влезет.
+    рендерим страницы в JPEG с пониженным DPI и пересобираем.
     """
     if len(pdf_bytes) <= MAX_GEMINI_BATCH_BYTES:
         return pdf_bytes
 
     page_count = _count_pages_in_bytes(pdf_bytes)
+    compressed = None
 
-    for dpi in (150, 100, 72):
+    # (dpi, jpeg_quality)
+    levels = [
+        (150, 80),
+        (150, 50),
+        (100, 60),
+        (72, 50),
+    ]
+
+    for dpi, quality in levels:
         logger.info(
-            "[PDF-SPLIT] Batch too large (%d bytes, %d pages), compressing to %d DPI",
-            len(pdf_bytes), page_count, dpi,
+            "[PDF-SPLIT] Batch too large (%d bytes, %d pages), "
+            "compressing to %d DPI / JPEG q=%d",
+            len(pdf_bytes), page_count, dpi, quality,
         )
 
         try:
@@ -117,41 +190,67 @@ def _maybe_compress_pdf_bytes(pdf_bytes: bytes) -> bytes:
 
             for page in src:
                 pix = page.get_pixmap(matrix=mat, alpha=False)
+                # Конвертируем в JPEG — ключевое отличие
+                img_bytes = pix.tobytes(output="jpeg", jpg_quality=quality)
 
                 img_pdf = fitz.open()
                 img_page = img_pdf.new_page(
                     width=pix.width * 72 / dpi,
                     height=pix.height * 72 / dpi,
                 )
-                img_page.insert_image(img_page.rect, pixmap=pix)
+                img_page.insert_image(
+                    img_page.rect,
+                    stream=img_bytes,  # JPEG bytes вместо pixmap
+                )
 
                 dst.insert_pdf(img_pdf)
                 img_pdf.close()
 
-            compressed = dst.tobytes(deflate=True)
+            result = dst.tobytes(garbage=4, deflate=True)
             dst.close()
             src.close()
 
             logger.info(
-                "[PDF-SPLIT] Compressed at %d DPI: %d → %d bytes (%.0f%% reduction)",
-                dpi, len(pdf_bytes), len(compressed),
-                (1 - len(compressed) / len(pdf_bytes)) * 100,
+                "[PDF-SPLIT] Compressed at %d DPI/q%d: %d → %d bytes (%.0f%% reduction)",
+                dpi, quality, len(pdf_bytes), len(result),
+                (1 - len(result) / len(pdf_bytes)) * 100,
             )
+
+            if len(result) >= len(pdf_bytes):
+                logger.warning(
+                    "[PDF-SPLIT] Compression made file LARGER (%d → %d), skipping",
+                    len(pdf_bytes), len(result),
+                )
+                break
+
+            compressed = result
 
             if len(compressed) <= MAX_GEMINI_BATCH_BYTES:
                 return compressed
 
-            # Не влезло — пробуем ещё ниже
             logger.warning(
-                "[PDF-SPLIT] Still too large at %d DPI (%d bytes), trying lower",
-                dpi, len(compressed),
+                "[PDF-SPLIT] Still too large at %d DPI/q%d (%d bytes), trying lower",
+                dpi, quality, len(compressed),
             )
 
         except Exception as e:
-            logger.warning("[PDF-SPLIT] Compression at %d DPI failed: %s", dpi, e)
+            logger.warning(
+                "[PDF-SPLIT] Compression at %d DPI/q%d failed: %s",
+                dpi, quality, e,
+            )
             break
 
-    logger.warning("[PDF-SPLIT] Could not compress below %d bytes, using last result", MAX_GEMINI_BATCH_BYTES)
+    if compressed is None:
+        logger.warning(
+            "[PDF-SPLIT] Could not compress at all, returning original (%d bytes)",
+            len(pdf_bytes),
+        )
+        return pdf_bytes
+
+    logger.warning(
+        "[PDF-SPLIT] Could not compress below %d bytes, using best result (%d bytes)",
+        MAX_GEMINI_BATCH_BYTES, len(compressed),
+    )
     return compressed
 
 
