@@ -168,14 +168,24 @@ const PROGRAM_FIELDS_CONFIG = {
   },
   centas: {
     programLabel: "Centas",
-    description: "Nurodykite numatytuosius sandėlio ir kaštų centro laukus pirkimams ir pardavimams.",
+    description: "Nurodykite numatytuosius sandėlio, kaštų centro ir DK sąskaitų laukus pirkimams ir pardavimams.",
     sections: [
+      {
+        title: "DK sąskaitos",
+        fullWidth: true,
+        fields: [
+          { key: "savikainos_saskaita", label: "Debeto (savikainos) sąskaita" },
+          { key: "sanaudu_saskaita", label: "Kredito (sąnaudų) sąskaita" },
+          { key: "pajamu_saskaita", label: "Pajamų sąskaita" },
+        ],
+      },
       {
         title: "Pirkimams",
         fields: [
           { key: "pirkimas_sandelis", label: "Sandėlis" },
           { key: "pirkimas_kastu_centras", label: "Kaštų centras" },
           { key: "pirkimas_atsk_asmuo", label: "Atskaitingas asmuo" },
+          { key: "pirkimas_prekes_grupe", label: "Prekės grupė" },
         ],
       },
       {
@@ -183,6 +193,7 @@ const PROGRAM_FIELDS_CONFIG = {
         fields: [
           { key: "pardavimas_sandelis", label: "Sandėlis" },
           { key: "pardavimas_kastu_centras", label: "Kaštų centras" },
+          { key: "pardavimas_prekes_grupe", label: "Prekės grupė" },
         ],
       },
     ],

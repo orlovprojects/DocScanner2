@@ -68,7 +68,7 @@ from rest_framework_simplejwt.tokens import AccessToken
 # --- Local (project) imports ---
 from .data_import.data_import_from_buh import import_products_from_xlsx, import_clients_from_xlsx
 from .exports.apskaita5 import export_documents_group_to_apskaita5_files
-from .exports.centas import export_documents_group_to_centras_xml
+from .exports.centas import export_documents_group_to_centras_xml, generate_prekes_paslaugos_csv, generate_pradiniai_likuciai_csv
 from .exports.finvalda import (
     export_pirkimai_group_to_finvalda,
     export_pardavimai_group_to_finvalda,
@@ -866,40 +866,58 @@ def export_documents(request):
         if pirkimai_docs:
             logger.info("[EXP] CENTAS exporting pirkimai: %d docs", len(pirkimai_docs))
             xml_bytes = export_documents_group_to_centras_xml(
-                pirkimai_docs, 
+                pirkimai_docs,
                 direction="pirkimas",
                 user=request.user,
                 own_company_code=cp_key,
             )
             files_to_export.append((f"{today_str}_pirkimai.xml", xml_bytes))
-            
+
         if pardavimai_docs:
             logger.info("[EXP] CENTAS exporting pardavimai: %d docs", len(pardavimai_docs))
             xml_bytes = export_documents_group_to_centras_xml(
-                pardavimai_docs, 
+                pardavimai_docs,
                 direction="pardavimas",
-                user=request.user  ,
+                user=request.user,
                 own_company_code=cp_key,
             )
             files_to_export.append((f"{today_str}_pardavimai.xml", xml_bytes))
+
+        # ── prekės/paslaugos CSV ──
+        csv_bytes = generate_prekes_paslaugos_csv(
+            pirkimai_docs=pirkimai_docs or [],
+            pardavimai_docs=pardavimai_docs or [],
+            user=request.user,
+            own_company_code=cp_key,
+        )
+        if csv_bytes:
+            files_to_export.append(("prekes_paslaugos.csv", csv_bytes))
+
+        # ── pradiniai likučiai CSV (только для pardavimai prekės) ──
+        if pardavimai_docs:
+            likuciai_bytes = generate_pradiniai_likuciai_csv(
+                pardavimai_docs=pardavimai_docs,
+                user=request.user,
+                own_company_code=cp_key,
+            )
+            if likuciai_bytes:
+                files_to_export.append(("pradiniai_likuciai.csv", likuciai_bytes))
 
         logger.info("[EXP] CENTAS files_to_export=%s", [n for n, _ in files_to_export])
 
         if len(files_to_export) > 1:
             zip_buffer = io.BytesIO()
             with zipfile.ZipFile(zip_buffer, "w") as zf:
-                for filename, xml_content in files_to_export:
-                    zf.writestr(filename, xml_content)
+                for filename, content in files_to_export:
+                    zf.writestr(filename, content)
             zip_buffer.seek(0)
             response = HttpResponse(zip_buffer.read(), content_type='application/zip')
             response['Content-Disposition'] = f'attachment; filename={today_str}_importui.zip'
             export_success = True
         elif len(files_to_export) == 1:
-            filename, xml_content = files_to_export[0]
-            response = HttpResponse(
-                xml_content,
-                content_type='application/xml; charset=utf-8'
-            )
+            filename, content = files_to_export[0]
+            ct = 'text/csv; charset=windows-1257' if filename.endswith('.csv') else 'application/xml; charset=utf-8'
+            response = HttpResponse(content, content_type=ct)
             response['Content-Disposition'] = f'attachment; filename={filename}'
             export_success = True
         else:
