@@ -598,7 +598,6 @@ def _build_sales_invoice(parent: ET.Element, doc, pvm_resolver: dict = None) -> 
     """Invoice для SalesInvoices."""
     invoice = _create_element(parent, "Invoice")
     
-    # InvoiceNo
     inv_no = build_dok_nr(
         getattr(doc, "document_series", ""),
         getattr(doc, "document_number", "")
@@ -617,10 +616,7 @@ def _build_sales_invoice(parent: ET.Element, doc, pvm_resolver: dict = None) -> 
     _create_nillable_element(invoice, "VATPointDate",
                             _format_date(operation_date) if operation_date else None)
     
-    # RegistrationAccountDate (обязательный по XSD, между VATPointDate и DocumentTotals)
-    reg_account_date = getattr(doc, "registration_account_date", None) or getattr(doc, "invoice_date", None)
-    _create_nillable_element(invoice, "RegistrationAccountDate",
-                            _format_date(reg_account_date) if reg_account_date else None)
+    # RegistrationAccountDate — НЕ добавляем для SalesInvoice (только для PurchaseInvoice по XSD)
     
     _build_document_totals(invoice, doc, is_sales=True, pvm_resolver=pvm_resolver)
     
