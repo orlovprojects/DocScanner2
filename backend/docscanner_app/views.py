@@ -87,6 +87,7 @@ from .exports.rivile_erp import (
     export_clients_to_rivile_erp_xlsx,
     export_prekes_and_paslaugos_to_rivile_erp_xlsx,
     export_documents_to_rivile_erp_xlsx,
+    classify_isaf_for_erp,
 )
 from .exports.stekas import export_documents_group_to_stekas_files
 from .exports.apsa import export_to_apsa
@@ -1851,28 +1852,34 @@ def export_documents(request):
             prekes_xlsx_bytes = tmp.read()
         files_to_export.append((f'prekes_paslaugos_{today_str}.xlsx', prekes_xlsx_bytes))
 
-        if pirkimai_docs:
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp:
-                export_documents_to_rivile_erp_xlsx(
-                    pirkimai_docs,
-                    tmp.name,
-                    doc_type="pirkimai",
-                    rivile_erp_extra_fields={
-                        **rivile_defaults,
-                        "user": {"extra_settings": user_extra_settings},
-                    },
-                    own_company_code=cp_key,
-                )
-                tmp.seek(0)
-                pirkimai_xlsx_bytes = tmp.read()
-            files_to_export.append((f'pirkimai_{today_str}.xlsx', pirkimai_xlsx_bytes))
+        # --- iSAF классификация: разделяем на formuoti / neformuoti ---
+        merge_vat = str(user_extra_settings.get("merge_vat", "0")).strip() == "1"
 
-        if pardavimai_docs:
+        def _split_by_isaf(docs, doc_type):
+            form, neform = [], []
+            for d in docs:
+                if classify_isaf_for_erp(d, doc_type, merge_vat) == "formuoti":
+                    form.append(d)
+                else:
+                    neform.append(d)
+            return form, neform
+
+        pirk_form, pirk_neform = _split_by_isaf(pirkimai_docs, "pirkimai")
+        pard_form, pard_neform = _split_by_isaf(pardavimai_docs, "pardavimai")
+
+        logger.info(
+            "[EXP] RIVILE_ERP isaf split: pirk_form=%d pirk_neform=%d pard_form=%d pard_neform=%d",
+            len(pirk_form), len(pirk_neform), len(pard_form), len(pard_neform),
+        )
+
+        def _export_erp_xlsx(docs, doc_type, suffix):
+            if not docs:
+                return None
             with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp:
                 export_documents_to_rivile_erp_xlsx(
-                    pardavimai_docs,
+                    docs,
                     tmp.name,
-                    doc_type="pardavimai",
+                    doc_type=doc_type,
                     rivile_erp_extra_fields={
                         **rivile_defaults,
                         "user": {"extra_settings": user_extra_settings},
@@ -1880,8 +1887,16 @@ def export_documents(request):
                     own_company_code=cp_key,
                 )
                 tmp.seek(0)
-                pardavimai_xlsx_bytes = tmp.read()
-            files_to_export.append((f'pardavimai_{today_str}.xlsx', pardavimai_xlsx_bytes))
+                return (f'{doc_type}_{suffix}_{today_str}.xlsx', tmp.read())
+
+        for result in [
+            _export_erp_xlsx(pirk_form, "pirkimai", "form_isaf"),
+            _export_erp_xlsx(pirk_neform, "pirkimai", "neform_isaf"),
+            _export_erp_xlsx(pard_form, "pardavimai", "form_isaf"),
+            _export_erp_xlsx(pard_neform, "pardavimai", "neform_isaf"),
+        ]:
+            if result:
+                files_to_export.append(result)
 
         logger.info("[EXP] RIVILE_ERP files_to_export=%s", [n for n, _ in files_to_export])
 
@@ -10976,6 +10991,7 @@ class OSSContractorSearchView(APIView):
         oss_buyer_q = (
             Q(buyer_country_iso__in=EU_COUNTRIES_NO_LT)
             & (Q(buyer_vat_code__isnull=True) | Q(buyer_vat_code=""))
+            & Q(buyer_is_person=True)
         )
 
         # ── ScannedDocument ──
@@ -11075,6 +11091,7 @@ class OSSReportGenerateView(APIView):
                 status__in=["completed", "exported"],
                 is_archive_container=False,
                 buyer_country_iso__in=EU_COUNTRIES_NO_LT,
+                buyer_is_person=True,
                 invoice_date__isnull=False,
                 ready_for_export=True,
                 math_validation_passed=True,
@@ -11163,6 +11180,7 @@ class OSSReportGenerateView(APIView):
                 status__in=["issued", "sent", "partially_paid", "paid"],
                 invoice_type__in=["saskaita", "pvm_saskaita"],
                 buyer_country_iso__in=EU_COUNTRIES_NO_LT,
+                buyer_is_person=True,
                 invoice_date__isnull=False,
             ).filter(
                 Q(buyer_vat_code__isnull=True) | Q(buyer_vat_code="")

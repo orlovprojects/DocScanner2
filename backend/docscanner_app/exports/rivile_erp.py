@@ -653,6 +653,115 @@ def _get_vat_percent_for_export(doc, item=None) -> Any:
         return getattr(item, "vat_percent", None)
     return getattr(doc, "vat_percent", None)
 
+# =========================
+# iSAF классификация для Rivile ERP
+# =========================
+EU_ISO2 = {
+    "AT", "BE", "BG", "HR", "CY", "CZ", "DK", "EE", "FI", "FR",
+    "DE", "GR", "HU", "IE", "IT", "LV", "LT", "LU", "MT", "NL",
+    "PL", "PT", "RO", "SK", "SI", "ES", "SE",
+}
+
+
+def _is_zero_vat(v) -> bool:
+    """True если ставка PVM = 0. None/'' тоже считаем как 0."""
+    try:
+        return Decimal(str(v)) == 0
+    except Exception:
+        return True
+
+
+def _all_vat_zero(doc) -> bool:
+    """
+    Проверяет, что все ставки PVM в документе равны нулю.
+
+    Логика:
+    - есть line_items → проверяем vat_percent каждой строки
+    - нет line_items + separate_vat=True → "Keli skirtingi PVM", ставки неизвестны
+      → возвращаем False (безопасно, пусть попадёт в iSAF)
+    - нет line_items + separate_vat=False → одна ставка, берём doc.vat_percent
+    """
+    separate_vat = bool(getattr(doc, "separate_vat", False))
+
+    line_items = getattr(doc, "line_items", None)
+    has_items = bool(line_items and hasattr(line_items, "all") and line_items.exists())
+
+    # есть line items → проверяем каждую строку
+    if has_items:
+        return all(_is_zero_vat(getattr(it, "vat_percent", None)) for it in line_items.all())
+
+    # нет line items + separate_vat → Keli skirtingi PVM, нельзя определить →
+    # безопасно считаем что есть ненулевой PVM → formuoti
+    if separate_vat:
+        return False
+
+    # нет line items, одна ставка на весь документ
+    return _is_zero_vat(getattr(doc, "vat_percent", None))
+
+
+def classify_isaf_for_erp(doc, doc_type: str, merge_vat: bool) -> str:
+    """
+    Определяет, нужно ли документу попадать в iSAF: 'formuoti' | 'neformuoti'.
+
+    doc_type: 'pirkimai' | 'pardavimai'
+    merge_vat: True → компания не PVM mokėtojas (PVM включён в цену)
+    """
+
+    # ── Правило 1 (pirkimai + pardavimai): merge_vat включён ──
+    # Компания не PVM mokėtojas → iSAF не подаётся вообще
+    if merge_vat:
+        logger.info("[RIVILE_ERP:ISAF] doc=%s -> neformuoti (merge_vat=True)",
+                    getattr(doc, "pk", None))
+        return "neformuoti"
+
+    all_zero = _all_vat_zero(doc)
+
+    if doc_type == "pirkimai":
+        seller_country = _s(getattr(doc, "seller_country_iso", "")).upper()
+        seller_is_person = bool(getattr(doc, "seller_is_person", False))
+        seller_vat = _s(getattr(doc, "seller_vat_code", ""))
+
+        # ── Правило 2 (pirkimai): не-ЕС поставщик + все PVM = 0% ──
+        # Импорт из третьих стран — оформляется через таможню, не iSAF
+        if all_zero and (not seller_country or seller_country not in EU_ISO2):
+            logger.info("[RIVILE_ERP:ISAF] doc=%s -> neformuoti (non-EU seller=%r, all_vat_zero)",
+                        getattr(doc, "pk", None), seller_country)
+            return "neformuoti"
+
+        # ── Правило 3 (pirkimai): продавец физлицо + нет PVM kodo + все PVM = 0% ──
+        # Не PVM sąskaita faktūra — физлицо без PVM не выставляет PVM SF
+        if all_zero and seller_is_person and not seller_vat:
+            logger.info("[RIVILE_ERP:ISAF] doc=%s -> neformuoti (seller_is_person, no vat, all_vat_zero)",
+                        getattr(doc, "pk", None))
+            return "neformuoti"
+
+    elif doc_type == "pardavimai":
+        buyer_country = _s(getattr(doc, "buyer_country_iso", "")).upper()
+        buyer_vat = _s(getattr(doc, "buyer_vat_code", ""))
+        buyer_is_person = bool(getattr(doc, "buyer_is_person", False))
+
+        # ── Правило 2 (pardavimai): OSS — продажа физлицу B2C в ЕС (не LT) ──
+        # OSS документы подаются через OSS декларацию, не через iSAF
+        if (buyer_country in EU_ISO2
+                and buyer_country != "LT"
+                and not buyer_vat
+                and buyer_is_person):
+            logger.info("[RIVILE_ERP:ISAF] doc=%s -> neformuoti (OSS: EU=%r, is_person, no vat)",
+                        getattr(doc, "pk", None), buyer_country)
+            return "neformuoti"
+
+        # ── Правило 3 (pardavimai): не-ЕС покупатель + все PVM = 0% ──
+        # Экспорт за пределы ЕС — не попадает в iSAF
+        if all_zero and (not buyer_country or buyer_country not in EU_ISO2):
+            logger.info("[RIVILE_ERP:ISAF] doc=%s -> neformuoti (non-EU buyer=%r, all_vat_zero)",
+                        getattr(doc, "pk", None), buyer_country)
+            return "neformuoti"
+
+    # ── По умолчанию: formuoti ──
+    logger.info("[RIVILE_ERP:ISAF] doc=%s doc_type=%s -> formuoti",
+                getattr(doc, "pk", None), doc_type)
+    return "formuoti"
+
 
 # =========================================================
 # 1) PREKĖS / PASLAUGOS
