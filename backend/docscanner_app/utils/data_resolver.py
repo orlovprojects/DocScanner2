@@ -2204,34 +2204,39 @@ def _distribute_doc_discount_to_lines(doc: Dict[str, Any]) -> bool:
     
     append_log(doc, f"distribute-discount: detected lines are 'pre-discount', distributing inv_wo={inv_wo}, inv_w={inv_w}")
     
-    # Распределяем пропорционально subtotal
+    # Распределяем пропорционально subtotal (метод Гамильтона / largest remainder)
+    # Работаем в центах для точного распределения без концентрации остатка на одной строке
+    def _hamilton_distribute(total_cents: int, ratios: list) -> list:
+        """Распределить total_cents по строкам пропорционально ratios."""
+        if total_cents == 0:
+            return [0] * len(ratios)
+        exact = [float(Decimal(str(total_cents)) * r) for r in ratios]
+        floors = [int(e) for e in exact]
+        remainders = [(exact[i] - floors[i], i) for i in range(len(ratios))]
+        allocated = sum(floors)
+        remaining = total_cents - allocated
+        remainders.sort(key=lambda x: x[0], reverse=True)
+        for j in range(remaining):
+            floors[remainders[j][1]] += 1
+        return floors
+
     if sum_wo == 0:
-        # Fallback: равномерно
+        # Fallback: равномерно (тоже через Hamilton)
         n = len(items)
-        for li in items:
-            li_disc_wo = Q2(inv_wo / Decimal(str(n)))
-            li_disc_w = Q2(inv_w / Decimal(str(n)))
-            _apply_discount_to_line(li, li_disc_wo, li_disc_w, doc)
+        ratios = [Decimal("1") / Decimal(str(n))] * n
     else:
-        # Пропорционально subtotal
-        distributed_wo = Decimal("0.00")
-        distributed_w = Decimal("0.00")
-        
-        for idx, li in enumerate(items):
-            sub = d(li.get("subtotal"), 2)
-            ratio = sub / sum_wo
-            
-            # Последняя строка получает остаток (избегаем ошибок округления)
-            if idx == len(items) - 1:
-                li_disc_wo = Q2(inv_wo - distributed_wo)
-                li_disc_w = Q2(inv_w - distributed_w)
-            else:
-                li_disc_wo = Q2(inv_wo * ratio)
-                li_disc_w = Q2(inv_w * ratio)
-                distributed_wo += li_disc_wo
-                distributed_w += li_disc_w
-            
-            _apply_discount_to_line(li, li_disc_wo, li_disc_w, doc)
+        ratios = [d(li.get("subtotal"), 2) / sum_wo for li in items]
+
+    total_cents_wo = int((inv_wo * 100).to_integral_value(rounding=ROUND_HALF_UP))
+    total_cents_w  = int((inv_w  * 100).to_integral_value(rounding=ROUND_HALF_UP))
+
+    cents_wo = _hamilton_distribute(total_cents_wo, ratios)
+    cents_w  = _hamilton_distribute(total_cents_w,  ratios)
+
+    for idx, li in enumerate(items):
+        li_disc_wo = Decimal(str(cents_wo[idx])) / Decimal("100")
+        li_disc_w  = Decimal(str(cents_w[idx]))  / Decimal("100")
+        _apply_discount_to_line(li, li_disc_wo, li_disc_w, doc)
     
     # Обнуляем документные скидки (уже распределены по строкам)
     doc["_orig_invoice_discount_wo_vat"] = inv_wo
