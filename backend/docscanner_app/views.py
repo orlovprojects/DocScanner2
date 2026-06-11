@@ -4302,6 +4302,81 @@ def admin_all_documents(request):
     return paginator.get_paginated_response(data)
 
 
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def admin_all_waybills(request):
+    """Superuser — vse važtaraščiai vsex userov. Cursornaja paginacija."""
+    if not request.user.is_superuser:
+        return Response({"detail": "Not authorized"}, status=status.HTTP_403_FORBIDDEN)
+
+    qs = ScannedWaybill.objects.select_related('user').filter(
+        is_archive_container=False,
+        is_multi_doc_container=False,
+    )
+
+    # Filtrai
+    status_filter = request.GET.get('status')
+    if status_filter:
+        qs = qs.filter(status=status_filter)
+
+    owner = request.GET.get('owner')
+    if owner:
+        qs = qs.filter(user__email__icontains=owner)
+
+    search = request.GET.get('search')
+    if search:
+        qs = qs.filter(document_number__icontains=search)
+
+    from django.utils.dateparse import parse_date
+    from datetime import timedelta
+
+    date_from = request.GET.get('date_from')
+    if date_from:
+        d = parse_date(date_from)
+        if d:
+            qs = qs.filter(uploaded_at__gte=d)
+
+    date_to = request.GET.get('date_to')
+    if date_to:
+        d = parse_date(date_to)
+        if d:
+            qs = qs.filter(uploaded_at__lt=d + timedelta(days=1))
+
+    qs = qs.order_by('-uploaded_at', '-id')
+
+    paginator = DocumentsCursorPagination()
+    page = paginator.paginate_queryset(qs, request)
+
+    data = []
+    for obj in page:
+        data.append({
+            "id": obj.id,
+            "user_id": obj.user_id,
+            "owner_email": getattr(obj.user, "email", ""),
+            "original_filename": obj.original_filename,
+            "status": obj.status,
+            "error_message": obj.error_message or "",
+            "document_number": obj.document_number or "",
+            "document_date": str(obj.document_date) if obj.document_date else "",
+            "airport": obj.airport or "",
+            "buyer_name": obj.buyer_name or "",
+            "buyer_iata_code": obj.buyer_iata_code or "",
+            "payment_type": obj.payment_type or "",
+            "flight_nature": obj.flight_nature or "",
+            "from_city": obj.from_city or "",
+            "from_airport_code": obj.from_airport_code or "",
+            "to_city": obj.to_city or "",
+            "to_airport_code": obj.to_airport_code or "",
+            "quantity_liters_observed": str(obj.quantity_liters_observed) if obj.quantity_liters_observed else "",
+            "quantity_kg_observed": str(obj.quantity_kg_observed) if obj.quantity_kg_observed else "",
+            "preview_url": obj.preview_url or "",
+            "uploaded_at": obj.uploaded_at.isoformat() if obj.uploaded_at else "",
+        })
+
+    return paginator.get_paginated_response(data)
+
+
 #3) Dlia users
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])

@@ -22,6 +22,7 @@ from .views import (
     superuser_dashboard_stats,
     admin_documents_with_errors,
     admin_all_documents,
+    admin_all_waybills,
     export_documents,
     InlineDocUpdateView,
     InlineLineUpdateView,
@@ -356,6 +357,7 @@ urlpatterns = [
     path('superuser/dashboard-stats/', superuser_dashboard_stats, name="superuser_dashboard_stats"),
     path('admin/visi-failai/', admin_all_documents, name='admin_all_documents'),
     path("admin/users/", admin_users_simple, name="admin_users_simple"),
+    path("admin/vaztarasciai/", admin_all_waybills, name="admin-all-waybills"),
     path("admin/newsletter/", NewsletterSendView.as_view(), name="newsletter-send"),
 
     #ADMIN israsymas

@@ -38,6 +38,7 @@ const AboutUs = lazy(() => import('./pages/ApieMus'));
 const AdminDashboard = lazy(() => import("./pages/AdminDashboard"));
 const AdminSuvestine = lazy(() => import("./pages/AdminSuvestine"));
 const AdminVisiFailai = lazy(() => import("./pages/AdminVisiFailai"));
+const AdminVaztarasciai = lazy(() => import("./pages/AdminVaztarasciai"));
 const AdminKlientai = lazy(() => import("./pages/AdminKlientai"));
 const AdminIsrasytosSaskaitos = lazy(() => import('./pages/AdminIsrasytosSaskaitos'));
 const NewsletterPage = lazy(() => import('./pages/NewsletterPage'));
@@ -206,6 +207,7 @@ function App() {
           <Route path="/naudojimo-taisykles" element={<Terms />} />
           <Route path="/saskaitu-israsymas" element={<InvoiceGenerator />} />
           <Route path="/admin-dashboard" element={<RequireSuperuser loginPath="/prisijungti" forbiddenPath="/403"><AdminDashboard /></RequireSuperuser>} />
+          <Route path="/admin-vaztarasciai" element={<RequireSuperuser loginPath="/prisijungti" forbiddenPath="/403"><AdminVaztarasciai /></RequireSuperuser>} />
           <Route path="/admin-visi-failai" element={<RequireSuperuser loginPath="/prisijungti" forbiddenPath="/403"><AdminVisiFailai /></RequireSuperuser>} />
           <Route path="/admin-suvestine" element={<RequireSuperuser loginPath="/prisijungti" forbiddenPath="/403"><AdminSuvestine /></RequireSuperuser>} />
           <Route path="/admin-klientai" element={<RequireSuperuser loginPath="/prisijungti" forbiddenPath="/403"><AdminKlientai /></RequireSuperuser>} />

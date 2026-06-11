@@ -45,6 +45,7 @@ const MEGA_MENUS = {
       { text: "Analytics", path: "/admin-dashboard" },
       { text: "Klaidų suvestinė", path: "/admin-suvestine" },
       { text: "Visi failai", path: "/admin-visi-failai" },
+      { text: "Visi važtaraščiai", path: "/admin-vaztarasciai" },
       { text: "Klientai", path: "/admin-klientai" },
       { text: "Išrašymas visos sąskaitos", path: "/admin-israsytos-saskaitos" },
       { text: "Newsletter", path: "/admin-newsletter" },
