@@ -224,7 +224,13 @@ const FancyProgress = styled(LinearProgress)(({ theme }) => ({
   },
 }));
 
-export default function ProcessingStatusBar({ onSessionComplete }) {
+export default function ProcessingStatusBar({ onSessionComplete, apiEndpoints }) {
+  
+  const ep = apiEndpoints || {
+    activeSessions: "/sessions/active/",
+    retryBlocked: (sid) => `/web/sessions/${sid}/retry/`,
+    cancelBlocked: (sid) => `/web/sessions/${sid}/cancel/`,
+  };
   const [sessions, setSessions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState(true);
@@ -418,7 +424,7 @@ export default function ProcessingStatusBar({ onSessionComplete }) {
 
   const fetchActiveSessions = useCallback(async () => {
     try {
-      const { data } = await api.get("/sessions/active/", {
+      const { data } = await api.get(ep.activeSessions, {
         withCredentials: true,
       });
 
@@ -490,7 +496,7 @@ export default function ProcessingStatusBar({ onSessionComplete }) {
   const handleRetryBlocked = async (sessionId) => {
     setRetryLoading(true);
     try {
-      await api.post(`/web/sessions/${sessionId}/retry/`);
+      await api.post(ep.retryBlocked(sessionId));
       await fetchActiveSessions();
     } catch (e) {
       console.error("Retry failed:", e);
@@ -502,7 +508,7 @@ export default function ProcessingStatusBar({ onSessionComplete }) {
   const handleCancelBlocked = async (sessionId) => {
     setCancelLoading(true);
     try {
-      await api.post(`/web/sessions/${sessionId}/cancel/`);
+      await api.post(ep.cancelBlocked(sessionId));
       await fetchActiveSessions();
     } catch (e) {
       console.error("Cancel failed:", e);

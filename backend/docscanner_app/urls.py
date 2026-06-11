@@ -68,6 +68,31 @@ from .views import (
     export_clients_view,
     delete_all_clients_view,
     clients_count_view,
+    # Važtaraščiai - CRUD
+    waybill_list,
+    waybill_detail,
+    waybill_update,
+    waybill_delete,
+    waybill_bulk_delete,
+    waybill_export_xls,
+    # Važtaraščiai - sessions
+    waybill_session_create,
+    waybill_session_status,
+    waybill_session_finalize,
+    # Važtaraščiai - old chunked upload (можно убрать если не используешь)
+    waybill_chunked_upload_init,
+    waybill_chunked_upload_chunk,
+    waybill_chunked_upload_complete,
+    # Važtaraščiai - batch upload + chunks через session URL
+    waybill_upload_batch,
+    waybill_chunk_init,
+    waybill_chunk_upload,
+    waybill_chunk_complete,
+    waybill_chunk_status,
+    # Važtaraščiai - active sessions + blocked
+    waybill_active_sessions,
+    waybill_retry_blocked,
+    waybill_cancel_blocked,
 )
 from .views import (
     counterparty_list_create,
@@ -478,5 +503,31 @@ urlpatterns = [
     path('oss-report/contractors/', OSSContractorSearchView.as_view()),
     path('oss-report/generate/', OSSReportGenerateView.as_view()),
     path('oss-report/export/', OSSReportExportView.as_view()),
+
+
+    # ─── Važtaraščiai (waybills) ───
+    path("waybills/sessions/", waybill_session_create, name="waybill-session-create"),
+    path("waybills/sessions/<uuid:session_id>/status/", waybill_session_status, name="waybill-session-status"),
+    path("waybills/sessions/<uuid:session_id>/finalize/", waybill_session_finalize, name="waybill-session-finalize"),
+    path("waybills/upload/init/", waybill_chunked_upload_init, name="waybill-upload-init"),
+    path("waybills/upload/<uuid:upload_id>/chunk/", waybill_chunked_upload_chunk, name="waybill-upload-chunk"),
+    path("waybills/upload/<uuid:upload_id>/complete/", waybill_chunked_upload_complete, name="waybill-upload-complete"),
+    path("waybills/", waybill_list, name="waybill-list"),
+    path("waybills/<int:pk>/", waybill_detail, name="waybill-detail"),
+    path("waybills/<int:pk>/update/", waybill_update, name="waybill-update"),
+    path("waybills/<int:pk>/delete/", waybill_delete, name="waybill-delete"),
+    path("waybills/bulk-delete/", waybill_bulk_delete, name="waybill-bulk-delete"),
+    path("waybills/export-xls/", waybill_export_xls, name="waybill-export-xls"),
+
+    # Važtaraščiai - session upload (batch + chunks через session URL)
+    path("waybills/sessions/create/", waybill_session_create, name="waybill-session-create-v2"),
+    path("waybills/sessions/<uuid:session_id>/upload/", waybill_upload_batch, name="waybill-upload-batch"),
+    path("waybills/sessions/<uuid:session_id>/chunks/init/", waybill_chunk_init, name="waybill-chunk-init"),
+    path("waybills/sessions/<uuid:session_id>/chunks/<uuid:upload_id>/<int:index>/", waybill_chunk_upload, name="waybill-chunk-upload"),
+    path("waybills/sessions/<uuid:session_id>/chunks/<uuid:upload_id>/complete/", waybill_chunk_complete, name="waybill-chunk-complete"),
+    path("waybills/sessions/<uuid:session_id>/chunks/<uuid:upload_id>/status/", waybill_chunk_status, name="waybill-chunk-status"),
+    path("waybills/sessions/active/", waybill_active_sessions, name="waybill-active-sessions"),
+    path("waybills/sessions/<uuid:session_id>/retry/", waybill_retry_blocked, name="waybill-retry-blocked"),
+    path("waybills/sessions/<uuid:session_id>/cancel/", waybill_cancel_blocked, name="waybill-cancel-blocked"),
 
 ]

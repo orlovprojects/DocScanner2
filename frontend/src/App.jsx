@@ -29,6 +29,7 @@ const Privacy = lazy(() => import('./pages/Privacy'));
 const AtlyginimoSkaiciuokle2025 = lazy(() => import('./pages/AtlyginimoSkaiciuokle2025'));
 const AtlyginimoSkaiciuokle2026 = lazy(() => import('./pages/AtlyginimoSkaiciuokle2026'));
 const IndividualiosVeiklosSkaiciuokle2026 = lazy(() => import('./pages/IndividualiosVeiklosSkaiciuokle2026'));
+const MBSkaiciuokle = lazy(() => import('./pages/MBSkaiciuokle'));
 const InvoiceGenerator = lazy(() => import('./pages/InvoiceGenerator'));
 const BuhalterinenApskaita = lazy(() => import('./pages/BuhalterineApskaita'));
 const SumaZodziais = lazy(() => import('./pages/SumaZodziais'));
@@ -46,6 +47,7 @@ const GidoCategories = lazy(() => import('./pages/GidoCategories'));
 const GidoArticle = lazy(() => import('./pages/GidoArticle'));
 
 const UploadPage = lazy(() => import('./pages/UploadPage'));
+const WaybillsPage = lazy(() => import('./pages/WaybillsPage'));
 const NustatymaiPage = lazy(() => import('./pages/Nustatymai'));
 const IsKlientu = lazy(() => import('./pages/IsKlientu'));
 const Dokskenas = lazy(() => import('./pages/DokSkenas'));
@@ -156,6 +158,7 @@ function App() {
           <Route path="/2025" element={<AtlyginimoSkaiciuokle2025 />} />
           <Route path="/2026" element={<Navigate to="/" replace />} />
           <Route path="/individualios-veiklos-skaiciuokle" element={<IndividualiosVeiklosSkaiciuokle2026 />} />
+          <Route path="/mazosios-bendrijos-skaiciuokle" element={<MBSkaiciuokle />} />
           <Route path="/saskaitu-skaitmenizavimas-dokskenas" element={<Dokskenas />} />
           <Route path="/pvm-skaiciuokle" element={<PvmCalculator />} />
           <Route path="/gpm-skaiciuokle" element={<GpmSkaiciuokle />} />
@@ -186,6 +189,7 @@ function App() {
           </Route>
 
           <Route path="/suvestine" element={<PrivateRoute><UploadPage /></PrivateRoute>} />
+          <Route path="/vaztarasciai" element={<PrivateRoute><WaybillsPage /></PrivateRoute>} />
           <Route path="/prisijungti" element={<RedirectIfAuthenticated><Login /></RedirectIfAuthenticated>} />
           <Route path="/registruotis" element={<RedirectIfAuthenticated><Register /></RedirectIfAuthenticated>} />
           <Route path="/veiklos-zurnalas" element={<PrivateRoute><VeiklosZurnalasPage /></PrivateRoute>} />

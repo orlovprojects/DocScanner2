@@ -276,7 +276,7 @@ const Rivile = () => {
               "name": "Importas į Rivilę Gama per API",
               "description": "Kaip siųsti skaitmenizuotus dokumentus iš DokSkeno į Rivilę Gama per API",
               "thumbnailUrl": "https://img.youtube.com/vi/mUTdwZDsGWQ/maxresdefault.jpg",
-              "uploadDate": "2025-01-01",
+              "uploadDate": "2026-01-01",
               "contentUrl": "https://www.youtube.com/watch?v=mUTdwZDsGWQ",
               "embedUrl": "https://www.youtube-nocookie.com/embed/mUTdwZDsGWQ"
             },
@@ -285,7 +285,7 @@ const Rivile = () => {
               "name": "Importas į Rivilę Gama per failus",
               "description": "Kaip importuoti sąskaitas į Rivilę Gama per failus, skaitmenizuotas su DokSkenas",
               "thumbnailUrl": "https://img.youtube.com/vi/7uwLLA3uTQ0/maxresdefault.jpg",
-              "uploadDate": "2025-01-01",
+              "uploadDate": "2026-01-01",
               "contentUrl": "https://www.youtube.com/watch?v=7uwLLA3uTQ0",
               "embedUrl": "https://www.youtube-nocookie.com/embed/7uwLLA3uTQ0"
             },
@@ -294,7 +294,7 @@ const Rivile = () => {
               "name": "Importas į Rivilę ERP",
               "description": "Kaip importuoti sąskaitas į Rivilę ERP, skaitmenizuotas su DokSkenas",
               "thumbnailUrl": "https://img.youtube.com/vi/2ENROTqWfYw/maxresdefault.jpg",
-              "uploadDate": "2025-01-01",
+              "uploadDate": "2026-01-01",
               "contentUrl": "https://www.youtube.com/watch?v=2ENROTqWfYw",
               "embedUrl": "https://www.youtube-nocookie.com/embed/2ENROTqWfYw"
             },
@@ -303,7 +303,7 @@ const Rivile = () => {
               "name": "Automatinis prekių, paslaugų ar kodų iš Rivilės priskyrimas",
               "description": "Kaip nusistatyti, kad prekės, paslaugos ar kodai iš Rivilės automatiškai prisiskirtų dokumentams",
               "thumbnailUrl": "https://img.youtube.com/vi/MftJl0_4jOE/maxresdefault.jpg",
-              "uploadDate": "2025-01-01",
+              "uploadDate": "2026-01-01",
               "contentUrl": "https://www.youtube.com/watch?v=MftJl0_4jOE",
               "embedUrl": "https://www.youtube-nocookie.com/embed/MftJl0_4jOE"
             }

@@ -11590,3 +11590,926 @@ class NewsletterSendView(APIView):
 # ────────────────────────────────────────────────────────────
 # END ─── Dlia frontend newsletter ───
 # ────────────────────────────────────────────────────────────
+
+# ────────────────────────────────────────────────────────────
+# ─── Waybill scan ───
+# ────────────────────────────────────────────────────────────
+
+"""
+waybill_views.py — API views для важтарашчей.
+"""
+import logging
+import os
+import uuid
+from decimal import Decimal
+
+from django.conf import settings
+from django.db import transaction
+from django.db.models import F, Q
+from django.utils import timezone
+from rest_framework import status
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.pagination import PageNumberPagination
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+
+from .models import (
+    ScannedWaybill,
+    WaybillUploadSession,
+    WaybillChunkedUpload,
+    CustomUser,
+    WAYBILL_CREDIT_COST,
+)
+from .serializers import (
+    WaybillSessionCreateSerializer,
+    WaybillSessionStatusSerializer,
+    WaybillSessionFinalizeSerializer,
+    WaybillChunkedUploadInitSerializer,
+    WaybillChunkedUploadStatusSerializer,
+    ScannedWaybillListSerializer,
+    ScannedWaybillDetailSerializer,
+    ScannedWaybillUpdateSerializer,
+)
+
+logger = logging.getLogger("docscanner_app")
+
+
+# ============================================================
+# Upload Session
+# ============================================================
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def waybill_session_create(request):
+    """Создать сессию загрузки важтарашчей."""
+    ser = WaybillSessionCreateSerializer(data=request.data)
+    ser.is_valid(raise_exception=True)
+
+    s = WaybillUploadSession.objects.create(
+        user=request.user,
+        client_total_files=ser.validated_data["client_total_files"],
+        archive_formats=ser.validated_data.get("archive_formats", []),
+        multi_doc=ser.validated_data.get("multi_doc", False),
+        scan_type="detaliai",
+    )
+
+    return Response(
+        {"id": str(s.id), "session_id": str(s.id), "stage": s.stage},
+        status=status.HTTP_201_CREATED,
+    )
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def waybill_session_status(request, session_id):
+    """Получить статус сессии для polling."""
+    try:
+        s = WaybillUploadSession.objects.get(id=session_id, user=request.user)
+    except WaybillUploadSession.DoesNotExist:
+        return Response({"error": "Session not found"}, status=404)
+
+    return Response(WaybillSessionStatusSerializer(s).data)
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def waybill_session_finalize(request, session_id):
+    """
+    Финализация: uploading → credit_check → queued/processing.
+    Резервирует кредиты и запускает обработку.
+    """
+    with transaction.atomic():
+        try:
+            s = WaybillUploadSession.objects.select_for_update().get(
+                id=session_id, user=request.user,
+            )
+        except WaybillUploadSession.DoesNotExist:
+            return Response({"error": "Session not found"}, status=404)
+
+        if s.stage != "uploading":
+            return Response(
+                {"error": f"Cannot finalize session in stage '{s.stage}'"},
+                status=400,
+            )
+
+        u = CustomUser.objects.select_for_update().get(id=request.user.id)
+
+        # Считаем expected items
+        expected = s.expected_items or s.uploaded_files or s.client_total_files
+        cost_per_doc = WAYBILL_CREDIT_COST
+        total_cost = cost_per_doc * Decimal(expected)
+
+        available = (u.credits or Decimal("0")) - (u.credits_reserved or Decimal("0"))
+
+        if total_cost > available:
+            s.stage = "blocked"
+            s.error_message = f"Nepakanka kreditų: reikia {total_cost}, turima {available}"
+            s.save(update_fields=["stage", "error_message", "updated_at"])
+            return Response(
+                {"error": s.error_message, "stage": "blocked"},
+                status=402,
+            )
+
+        # Резервируем кредиты
+        u.credits_reserved = (u.credits_reserved or Decimal("0")) + total_cost
+        u.save(update_fields=["credits_reserved"])
+
+        s.reserved_credits = total_cost
+        s.reserved_items = expected
+
+        # Если уже есть processing — в очередь
+        has_processing = WaybillUploadSession.objects.filter(
+            user=request.user, stage="processing",
+        ).exclude(id=s.id).exists()
+
+        if has_processing:
+            s.stage = "queued"
+        else:
+            s.stage = "processing"
+            s.started_at = timezone.now()
+
+        s.save(update_fields=[
+            "stage", "reserved_credits", "reserved_items",
+            "started_at", "error_message", "updated_at",
+        ])
+
+    # Вне транзакции — запускаем обработку
+    if s.stage == "processing":
+        from .tasks import start_waybill_session_processing
+        start_waybill_session_processing.delay(str(s.id))
+
+    return Response({"stage": s.stage, "session_id": str(s.id)})
+
+
+# ============================================================
+# Chunked Upload
+# ============================================================
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def waybill_chunked_upload_init(request):
+    """Инициализация chunked upload."""
+    ser = WaybillChunkedUploadInitSerializer(data=request.data)
+    ser.is_valid(raise_exception=True)
+    d = ser.validated_data
+
+    try:
+        session = WaybillUploadSession.objects.get(id=d["session_id"], user=request.user)
+    except WaybillUploadSession.DoesNotExist:
+        return Response({"error": "Session not found"}, status=404)
+
+    if session.stage != "uploading":
+        return Response({"error": "Session is not in uploading stage"}, status=400)
+
+    upload = WaybillChunkedUpload.objects.create(
+        user=request.user,
+        session=session,
+        filename=d["filename"],
+        total_size=d["total_size"],
+        chunk_size=d["chunk_size"],
+        total_chunks=d["total_chunks"],
+    )
+
+    return Response(
+        {"upload_id": str(upload.id), "status": upload.status},
+        status=201,
+    )
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def waybill_chunked_upload_chunk(request, upload_id):
+    """Загрузить один chunk."""
+    try:
+        upload = WaybillChunkedUpload.objects.get(id=upload_id, user=request.user)
+    except WaybillChunkedUpload.DoesNotExist:
+        return Response({"error": "Upload not found"}, status=404)
+
+    if upload.status != "uploading":
+        return Response({"error": "Upload is not active"}, status=400)
+
+    chunk_index = request.data.get("chunk_index")
+    chunk_file = request.FILES.get("chunk")
+
+    if chunk_index is None or chunk_file is None:
+        return Response({"error": "chunk_index and chunk file required"}, status=400)
+
+    chunk_index = int(chunk_index)
+
+    # Путь для tmp файла
+    if not upload.tmp_path:
+        tmp_dir = os.path.join(settings.MEDIA_ROOT, "waybills_tmp", str(request.user.id))
+        os.makedirs(tmp_dir, exist_ok=True)
+        upload.tmp_path = os.path.join(tmp_dir, f"{upload.id}.part")
+
+    # Записываем chunk
+    mode = "ab" if os.path.exists(upload.tmp_path) else "wb"
+    with open(upload.tmp_path, mode) as f:
+        for c in chunk_file.chunks():
+            f.write(c)
+
+    received = upload.received or []
+    if chunk_index not in received:
+        received.append(chunk_index)
+    upload.received = received
+    upload.save(update_fields=["received", "tmp_path", "updated_at"])
+
+    return Response({
+        "upload_id": str(upload.id),
+        "received": len(received),
+        "total_chunks": upload.total_chunks,
+    })
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def waybill_chunked_upload_complete(request, upload_id):
+    """Завершить chunked upload — собрать файл и создать ScannedWaybill."""
+    try:
+        upload = WaybillChunkedUpload.objects.get(id=upload_id, user=request.user)
+    except WaybillChunkedUpload.DoesNotExist:
+        return Response({"error": "Upload not found"}, status=404)
+
+    received = upload.received or []
+    if len(received) < upload.total_chunks:
+        return Response(
+            {"error": f"Not all chunks received: {len(received)}/{upload.total_chunks}"},
+            status=400,
+        )
+
+    if not upload.tmp_path or not os.path.exists(upload.tmp_path):
+        return Response({"error": "Temporary file not found"}, status=400)
+
+    try:
+        session = upload.session
+
+        # Создаём ScannedWaybill
+        doc = ScannedWaybill(
+            user=request.user,
+            original_filename=upload.filename,
+            status="pending",
+            upload_session=session,
+        )
+
+        with open(upload.tmp_path, 'rb') as f:
+            from django.core.files.base import ContentFile
+            doc.file.save(upload.filename, ContentFile(f.read()), save=False)
+
+        doc.uploaded_size_bytes = upload.total_size
+        doc.save()
+
+        # Обновляем счётчики сессии
+        WaybillUploadSession.objects.filter(id=session.id).update(
+            uploaded_files=F("uploaded_files") + 1,
+            uploaded_bytes=F("uploaded_bytes") + upload.total_size,
+            expected_items=F("expected_items") + 1,
+        )
+
+        upload.status = "complete"
+        upload.save(update_fields=["status", "updated_at"])
+
+        # Удаляем tmp
+        try:
+            os.remove(upload.tmp_path)
+        except Exception:
+            pass
+
+        return Response({
+            "doc_id": doc.id,
+            "upload_id": str(upload.id),
+            "status": "complete",
+        })
+
+    except Exception as e:
+        logger.exception("[WAYBILL-UPLOAD] Complete failed: %s", e)
+        upload.status = "failed"
+        upload.error_message = str(e)
+        upload.save(update_fields=["status", "error_message", "updated_at"])
+        return Response({"error": str(e)}, status=500)
+
+
+# ============================================================
+# Waybill List
+# ============================================================
+
+class WaybillPagination(PageNumberPagination):
+    page_size = 25
+    page_size_query_param = "page_size"
+    max_page_size = 100
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def waybill_list(request):
+    """Список важтарашчей с фильтрацией и пагинацией."""
+    qs = (
+        ScannedWaybill.objects
+        .filter(user=request.user, is_archive_container=False, is_multi_doc_container=False)
+        .order_by("-uploaded_at")
+    )
+
+    # Фильтры
+    status_filter = request.query_params.get("status")
+    if status_filter:
+        qs = qs.filter(status=status_filter)
+
+    waybill_type = request.query_params.get("waybill_type")
+    if waybill_type:
+        qs = qs.filter(waybill_type=waybill_type)
+
+    search = request.query_params.get("search")
+    if search:
+        qs = qs.filter(document_number__icontains=search)
+
+    date_from = request.query_params.get("date_from")
+    if date_from:
+        qs = qs.filter(uploaded_at__date__gte=date_from)
+
+    date_to = request.query_params.get("date_to")
+    if date_to:
+        qs = qs.filter(uploaded_at__date__lte=date_to)
+
+    session_id = request.query_params.get("session_id")
+    if session_id:
+        qs = qs.filter(upload_session_id=session_id)
+
+    paginator = WaybillPagination()
+    page = paginator.paginate_queryset(qs, request)
+    ser = ScannedWaybillListSerializer(page, many=True)
+    return paginator.get_paginated_response(ser.data)
+
+
+# ============================================================
+# Waybill Detail / Update / Delete
+# ============================================================
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def waybill_detail(request, pk):
+    """Получить полную информацию о важтарашчисе."""
+    try:
+        doc = ScannedWaybill.objects.get(pk=pk, user=request.user)
+    except ScannedWaybill.DoesNotExist:
+        return Response({"error": "Not found"}, status=404)
+
+    return Response(ScannedWaybillDetailSerializer(doc).data)
+
+
+@api_view(["PATCH"])
+@permission_classes([IsAuthenticated])
+def waybill_update(request, pk):
+    """Обновить поля важтарашчиса (ручная правка)."""
+    try:
+        doc = ScannedWaybill.objects.get(pk=pk, user=request.user)
+    except ScannedWaybill.DoesNotExist:
+        return Response({"error": "Not found"}, status=404)
+
+    ser = ScannedWaybillUpdateSerializer(doc, data=request.data, partial=True)
+    ser.is_valid(raise_exception=True)
+    ser.save()
+
+    return Response(ScannedWaybillDetailSerializer(doc).data)
+
+
+@api_view(["DELETE"])
+@permission_classes([IsAuthenticated])
+def waybill_delete(request, pk):
+    """Удалить один важтарашчис."""
+    try:
+        doc = ScannedWaybill.objects.get(pk=pk, user=request.user)
+    except ScannedWaybill.DoesNotExist:
+        return Response({"error": "Not found"}, status=404)
+
+    # Удаляем файл
+    if doc.file:
+        try:
+            doc.file.delete(save=False)
+        except Exception:
+            pass
+
+    doc.delete()
+    return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def waybill_bulk_delete(request):
+    """Массовое удаление важтарашчей."""
+    ids = request.data.get("ids", [])
+    if not ids:
+        return Response({"error": "No ids provided"}, status=400)
+
+    docs = ScannedWaybill.objects.filter(pk__in=ids, user=request.user)
+
+    # Удаляем файлы
+    for doc in docs:
+        if doc.file:
+            try:
+                doc.file.delete(save=False)
+            except Exception:
+                pass
+
+    count = docs.count()
+    docs.delete()
+
+    return Response({"deleted": count})
+
+
+"""
+waybill_export_xls — экспорт важтарашчей в XLSX.
+Добавить в views.py + URL: path("waybills/export-xls/", waybill_export_xls, name="waybill-export-xls"),
+"""
+import io
+import logging
+from datetime import datetime
+
+from django.http import HttpResponse
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+
+from .models import ScannedWaybill
+
+logger = logging.getLogger("docscanner_app")
+
+# Polja dlia eksporta i ix zagolovki
+EXPORT_COLUMNS = [
+    ("document_number", "Numeris"),
+    ("document_date", "Data"),
+    ("airport", "Oro uostas"),
+    ("payment_type", "Mokėjimo būdas"),
+    ("delivery_receipt", "Važtaraštis kurui užpilti"),
+    ("defuelling_receipt", "Važtaraštis kurui išpilti"),
+    ("buyer_iata_code", "IATA kodas"),
+    ("buyer_name", "Pavadinimas"),
+    ("buyer_address", "Adresas"),
+    ("buyer_vat_code", "PVM kodas"),
+    ("buyer_remark_half_income", "Aviakompanija su > 1/2 pajamų"),
+    ("buyer_remark_other", "Kita"),
+    ("aircraft_type", "Orlaivio tipas"),
+    ("flight_type", "Tipas"),
+    ("outside_eu", "Už ES ribų"),
+    ("flight_nature", "Skrydžio pobūdis"),
+    ("time_departure", "Išvykimas"),
+    ("time_arrival", "Atvykimas"),
+    ("time_start", "Pradžia"),
+    ("time_finish", "Pabaiga"),
+    ("time_return", "Grįžimas"),
+    ("from_city", "Iš (miestas)"),
+    ("from_airport_code", "Iš (oro uostas)"),
+    ("from_country_iso", "Iš (šalies kodas)"),
+    ("to_city", "Į (miestas)"),
+    ("to_airport_code", "Į (oro uostas)"),
+    ("to_country_iso", "Į (šalies kodas)"),
+    ("refueller_number", "Autocisternos Nr."),
+    ("reading_before", "Prieš užpildymą"),
+    ("reading_after", "Po užpildymo"),
+    ("reading_difference", "Skirtumas"),
+    ("company_representative", "Įmonės įgaliotas asmuo"),
+    ("density_observed", "Tankis (faktinis)"),
+    ("temperature_observed", "Temp. °C (faktinė)"),
+    ("quantity_liters_observed", "Litrai (faktiniai)"),
+    ("quantity_kg_observed", "Kilogramai (faktiniai)"),
+    ("density_standard", "Tankis (+15°C)"),
+    ("temperature_standard", "Temp. °C (+15°C)"),
+    ("quantity_liters_standard", "Litrai (+15°C)"),
+]
+
+BOOLEAN_FIELDS = {
+    "delivery_receipt",
+    "defuelling_receipt",
+    "outside_eu",
+    "buyer_remark_half_income",
+}
+
+
+def _format_value(field_name, val):
+    """Formatuoja reikšmę XLS celei.
+    - Boolean laukai: None -> "Ne", True -> "Taip", False -> "Ne".
+    - Kiti laukai: None -> "".
+    """
+    if field_name in BOOLEAN_FIELDS:
+        if val is True:
+            return "Taip"
+        # val is False or None
+        return "Ne"
+
+    if val is None:
+        return ""
+    return val
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def waybill_export_xls(request):
+    """Eksportuoti pasirinktus važtaraščius į XLSX failą."""
+    ids = request.data.get("ids", [])
+    if not ids:
+        return Response({"error": "Nepateikti dokumentų ID"}, status=400)
+
+    docs = ScannedWaybill.objects.filter(
+        pk__in=ids,
+        user=request.user,
+        status__in=("completed", "exported"),
+    ).order_by("document_date", "document_number")
+
+    if not docs.exists():
+        return Response({"error": "Nerasta eksportuojamų dokumentų"}, status=404)
+
+    try:
+        import openpyxl
+        from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
+    except ImportError:
+        return Response({"error": "openpyxl neįdiegtas serveryje"}, status=500)
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Važtaraščiai"
+
+    # Stiliai
+    header_font = Font(bold=True, size=11)
+    header_fill = PatternFill(start_color="F2F2F2", end_color="F2F2F2", fill_type="solid")
+    header_alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    thin_border = Border(
+        left=Side(style="thin"),
+        right=Side(style="thin"),
+        top=Side(style="thin"),
+        bottom=Side(style="thin"),
+    )
+
+    # Zagolovki
+    for col_idx, (_, label) in enumerate(EXPORT_COLUMNS, start=1):
+        cell = ws.cell(row=1, column=col_idx, value=label)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = header_alignment
+        cell.border = thin_border
+
+    # Danyje
+    for row_idx, doc in enumerate(docs, start=2):
+        for col_idx, (field, _) in enumerate(EXPORT_COLUMNS, start=1):
+            val = getattr(doc, field, None)
+            cell = ws.cell(row=row_idx, column=col_idx, value=_format_value(field, val))
+            cell.border = thin_border
+
+    # Avto-shirina stolbcov
+    for col_idx, (_, label) in enumerate(EXPORT_COLUMNS, start=1):
+        max_len = len(label)
+        for row in ws.iter_rows(min_row=2, min_col=col_idx, max_col=col_idx):
+            for cell in row:
+                if cell.value:
+                    max_len = max(max_len, len(str(cell.value)))
+        ws.column_dimensions[openpyxl.utils.get_column_letter(col_idx)].width = min(max_len + 3, 30)
+
+    # Zamorozka zagolovkov
+    ws.freeze_panes = "A2"
+
+    # Pomecijajem kak exported
+    doc_ids = list(docs.values_list("id", flat=True))
+    ScannedWaybill.objects.filter(id__in=doc_ids).update(status="exported")
+
+    # Otdajem fail
+    buffer = io.BytesIO()
+    wb.save(buffer)
+    buffer.seek(0)
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M")
+    filename = f"vaztarasciai_{timestamp}.xlsx"
+
+    response = HttpResponse(
+        buffer.getvalue(),
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+    response["Content-Disposition"] = f'attachment; filename="{filename}"'
+
+    logger.info(
+        "[WAYBILL-EXPORT] User %s exported %d waybills to XLS",
+        request.user.email, len(doc_ids),
+    )
+
+    return response
+
+
+"""
+Дополнительные views для важтарашчей — batch upload и active sessions.
+Добавить в views.py рядом с остальными waybill views.
+Добавить URLs.
+"""
+
+
+# ============================================================
+# Batch upload (как SF upload_batch)
+# ============================================================
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def waybill_upload_batch(request, session_id):
+    """Batch upload файлов через FormData — как SF upload_batch."""
+    try:
+        s = WaybillUploadSession.objects.get(id=session_id, user=request.user)
+    except WaybillUploadSession.DoesNotExist:
+        return Response({"error": "Session not found"}, status=404)
+
+    if s.stage != "uploading":
+        return Response({"error": f"Session stage is '{s.stage}', expected 'uploading'"}, status=400)
+
+    files = request.FILES.getlist("files")
+    if not files:
+        return Response({"error": "No files provided"}, status=400)
+
+    created_ids = []
+    total_bytes = 0
+
+    for f in files:
+        doc = ScannedWaybill(
+            user=request.user,
+            original_filename=f.name,
+            status="pending",
+            upload_session=s,
+            uploaded_size_bytes=f.size,
+        )
+        doc.file.save(f.name, f, save=False)
+        doc.save()
+        created_ids.append(doc.id)
+        total_bytes += f.size
+
+    # Обновляем счётчики сессии
+    WaybillUploadSession.objects.filter(id=s.id).update(
+        uploaded_files=F("uploaded_files") + len(created_ids),
+        uploaded_bytes=F("uploaded_bytes") + total_bytes,
+        expected_items=F("expected_items") + len(created_ids),
+    )
+
+    return Response({
+        "uploaded": len(created_ids),
+        "doc_ids": created_ids,
+    })
+
+
+# ============================================================
+# Chunked upload (через session URL, как SF)
+# ============================================================
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def waybill_chunk_init(request, session_id):
+    """Инициализация chunked upload через session URL."""
+    try:
+        session = WaybillUploadSession.objects.get(id=session_id, user=request.user)
+    except WaybillUploadSession.DoesNotExist:
+        return Response({"error": "Session not found"}, status=404)
+
+    if session.stage != "uploading":
+        return Response({"error": "Session is not in uploading stage"}, status=400)
+
+    filename = request.data.get("filename")
+    total_size = int(request.data.get("total_size", 0))
+    chunk_size = int(request.data.get("chunk_size", 0))
+    total_chunks = int(request.data.get("total_chunks", 0))
+
+    if not filename or not total_size or not total_chunks:
+        return Response({"error": "filename, total_size, total_chunks required"}, status=400)
+
+    upload = WaybillChunkedUpload.objects.create(
+        user=request.user,
+        session=session,
+        filename=filename,
+        total_size=total_size,
+        chunk_size=chunk_size,
+        total_chunks=total_chunks,
+    )
+
+    return Response({"upload_id": str(upload.id)}, status=201)
+
+
+@api_view(["PUT"])
+@permission_classes([IsAuthenticated])
+def waybill_chunk_upload(request, session_id, upload_id, index):
+    """Загрузить один chunk (raw bytes)."""
+    try:
+        upload = WaybillChunkedUpload.objects.get(
+            id=upload_id, session_id=session_id, user=request.user,
+        )
+    except WaybillChunkedUpload.DoesNotExist:
+        return Response({"error": "Upload not found"}, status=404)
+
+    if upload.status != "uploading":
+        return Response({"error": "Upload is not active"}, status=400)
+
+    if not upload.tmp_path:
+        tmp_dir = os.path.join(settings.MEDIA_ROOT, "waybills_tmp", str(request.user.id))
+        os.makedirs(tmp_dir, exist_ok=True)
+        upload.tmp_path = os.path.join(tmp_dir, f"{upload.id}.part")
+
+    mode = "ab" if os.path.exists(upload.tmp_path) else "wb"
+    with open(upload.tmp_path, mode) as f:
+        f.write(request.body)
+
+    received = upload.received or []
+    if index not in received:
+        received.append(index)
+    upload.received = received
+    upload.save(update_fields=["received", "tmp_path", "updated_at"])
+
+    return Response({"received": len(received), "total_chunks": upload.total_chunks})
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def waybill_chunk_complete(request, session_id, upload_id):
+    """Завершить chunked upload — собрать файл и создать ScannedWaybill."""
+    try:
+        upload = WaybillChunkedUpload.objects.get(
+            id=upload_id, session_id=session_id, user=request.user,
+        )
+    except WaybillChunkedUpload.DoesNotExist:
+        return Response({"error": "Upload not found"}, status=404)
+
+    received = upload.received or []
+    if len(received) < upload.total_chunks:
+        return Response({"error": f"Not all chunks: {len(received)}/{upload.total_chunks}"}, status=400)
+
+    if not upload.tmp_path or not os.path.exists(upload.tmp_path):
+        return Response({"error": "Temp file not found"}, status=400)
+
+    try:
+        session = upload.session
+        doc = ScannedWaybill(
+            user=request.user,
+            original_filename=upload.filename,
+            status="pending",
+            upload_session=session,
+            uploaded_size_bytes=upload.total_size,
+        )
+
+        from django.core.files.base import ContentFile
+        with open(upload.tmp_path, 'rb') as f:
+            doc.file.save(upload.filename, ContentFile(f.read()), save=False)
+        doc.save()
+
+        WaybillUploadSession.objects.filter(id=session.id).update(
+            uploaded_files=F("uploaded_files") + 1,
+            uploaded_bytes=F("uploaded_bytes") + upload.total_size,
+            expected_items=F("expected_items") + 1,
+        )
+
+        upload.status = "complete"
+        upload.save(update_fields=["status", "updated_at"])
+
+        try:
+            os.remove(upload.tmp_path)
+        except Exception:
+            pass
+
+        return Response({"doc_id": doc.id, "status": "complete"})
+
+    except Exception as e:
+        logger.exception("[WAYBILL-UPLOAD] Chunk complete failed: %s", e)
+        upload.status = "failed"
+        upload.error_message = str(e)
+        upload.save(update_fields=["status", "error_message", "updated_at"])
+        return Response({"error": str(e)}, status=500)
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def waybill_chunk_status(request, session_id, upload_id):
+    """Статус chunked upload."""
+    try:
+        upload = WaybillChunkedUpload.objects.get(
+            id=upload_id, session_id=session_id, user=request.user,
+        )
+    except WaybillChunkedUpload.DoesNotExist:
+        return Response({"error": "Not found"}, status=404)
+
+    return Response({
+        "upload_id": str(upload.id),
+        "status": upload.status,
+        "received": len(upload.received or []),
+        "total_chunks": upload.total_chunks,
+    })
+
+
+# ============================================================
+# Active sessions (для ProcessingStatusBar)
+# ============================================================
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def waybill_active_sessions(request):
+    from datetime import timedelta
+
+    # Активные сессии
+    active = WaybillUploadSession.objects.filter(
+        user=request.user,
+        stage__in=["processing", "queued", "credit_check", "blocked"],
+    ).order_by("-created_at")[:10]
+
+    # "done" только за последние 30 секунд
+    cutoff = timezone.now() - timedelta(seconds=30)
+    done = WaybillUploadSession.objects.filter(
+        user=request.user,
+        stage="done",
+        finished_at__gte=cutoff,
+    ).order_by("-created_at")[:5]
+
+    all_sessions = list(active) + list(done)
+
+    result = []
+    for s in all_sessions:
+        result.append({
+            "id": str(s.id),
+            "stage": s.stage,
+            "uploaded_files": s.uploaded_files,
+            "expected_items": s.expected_items,
+            "actual_items": s.actual_items,
+            "processed_items": s.processed_items,
+            "done_items": s.done_items,
+            "failed_items": s.failed_items,
+            "pending_archives": s.pending_archives,
+            "error_message": s.error_message,
+            "created_at": s.created_at.isoformat() if s.created_at else None,
+            "started_at": s.started_at.isoformat() if s.started_at else None,
+            "finished_at": s.finished_at.isoformat() if s.finished_at else None,
+        })
+
+    return Response({"sessions": result})
+
+
+# ============================================================
+# Retry / Cancel blocked session
+# ============================================================
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def waybill_retry_blocked(request, session_id):
+    """Повторить blocked waybill session (после пополнения кредитов)."""
+    with transaction.atomic():
+        try:
+            s = WaybillUploadSession.objects.select_for_update().get(
+                id=session_id, user=request.user, stage="blocked",
+            )
+        except WaybillUploadSession.DoesNotExist:
+            return Response({"error": "Session not found or not blocked"}, status=404)
+
+        u = CustomUser.objects.select_for_update().get(id=request.user.id)
+
+        expected = s.expected_items or s.uploaded_files
+        total_cost = WAYBILL_CREDIT_COST * Decimal(expected)
+        available = (u.credits or Decimal("0")) - (u.credits_reserved or Decimal("0"))
+
+        if total_cost > available:
+            return Response({
+                "error": f"Nepakanka kreditų: reikia {total_cost}, turima {available}",
+            }, status=402)
+
+        u.credits_reserved = (u.credits_reserved or Decimal("0")) + total_cost
+        u.save(update_fields=["credits_reserved"])
+
+        s.reserved_credits = total_cost
+        s.reserved_items = expected
+        s.stage = "processing"
+        s.started_at = timezone.now()
+        s.error_message = ""
+        s.save(update_fields=["stage", "reserved_credits", "reserved_items", "started_at", "error_message", "updated_at"])
+
+    from .tasks import start_waybill_session_processing
+    start_waybill_session_processing.delay(str(s.id))
+
+    return Response({"stage": "processing"})
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def waybill_cancel_blocked(request, session_id):
+    """Отменить blocked waybill session."""
+    with transaction.atomic():
+        try:
+            s = WaybillUploadSession.objects.select_for_update().get(
+                id=session_id, user=request.user, stage="blocked",
+            )
+        except WaybillUploadSession.DoesNotExist:
+            return Response({"error": "Session not found or not blocked"}, status=404)
+
+        if s.reserved_credits > 0:
+            u = CustomUser.objects.select_for_update().get(id=request.user.id)
+            u.credits_reserved = max(
+                (u.credits_reserved or Decimal("0")) - s.reserved_credits,
+                Decimal("0"),
+            )
+            u.save(update_fields=["credits_reserved"])
+
+        # Удаляем pending документы
+        ScannedWaybill.objects.filter(upload_session=s, status="pending").delete()
+
+        s.stage = "failed"
+        s.finished_at = timezone.now()
+        s.reserved_credits = Decimal("0")
+        s.error_message = "Atšaukta vartotojo"
+        s.save(update_fields=["stage", "finished_at", "reserved_credits", "error_message", "updated_at"])
+
+    return Response({"stage": "failed"})
+
+# ────────────────────────────────────────────────────────────
+# END ─── Waybill scan ───
+# ────────────────────────────────────────────────────────────

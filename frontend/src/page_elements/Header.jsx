@@ -351,6 +351,18 @@ const Header = () => {
   }, [isAuthenticated]);
 
   const isSuper = !!profile?.is_superuser;
+  const hasWaybillAccess = !!profile?.has_waybill_access;
+
+  // Динамическое меню Skaitmenizavimas с опциональным Važtaraščiai
+  const skaitmenizavimasMenu = {
+    ...MEGA_MENUS.skaitmenizavimas,
+    items: [
+      { text: "Suvestinė", path: "/suvestine" },
+      ...(hasWaybillAccess ? [{ text: "Važtaraščiai", path: "/vaztarasciai" }] : []),
+      { text: "Iš klientų", path: "/is-klientu" },
+      { text: "Nustatymai", path: "/nustatymai" },
+    ],
+  };
 
   const logoSrc = "/DokSkenas_logo.jpg";
   const logoAlt = "DokSkenas Logo";
@@ -429,7 +441,7 @@ const Header = () => {
                 )}
 
                 {/* Mega-dropdown: Skaitmenizavimas */}
-                <NavDropdown menu={MEGA_MENUS.skaitmenizavimas} nav={nav} />
+                <NavDropdown menu={skaitmenizavimasMenu} nav={nav} />
 
                 {/* Mega-dropdown: Išrašymas */}
                 <NavDropdown menu={MEGA_MENUS.israsymas} nav={nav} />
@@ -673,7 +685,7 @@ const Header = () => {
 
                 {/* Collapsible: Skaitmenizavimas */}
                 <MobileDropdownSection
-                  menu={MEGA_MENUS.skaitmenizavimas}
+                  menu={skaitmenizavimasMenu}
                   nav={nav}
                   closeDrawer={() => setIsDrawerOpen(false)}
                 />

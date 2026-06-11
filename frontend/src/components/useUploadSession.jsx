@@ -227,7 +227,16 @@ function createThrottle(fn, ms) {
   };
 }
 
-export function useUploadSession({ onUploadComplete, onError }) {
+export function useUploadSession({ onUploadComplete, onError, apiEndpoints }) {
+  const ep = apiEndpoints || {
+    createSession: "/sessions/create/",
+    uploadBatch: (sid) => `/sessions/${sid}/upload/`,
+    finalize: (sid) => `/sessions/${sid}/finalize/`,
+    chunksInit: (sid) => `/sessions/${sid}/chunks/init/`,
+    chunksUpload: (sid, uid, idx) => `/sessions/${sid}/chunks/${uid}/${idx}/`,
+    chunksComplete: (sid, uid) => `/sessions/${sid}/chunks/${uid}/complete/`,
+  };
+
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState({
     current: 0,
@@ -260,7 +269,7 @@ export function useUploadSession({ onUploadComplete, onError }) {
 
     console.log(`  Archive chunks: ${totalChunks} x ${formatBytes(CHUNK_SIZE)}`);
 
-    const { data: initData } = await api.post(`/sessions/${sid}/chunks/init/`, {
+    const { data: initData } = await api.post(ep.chunksInit(sid), {
       filename: file.name,
       total_size: totalSize,
       chunk_size: CHUNK_SIZE,
@@ -277,8 +286,7 @@ export function useUploadSession({ onUploadComplete, onError }) {
       const end = Math.min(start + CHUNK_SIZE, totalSize);
       const chunk = file.slice(start, end);
 
-      await api.put(
-        `/sessions/${sid}/chunks/${uploadId}/${i}/`,
+      await api.put(ep.chunksUpload(sid, uploadId, i),
         chunk,
         { headers: { "Content-Type": "application/octet-stream" } }
       );
@@ -287,7 +295,7 @@ export function useUploadSession({ onUploadComplete, onError }) {
       onChunkProgress?.(uploadedBytes, totalSize);
     }
 
-    await api.post(`/sessions/${sid}/chunks/${uploadId}/complete/`);
+    await api.post(ep.chunksComplete(sid, uploadId));
     console.log(`  Archive upload complete: ${file.name}`);
   };
 
@@ -357,7 +365,7 @@ export function useUploadSession({ onUploadComplete, onError }) {
       console.log("=== UPLOAD SESSION START ===");
       let session;
       try {
-        const { data } = await api.post("/sessions/create/", {
+        const { data } = await api.post(ep.createSession, {
           scan_type: scanType,
           client_total_files: validFiles.length,
           multi_doc: multiDoc,
@@ -418,7 +426,7 @@ export function useUploadSession({ onUploadComplete, onError }) {
         // Сохраняем базу для этого батча
         const batchStartBytes = globalUploadedBytes;
 
-        await api.post(`/sessions/${sid}/upload/`, formData, {
+        await api.post(ep.uploadBatch(sid), formData, {
           headers: { "Content-Type": "multipart/form-data" },
           onUploadProgress: (progressEvent) => {
             if (progressEvent.lengthComputable) {
@@ -480,7 +488,7 @@ export function useUploadSession({ onUploadComplete, onError }) {
         currentFile: "",
       }));
 
-      const { data: finalized } = await api.post(`/sessions/${sid}/finalize/`);
+      const { data: finalized } = await api.post(ep.finalize(sid));
       console.log(`Session finalized: stage=${finalized.stage}, expected_items=${finalized.expected_items}`);
       console.log("=== UPLOAD SESSION END ===");
 
@@ -505,7 +513,7 @@ export function useUploadSession({ onUploadComplete, onError }) {
             `Finalizing session ${sid} after error: uploaded ${uploaded}/${total} files`
           );
 
-          const { data: rescued } = await api.post(`/sessions/${sid}/finalize/`);
+          const { data: rescued } = await api.post(ep.finalize(sid));
           console.log(
             `Session ${sid} rescued: stage=${rescued.stage}, expected=${rescued.expected_items}`
           );

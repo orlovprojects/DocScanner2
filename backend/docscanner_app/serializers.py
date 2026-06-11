@@ -495,9 +495,9 @@ class CustomUserSerializer(serializers.ModelSerializer):
             'rivile_erp_extra_fields', 'rivile_gama_extra_fields', 'butent_extra_fields','finvalda_extra_fields',
             'centas_extra_fields','agnum_extra_fields','debetas_extra_fields','site_pro_extra_fields',
             'pragma3_extra_fields', 'pragma4_extra_fields', 'optimum_extra_fields', 'dineta_extra_fields',
-            'inbox_email_address'
+            'inbox_email_address', 'has_waybill_access'
         ]
-        read_only_fields = ('credits',)
+        read_only_fields = ('credits', 'has_waybill_access')
         extra_kwargs = {
             'password': {'write_only': True, 'required': True},
             'email':    {'required': True},
@@ -3392,4 +3392,161 @@ class NewsletterSerializer(serializers.Serializer):
 
 # ────────────────────────────────────────────────────────────
 # END ─── Dlia frontend newsletter ───
+# ────────────────────────────────────────────────────────────
+
+
+# ────────────────────────────────────────────────────────────
+# ─── Waybill scan ───
+# ────────────────────────────────────────────────────────────
+
+"""
+Обновлённые сериализаторы для важтарашчей - 38 доменных полей.
+Заменяет предыдущую версию.
+"""
+from decimal import Decimal
+from rest_framework import serializers
+from .models import ScannedWaybill, WaybillUploadSession, WaybillChunkedUpload, WAYBILL_CREDIT_COST
+
+
+# ============================================================
+# Upload Session (bez izmainam)
+# ============================================================
+
+class WaybillSessionCreateSerializer(serializers.Serializer):
+    client_total_files = serializers.IntegerField(min_value=1, max_value=2000)
+    archive_formats = serializers.ListField(child=serializers.CharField(), required=False, default=list)
+    multi_doc = serializers.BooleanField(required=False, default=False)
+
+
+class WaybillSessionStatusSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = WaybillUploadSession
+        fields = [
+            "id", "stage", "client_total_files",
+            "uploaded_files", "uploaded_bytes",
+            "expected_items", "actual_items",
+            "processed_items", "done_items", "failed_items",
+            "pending_archives", "reserved_credits", "reserved_items",
+            "error_message", "created_at", "started_at", "finished_at", "multi_doc",
+        ]
+
+
+class WaybillSessionFinalizeSerializer(serializers.Serializer):
+    pass
+
+
+# ============================================================
+# Chunked Upload (bez izmainam)
+# ============================================================
+
+class WaybillChunkedUploadInitSerializer(serializers.Serializer):
+    session_id = serializers.UUIDField()
+    filename = serializers.CharField(max_length=255)
+    total_size = serializers.IntegerField(min_value=1)
+    chunk_size = serializers.IntegerField(min_value=1)
+    total_chunks = serializers.IntegerField(min_value=1)
+
+
+class WaybillChunkedUploadStatusSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = WaybillChunkedUpload
+        fields = ["id", "filename", "status", "total_chunks", "received"]
+
+
+# ============================================================
+# List - kompaktnyj dlia tablicy
+# ============================================================
+
+class ScannedWaybillListSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ScannedWaybill
+        fields = [
+            "id", "original_filename", "status",
+            "error_message", "uploaded_at", "preview_url",
+        ]
+
+
+
+
+# ============================================================
+# Detail - polnaja info
+# ============================================================
+
+# class ScannedWaybillDetailSerializer(serializers.ModelSerializer):
+#     class Meta:
+#         model = ScannedWaybill
+#         exclude = [
+#             "user", "file",
+#             "raw_text", "glued_raw_text", "gpt_raw_json",
+#             "enhanced_ocr_text", "enhanced_ocr_source", "pre_extracted_ocr_text",
+#             "upload_session", "counted_in_session", "uploaded_size_bytes",
+#             "is_archive_container", "archive_file_count",
+#             "parent_document", "upload_batch_index",
+#             "is_multi_doc_container", "source_pages",
+#         ]
+
+
+class ScannedWaybillDetailSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ScannedWaybill
+        exclude = [
+            # User / file
+            "user",
+            "file",
+
+            # Internal OCR / AI fields
+            "raw_text",
+            "glued_raw_text",
+            "gpt_raw_json",
+            "enhanced_ocr_text",
+            "enhanced_ocr_source",
+            "pre_extracted_ocr_text",
+
+            # Upload infrastructure
+            "upload_session",
+            "counted_in_session",
+            "uploaded_size_bytes",
+            "is_archive_container",
+            "archive_file_count",
+            "parent_document",
+            "upload_batch_index",
+            "is_multi_doc_container",
+            "source_pages",
+        ]
+
+
+# ============================================================
+# Update - vse redaktiruemyje polja
+# ============================================================
+
+class ScannedWaybillUpdateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ScannedWaybill
+        fields = [
+            # Dokumentas
+            "airport", "document_number", "document_date",
+            "payment_type", "delivery_receipt", "defuelling_receipt",
+            # Pirkejas
+            "buyer_iata_code", "buyer_name", "buyer_address",
+            "buyer_vat_code", "buyer_remark_half_income", "buyer_remark_other",
+            # Orlaivis
+            "aircraft_type", "flight_type", "outside_eu", "flight_nature",
+            # Laikas
+            "time_departure", "time_arrival", "time_start", "time_finish", "time_return",
+            # Marsrutas
+            "from_city", "from_airport_code", "from_country_iso",
+            "to_city", "to_airport_code", "to_country_iso",
+            # Skaitikliai
+            "refueller_number", "reading_before", "reading_after", "reading_difference",
+            # Operatorius
+            "company_representative",
+            # Matavimai - faktinis
+            "density_observed", "temperature_observed",
+            "quantity_liters_observed", "quantity_kg_observed",
+            # Matavimai - standartinis
+            "density_standard", "temperature_standard", "quantity_liters_standard",
+        ]
+
+# ────────────────────────────────────────────────────────────
+# END ─── Waybill scan ───
 # ────────────────────────────────────────────────────────────

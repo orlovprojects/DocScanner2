@@ -667,6 +667,12 @@ class CustomUser(AbstractUser):
         null=True,
     )
 
+    has_waybill_access = models.BooleanField(
+        "Važtaraščių prieiga",
+        default=False,
+        help_text="Ar vartotojas mato važtaraščių modulį meniu",
+    )
+
     trial_expired_email_sent_at = models.DateTimeField(
         "Trial pabaigos laiško data",
         blank=True,
@@ -3765,3 +3771,356 @@ class APIProviderKey(models.Model):
         self.last_ok = success
         self.last_error = error if not success else ""
         self.save(update_fields=["verified_at", "last_ok", "last_error", "updated_at"])
+
+
+
+
+
+
+"""
+Обновлённая модель ScannedWaybill — 38 доменных полей для oro važtaraštis.
+Заменяет предыдущую версию в models.py.
+"""
+import uuid
+import logging
+from decimal import Decimal
+
+from django.conf import settings
+from django.db import models
+
+logger = logging.getLogger("docscanner_app")
+
+WAYBILL_CREDIT_COST = Decimal("1.30")
+
+
+def waybill_upload_path(instance, filename):
+    return f"waybills/{instance.user.id}/{filename}"
+
+
+# ============================================================
+# Upload infrastruktūra (bez izmaiņām)
+# ============================================================
+
+class WaybillUploadSession(models.Model):
+    STAGES = [
+        ("uploading", "uploading"),
+        ("credit_check", "credit_check"),
+        ("queued", "queued"),
+        ("processing", "processing"),
+        ("done", "done"),
+        ("blocked", "blocked"),
+        ("failed", "failed"),
+    ]
+
+    ARCHIVE_FORMATS = [
+        ("", "None"),
+        ("zip", "ZIP"),
+        ("rar", "RAR"),
+        ("7z", "7Z"),
+        ("tar", "TAR"),
+        ("tar.gz", "TAR.GZ"),
+        ("tar.bz2", "TAR.BZ2"),
+        ("tar.xz", "TAR.XZ"),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+        related_name="waybill_upload_sessions",
+    )
+    scan_type = models.CharField(max_length=32, default="detaliai", db_index=True)
+    stage = models.CharField(max_length=32, choices=STAGES, default="uploading", db_index=True)
+
+    client_total_files = models.PositiveIntegerField(default=0)
+    uploaded_files = models.PositiveIntegerField(default=0)
+    uploaded_bytes = models.BigIntegerField(default=0)
+
+    expected_items = models.PositiveIntegerField(default=0)
+    actual_items = models.PositiveIntegerField(default=0)
+    processed_items = models.PositiveIntegerField(default=0)
+    done_items = models.PositiveIntegerField(default=0)
+    failed_items = models.PositiveIntegerField(default=0)
+
+    pending_archives = models.PositiveIntegerField(default=0)
+    archive_formats = models.JSONField(default=list, blank=True)
+    error_message = models.TextField(blank=True, default="")
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    reserved_credits = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
+    reserved_items = models.PositiveIntegerField(default=0)
+
+    started_at = models.DateTimeField(null=True, blank=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+    multi_doc = models.BooleanField(default=False)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["user", "stage"]),
+            models.Index(fields=["created_at"]),
+        ]
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"WaybillUploadSession({self.id}) user={self.user_id} stage={self.stage}"
+
+
+class WaybillChunkedUpload(models.Model):
+    STATUS = [
+        ("uploading", "uploading"),
+        ("complete", "complete"),
+        ("failed", "failed"),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+        related_name="waybill_chunked_uploads",
+    )
+    session = models.ForeignKey(
+        WaybillUploadSession, on_delete=models.CASCADE, related_name="chunked_uploads",
+    )
+    filename = models.CharField(max_length=255)
+    total_size = models.BigIntegerField()
+    chunk_size = models.IntegerField()
+    total_chunks = models.IntegerField()
+    received = models.JSONField(default=list, blank=True)
+    status = models.CharField(max_length=16, choices=STATUS, default="uploading")
+    tmp_path = models.TextField(blank=True, default="")
+    error_message = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["user", "status"]),
+            models.Index(fields=["session", "status"]),
+        ]
+
+
+# ============================================================
+# ScannedWaybill — основная модель
+# ============================================================
+
+class ScannedWaybill(models.Model):
+    STATUS_CHOICES = [
+        ('pending', 'Tikrinami'),
+        ('processing', 'Vykdomi'),
+        ('completed', 'Atlikti (Neeksportuoti)'),
+        ('rejected', 'Atmesti'),
+        ('exported', 'Atlikti (Eksportuoti)'),
+    ]
+
+    PAYMENT_TYPE_CHOICES = [
+        ('invoice', 'Invoice'),
+        ('fuelling_card', 'Fuelling card'),
+        ('cash', 'Cash'),
+        ('credit_card', 'Credit card'),
+        ('other', 'Other'),
+    ]
+
+    FLIGHT_NATURE_CHOICES = [
+        ('commercial', 'Commercial'),
+        ('private', 'Private'),
+        ('other', 'Other'),
+    ]
+
+    # ===== Infrastruktūra =====
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+    file = models.FileField(upload_to=waybill_upload_path)
+    original_filename = models.CharField(max_length=255)
+
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='processing')
+    error_message = models.TextField(blank=True, null=True)
+    preview_url = models.URLField(blank=True, null=True)
+
+    # ===== OCR / JSON =====
+    raw_text = models.TextField(blank=True, null=True)
+    glued_raw_text = models.TextField(blank=True, null=True)
+    gpt_raw_json = models.JSONField(blank=True, null=True)
+    structured_json = models.JSONField(blank=True, null=True)
+    enhanced_ocr_text = models.TextField(blank=True, null=True)
+    enhanced_ocr_source = models.CharField(max_length=50, blank=True, null=True)
+
+    # ========================================================
+    # DOKUMENTO DUOMENYS (6)
+    # ========================================================
+    airport = models.CharField(
+        "Oro uostas", max_length=100, blank=True, null=True,
+        help_text="pvz. KUN / Kaunas",
+    )
+    document_number = models.CharField(
+        "Važtaraščio numeris", max_length=100, blank=True, null=True,
+    )
+    document_date = models.DateField(
+        "Važtaraščio data", blank=True, null=True,
+    )
+    payment_type = models.CharField(
+        "Mokėjimo būdas", max_length=50, choices=PAYMENT_TYPE_CHOICES,
+        blank=True, null=True,
+    )
+    delivery_receipt = models.BooleanField(
+        "Delivery receipt (kurai užpilti)", null=True, blank=True, default=None,
+    )
+    defuelling_receipt = models.BooleanField(
+        "Defuelling receipt (kurai išpilti)", null=True, blank=True, default=None,
+    )
+
+    # ========================================================
+    # PIRKĖJAS / CUSTOMER (6)
+    # ========================================================
+    buyer_iata_code = models.CharField(
+        "IATA kodas", max_length=10, blank=True, null=True,
+    )
+    buyer_name = models.CharField(
+        "Pirkėjo pavadinimas", max_length=256, blank=True, null=True,
+    )
+    buyer_address = models.CharField(
+        "Pirkėjo adresas", max_length=256, blank=True, null=True,
+    )
+    buyer_vat_code = models.CharField(
+        "PVM kodas", max_length=50, blank=True, null=True,
+    )
+    buyer_remark_half_income = models.BooleanField(
+        "Half income from transportation", null=True, blank=True, default=None,
+    )
+    buyer_remark_other = models.TextField(
+        "Kitos pastabos", blank=True, null=True,
+    )
+
+    # ========================================================
+    # ORLAIVIS IR SKRYDIS (4)
+    # ========================================================
+    aircraft_type = models.CharField(
+        "Orlaivio tipas", max_length=50, blank=True, null=True,
+    )
+    flight_type = models.CharField(
+        "Tipas", max_length=20, blank=True, null=True,
+    )
+    outside_eu = models.BooleanField(
+        "Už ES ribų", null=True, blank=True, default=None,
+    )
+    flight_nature = models.CharField(
+        "Skrydžio pobūdis", max_length=50, choices=FLIGHT_NATURE_CHOICES,
+        blank=True, null=True,
+    )
+
+    # ========================================================
+    # LAIKAS (5) - saugomos kaip CharField nes tai laiko reikšmės be datos
+    # ========================================================
+    time_departure = models.CharField("Departure", max_length=20, blank=True, null=True)
+    time_arrival = models.CharField("Arrival", max_length=20, blank=True, null=True)
+    time_start = models.CharField("Start", max_length=20, blank=True, null=True)
+    time_finish = models.CharField("Finish", max_length=20, blank=True, null=True)
+    time_return = models.CharField("Return", max_length=20, blank=True, null=True)
+
+    # ========================================================
+    # MARŠRUTAS (6)
+    # ========================================================
+    from_city = models.CharField(
+        "Iš (miestas)", max_length=100, blank=True, null=True,
+    )
+    from_airport_code = models.CharField(
+        "Iš (oro uosto kodas)", max_length=10, blank=True, null=True,
+    )
+    from_country_iso = models.CharField(
+        "Iš (šalis ISO)", max_length=2, blank=True, null=True,
+    )
+    to_city = models.CharField(
+        "Į (miestas)", max_length=100, blank=True, null=True,
+    )
+    to_airport_code = models.CharField(
+        "Į (oro uosto kodas)", max_length=10, blank=True, null=True,
+    )
+    to_country_iso = models.CharField(
+        "Į (šalis ISO)", max_length=2, blank=True, null=True,
+    )
+
+    # ========================================================
+    # SKAITIKLIAI / READINGS (4)
+    # ========================================================
+    refueller_number = models.CharField(
+        "Autocisternos numeris", max_length=50, blank=True, null=True,
+    )
+    reading_before = models.DecimalField(
+        "Prieš užpildymą", max_digits=12, decimal_places=2, blank=True, null=True,
+    )
+    reading_after = models.DecimalField(
+        "Po užpildymo", max_digits=12, decimal_places=2, blank=True, null=True,
+    )
+    reading_difference = models.DecimalField(
+        "Skirtumas", max_digits=12, decimal_places=2, blank=True, null=True,
+    )
+
+    # ========================================================
+    # OPERATORIUS (1)
+    # ========================================================
+    company_representative = models.CharField(
+        "Operatorius / atstovas", max_length=140, blank=True, null=True,
+    )
+
+    # ========================================================
+    # DEGALŲ MATAVIMAI - FAKTINIS (4)
+    # ========================================================
+    density_observed = models.DecimalField(
+        "Tankis (faktinis)", max_digits=6, decimal_places=4, blank=True, null=True,
+    )
+    temperature_observed = models.DecimalField(
+        "Temperatūra °C (faktinė)", max_digits=5, decimal_places=1, blank=True, null=True,
+    )
+    quantity_liters_observed = models.DecimalField(
+        "Litrai (faktinis)", max_digits=13, decimal_places=3, blank=True, null=True,
+    )
+    quantity_kg_observed = models.DecimalField(
+        "Kilogramai (faktinis)", max_digits=13, decimal_places=3, blank=True, null=True,
+    )
+
+    # ========================================================
+    # DEGALŲ MATAVIMAI - STANDARTINIS +15°C (3)
+    # ========================================================
+    density_standard = models.DecimalField(
+        "Tankis (+15°C)", max_digits=6, decimal_places=4, blank=True, null=True,
+    )
+    temperature_standard = models.DecimalField(
+        "Temperatūra °C (+15°C)", max_digits=5, decimal_places=1, blank=True, null=True,
+    )
+    quantity_liters_standard = models.DecimalField(
+        "Litrai (+15°C)", max_digits=13, decimal_places=3, blank=True, null=True,
+    )
+
+    # ========================================================
+    # UPLOAD INFRASTRUKTŪRA
+    # ========================================================
+    upload_session = models.ForeignKey(
+        WaybillUploadSession, null=True, blank=True,
+        on_delete=models.SET_NULL, related_name="waybills",
+    )
+    counted_in_session = models.BooleanField(default=False)
+    uploaded_size_bytes = models.BigIntegerField(default=0)
+
+    is_archive_container = models.BooleanField(default=False)
+    archive_file_count = models.PositiveIntegerField(default=0)
+
+    parent_document = models.ForeignKey(
+        "self", null=True, blank=True,
+        on_delete=models.SET_NULL, related_name="children",
+    )
+    upload_batch_index = models.PositiveIntegerField(null=True, blank=True)
+
+    is_multi_doc_container = models.BooleanField(default=False)
+    source_pages = models.JSONField(null=True, blank=True)
+    pre_extracted_ocr_text = models.TextField(null=True, blank=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["user", "-uploaded_at"], name="idx_wb_user_uploaded_desc"),
+            models.Index(fields=["user", "status", "-uploaded_at"], name="idx_wb_user_status_uploaded"),
+            models.Index(fields=["user", "buyer_name"], name="idx_wb_user_buyer"),
+            models.Index(fields=["upload_session"]),
+            models.Index(fields=["parent_document"]),
+        ]
+
+    def __str__(self):
+        return f"Važtaraštis {self.document_number or '-'} ({self.user.email})"

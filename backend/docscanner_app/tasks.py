@@ -3983,3 +3983,655 @@ def send_newsletter_task(
 # ────────────────────────────────────────────────────────────
 # END ─── Dlia frontend newsletter ───
 # ────────────────────────────────────────────────────────────
+
+
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# WAybill scan
+# ═══════════════════════════════════════════════════════════════════════════════
+
+"""
+waybill_tasks.py — Celery-задачи для обработки важтарашчей.
+
+Упрощённый pipeline по сравнению с SF:
+  normalize → enhanced OCR (Gemini 3.1 Lite) → extraction (KIE 2.5 Flash) → save → settle credits
+
+Без: similarity check, duplicate check, pre-classify PDF, multi-doc split,
+     truncated JSON repair, math validation, seller/buyer autocomplete.
+"""
+import json
+import os
+import time
+import uuid
+import logging
+from decimal import Decimal
+
+from celery import shared_task
+from celery.exceptions import SoftTimeLimitExceeded
+from django.conf import settings
+from django.core.files.base import ContentFile
+from django.db import transaction
+from django.db.models import F
+from django.utils import timezone
+
+from .models import (
+    ScannedWaybill,
+    WaybillUploadSession,
+    WaybillChunkedUpload,
+    WAYBILL_CREDIT_COST,
+)
+from .models import CustomUser, CreditUsageLog
+
+logger = logging.getLogger("docscanner_app")
+
+
+# ============================================================
+# Timing helpers
+# ============================================================
+
+def _t():
+    return time.perf_counter()
+
+def _log_t(label: str, t0: float):
+    logger.info("[WAYBILL-TIME] %s: %.2fs", label, time.perf_counter() - t0)
+
+
+# ============================================================
+# Credit settlement
+# ============================================================
+
+@transaction.atomic
+def settle_waybill_session_for_doc(doc_id: int):
+    """Списание/освобождение кредитов для одного важтарашчиса."""
+    doc = ScannedWaybill.objects.select_for_update().get(id=doc_id)
+
+    if not doc.upload_session_id:
+        return
+    if doc.counted_in_session:
+        return
+
+    s = WaybillUploadSession.objects.select_for_update().get(id=doc.upload_session_id)
+    u = CustomUser.objects.select_for_update().get(id=doc.user_id)
+
+    cost = WAYBILL_CREDIT_COST
+
+    # Архив-контейнер
+    if doc.is_archive_container:
+        s.pending_archives = max((s.pending_archives or 0) - 1, 0)
+
+        if doc.status in ("rejected", "failed"):
+            actual_children = ScannedWaybill.objects.filter(parent_document=doc).count()
+            unrealized = max((doc.archive_file_count or 0) - actual_children, 0)
+            release = cost * Decimal(unrealized)
+
+            if release > 0:
+                u.credits_reserved = max(
+                    (u.credits_reserved or Decimal("0")) - release, Decimal("0"),
+                )
+                s.reserved_credits = max(
+                    (s.reserved_credits or Decimal("0")) - release, Decimal("0"),
+                )
+                u.save(update_fields=["credits_reserved"])
+
+        doc.counted_in_session = True
+        s.save(update_fields=["pending_archives", "reserved_credits", "updated_at"])
+        doc.save(update_fields=["counted_in_session"])
+        return
+
+    # Обычный документ
+    s.processed_items = (s.processed_items or 0) + 1
+
+    success = doc.status in ("completed", "exported")
+
+    if success:
+        s.done_items = (s.done_items or 0) + 1
+        u.credits = (u.credits or Decimal("0")) - cost
+
+        CreditUsageLog.objects.create(
+            user=u,
+            # scanned_document оставляем None — это waybill, не SF
+            credits_used=cost,
+            document_filename=doc.original_filename or '',
+        )
+    else:
+        s.failed_items = (s.failed_items or 0) + 1
+
+    u.credits_reserved = max((u.credits_reserved or Decimal("0")) - cost, Decimal("0"))
+    s.reserved_credits = max((s.reserved_credits or Decimal("0")) - cost, Decimal("0"))
+    doc.counted_in_session = True
+
+    u.save(update_fields=["credits", "credits_reserved"])
+    s.save(update_fields=["processed_items", "done_items", "failed_items", "reserved_credits", "updated_at"])
+    doc.save(update_fields=["counted_in_session"])
+
+
+# ============================================================
+# Session lifecycle
+# ============================================================
+
+def maybe_finish_waybill_session_async(session_id):
+    if not session_id:
+        return
+    finish_waybill_session_task.delay(str(session_id))
+
+
+@shared_task
+def finish_waybill_session_task(session_id: str):
+    _maybe_finish_waybill_session(session_id)
+
+
+@transaction.atomic
+def _maybe_finish_waybill_session(session_id: str):
+    s = WaybillUploadSession.objects.select_for_update().get(id=session_id)
+
+    if s.stage != "processing":
+        return
+
+    pending = s.pending_archives or 0
+    actual = s.actual_items or 0
+    processed = s.processed_items or 0
+
+    normal_done = (pending == 0 and actual > 0 and processed >= actual)
+    empty_done = (pending == 0 and actual == 0)
+
+    if normal_done or empty_done:
+        s.stage = "done" if normal_done else "failed"
+        s.finished_at = timezone.now()
+
+        if s.reserved_credits > 0:
+            u = CustomUser.objects.select_for_update().get(id=s.user_id)
+            u.credits_reserved = max(
+                (u.credits_reserved or Decimal("0")) - s.reserved_credits,
+                Decimal("0"),
+            )
+            u.save(update_fields=["credits_reserved"])
+            s.reserved_credits = Decimal("0")
+
+        s.save(update_fields=["stage", "finished_at", "reserved_credits", "updated_at"])
+        kick_next_waybill_session_task.delay(s.user_id)
+
+
+@shared_task
+def kick_next_waybill_session_task(user_id: int):
+    maybe_start_next_waybill_session(user_id)
+
+
+@transaction.atomic
+def maybe_start_next_waybill_session(user_id: int):
+    if WaybillUploadSession.objects.filter(user_id=user_id, stage="processing").exists():
+        return
+
+    nxt = (
+        WaybillUploadSession.objects
+        .select_for_update()
+        .filter(user_id=user_id, stage="queued")
+        .order_by("created_at")
+        .first()
+    )
+    if not nxt:
+        return
+
+    nxt.stage = "processing"
+    if not nxt.started_at:
+        nxt.started_at = timezone.now()
+    nxt.save(update_fields=["stage", "started_at", "updated_at"])
+
+    start_waybill_session_processing.delay(str(nxt.id))
+
+
+def _settle_and_finish_waybill(doc: ScannedWaybill):
+    """Settle credits + check if session is done."""
+    if not doc or not getattr(doc, "upload_session_id", None):
+        return
+    try:
+        settle_waybill_session_for_doc(doc.id)
+    finally:
+        maybe_finish_waybill_session_async(doc.upload_session_id)
+
+
+# ============================================================
+# Session start — запуск обработки всех pending документов
+# ============================================================
+
+@shared_task
+def start_waybill_session_processing(session_id: str):
+    to_process = []
+
+    with transaction.atomic():
+        s = WaybillUploadSession.objects.select_for_update().get(id=session_id)
+
+        qs = (
+            ScannedWaybill.objects
+            .select_for_update()
+            .filter(upload_session=s, status="pending")
+            .only("id", "user_id")
+        )
+        docs = list(qs)
+
+        if not docs:
+            return
+
+        doc_ids = [d.id for d in docs]
+        total_cnt = len(doc_ids)
+        arch_cnt = ScannedWaybill.objects.filter(id__in=doc_ids, is_archive_container=True).count()
+        normal_cnt = total_cnt - arch_cnt
+
+        ScannedWaybill.objects.filter(id__in=doc_ids).update(status="processing")
+
+        if arch_cnt:
+            WaybillUploadSession.objects.filter(id=s.id).update(
+                pending_archives=F("pending_archives") + arch_cnt,
+            )
+        if normal_cnt:
+            WaybillUploadSession.objects.filter(id=s.id).update(
+                actual_items=F("actual_items") + normal_cnt,
+            )
+
+        to_process = [(d.user_id, d.id) for d in docs]
+
+    for user_id, doc_id in to_process:
+        process_waybill_task.delay(user_id, doc_id)
+
+
+# ============================================================
+# Главная задача — обработка одного важтарашчиса
+# ============================================================
+
+@shared_task(bind=True, soft_time_limit=300, time_limit=330, acks_late=True, reject_on_worker_lost=True)
+def process_waybill_task(self, user_id, doc_id):
+    """
+    Pipeline:
+      1. Read file
+      2. Normalize (normalize_any)
+      3. Handle archives
+      4. Enhanced OCR (Gemini 3.1 Flash Lite)
+      5. Field extraction (KIE Gemini 2.5 Flash)
+      6. Save structured data
+      7. Settle credits
+    """
+    from django.core.cache import cache
+
+    # ── Guard: requeue protection ──
+    attempt_key = f"wb_proc_attempt:{doc_id}"
+    attempt = cache.get(attempt_key, 0)
+    if attempt >= 1:
+        cache.delete(attempt_key)
+        logger.error("[WAYBILL-TASK] Requeued after hard kill, rejecting doc_id=%s", doc_id)
+        try:
+            doc = ScannedWaybill.objects.filter(pk=doc_id).first()
+            if doc and doc.status == "processing":
+                doc.status = "rejected"
+                doc.error_message = "Operacija nutraukta: viršytas laiko limitas"
+                try:
+                    doc.preview_url = f"{settings.SITE_URL_BACKEND}/media/{doc.file.name}"
+                except Exception:
+                    pass
+                doc.save(update_fields=["status", "error_message", "preview_url"])
+                _settle_and_finish_waybill(doc)
+        except Exception as e:
+            logger.exception("[WAYBILL-TASK] Failed to reject requeued doc_id=%s: %s", doc_id, e)
+        return
+    cache.set(attempt_key, attempt + 1, timeout=600)
+
+    total_start = _t()
+
+    try:
+        # ── 1. Load user & doc ──
+        t0 = _t()
+        user = CustomUser.objects.get(pk=user_id)
+        doc = ScannedWaybill.objects.get(pk=doc_id)
+        _log_t("Fetch user & doc", t0)
+
+        file_path = doc.file.path
+        original_filename = doc.original_filename
+        logger.info("[WAYBILL-TASK] Starting doc_id=%s, file=%s", doc_id, original_filename)
+
+        # ── 2. Read file ──
+        t0 = _t()
+        with open(file_path, 'rb') as f:
+            file_bytes = f.read()
+        _log_t("Read file", t0)
+
+        # ── 3. Content type ──
+        content_type = None
+        low = file_path.lower()
+        if low.endswith('.pdf'):
+            content_type = 'application/pdf'
+        elif low.endswith(('.jpg', '.jpeg')):
+            content_type = 'image/jpeg'
+        elif low.endswith('.png'):
+            content_type = 'image/png'
+        elif low.endswith('.webp'):
+            content_type = 'image/webp'
+        elif low.endswith(('.tif', '.tiff')):
+            content_type = 'image/tiff'
+
+        # ── 4. Normalize ──
+        class FakeUpload:
+            def __init__(self, name, content, ct):
+                self.name = name
+                self._content = content
+                self.content_type = ct
+                self._read = False
+            def read(self):
+                if not self._read:
+                    self._read = True
+                    return self._content
+                return b''
+
+        fake_file = FakeUpload(original_filename, file_bytes, content_type or "")
+
+        t0 = _t()
+        try:
+            from .utils.file_converter import normalize_any, ArchiveLimitError
+            normalized_result = normalize_any(fake_file)
+            _log_t("Normalize", t0)
+        except ArchiveLimitError as e:
+            _log_t("Normalize failed (archive limit)", t0)
+            doc.status = 'rejected'
+            doc.error_message = str(e)
+            doc.save(update_fields=['status', 'error_message'])
+            _settle_and_finish_waybill(doc)
+            return
+        except ValueError as e:
+            _log_t("Normalize failed (unsupported)", t0)
+            doc.status = 'rejected'
+            doc.error_message = f"Nepalaikomas failo formatas: {e}"
+            doc.save(update_fields=['status', 'error_message'])
+            _settle_and_finish_waybill(doc)
+            return
+        except Exception as e:
+            _log_t("Normalize failed", t0)
+            doc.status = 'rejected'
+            doc.error_message = f"Klaida apdorojant failą: {e}"
+            doc.save(update_fields=['status', 'error_message'])
+            _settle_and_finish_waybill(doc)
+            return
+
+        # ── 5. Archive handling ──
+        if isinstance(normalized_result, list):
+            file_count = len(normalized_result)
+            logger.info("[WAYBILL-TASK] Archive: %d files", file_count)
+
+            archive_skipped_data = {}
+            if normalized_result and '_archive_skipped' in normalized_result[0]:
+                archive_skipped_data = normalized_result[0].pop('_archive_skipped', {})
+
+            skipped_too_large = archive_skipped_data.get('too_large', [])
+            skipped_unsupported = archive_skipped_data.get('unsupported', [])
+            has_skipped = len(skipped_too_large) > 0 or len(skipped_unsupported) > 0
+
+            if file_count == 0:
+                doc.status = 'rejected'
+                doc.error_message = "Archyve nerasta palaikomų failų"
+                doc.save(update_fields=['status', 'error_message'])
+                _settle_and_finish_waybill(doc)
+                return
+
+            # Удаляем архив
+            if doc.file and os.path.exists(file_path):
+                try:
+                    doc.file.delete(save=False)
+                except Exception:
+                    pass
+                if os.path.exists(file_path):
+                    try:
+                        os.remove(file_path)
+                    except Exception:
+                        pass
+
+            doc.is_archive_container = True
+            if has_skipped:
+                doc.status = "rejected"
+                error_parts = []
+                if skipped_too_large:
+                    error_parts.append(f"{len(skipped_too_large)} per didelių failų")
+                if skipped_unsupported:
+                    error_parts.append(f"{len(skipped_unsupported)} nepalaikomų failų")
+                doc.error_message = "Praleista: " + "; ".join(error_parts)
+            else:
+                doc.status = "completed"
+            doc.archive_file_count = file_count
+            doc.save(update_fields=["is_archive_container", "archive_file_count", "status", "error_message"])
+
+            # Создаём дочерние документы
+            created_docs = []
+            for i, nf in enumerate(normalized_result, start=1):
+                try:
+                    orig_name = nf.get('original_filename', f'file_{i}.bin')
+                    new_ext = os.path.splitext(nf['filename'])[1]
+                    base_name = os.path.splitext(orig_name)[0]
+                    corrected_filename = f"{base_name}{new_ext}"
+
+                    new_doc = ScannedWaybill.objects.create(
+                        user=user,
+                        original_filename=corrected_filename,
+                        status='processing',
+                        upload_session=doc.upload_session,
+                        parent_document=doc,
+                    )
+                    new_doc.file.save(nf['filename'], ContentFile(nf['data']), save=True)
+                    new_doc.refresh_from_db()
+                    created_docs.append(new_doc.id)
+                except Exception as e:
+                    logger.error("[WAYBILL-TASK] Failed to create child %d: %s", i, e)
+
+            if not created_docs:
+                doc.status = "rejected"
+                doc.error_message = "Nepavyko sukurti dokumentų iš archyvo"
+                doc.save(update_fields=["status", "error_message"])
+                _settle_and_finish_waybill(doc)
+                return
+
+            if doc.upload_session_id:
+                WaybillUploadSession.objects.filter(id=doc.upload_session_id).update(
+                    actual_items=F("actual_items") + len(created_docs),
+                )
+
+            _settle_and_finish_waybill(doc)
+
+            for i, new_doc_id in enumerate(created_docs, start=1):
+                process_waybill_task.apply_async(
+                    args=[user_id, new_doc_id],
+                    countdown=i * 2,
+                )
+
+            _log_t("TOTAL (archive)", total_start)
+            return
+
+        # ── 6. Single file ──
+        normalized = normalized_result
+
+        # Удаляем оригинал, сохраняем нормализованный
+        t0 = _t()
+        if doc.file and os.path.exists(file_path):
+            try:
+                doc.file.delete(save=False)
+            except Exception:
+                pass
+            if os.path.exists(file_path):
+                try:
+                    os.remove(file_path)
+                except Exception:
+                    pass
+
+        doc.file.save(normalized['filename'], ContentFile(normalized['data']), save=True)
+        doc.refresh_from_db()
+        _log_t("Save normalized", t0)
+
+        file_path = doc.file.path
+        data = normalized['data']
+        preview_url = f"{settings.SITE_URL_BACKEND}/media/{doc.file.name}"
+
+        # # ── 7. Enhanced OCR ──
+        # t0 = _t()
+        # from .utils.waybill_extraction import get_waybill_ocr_text
+
+        # ocr_text, ocr_err = get_waybill_ocr_text(data, doc.file.name)
+        # _log_t("OCR (enhanced)", t0)
+
+        # if ocr_err or not ocr_text:
+        #     doc.status = 'rejected'
+        #     doc.error_message = f"OCR klaida: {ocr_err or 'tuščias rezultatas'}"
+        #     doc.preview_url = preview_url
+        #     doc.save(update_fields=['status', 'error_message', 'preview_url'])
+        #     _settle_and_finish_waybill(doc)
+        #     _log_t("TOTAL (OCR failed)", total_start)
+        #     return
+
+        # # Сохраняем OCR-текст
+        # doc.raw_text = ocr_text
+        # doc.glued_raw_text = ocr_text
+        # doc.preview_url = preview_url
+        # doc.save(update_fields=['raw_text', 'glued_raw_text', 'preview_url'])
+
+        # # ── 8. Field extraction (KIE Gemini) ──
+        # t0 = _t()
+        # from .utils.waybill_extraction import extract_waybill_fields
+
+        # structured, raw_response, extract_err = extract_waybill_fields(ocr_text)
+        # _log_t("Field extraction (KIE)", t0)
+
+        # if extract_err or not structured:
+        #     doc.status = 'rejected'
+        #     doc.error_message = f"Duomenų išgavimo klaida: {extract_err or 'tuščias rezultatas'}"
+        #     doc.gpt_raw_json = raw_response
+        #     doc.preview_url = preview_url
+        #     doc.save(update_fields=['status', 'error_message', 'gpt_raw_json', 'preview_url'])
+        #     _settle_and_finish_waybill(doc)
+        #     _log_t("TOTAL (extraction failed)", total_start)
+        #     return
+
+        # # netinkamas dokumentas
+        # if structured.get("netinkamas_dokumentas"):
+        #     doc.status = "rejected"
+        #     doc.error_message = "Netinkamas dokumentas"
+        #     doc.gpt_raw_json = raw_response
+        #     doc.preview_url = preview_url
+        #     doc.save(update_fields=["status", "error_message", "gpt_raw_json", "preview_url"])
+        #     _settle_and_finish_waybill(doc)
+        #     _log_t("TOTAL (netinkamas)", total_start)
+        #     return
+
+        # ── 7. OCR + Extraction ──
+        t0 = _t()
+        from .utils.waybill_extraction import extract_waybill_from_image
+
+        structured, raw_main, raw_checkboxes, extract_err = extract_waybill_from_image(data, doc.file.name)
+        _log_t("OCR + Extraction", t0)
+
+        if extract_err or not structured:
+            doc.status = 'rejected'
+            doc.error_message = f"Duomenų išgavimo klaida: {extract_err or 'tuščias rezultatas'}"
+            doc.gpt_raw_json = raw_main
+            doc.preview_url = preview_url
+            doc.save(update_fields=['status', 'error_message', 'gpt_raw_json', 'preview_url'])
+            _settle_and_finish_waybill(doc)
+            return
+
+        # Сохраняем raw (оба ответа)
+        doc.raw_text = raw_main
+        doc.glued_raw_text = raw_checkboxes or ""
+        doc.preview_url = preview_url
+        doc.save(update_fields=['raw_text', 'glued_raw_text', 'preview_url'])
+
+        # ── 8. Netinkamas dokumentas check ──
+        if structured.get("netinkamas_dokumentas"):
+            doc.status = "rejected"
+            doc.error_message = "Netinkamas dokumentas"
+            doc.gpt_raw_json = raw_main
+            doc.preview_url = preview_url
+            doc.save(update_fields=["status", "error_message", "gpt_raw_json", "preview_url"])
+            _settle_and_finish_waybill(doc)
+            _log_t("TOTAL (netinkamas)", total_start)
+            return
+        
+        # ── 8.5. Duplicate check by document_number ──
+        doc_number = structured.get("document_number")
+        if doc_number and str(doc_number).strip():
+            from .utils.waybill_extraction import is_waybill_duplicate
+            if is_waybill_duplicate(user, doc_number, exclude_doc_id=doc.id):
+                doc.status = "rejected"
+                doc.error_message = "Dokumentas su tokiu numeriu jau buvo ikeltas"
+                doc.gpt_raw_json = raw_main
+                doc.preview_url = preview_url
+                doc.save(update_fields=["status", "error_message", "gpt_raw_json", "preview_url"])
+                _settle_and_finish_waybill(doc)
+                _log_t("TOTAL (duplicate)", total_start)
+                return
+
+        # ── 9. Save structured data ──
+        t0 = _t()
+        from .utils.waybill_extraction import update_scanned_waybill
+
+        update_scanned_waybill(doc, structured, raw_main, raw_checkboxes, preview_url)
+        _log_t("Save structured", t0)
+
+        # ── 10. Preview optimization ──
+        t0 = _t()
+        try:
+            from .utils.preview_optimizer import optimize_preview_for_document
+
+            if doc.file and os.path.exists(doc.file.path):
+                file_size = os.path.getsize(doc.file.path)
+                if file_size > 150_000:
+                    optimize_preview_for_document(doc)
+                    doc.preview_url = f"{settings.SITE_URL_BACKEND}/media/{doc.file.name}"
+                    doc.save(update_fields=['preview_url'])
+        except Exception as e:
+            logger.warning("[WAYBILL-TASK] Preview optimization failed: %s", e)
+        _log_t("Optimize preview", t0)
+
+        # ── 11. Settle credits ──
+        t0 = _t()
+        doc.refresh_from_db(fields=["id", "status", "upload_session_id"])
+        if doc.upload_session_id:
+            _settle_and_finish_waybill(doc)
+        else:
+            # legacy без session
+            u = CustomUser.objects.get(pk=user_id)
+            u.credits -= WAYBILL_CREDIT_COST
+            u.save(update_fields=["credits"])
+            CreditUsageLog.objects.create(
+                user=u,
+                credits_used=WAYBILL_CREDIT_COST,
+                document_filename=doc.original_filename or '',
+            )
+        _log_t("Settle credits", t0)
+
+        _log_t("TOTAL", total_start)
+
+    except SoftTimeLimitExceeded:
+        logger.error("[WAYBILL-TASK] Soft time limit exceeded for doc_id=%s", doc_id)
+        try:
+            doc = ScannedWaybill.objects.filter(pk=doc_id).first()
+            if doc:
+                doc.status = 'rejected'
+                doc.error_message = "Operacija nutraukta: viršytas laiko limitas"
+                try:
+                    doc.preview_url = f"{settings.SITE_URL_BACKEND}/media/{doc.file.name}"
+                except Exception:
+                    pass
+                doc.save(update_fields=['status', 'error_message', 'preview_url'])
+                _settle_and_finish_waybill(doc)
+        except Exception:
+            pass
+        _log_t("TOTAL (soft time limit)", total_start)
+
+    except Exception as e:
+        logger.exception("[WAYBILL-TASK] Error processing doc_id=%s", doc_id)
+        try:
+            doc = ScannedWaybill.objects.filter(pk=doc_id).first()
+            if doc:
+                doc.status = 'rejected'
+                doc.error_message = "Dokumento apdorojimo klaida. Bandykite ištrinti ir įkelti pakartotinai"
+                doc.save(update_fields=["status", "error_message"])
+                _settle_and_finish_waybill(doc)
+        except Exception:
+            pass
+        _log_t("TOTAL (exception)", total_start)
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# END - Waybill scan
+# ═══════════════════════════════════════════════════════════════════════════════

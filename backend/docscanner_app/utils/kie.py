@@ -25,6 +25,10 @@ if KIE_API_KEY.lower().startswith("bearer "):
 
 KIE_GEMINI_FLASH_URL = "https://api.kie.ai/gemini-2.5-flash/v1/chat/completions"
 KIE_GEMINI_3_FLASH_URL = "https://api.kie.ai/gemini-3-flash/v1/chat/completions"
+KIE_GEMINI_35_FLASH_URL = "https://api.kie.ai/gemini-3-5-flash-openai/v1/chat/completions"
+KIE_GEMINI_31_PRO_URL = "https://api.kie.ai/gemini-3.1-pro/v1/chat/completions"
+
+
 
 KIE_TIMEOUT_SECONDS = float(os.getenv("KIE_TIMEOUT_SECONDS", "300"))
 
