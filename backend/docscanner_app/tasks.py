@@ -4514,12 +4514,10 @@ def process_waybill_task(self, user_id, doc_id):
         #     _log_t("TOTAL (netinkamas)", total_start)
         #     return
 
-        # ── 7. OCR + Extraction ──
-        t0 = _t()
-        from .utils.waybill_extraction import extract_waybill_from_image
+        # ── 7. Step 1: Main extraction ──
+        from .utils.waybill_extraction import extract_waybill_main, verify_checkboxes, _apply_checkbox_results, update_scanned_waybill
 
-        structured, raw_main, raw_checkboxes, extract_err = extract_waybill_from_image(data, doc.file.name)
-        _log_t("OCR + Extraction", t0)
+        structured, raw_main, data_url, extract_err = extract_waybill_main(data, doc.file.name)
 
         if extract_err or not structured:
             doc.status = 'rejected'
@@ -4530,41 +4528,41 @@ def process_waybill_task(self, user_id, doc_id):
             _settle_and_finish_waybill(doc)
             return
 
-        # Сохраняем raw (оба ответа)
         doc.raw_text = raw_main
-        doc.glued_raw_text = raw_checkboxes or ""
         doc.preview_url = preview_url
-        doc.save(update_fields=['raw_text', 'glued_raw_text', 'preview_url'])
+        doc.save(update_fields=['raw_text', 'preview_url'])
 
-        # ── 8. Netinkamas dokumentas check ──
+        # ── 8. Netinkamas check ──
         if structured.get("netinkamas_dokumentas"):
             doc.status = "rejected"
             doc.error_message = "Netinkamas dokumentas"
             doc.gpt_raw_json = raw_main
-            doc.preview_url = preview_url
-            doc.save(update_fields=["status", "error_message", "gpt_raw_json", "preview_url"])
+            doc.save(update_fields=["status", "error_message", "gpt_raw_json"])
             _settle_and_finish_waybill(doc)
-            _log_t("TOTAL (netinkamas)", total_start)
             return
-        
-        # ── 8.5. Duplicate check by document_number ──
+
+        # ── 9. Duplicate check (ПЕРЕД checkbox verification!) ──
         doc_number = structured.get("document_number")
         if doc_number and str(doc_number).strip():
             from .utils.waybill_extraction import is_waybill_duplicate
             if is_waybill_duplicate(user, doc_number, exclude_doc_id=doc.id):
                 doc.status = "rejected"
-                doc.error_message = "Dokumentas su tokiu numeriu jau buvo ikeltas"
+                doc.error_message = "Dublikatas: dokumentas su tokiu numeriu jau buvo įkeltas"
                 doc.gpt_raw_json = raw_main
-                doc.preview_url = preview_url
-                doc.save(update_fields=["status", "error_message", "gpt_raw_json", "preview_url"])
+                doc.save(update_fields=["status", "error_message", "gpt_raw_json"])
                 _settle_and_finish_waybill(doc)
-                _log_t("TOTAL (duplicate)", total_start)
                 return
 
-        # ── 9. Save structured data ──
-        t0 = _t()
-        from .utils.waybill_extraction import update_scanned_waybill
+        # ── 10. Step 2: Checkbox verification (только если не дубликат) ──
+        checked, raw_checkboxes = verify_checkboxes(
+            data_url=data_url, filename=doc.file.name, image_size=len(data),
+        )
+        if checked:
+            structured = _apply_checkbox_results(structured, checked)
+        doc.glued_raw_text = raw_checkboxes or ""
+        doc.save(update_fields=['glued_raw_text'])
 
+        # ── 11. Save structured data ──
         update_scanned_waybill(doc, structured, raw_main, raw_checkboxes, preview_url)
         _log_t("Save structured", t0)
 
