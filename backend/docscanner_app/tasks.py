@@ -4185,8 +4185,12 @@ def _settle_and_finish_waybill(doc: ScannedWaybill):
     if not doc or not getattr(doc, "upload_session_id", None):
         return
 
-    # Kontejnery — ne snimajem kredit, tolko obnovliajem session
+    # Kontejnery — ne snimajem kredit, no obnovliajem session counter
     if doc.is_archive_container or doc.is_multi_doc_container:
+        WaybillUploadSession.objects.filter(id=doc.upload_session_id).update(
+            done_items=F("done_items") + 1,
+            processed_items=F("processed_items") + 1,
+        )
         maybe_finish_waybill_session_async(doc.upload_session_id)
         return
 
