@@ -4184,6 +4184,12 @@ def _settle_and_finish_waybill(doc: ScannedWaybill):
     """Settle credits + check if session is done."""
     if not doc or not getattr(doc, "upload_session_id", None):
         return
+
+    # Kontejnery — ne snimajem kredit, tolko obnovliajem session
+    if doc.is_archive_container or doc.is_multi_doc_container:
+        maybe_finish_waybill_session_async(doc.upload_session_id)
+        return
+
     try:
         settle_waybill_session_for_doc(doc.id)
     finally:
@@ -4306,6 +4312,67 @@ def process_waybill_task(self, user_id, doc_id):
             content_type = 'image/webp'
         elif low.endswith(('.tif', '.tiff')):
             content_type = 'image/tiff'
+
+        # ── 3.5. Multi-page PDF split ──
+        if original_filename.lower().endswith('.pdf') or content_type == 'application/pdf':
+            from .utils.waybill_extraction import split_pdf_to_pages
+
+            t0 = _t()
+            pages = split_pdf_to_pages(file_bytes, original_filename)
+            _log_t("PDF page check", t0)
+
+            if pages:
+                logger.info("[WAYBILL-TASK] Multi-page PDF: %d pages, splitting", len(pages))
+
+                # Pomeciajem parent kak multi-doc container
+                doc.is_multi_doc_container = True
+                doc.status = "completed"
+                doc.error_message = ""
+                doc.save(update_fields=["is_multi_doc_container", "status", "error_message"])
+
+                # Sozdajem child dokumenty
+                created_docs = []
+                for i, page in enumerate(pages, start=1):
+                    try:
+                        new_doc = ScannedWaybill.objects.create(
+                            user=user,
+                            original_filename=page["original_filename"],
+                            status="processing",
+                            upload_session=doc.upload_session,
+                            parent_document=doc,
+                            source_pages=[i],
+                        )
+                        new_doc.file.save(page["filename"], ContentFile(page["data"]), save=True)
+                        new_doc.refresh_from_db()
+                        created_docs.append(new_doc.id)
+                    except Exception as e:
+                        logger.error("[WAYBILL-TASK] Failed to create page %d: %s", i, e)
+
+                if not created_docs:
+                    doc.status = "rejected"
+                    doc.error_message = "Nepavyko sukurti dokumentų iš PDF puslapių"
+                    doc.save(update_fields=["status", "error_message"])
+                    _settle_and_finish_waybill(doc)
+                    return
+
+                # Obnovliajem session counter
+                if doc.upload_session_id:
+                    WaybillUploadSession.objects.filter(id=doc.upload_session_id).update(
+                        actual_items=F("actual_items") + len(created_docs),
+                    )
+
+                # Parent ne snimam credit
+                _settle_and_finish_waybill(doc)
+
+                # Zapuskajem obrabotku kazhdoj stranicy
+                for i, new_doc_id in enumerate(created_docs, start=1):
+                    process_waybill_task.apply_async(
+                        args=[user_id, new_doc_id],
+                        countdown=i * 2,
+                    )
+
+                _log_t("TOTAL (multi-page PDF split)", total_start)
+                return
 
         # ── 4. Normalize ──
         class FakeUpload:
@@ -4536,6 +4603,15 @@ def process_waybill_task(self, user_id, doc_id):
         if structured.get("netinkamas_dokumentas"):
             doc.status = "rejected"
             doc.error_message = "Netinkamas dokumentas"
+            doc.gpt_raw_json = raw_main
+            doc.save(update_fields=["status", "error_message", "gpt_raw_json"])
+            _settle_and_finish_waybill(doc)
+            return
+        
+        # ── 8b. Keli dokumentai check ──
+        if structured.get("keli_dokumentai"):
+            doc.status = "rejected"
+            doc.error_message = "Keli dokumentai viename faile"
             doc.gpt_raw_json = raw_main
             doc.save(update_fields=["status", "error_message", "gpt_raw_json"])
             _settle_and_finish_waybill(doc)

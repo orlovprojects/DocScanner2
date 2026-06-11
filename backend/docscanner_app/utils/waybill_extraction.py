@@ -184,6 +184,7 @@ Fuel measurements — standard (+15°C):
 6. Two measurement rows: first = observed, second = standard at +15°C.
 7. Output must be parsable by JSON.parse().
 8. If not an aviation fuel waybill: {"netinkamas_dokumentas":true}
+9. If the image contains MORE THAN ONE waybill document (multiple waybills on one page), return: {"keli_dokumentai":true}"
 """
 
 
@@ -632,7 +633,43 @@ def update_scanned_waybill(db_waybill, structured, raw_main, raw_checkboxes, pre
         "[WAYBILL] Updated id=%s: %d fields, number=%s",
         db_waybill.pk, len(update_fields), db_waybill.document_number,
     )
+    
 
+def split_pdf_to_pages(pdf_bytes, base_filename):
+    """Razrezajet multi-page PDF na otdelnyje stranicy (JPEG).
+    Returns list of dicts ili None jesli PDF <= 1 stranicy.
+    """
+    try:
+        from pdf2image import convert_from_bytes
+    except ImportError:
+        logger.warning("[WAYBILL] pdf2image not installed, cannot split PDF")
+        return None
+
+    import io
+
+    try:
+        images = convert_from_bytes(pdf_bytes, dpi=200, fmt="jpeg", timeout=60)
+    except Exception as e:
+        logger.warning("[WAYBILL] PDF split failed: %s", e)
+        return None
+
+    if len(images) <= 1:
+        return None
+
+    base = os.path.splitext(base_filename)[0]
+    pages = []
+
+    for i, img in enumerate(images, start=1):
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", quality=90)
+        pages.append({
+            "filename": f"{base}_v{i}.jpg",
+            "data": buf.getvalue(),
+            "original_filename": f"{base}_v{i}.jpg",
+        })
+
+    logger.info("[WAYBILL] PDF split: %s → %d pages", base_filename, len(pages))
+    return pages
 
 
 
