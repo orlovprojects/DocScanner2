@@ -12021,12 +12021,13 @@ def waybill_list(request):
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 def waybill_detail(request, pk):
-    """Получить полную информацию о важтарашчисе."""
     try:
-        doc = ScannedWaybill.objects.get(pk=pk, user=request.user)
+        if request.user.is_superuser:
+            doc = ScannedWaybill.objects.get(pk=pk)
+        else:
+            doc = ScannedWaybill.objects.get(pk=pk, user=request.user)
     except ScannedWaybill.DoesNotExist:
         return Response({"error": "Not found"}, status=404)
-
     return Response(ScannedWaybillDetailSerializer(doc).data)
 
 
