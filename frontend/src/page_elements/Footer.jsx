@@ -178,6 +178,9 @@ const Footer = () => {
                   <Link href="/suma-zodziais" underline="none" color="inherit" sx={linkSx}>
                     Nemokamas sumos žodžiais generatorius
                   </Link>
+                  <Link href="/mazosios-bendrijos-skaiciuokle" underline="none" color="inherit" sx={linkSx}>
+                    MB skaičiuoklė 2026
+                  </Link>
                   <Link href="/" underline="none" color="inherit" sx={linkSx}>
                     Atlyginimo skaičiuoklė 2026
                   </Link>
