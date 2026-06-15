@@ -472,6 +472,22 @@ def superuser_dashboard_stats(request):
     email_30d = _email_stats_last_n_days(30)
     email_total = _email_stats_total()
 
+    # ========== Važtaraščiai stats ==========
+    wb_qs_all = ScannedWaybill.objects.filter(
+        is_archive_container=False,
+        is_multi_doc_container=False,
+    ).exclude(user_id__in=[1, 2, 31, 105])
+    wb_qs_today = wb_qs_all.filter(uploaded_at__date=today)
+    wb_qs_yesterday = wb_qs_all.filter(uploaded_at__date=yesterday)
+    wb_qs_7d = wb_qs_all.filter(uploaded_at__gte=timezone.now() - timedelta(days=7))
+    wb_qs_30d = wb_qs_all.filter(uploaded_at__gte=timezone.now() - timedelta(days=30))
+
+    def _wb_stats(qs):
+        total = qs.count()
+        ok = qs.filter(status__in=("completed", "exported")).count()
+        rej = qs.filter(status="rejected").count()
+        return {"total": total, "ok": ok, "rejected": rej}
+
     data = {
         "documents": {
             "today":       {"count": docs_today,     "errors": err_today},
@@ -502,6 +518,13 @@ def superuser_dashboard_stats(request):
                 "sumiskai": {"count": st_sumiskai, "pct": _pct(st_sumiskai, total_docs)},
                 "detaliai": {"count": st_detaliai, "pct": _pct(st_detaliai, total_docs)},
             },
+        },
+        "vaztarasciai": {
+            "today": _wb_stats(wb_qs_today),
+            "yesterday": _wb_stats(wb_qs_yesterday),
+            "last_7_days": _wb_stats(wb_qs_7d),
+            "last_30_days": _wb_stats(wb_qs_30d),
+            "total": _wb_stats(wb_qs_all),
         },
         "users": {
             "new_today":        new_users_today,

@@ -370,6 +370,54 @@ export default function AdminDashboard() {
           />
         </Grid>
 
+        {/* Važtaraščiai */}
+        <Grid size={12}>
+          <Card
+            elevation={0}
+            sx={{
+              border: 1,
+              borderColor: "#FF9800",
+              bgcolor: "#FFF8E1",
+              borderRadius: 2,
+            }}
+          >
+            <CardContent>
+              <Box display="flex" alignItems="center" gap={2} flexWrap="wrap">
+                <Description sx={{ color: "#FF9800", fontSize: 32 }} />
+                <Box flex={1} minWidth={260}>
+                  <Typography variant="h6" fontWeight={800} color="#E65100">
+                    Važtaraščiai
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Sėkmingi / Atmesti
+                  </Typography>
+                </Box>
+                <Stack direction="row" spacing={3} flexWrap="wrap">
+                  {[
+                    ["Šiandien", stats.vaztarasciai?.today],
+                    ["Vakar", stats.vaztarasciai?.yesterday],
+                    ["Pask. 7 d.", stats.vaztarasciai?.last_7_days],
+                    ["Pask. 30 d.", stats.vaztarasciai?.last_30_days],
+                    ["Viso", stats.vaztarasciai?.total],
+                  ].map(([label, d]) => (
+                    <Box key={label} textAlign="center" sx={{ minWidth: 80 }}>
+                      <Typography variant="caption" color="text.secondary">{label}</Typography>
+                      <Typography variant="h6" fontWeight={700}>
+                        <span style={{ color: "#16a34a" }}>{d?.ok ?? 0}</span>
+                        {" / "}
+                        <span style={{ color: d?.rejected > 0 ? "#dc2626" : "#9ca3af" }}>{d?.rejected ?? 0}</span>
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        iš {d?.total ?? 0}
+                      </Typography>
+                    </Box>
+                  ))}
+                </Stack>
+              </Box>
+            </CardContent>
+          </Card>
+        </Grid>
+
         {/* Success rate card */}
         <Grid size={12}>
           <Card
