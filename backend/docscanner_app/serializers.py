@@ -17,6 +17,22 @@ from .models import Payments, MeasurementUnit, InvoiceSeries, Product, Recurring
 from .utils.lineitem_rules import normalize_lineitem_rules
 
 
+def normalize_company_replace_rules(raw):
+    """Нормализует входящий список company_replace_rules."""
+    if raw is None:
+        return []
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except Exception:
+            return []
+    if isinstance(raw, dict):
+        raw = [raw]
+    if not isinstance(raw, list):
+        return []
+    return raw
+
+
 class LineItemSerializer(serializers.ModelSerializer):
     pvm_kodas_label = serializers.CharField(read_only=True, required=False)
     class Meta:
@@ -465,6 +481,7 @@ class CustomUserSerializer(serializers.ModelSerializer):
     sales_defaults    = serializers.JSONField(required=False)
 
     lineitem_rules    = serializers.JSONField(required=False)
+    company_replace_rules = serializers.JSONField(required=False)
 
     extra_settings    = serializers.JSONField(required=False, allow_null=True)
 
@@ -495,7 +512,7 @@ class CustomUserSerializer(serializers.ModelSerializer):
             'rivile_erp_extra_fields', 'rivile_gama_extra_fields', 'butent_extra_fields','finvalda_extra_fields',
             'centas_extra_fields','agnum_extra_fields','debetas_extra_fields','site_pro_extra_fields',
             'pragma3_extra_fields', 'pragma4_extra_fields', 'optimum_extra_fields', 'dineta_extra_fields',
-            'inbox_email_address', 'has_waybill_access'
+            'inbox_email_address', 'has_waybill_access', 'company_replace_rules'
         ]
         read_only_fields = ('credits', 'has_waybill_access')
         extra_kwargs = {
@@ -691,6 +708,8 @@ class CustomUserSerializer(serializers.ModelSerializer):
         # 🔹 НОВОЕ: сырые правила по строкам
         raw_lr = self.initial_data.get('lineitem_rules', None)
 
+        raw_crr = self.initial_data.get('company_replace_rules', None)
+
         # extra_settings уже провалидирован
         extra   = validated_data.pop('extra_settings', None)
 
@@ -707,8 +726,15 @@ class CustomUserSerializer(serializers.ModelSerializer):
         pragma3_extra    = validated_data.pop('pragma3_extra_fields', None)
         pragma4_extra    = validated_data.pop('pragma4_extra_fields', None)
 
+        validated_data.pop('company_replace_rules', None)
+
         user = CustomUser.objects.create_user(password=password, **validated_data)
         user.credits = 50
+
+        if raw_crr is not None:
+            user.company_replace_rules = normalize_company_replace_rules(raw_crr)
+        else:
+            user.company_replace_rules = []
 
         # стартуем со списков
         user.purchase_defaults = []
@@ -777,7 +803,8 @@ class CustomUserSerializer(serializers.ModelSerializer):
             'rivile_erp_extra_fields', 'rivile_gama_extra_fields',
             'butent_extra_fields','finvalda_extra_fields',
             'centas_extra_fields','agnum_extra_fields', 'debetas_extra_fields',
-            'site_pro_extra_fields', 'pragma3_extra_fields', 'pragma4_extra_fields', 'optimum_extra_fields', 'dineta_extra_fields',
+            'site_pro_extra_fields', 'pragma3_extra_fields', 'pragma4_extra_fields', 
+            'optimum_extra_fields', 'dineta_extra_fields', 'company_replace_rules',
         ])
         return user
     
@@ -798,6 +825,12 @@ class CustomUserSerializer(serializers.ModelSerializer):
 
         # 🔹 для lineitem_rules НИКАКИХ спец-команд — только список целиком
         raw_lr = self.initial_data.get('lineitem_rules', None)
+
+        raw_crr = self.initial_data.get('company_replace_rules', None)
+        validated_data.pop('company_replace_rules', None)
+
+        if raw_crr is not None:
+            instance.company_replace_rules = normalize_company_replace_rules(raw_crr)
 
         # какой метод
         method = (self.context.get('request').method.upper()

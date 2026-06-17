@@ -275,6 +275,8 @@ class ScannedDocument(models.Model):
     currency = models.CharField(max_length=20, blank=True, null=True)
     with_receipt = models.BooleanField(blank=True, null=True)
     paid_by_cash = models.BooleanField(blank=True, null=True)
+    buyer_replaced_by_rule = models.BooleanField(default=False)
+    seller_replaced_by_rule = models.BooleanField(default=False)
 
     note = models.TextField(blank=True, null=True)
     report_to_isaf = models.BooleanField(blank=True, null=True)
@@ -625,6 +627,8 @@ class CustomUser(AbstractUser):
     purchase_defaults = models.JSONField(default=_purchase_default_list, blank=True)
     sales_defaults = models.JSONField(default=_sales_default_list, blank=True)
     lineitem_rules = models.JSONField(default=list, blank=True)
+    company_replace_rules = models.JSONField(default=list, blank=True)
+
 
     extra_settings = models.JSONField(blank=True, null=True)
 

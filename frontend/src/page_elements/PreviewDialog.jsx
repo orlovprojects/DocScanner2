@@ -4,6 +4,8 @@ import dayjs from 'dayjs';
 import 'dayjs/locale/lt';
 import React from 'react';
 import SwapBuyerSellerButton from './SwapBuyerSellerButton';
+import SwapHorizontalCircleIcon from "@mui/icons-material/SwapHorizontalCircle";
+import FindReplaceIcon from "@mui/icons-material/FindReplace";
 
 import {
   Dialog,
@@ -1179,6 +1181,56 @@ export default function PreviewDialog({
               ...invoiceTypeChipSx,
               bgcolor: "#BBDCE5",
               color: "#1B4D5C",
+            }}
+          />
+        )}
+        {selected?.buyer_replaced_by_rule && selected?.seller_replaced_by_rule && (
+          <Chip
+            icon={<FindReplaceIcon />}
+            label="Pirkėjas ir pardavėjas pakeisti"
+            size="small"
+            sx={{
+              fontSize: isMobile ? "0.75rem" : "0.8125rem",
+              fontWeight: 600,
+              height: 24,
+              bgcolor: "#7DBF82",
+              color: "#fff",
+              "& .MuiChip-icon": { color: "#fff", fontSize: isMobile ? "1rem" : "1.1rem" },
+              "& .MuiChip-label": { px: 1 },
+            }}
+          />
+        )}
+
+        {selected?.buyer_replaced_by_rule && !selected?.seller_replaced_by_rule && (
+          <Chip
+            icon={<SwapHorizontalCircleIcon />}
+            label="Pirkėjas pakeistas"
+            size="small"
+            sx={{
+              fontSize: isMobile ? "0.75rem" : "0.8125rem",
+              fontWeight: 600,
+              height: 24,
+              bgcolor: "#D98A8A",
+              color: "#fff",
+              "& .MuiChip-icon": { color: "#fff", fontSize: isMobile ? "1rem" : "1.1rem" },
+              "& .MuiChip-label": { px: 1 },
+            }}
+          />
+        )}
+
+        {selected?.seller_replaced_by_rule && !selected?.buyer_replaced_by_rule && (
+          <Chip
+            icon={<SwapHorizontalCircleIcon />}
+            label="Pardavėjas pakeistas"
+            size="small"
+            sx={{
+              fontSize: isMobile ? "0.75rem" : "0.8125rem",
+              fontWeight: 600,
+              height: 24,
+              bgcolor: "#D4A84B",
+              color: "#fff",
+              "& .MuiChip-icon": { color: "#fff", fontSize: isMobile ? "1rem" : "1.1rem" },
+              "& .MuiChip-label": { px: 1 },
             }}
           />
         )}

@@ -44,6 +44,8 @@ import CancelIcon from "@mui/icons-material/Cancel";
 import ShoppingCartIcon from "@mui/icons-material/ShoppingCart";
 import SellIcon from "@mui/icons-material/Sell";
 import RemoveCircleOutlineIcon from "@mui/icons-material/RemoveCircleOutline";
+import SwapHorizontalCircleIcon from "@mui/icons-material/SwapHorizontalCircle";
+import FindReplaceIcon from "@mui/icons-material/FindReplace";
 
 import { CreditInvoiceIcon, DebitInvoiceIcon } from "../components/Icons";
 
@@ -737,6 +739,26 @@ export default function DocumentsTable({
         <Box key="debit-invoice" component="span" sx={invoiceIconWrapSx}>
           <DebitInvoiceIcon sx={invoiceIconSx} />
         </Box>
+      );
+    }
+    
+    if (d.buyer_replaced_by_rule && d.seller_replaced_by_rule) {
+      icons.push(
+        <Tooltip key="both-replaced" title="Pirkėjas ir pardavėjas buvo pakeisti pagal taisyklę" {...tooltipProps}>
+          <FindReplaceIcon fontSize={iconFontSize} sx={{ ...iconSx, color: "#7DBF82" }} />
+        </Tooltip>
+      );
+    } else if (d.buyer_replaced_by_rule) {
+      icons.push(
+        <Tooltip key="buyer-replaced" title="Pirkėjas buvo pakeistas pagal taisyklę" {...tooltipProps}>
+          <SwapHorizontalCircleIcon fontSize={iconFontSize} sx={{ ...iconSx, color: "#D98A8A" }} />
+        </Tooltip>
+      );
+    } else if (d.seller_replaced_by_rule) {
+      icons.push(
+        <Tooltip key="seller-replaced" title="Pardavėjas buvo pakeistas pagal taisyklę" {...tooltipProps}>
+          <SwapHorizontalCircleIcon fontSize={iconFontSize} sx={{ ...iconSx, color: "#D4A84B" }} />
+        </Tooltip>
       );
     }
 

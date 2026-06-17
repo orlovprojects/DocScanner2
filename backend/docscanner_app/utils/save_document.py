@@ -17,6 +17,7 @@ from ..validators.currency_converter import to_iso_currency
 from ..validators.company_name_normalizer import normalize_company_name_v2
 from ..validators.vat_validator import validate_vat
 from ..validators.vat_code_sanitizer import sanitize_vat_code
+from ..utils.company_replace_rules_applier import apply_company_replace_rules
 
 
 
@@ -856,6 +857,16 @@ def update_scanned_document(
             preview_url=preview_url,
             glued_raw_text=glued_raw_text,
         )
+
+        # ── Применяем правила замены контрагентов ──
+        try:
+            crr_count = apply_company_replace_rules(db_doc, user)
+            if crr_count:
+                logger.info("apply_company_replace_rules applied %d replacement(s)", crr_count)
+                db_doc.pirkimas_pardavimas = determine_pirkimas_pardavimas(doc_struct, user)
+        except Exception as e:
+            logger.warning("Failed to apply company_replace_rules: %s", e)
+
         db_doc.save()
 
         _save_line_items(db_doc, doc_struct, scan_type)
@@ -866,18 +877,14 @@ def update_scanned_document(
                 logger.info("apply_lineitem_rules_for_detaliai changed %d line(s)", changed)
         except Exception as e:
             logger.warning("Failed to apply lineitem_rules: %s", e)
-            
 
         if scan_type == "detaliai" and (structured or {}).get("ar_sutapo") is not None:
-            # Не затираем внешний флаг, если он пришёл снаружи
             db_doc.val_ar_sutapo = structured.get("ar_sutapo")
 
         db_doc.status = "completed"
 
-        # Проверка обязательных полей
         db_doc.ready_for_export = check_required_fields_for_export(db_doc)
 
-        # Проверка математики
         math_valid, math_report = validate_document_math_for_export(db_doc)
         db_doc.math_validation_passed = math_valid
 

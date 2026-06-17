@@ -377,7 +377,7 @@ export default function AdminDashboard() {
             sx={{
               border: 1,
               borderColor: "#FF9800",
-              bgcolor: "#FFF8E1",
+              bgcolor: "background.paper",
               borderRadius: 2,
             }}
           >
