@@ -79,6 +79,7 @@ const BankStatementsPage = lazy(() => import('./pages/BankStatementsPage'));
 const InvoicePublicPage = lazy(() => import('./pages/InvoicePublicPage'));
 const VeiklosZurnalasPage = lazy(() => import('./pages/VeiklosZurnalasPage'));
 const OSSReportPage = lazy(() => import('./pages/Ossreportpage'));
+const SVSReportPage = lazy(() => import('./pages/SVSReportPage'));
 
 // ─── Loader для Suspense ───
 function PageLoader() {
@@ -195,6 +196,7 @@ function App() {
           <Route path="/registruotis" element={<RedirectIfAuthenticated><Register /></RedirectIfAuthenticated>} />
           <Route path="/veiklos-zurnalas" element={<PrivateRoute><VeiklosZurnalasPage /></PrivateRoute>} />
           <Route path="/oss-zurnalas" element={<PrivateRoute><OSSReportPage /></PrivateRoute>} />
+          <Route path="/svs-deklaravimas" element={<PrivateRoute><SVSReportPage /></PrivateRoute>} />
           <Route path="/papildyti" element={<Subscribe />} />
           <Route path="/susisiekti" element={<Contact />} />
           <Route path="/nustatymai" element={<PrivateRoute><NustatymaiPage /></PrivateRoute>} />

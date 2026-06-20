@@ -334,6 +334,12 @@ class ScannedDocument(models.Model):
     val_total_match = models.BooleanField(null=True, blank=True)
     ready_for_export = models.BooleanField(null=True, blank=True, default=None)
     math_validation_passed = models.BooleanField(null=True, blank=True, default=None)
+    traded_type = models.CharField(
+        "Prekė/Paslauga/Mišrus",
+        max_length=12,
+        choices=[("services", "Paslaugos"), ("goods", "Prekės"), ("mixed", "Mišrus")],
+        blank=True, null=True,
+    )
 
     # ===== Novyje dlia progress bar i razdelenija uploadov na neskolko sessij =====
     upload_session = models.ForeignKey(

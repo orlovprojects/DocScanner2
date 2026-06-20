@@ -233,6 +233,8 @@ class ScannedDocumentListSerializer(serializers.ModelSerializer):
             "rivile_api_last_try",
             'is_credit_invoice',
             'is_debit_invoice',
+            'buyer_replaced_by_rule',
+            'seller_replaced_by_rule',
             # ...и т.п., без тяжелых полей и line_items
         ]
 

@@ -440,6 +440,12 @@ def _apply_top_level_fields(
         db_doc.centro_kodas = ""
         db_doc.centro_pavadinimas = ""
 
+    # Стало:
+    # ── traded_type (paslaugos/prekės/mišrus) ──
+    # sumiskai: iš LLM atsakymo; detaliai: perskaičiuosime iš line_items (_save_line_items)
+    db_doc.traded_type = doc_struct.get("traded_type")
+
+
     # Определяем pirkimas/pardavimas
     db_doc.pirkimas_pardavimas = determine_pirkimas_pardavimas(doc_struct, user)
 
@@ -757,6 +763,22 @@ def _save_line_items(db_doc, doc_struct: Dict[str, Any], scan_type: str):
             seller_has_vat_code=getattr(db_doc, "seller_has_vat_code", None),
             doc_96_str=bool(getattr(db_doc, "doc_96_str", False)),
         )
+
+    # ── Agregacija traded_type iš line items (detaliai) ──
+    if scan_type == "detaliai" and line_items:
+        pp_values = set()
+        for raw_item in line_items:
+            pp = str(raw_item.get("preke_paslauga") or "").strip()
+            if pp in ("1", "2", "3", "4"):
+                pp_values.add(pp)
+
+        if pp_values:
+            if pp_values <= {"2", "4", "paslauga"}:
+                db_doc.traded_type = "services"
+            elif pp_values <= {"1", "3", "preke"}:
+                db_doc.traded_type = "goods"
+            else:
+                db_doc.traded_type = "mixed"
 
     db_doc.save()
 

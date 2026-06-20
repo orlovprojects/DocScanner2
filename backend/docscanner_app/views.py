@@ -7451,60 +7451,91 @@ def invoice_check_number(request):
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 def invoice_search_products(request):
-    """
-    Ищет по ранее использованным товарам/услугам пользователя.
-    Источник — InvoiceLineItem из счетов этого пользователя.
-    Дедупликация по (pavadinimas, kodas, barkodas).
-    """
     q = request.query_params.get("q", "").strip()
     limit = min(int(request.query_params.get("limit", 15)), 50)
 
     if len(q) < 2:
         return Response([])
 
-    # Все строки из счетов этого пользователя
-    qs = InvoiceLineItem.objects.filter(
-        invoice__user=request.user,
-    ).exclude(
-        prekes_pavadinimas="",
-    )
+    qs = Product.objects.filter(user=request.user).filter(
+        Q(pavadinimas__icontains=q) |
+        Q(kodas__icontains=q) |
+        Q(barkodas__icontains=q)
+    ).select_related("measurement_unit").order_by("pavadinimas")[:limit]
 
-    # Поиск по трём полям
-    q_upper = q.upper()
-    q_filter = (
-        Q(prekes_pavadinimas__icontains=q) |
-        Q(prekes_kodas__icontains=q) |
-        Q(prekes_barkodas__icontains=q)
-    )
-    qs = qs.filter(q_filter)
-
-    # Берём уникальные комбинации, приоритет — последние использованные
-    qs = qs.order_by("-invoice__created_at")
-
-    # Дедупликация в Python (чтобы сохранить последнюю цену)
-    seen = set()
-    results = []
-    for item in qs.iterator():
-        key = (
-            item.prekes_pavadinimas.strip().upper(),
-            item.prekes_kodas.strip().upper(),
-        )
-        if key in seen:
-            continue
-        seen.add(key)
-        results.append({
-            "id": item.id,
-            "prekes_pavadinimas": item.prekes_pavadinimas,
-            "prekes_kodas": item.prekes_kodas,
-            "prekes_barkodas": item.prekes_barkodas,
-            "price": float(item.price) if item.price is not None else None,
-            "unit": item.unit or "vnt",
-            "vat_percent": float(item.vat_percent) if item.vat_percent is not None else None,
-        })
-        if len(results) >= limit:
-            break
+    results = [
+        {
+            "id": p.id,
+            "prekes_pavadinimas": p.pavadinimas,
+            "prekes_kodas": p.kodas,
+            "prekes_barkodas": p.barkodas,
+            "preke_paslauga": p.preke_paslauga,
+            "price": float(p.pardavimo_kaina) if p.pardavimo_kaina is not None else None,
+            "unit": str(p.measurement_unit) if p.measurement_unit else "vnt",
+            "vat_percent": p.pvm_procentas,
+        }
+        for p in qs
+    ]
 
     return Response(results)
+
+# @api_view(["GET"])
+# @permission_classes([IsAuthenticated])
+# def invoice_search_products(request):
+#     """
+#     Ищет по ранее использованным товарам/услугам пользователя.
+#     Источник — InvoiceLineItem из счетов этого пользователя.
+#     Дедупликация по (pavadinimas, kodas, barkodas).
+#     """
+#     q = request.query_params.get("q", "").strip()
+#     limit = min(int(request.query_params.get("limit", 15)), 50)
+
+#     if len(q) < 2:
+#         return Response([])
+
+#     # Все строки из счетов этого пользователя
+#     qs = InvoiceLineItem.objects.filter(
+#         invoice__user=request.user,
+#     ).exclude(
+#         prekes_pavadinimas="",
+#     )
+
+#     # Поиск по трём полям
+#     q_upper = q.upper()
+#     q_filter = (
+#         Q(prekes_pavadinimas__icontains=q) |
+#         Q(prekes_kodas__icontains=q) |
+#         Q(prekes_barkodas__icontains=q)
+#     )
+#     qs = qs.filter(q_filter)
+
+#     # Берём уникальные комбинации, приоритет — последние использованные
+#     qs = qs.order_by("-invoice__created_at")
+
+#     # Дедупликация в Python (чтобы сохранить последнюю цену)
+#     seen = set()
+#     results = []
+#     for item in qs.iterator():
+#         key = (
+#             item.prekes_pavadinimas.strip().upper(),
+#             item.prekes_kodas.strip().upper(),
+#         )
+#         if key in seen:
+#             continue
+#         seen.add(key)
+#         results.append({
+#             "id": item.id,
+#             "prekes_pavadinimas": item.prekes_pavadinimas,
+#             "prekes_kodas": item.prekes_kodas,
+#             "prekes_barkodas": item.prekes_barkodas,
+#             "price": float(item.price) if item.price is not None else None,
+#             "unit": item.unit or "vnt",
+#             "vat_percent": float(item.vat_percent) if item.vat_percent is not None else None,
+#         })
+#         if len(results) >= limit:
+#             break
+
+#     return Response(results)
 
 
 
@@ -11612,6 +11643,690 @@ class OSSReportExportView(APIView):
 # ──────────────────────────────────────────────────────────────
 
 # ────────────────────────────────────────────────────────────
+# ─── SVS
+# ────────────────────────────────────────────────────────────
+
+import io
+import logging
+from decimal import Decimal
+from collections import defaultdict
+
+from django.db.models import Count, Q
+from django.http import HttpResponse
+from rest_framework.views import APIView
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+from openpyxl import Workbook
+from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
+
+
+
+# ── SVS traded_type filter (vključaja NULL dlia obratnoj sovmestimosti) ──
+_SVS_TRADED_Q = (
+    Q(traded_type="services")
+    | Q(traded_type__isnull=True)
+    | Q(traded_type="")
+)
+
+CODE_LABELS = {
+    "140": "Iš kitų ES valstybių narių įsigytų paslaugų apmokestinamoji vertė",
+    "141": "Iš ne ES šalių įsigytų paslaugų apmokestinamoji vertė",
+    "043": "Paslaugų, kurių teikimo vieta yra kita valstybė narė, apmokestinamoji vertė",
+}
+
+
+# ──────────────────────────────────────────────────────────────
+# Helpers
+# ──────────────────────────────────────────────────────────────
+
+def _svs_dedup_key(series, number, amount, invoice_date):
+    s = (series or "").strip().lower()
+    n = (number or "").strip().lower()
+    try:
+        a = str(Decimal(str(amount)).quantize(Decimal("0.01"))) if amount is not None else ""
+    except Exception:
+        a = ""
+    d = str(invoice_date) if invoice_date else ""
+    return (s, n, a, d)
+
+
+def _strip_vat_prefix(vat_code, country_iso):
+    """Nuima šalies prefiksą iš PVM kodo (FR0564 reikalauja be prefikso)."""
+    if not vat_code:
+        return ""
+    vat = vat_code.strip()
+    prefix = (country_iso or "").strip().upper()
+    if prefix and vat.upper().startswith(prefix):
+        return vat[len(prefix):]
+    return vat
+
+
+def _classify_svs_doc(
+    source, doc_id,
+    seller_key, buyer_key,
+    seller_country_iso, buyer_country_iso,
+    buyer_vat_code, buyer_name, seller_name,
+    vat_percent, vat_amount,
+    amount_wo_vat, amount_with_vat,
+    traded_type,
+    invoice_date, document_series, document_number,
+    currency,
+    contractor_keys_set,
+):
+    """
+    Klasifikuoja dokumentą kaip SVS pirkimą (140/141) arba pardavimą (043).
+    Grąžina dict arba None jei dokumentas netinka SVS.
+    """
+    seller_iso = (seller_country_iso or "").strip().upper()
+    buyer_iso = (buyer_country_iso or "").strip().upper()
+    b_vat = (buyer_vat_code or "").strip()
+    t_type = (traded_type or "").strip().lower()
+
+    # traded_type filtras: tik paslaugos/mišrus (arba tuščias — atgalinis suderinamumas)
+    is_services = t_type in ("services")
+
+    # ── Pirkimas: mano įmonė = buyer, seller užsienietis, PVM ≈ 0% ──
+    if buyer_key in contractor_keys_set and seller_key not in contractor_keys_set:
+        if not seller_iso or seller_iso == "LT":
+            return None
+        if not is_services:
+            return None
+
+        # Tikriname ar pardavėjas nepritaikė LT PVM (pvz. per OSS)
+        vp = _safe_d(vat_percent)
+        va = _safe_d(vat_amount)
+        if vp > 0 and va > 0:
+            return None
+
+        svs_code = "140" if seller_iso in EU_COUNTRIES_NO_LT else "141"
+
+        # Apmokestinamoji vertė: amount_wo_vat, fallback į amount_with_vat (nes PVM=0)
+        taxable = _to_eur(amount_wo_vat, currency, invoice_date)
+        if taxable == Decimal("0") and amount_with_vat:
+            taxable = _to_eur(amount_with_vat, currency, invoice_date)
+
+        return {
+            "source": source,
+            "doc_id": doc_id,
+            "svs_code": svs_code,
+            "invoice_date": invoice_date,
+            "document_series": document_series or "",
+            "document_number": document_number or "",
+            "counterparty_name": seller_name or "",
+            "counterparty_country_iso": seller_iso,
+            "counterparty_vat_code": "",
+            "amount_wo_vat_eur": taxable,
+            "vat_amount_eur": Decimal("0"),
+            "amount_with_vat": amount_with_vat,
+        }
+
+    # ── Pardavimas: mano įmonė = seller, buyer yra ES PVM mokėtojas ──
+    if seller_key in contractor_keys_set and buyer_key not in contractor_keys_set:
+        if buyer_iso not in EU_COUNTRIES_NO_LT:
+            return None
+        if not b_vat:
+            return None
+        if not is_services:
+            return None
+
+        taxable = _to_eur(amount_wo_vat, currency, invoice_date)
+        if taxable == Decimal("0") and amount_with_vat:
+            taxable = _to_eur(amount_with_vat, currency, invoice_date)
+
+        return {
+            "source": source,
+            "doc_id": doc_id,
+            "svs_code": "043",
+            "invoice_date": invoice_date,
+            "document_series": document_series or "",
+            "document_number": document_number or "",
+            "counterparty_name": buyer_name or "",
+            "counterparty_country_iso": buyer_iso,
+            "counterparty_vat_code": b_vat,
+            "amount_wo_vat_eur": taxable,
+            "vat_amount_eur": Decimal("0"),
+            "amount_with_vat": amount_with_vat,
+        }
+
+    return None
+
+
+# ──────────────────────────────────────────────────────────────
+# Contractor search
+# ──────────────────────────────────────────────────────────────
+
+class SVSContractorSearchView(APIView):
+    """Kontrahentų paieška SVS ataskaitai — vartotojas renkasi savo įmonės variacijas."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        search = (request.query_params.get("q") or "").strip().lower()
+        if len(search) < 2:
+            return Response([])
+
+        merged = {}
+
+        def upsert(cp_id, name, vat, cnt, svs_cnt=0):
+            key = _company_key(name, vat, cp_id)
+            if not key:
+                return
+            if key in merged:
+                merged[key]["count"] += int(cnt or 0)
+                merged[key]["svs_count"] += int(svs_cnt or 0)
+                if not merged[key]["code"] and cp_id:
+                    merged[key]["code"] = (cp_id or "").strip() or None
+                if not merged[key]["vat"] and vat:
+                    merged[key]["vat"] = vat or ""
+                if not merged[key]["display_name"] and name:
+                    merged[key]["display_name"] = name or ""
+            else:
+                merged[key] = {
+                    "key": key,
+                    "display_name": name or "",
+                    "code": (cp_id or "").strip() or None,
+                    "vat": vat or "",
+                    "count": int(cnt or 0),
+                    "svs_count": int(svs_cnt or 0),
+                }
+
+        # ── SVS pirkimų filtras: pardavėjas užsienietis, PVM ≈ 0, paslaugos ──
+        svs_purchase_q = (
+            ~Q(seller_country_iso="LT")
+            & Q(seller_country_iso__isnull=False)
+            & ~Q(seller_country_iso="")
+            & (Q(vat_percent__isnull=True) | Q(vat_percent=0) | Q(vat_amount=0) | Q(vat_amount__isnull=True))
+            & _SVS_TRADED_Q
+        )
+
+        # ── SVS pardavimų filtras: pirkėjas yra ES PVM mokėtojas ──
+        svs_sale_q = (
+            Q(buyer_country_iso__in=EU_COUNTRIES_NO_LT)
+            & ~Q(buyer_vat_code__isnull=True)
+            & ~Q(buyer_vat_code="")
+            & _SVS_TRADED_Q
+        )
+
+        # ── ScannedDocument ──
+        sd_qs = ScannedDocument.objects.filter(
+            user=request.user,
+            status__in=["completed", "exported"],
+            is_archive_container=False,
+        )
+
+        for r in sd_qs.exclude(seller_name__isnull=True).exclude(seller_name="") \
+                .values("seller_id", "seller_name", "seller_vat_code").annotate(cnt=Count("id")):
+            upsert(r["seller_id"], r["seller_name"], r["seller_vat_code"], r["cnt"])
+        for r in sd_qs.exclude(buyer_name__isnull=True).exclude(buyer_name="") \
+                .values("buyer_id", "buyer_name", "buyer_vat_code").annotate(cnt=Count("id")):
+            upsert(r["buyer_id"], r["buyer_name"], r["buyer_vat_code"], r["cnt"])
+
+        # SVS count — pirkimai (kontrahentas = buyer)
+        for r in sd_qs.filter(svs_purchase_q) \
+                .exclude(buyer_name__isnull=True).exclude(buyer_name="") \
+                .values("buyer_id", "buyer_name", "buyer_vat_code").annotate(cnt=Count("id")):
+            key = _company_key(r["buyer_name"], r["buyer_vat_code"], r["buyer_id"])
+            if key and key in merged:
+                merged[key]["svs_count"] += int(r["cnt"] or 0)
+
+        # SVS count — pardavimai (kontrahentas = seller)
+        for r in sd_qs.filter(svs_sale_q) \
+                .exclude(seller_name__isnull=True).exclude(seller_name="") \
+                .values("seller_id", "seller_name", "seller_vat_code").annotate(cnt=Count("id")):
+            key = _company_key(r["seller_name"], r["seller_vat_code"], r["seller_id"])
+            if key and key in merged:
+                merged[key]["svs_count"] += int(r["cnt"] or 0)
+
+        # ── Invoice ──
+        inv_qs = Invoice.objects.filter(
+            user=request.user,
+            status__in=["issued", "sent", "partially_paid", "paid"],
+            invoice_type__in=["saskaita", "pvm_saskaita"],
+        )
+        for r in inv_qs.exclude(seller_name="") \
+                .values("seller_id", "seller_name", "seller_vat_code").annotate(cnt=Count("id")):
+            upsert(r["seller_id"], r["seller_name"], r["seller_vat_code"], r["cnt"])
+        for r in inv_qs.exclude(buyer_name="") \
+                .values("buyer_id", "buyer_name", "buyer_vat_code").annotate(cnt=Count("id")):
+            upsert(r["buyer_id"], r["buyer_name"], r["buyer_vat_code"], r["cnt"])
+
+        # SVS count iš Invoice — pardavimai (kontrahentas = seller, buyer ES PVM mokėtojas)
+        inv_svs_sale_q = (
+            Q(buyer_country_iso__in=EU_COUNTRIES_NO_LT)
+            & ~Q(buyer_vat_code__isnull=True)
+            & ~Q(buyer_vat_code="")
+        )
+        for r in inv_qs.filter(inv_svs_sale_q).exclude(seller_name="") \
+                .values("seller_id", "seller_name", "seller_vat_code").annotate(cnt=Count("id")):
+            key = _company_key(r["seller_name"], r["seller_vat_code"], r["seller_id"])
+            if key and key in merged:
+                merged[key]["svs_count"] += int(r["cnt"] or 0)
+
+        items = [
+            item for item in merged.values()
+            if search in (item["display_name"] or "").lower()
+            or search in (item["vat"] or "").lower()
+            or search in (item["code"] or "").lower()
+        ]
+        items.sort(key=lambda x: (-x["svs_count"], -x["count"]))
+        return Response(items[:30])
+
+
+# ──────────────────────────────────────────────────────────────
+# Generate
+# ──────────────────────────────────────────────────────────────
+
+class SVSReportGenerateView(APIView):
+    """SVS ataskaitos generavimas (PVM101 + FR0564) su puslapiavimu."""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        contractor_keys = request.data.get("contractor_keys", [])
+        date_from = request.data.get("date_from")
+        date_to = request.data.get("date_to")
+        sources = request.data.get("sources", ["skaitmenizavimas", "israsymas"])
+        offset = int(request.data.get("offset", 0))
+        limit = int(request.data.get("limit", 25))
+
+        if not contractor_keys:
+            return Response({"error": "Nepasirinktas nė vienas kontrahentas"}, status=400)
+
+        result = self._build_report(
+            request.user, contractor_keys, date_from, date_to, sources,
+        )
+
+        total_count = len(result["entries"])
+        page = result["entries"][offset:offset + limit]
+
+        return Response({
+            "pvm101_summary": result["pvm101_summary"],
+            "fr0564_summary": result["fr0564_summary"],
+            "grand_totals": result["grand_totals"],
+            "total_count": total_count,
+            "offset": offset,
+            "entries": page,
+        })
+
+    @staticmethod
+    def _build_report(user, contractor_keys, date_from, date_to, sources):
+        contractor_keys_set = set(contractor_keys)
+        raw_rows = []
+
+        def _iter_docs(source_label, qs):
+            for obj in qs.iterator():
+                seller_key = _company_key(obj.seller_name, obj.seller_vat_code, obj.seller_id)
+                buyer_key = _company_key(obj.buyer_name, obj.buyer_vat_code, obj.buyer_id)
+                row = _classify_svs_doc(
+                    source=source_label,
+                    doc_id=obj.id,
+                    seller_key=seller_key,
+                    buyer_key=buyer_key,
+                    seller_country_iso=obj.seller_country_iso,
+                    buyer_country_iso=obj.buyer_country_iso,
+                    buyer_vat_code=obj.buyer_vat_code,
+                    buyer_name=obj.buyer_name,
+                    seller_name=obj.seller_name,
+                    vat_percent=obj.vat_percent,
+                    vat_amount=obj.vat_amount,
+                    amount_wo_vat=obj.amount_wo_vat,
+                    amount_with_vat=obj.amount_with_vat,
+                    traded_type=getattr(obj, "traded_type", None),
+                    invoice_date=obj.invoice_date,
+                    document_series=obj.document_series,
+                    document_number=obj.document_number,
+                    currency=obj.currency,
+                    contractor_keys_set=contractor_keys_set,
+                )
+                if row:
+                    raw_rows.append(row)
+
+        # ── ScannedDocument ──
+        if "skaitmenizavimas" in sources:
+            sd_qs = ScannedDocument.objects.filter(
+                user=user,
+                status__in=["completed", "exported"],
+                is_archive_container=False,
+                invoice_date__isnull=False,
+            )
+            if date_from:
+                sd_qs = sd_qs.filter(invoice_date__gte=date_from)
+            if date_to:
+                sd_qs = sd_qs.filter(invoice_date__lte=date_to)
+            _iter_docs("skaitmenizavimas", sd_qs)
+
+        # ── Invoice ──
+        if "israsymas" in sources:
+            inv_qs = Invoice.objects.filter(
+                user=user,
+                status__in=["issued", "sent", "partially_paid", "paid"],
+                invoice_type__in=["saskaita", "pvm_saskaita"],
+                invoice_date__isnull=False,
+            )
+            if date_from:
+                inv_qs = inv_qs.filter(invoice_date__gte=date_from)
+            if date_to:
+                inv_qs = inv_qs.filter(invoice_date__lte=date_to)
+            _iter_docs("israsymas", inv_qs)
+
+        # ── Deduplikacija: israsymas prioritetas ──
+        raw_rows.sort(key=lambda r: (0 if r["source"] == "israsymas" else 1))
+        seen_keys = {}
+        entries = []
+
+        for row in raw_rows:
+            dk = _svs_dedup_key(
+                row["document_series"], row["document_number"],
+                row["amount_wo_vat_eur"], row["invoice_date"],
+            )
+            is_duplicate = False
+            if dk != ("", "", "", ""):
+                if dk in seen_keys:
+                    if row["source"] == "skaitmenizavimas" and seen_keys[dk] == "israsymas":
+                        is_duplicate = True
+                    elif row["source"] == "israsymas" and seen_keys[dk] == "skaitmenizavimas":
+                        for prev in entries:
+                            prev_dk = _svs_dedup_key(
+                                prev["document_series"], prev["document_number"],
+                                prev.get("_amount_raw"), prev.get("_date_raw"),
+                            )
+                            if prev_dk == dk and prev["source"] == "skaitmenizavimas":
+                                prev["is_duplicate"] = True
+                        is_duplicate = False
+                        seen_keys[dk] = "israsymas"
+                    else:
+                        is_duplicate = True
+                else:
+                    seen_keys[dk] = row["source"]
+
+            series = row["document_series"]
+            number = row["document_number"]
+            serija_nr = f"{series}-{number}" if series else number
+            c_iso = row["counterparty_country_iso"]
+
+            entries.append({
+                "doc_id": row["doc_id"],
+                "source": row["source"],
+                "svs_code": row["svs_code"],
+                "invoice_date": row["invoice_date"].strftime("%Y-%m-%d") if row["invoice_date"] else "",
+                "serija_nr": serija_nr,
+                "counterparty_name": row["counterparty_name"],
+                "counterparty_country_iso": c_iso,
+                "counterparty_country_name": EU_COUNTRY_NAMES_LT.get(c_iso, c_iso or ""),
+                "counterparty_vat_code": row.get("counterparty_vat_code", ""),
+                "amount_wo_vat": str(row["amount_wo_vat_eur"].quantize(Decimal("0.01"))),
+                "is_duplicate": is_duplicate,
+                # Internal fields dlia dedup
+                "document_series": row["document_series"],
+                "document_number": row["document_number"],
+                "_amount_raw": row["amount_wo_vat_eur"],
+                "_date_raw": row["invoice_date"],
+            })
+
+        entries.sort(key=lambda r: r["invoice_date"], reverse=True)
+
+        # ── PVM101 suvestinė: pagal kodą ──
+        pvm101_map = defaultdict(lambda: {"taxable": Decimal("0"), "doc_count": 0})
+        for entry in entries:
+            if entry["is_duplicate"]:
+                continue
+            code = entry["svs_code"]
+            pvm101_map[code]["taxable"] += _safe_d(entry["amount_wo_vat"])
+            pvm101_map[code]["doc_count"] += 1
+
+        pvm101_summary = []
+        grand_taxable = Decimal("0")
+        grand_vat = Decimal("0")
+        grand_doc_count = 0
+
+        for code in sorted(pvm101_map.keys()):
+            amounts = pvm101_map[code]
+            taxable = amounts["taxable"].quantize(Decimal("0.01"))
+            if code in ("140", "141"):
+                vat = (taxable * Decimal("0.21")).quantize(Decimal("0.01"))
+                vat_pct = "21"
+            else:
+                vat = Decimal("0")
+                vat_pct = "0"
+
+            pvm101_summary.append({
+                "code": code,
+                "label": CODE_LABELS.get(code, code),
+                "vat_percent": vat_pct,
+                "taxable_amount": str(taxable),
+                "vat_amount": str(vat),
+                "doc_count": amounts["doc_count"],
+            })
+            grand_taxable += taxable
+            grand_vat += vat
+            grand_doc_count += amounts["doc_count"]
+
+        # ── FR0564 suvestinė: pagal kiekvieną pirkėją (tik kodas 043) ──
+        fr0564_map = defaultdict(lambda: {
+            "country_iso": "", "vat_code_raw": "",
+            "buyer_name": "", "amount": Decimal("0"), "doc_count": 0,
+        })
+        for entry in entries:
+            if entry["is_duplicate"] or entry["svs_code"] != "043":
+                continue
+            vat_raw = entry.get("counterparty_vat_code", "")
+            c_iso = entry["counterparty_country_iso"]
+            fr_key = (c_iso, vat_raw)
+            fr0564_map[fr_key]["country_iso"] = c_iso
+            fr0564_map[fr_key]["vat_code_raw"] = vat_raw
+            fr0564_map[fr_key]["buyer_name"] = entry["counterparty_name"]
+            fr0564_map[fr_key]["amount"] += _safe_d(entry["amount_wo_vat"])
+            fr0564_map[fr_key]["doc_count"] += 1
+
+        fr0564_summary = []
+        for (c_iso, vat_raw), data in sorted(fr0564_map.items()):
+            # FR0564 sumos apvalinamos iki sveikų skaičių (taisyklių 11 p.)
+            amount_rounded = data["amount"].quantize(Decimal("1"))
+            fr0564_summary.append({
+                "country_iso": c_iso,
+                "country_name": EU_COUNTRY_NAMES_LT.get(c_iso, c_iso),
+                "vat_code": _strip_vat_prefix(vat_raw, c_iso),
+                "vat_code_full": vat_raw,
+                "buyer_name": data["buyer_name"],
+                "services_amount": str(amount_rounded),
+                "doc_count": data["doc_count"],
+            })
+
+        grand_totals = {
+            "taxable_amount": str(grand_taxable.quantize(Decimal("0.01"))),
+            "vat_amount": str(grand_vat.quantize(Decimal("0.01"))),
+            "documents_count": grand_doc_count,
+            "duplicates_count": sum(1 for e in entries if e["is_duplicate"]),
+        }
+
+        # Valome entries prieš grąžinant
+        clean_entries = []
+        for entry in entries:
+            clean_entries.append({
+                "doc_id": entry["doc_id"],
+                "source": entry["source"],
+                "svs_code": entry["svs_code"],
+                "invoice_date": entry["invoice_date"],
+                "serija_nr": entry["serija_nr"],
+                "counterparty_name": entry["counterparty_name"],
+                "counterparty_country_iso": entry["counterparty_country_iso"],
+                "counterparty_country_name": entry["counterparty_country_name"],
+                "counterparty_vat_code": entry.get("counterparty_vat_code", ""),
+                "amount_wo_vat": entry["amount_wo_vat"],
+                "is_duplicate": entry["is_duplicate"],
+            })
+
+        return {
+            "pvm101_summary": pvm101_summary,
+            "fr0564_summary": fr0564_summary,
+            "grand_totals": grand_totals,
+            "entries": clean_entries,
+        }
+
+
+# ──────────────────────────────────────────────────────────────
+# Excel export
+# ──────────────────────────────────────────────────────────────
+
+class SVSReportExportView(APIView):
+    """SVS ataskaitos XLSX eksportas."""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        contractor_keys = request.data.get("contractor_keys", [])
+        date_from = request.data.get("date_from")
+        date_to = request.data.get("date_to")
+        sources = request.data.get("sources", ["skaitmenizavimas", "israsymas"])
+
+        if not contractor_keys:
+            return Response({"error": "Nepasirinktas nė vienas kontrahentas"}, status=400)
+
+        result = SVSReportGenerateView._build_report(
+            request.user, contractor_keys, date_from, date_to, sources,
+        )
+
+        wb = Workbook()
+        header_font = Font(bold=True, size=11)
+        header_fill = PatternFill(start_color="F2F2F2", end_color="F2F2F2", fill_type="solid")
+        total_fill = PatternFill(start_color="E8F5E9", end_color="E8F5E9", fill_type="solid")
+        thin = Border(
+            left=Side(style="thin"), right=Side(style="thin"),
+            top=Side(style="thin"), bottom=Side(style="thin"),
+        )
+
+        def _hdr(ws, row, headers):
+            for col, h in enumerate(headers, 1):
+                c = ws.cell(row=row, column=col, value=h)
+                c.font = header_font
+                c.fill = header_fill
+                c.border = thin
+                c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+
+        # ── Sheet 1: PVM101 suvestinė ──
+        ws1 = wb.active
+        ws1.title = "PVM101"
+        _hdr(ws1, 1, [
+            "Kodas", "Aprašymas", "PVM tarifas, %",
+            "Apmokestinamoji vertė (EUR)", "PVM suma (EUR)", "Dok.",
+        ])
+
+        for i, row in enumerate(result["pvm101_summary"], 2):
+            ws1.cell(row=i, column=1, value=row["code"]).border = thin
+            ws1.cell(row=i, column=2, value=row["label"]).border = thin
+            c = ws1.cell(row=i, column=3, value=int(row["vat_percent"]))
+            c.border = thin
+            c = ws1.cell(row=i, column=4, value=float(row["taxable_amount"]))
+            c.border = thin
+            c.number_format = "#,##0.00"
+            c = ws1.cell(row=i, column=5, value=float(row["vat_amount"]))
+            c.border = thin
+            c.number_format = "#,##0.00"
+            ws1.cell(row=i, column=6, value=row["doc_count"]).border = thin
+
+        tr = len(result["pvm101_summary"]) + 2
+        c = ws1.cell(row=tr, column=1, value="Viso:")
+        c.font = header_font
+        c.fill = total_fill
+        c.border = thin
+        for col in (2, 3):
+            c = ws1.cell(row=tr, column=col, value="")
+            c.fill = total_fill
+            c.border = thin
+        c = ws1.cell(row=tr, column=4, value=float(result["grand_totals"]["taxable_amount"]))
+        c.font = header_font
+        c.fill = total_fill
+        c.border = thin
+        c.number_format = "#,##0.00"
+        c = ws1.cell(row=tr, column=5, value=float(result["grand_totals"]["vat_amount"]))
+        c.font = header_font
+        c.fill = total_fill
+        c.border = thin
+        c.number_format = "#,##0.00"
+        c = ws1.cell(row=tr, column=6, value=result["grand_totals"]["documents_count"])
+        c.font = header_font
+        c.fill = total_fill
+        c.border = thin
+
+        ws1.column_dimensions["A"].width = 10
+        ws1.column_dimensions["B"].width = 55
+        ws1.column_dimensions["C"].width = 14
+        ws1.column_dimensions["D"].width = 26
+        ws1.column_dimensions["E"].width = 18
+        ws1.column_dimensions["F"].width = 8
+
+        # ── Sheet 2: FR0564 (tik jei yra 043 pardavimų) ──
+        if result["fr0564_summary"]:
+            ws2 = wb.create_sheet("FR0564")
+            _hdr(ws2, 1, [
+                "Valstybės kodas", "PVM mokėtojo kodas (be prefikso)",
+                "Pirkėjas", "Paslaugų vertė (EUR)",
+            ])
+
+            for i, row in enumerate(result["fr0564_summary"], 2):
+                ws2.cell(row=i, column=1, value=row["country_iso"]).border = thin
+                ws2.cell(row=i, column=2, value=row["vat_code"]).border = thin
+                ws2.cell(row=i, column=3, value=row["buyer_name"]).border = thin
+                c = ws2.cell(row=i, column=4, value=int(row["services_amount"]))
+                c.border = thin
+                c.number_format = "#,##0"
+
+            ws2.column_dimensions["A"].width = 18
+            ws2.column_dimensions["B"].width = 30
+            ws2.column_dimensions["C"].width = 30
+            ws2.column_dimensions["D"].width = 22
+
+        # ── Sheet 3: Dokumentai ──
+        ws3 = wb.create_sheet("Dokumentai")
+        _hdr(ws3, 1, [
+            "Eil. Nr.", "Kodas", "Data", "Serija ir numeris",
+            "Kontrahentas", "Šalis", "PVM kodas",
+            "Apmokestinamoji vertė (EUR)", "Šaltinis",
+        ])
+
+        row_num = 0
+        for entry in result["entries"]:
+            if entry["is_duplicate"]:
+                continue
+            row_num += 1
+            r = row_num + 1
+            ws3.cell(row=r, column=1, value=row_num).border = thin
+            ws3.cell(row=r, column=2, value=entry["svs_code"]).border = thin
+            ws3.cell(row=r, column=3, value=entry["invoice_date"]).border = thin
+            ws3.cell(row=r, column=4, value=entry["serija_nr"]).border = thin
+            ws3.cell(row=r, column=5, value=entry["counterparty_name"]).border = thin
+            ws3.cell(row=r, column=6, value=entry.get("counterparty_country_name", "")).border = thin
+            ws3.cell(row=r, column=7, value=entry.get("counterparty_vat_code", "")).border = thin
+            c = ws3.cell(row=r, column=8, value=float(entry["amount_wo_vat"]))
+            c.border = thin
+            c.number_format = "#,##0.00"
+            src = "Išrašymas" if entry["source"] == "israsymas" else "Skaitmenizavimas"
+            ws3.cell(row=r, column=9, value=src).border = thin
+
+        ws3.column_dimensions["A"].width = 8
+        ws3.column_dimensions["B"].width = 8
+        ws3.column_dimensions["C"].width = 14
+        ws3.column_dimensions["D"].width = 20
+        ws3.column_dimensions["E"].width = 30
+        ws3.column_dimensions["F"].width = 16
+        ws3.column_dimensions["G"].width = 22
+        ws3.column_dimensions["H"].width = 26
+        ws3.column_dimensions["I"].width = 18
+
+        # ── Response ──
+        buf = io.BytesIO()
+        wb.save(buf)
+        buf.seek(0)
+
+        response = HttpResponse(
+            buf.read(),
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        response["Content-Disposition"] = 'attachment; filename="svs_ataskaita.xlsx"'
+        return response
+
+# ────────────────────────────────────────────────────────────
+# END ─── SVS
+# ────────────────────────────────────────────────────────────
+
+# ────────────────────────────────────────────────────────────
 # ─── Dlia frontend newsletter ───
 # ────────────────────────────────────────────────────────────
 
@@ -12612,3 +13327,5 @@ def waybill_cancel_blocked(request, session_id):
 # ────────────────────────────────────────────────────────────
 # END ─── Waybill scan ───
 # ────────────────────────────────────────────────────────────
+
+

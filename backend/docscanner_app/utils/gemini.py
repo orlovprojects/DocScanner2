@@ -93,13 +93,14 @@ Assign the detected type to the field "document_type".
 - with_receipt
 - paid_by_cash
 - doc_96_str
+- traded_type
 
 All boolean fields (seller_is_person, buyer_is_person, with_receipt, separate_vat, paid_by_cash, doc_96_str, is_credit_invoice, is_debit_invoice) must be returned as true/false, not as strings.
 
 *Return ONLY a valid JSON object in a SINGLE LINE (compact form): no newlines, no \n, no \r, no tabs, and no spaces outside string values. Do not use Markdown or code fences. No trailing commas. Do NOT wrap in quotes or escape characters. Do NOT include any explanations, comments, or extra text outside the JSON. The output must be directly parsable by JSON.parse().
 
 Example (structure and field names; values may be empty strings, booleans must be true/false, numbers should be numbers when available):
-{"docs":<number_of_documents>,"documents":[{"document_type":"","seller_id":"","seller_name":"","seller_vat_code":"","seller_address":"","seller_country":"","seller_country_iso":"","seller_iban":"","seller_is_person":false,"buyer_id":"","buyer_name":"","buyer_vat_code":"","buyer_address":"","buyer_country":"","buyer_country_iso":"","buyer_iban":"","buyer_is_person":false,"invoice_date":"","due_date":"","operation_date":"","document_series":"","document_number":"","order_number":"","amount_wo_vat":"","vat_amount":"","vat_percent":"","amount_with_vat":"","separate_vat":false,"currency":"","with_receipt":false,"paid_by_cash":false}]}
+{"docs":<number_of_documents>,"documents":[{"document_type":"","seller_id":"","seller_name":"","seller_vat_code":"","seller_address":"","seller_country":"","seller_country_iso":"","seller_iban":"","seller_is_person":false,"buyer_id":"","buyer_name":"","buyer_vat_code":"","buyer_address":"","buyer_country":"","buyer_country_iso":"","buyer_iban":"","buyer_is_person":false,"invoice_date":"","due_date":"","operation_date":"","document_series":"","document_number":"","order_number":"","amount_wo_vat":"","vat_amount":"","vat_percent":"","amount_with_vat":"","separate_vat":false,"currency":"","with_receipt":false,"paid_by_cash":false,"doc_96_str":false,"traded_type":""}]}
 
 Format dates as yyyy-mm-dd. Delete country from addresses. seller_country and buyer_country must be full country name in language of address provided. country_iso must be 2-letter code.
 In lithuanian documents dates are usually displayed in yyyy-mm-dd or dd/mm/yyyy formats. For example, when parsing 12/01/2026, it's 12th January, not 1st December.
@@ -129,6 +130,13 @@ Set "doc_96_str": true only if the document explicitly mentions Lietuvos PVM įs
 Set "is_credit_invoice": true ONLY if the document is a credit invoice (kreditinė sąskaita faktūra, credit note, grąžinimas). Signs: title contains "Kreditinė", "Credit note", "Grąžinimas", negative amounts, reference to original invoice number. If the document is a regular invoice, do NOT include this field.
 Set "is_debit_invoice": true ONLY if the document is a debit invoice (debetinė sąskaita faktūra, debit note). Signs: title contains "Debetinė", "Debit note", reference to original invoice, additional charge. If the document is a regular invoice, do NOT include this field.
 A document cannot be both credit and debit at the same time.
+
+Set "traded_type" based on what is being sold/purchased in the document:
+- "services" — if ALL items are services (hosting, SaaS, ads, consulting, development, subscriptions, commissions, transport, delivery)
+- "goods" — if ALL items are physical products (materials, equipment, fuel, office supplies, food)
+- "mixed" — if document contains BOTH goods and services (e.g. products + delivery fee, equipment + installation service)
+When unsure whether an item is a good or service, treat digital/intangible items as services and physical/tangible items as goods.
+Possible values for "traded_type" (chose only ONE): "services", "goods", "mixed". If cannot determine, return "".
 
 If the document displays amounts in multiple currencies, always extract the EUR amounts if available.
 

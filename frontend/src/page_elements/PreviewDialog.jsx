@@ -339,6 +339,7 @@ export default function PreviewDialog({
     if (!open) return;
     
     const scrollY = window.scrollY;
+    const scrollbarWidth = window.innerWidth - document.documentElement.clientWidth;  // ← добавить
     const html = document.documentElement;
     const body = document.body;
     const root = document.getElementById('root');
@@ -351,6 +352,7 @@ export default function PreviewDialog({
     const originalBodyLeft = body.style.left;
     const originalBodyRight = body.style.right;
     const originalBodyWidth = body.style.width;
+    const originalBodyPaddingRight = body.style.paddingRight;  // ← добавить
     const originalRootOverflow = root?.style.overflow;
     
     // Блокируем скролл
@@ -361,10 +363,10 @@ export default function PreviewDialog({
     body.style.left = '0';
     body.style.right = '0';
     body.style.width = '100%';
+    body.style.paddingRight = `${scrollbarWidth}px`;
     if (root) root.style.overflow = 'hidden';
     
     return () => {
-      // Восстанавливаем стили
       html.style.overflow = originalHtmlOverflow;
       body.style.overflow = originalBodyOverflow;
       body.style.position = originalBodyPosition;
@@ -372,9 +374,9 @@ export default function PreviewDialog({
       body.style.left = originalBodyLeft;
       body.style.right = originalBodyRight;
       body.style.width = originalBodyWidth;
+      body.style.paddingRight = originalBodyPaddingRight;  // ← добавить
       if (root) root.style.overflow = originalRootOverflow;
       
-      // Возвращаем scroll позицию
       window.scrollTo(0, scrollY);
     };
   }, [open]);

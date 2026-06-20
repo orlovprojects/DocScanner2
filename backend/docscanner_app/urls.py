@@ -94,6 +94,10 @@ from .views import (
     waybill_active_sessions,
     waybill_retry_blocked,
     waybill_cancel_blocked,
+    #SVS
+    SVSContractorSearchView, 
+    SVSReportGenerateView, 
+    SVSReportExportView,
 )
 from .views import (
     counterparty_list_create,
@@ -531,5 +535,10 @@ urlpatterns = [
     path("waybills/sessions/active/", waybill_active_sessions, name="waybill-active-sessions"),
     path("waybills/sessions/<uuid:session_id>/retry/", waybill_retry_blocked, name="waybill-retry-blocked"),
     path("waybills/sessions/<uuid:session_id>/cancel/", waybill_cancel_blocked, name="waybill-cancel-blocked"),
+
+    # SVS (PVM101 + FR0564)
+    path('svs-report/contractors/', SVSContractorSearchView.as_view()),
+    path('svs-report/generate/', SVSReportGenerateView.as_view()),
+    path('svs-report/export/', SVSReportExportView.as_view()),
 
 ]
