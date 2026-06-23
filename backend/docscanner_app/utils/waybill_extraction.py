@@ -20,19 +20,21 @@ from decimal import Decimal, InvalidOperation
 
 logger = logging.getLogger("docscanner_app")
 
-
-OPENROUTER_CHECKBOX_MODEL = "qwen/qwen3.5-flash-02-23"
+OPENROUTER_CHECKBOX_MODEL = "nex-agi/nex-n2-pro"
+OPENROUTER_CHECKBOX_FALLBACK = "qwen/qwen3.5-flash-02-23"
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 
 
-def _call_openrouter_checkboxes(data_url, prompt, filename=None, image_size=0):
-    """Checkbox verification через OpenRouter Qwen 3.5 Flash."""
+def _call_openrouter_checkboxes(data_url, prompt, filename=None, image_size=0, model=None):
+    """Checkbox verification через OpenRouter."""
     api_key = os.environ.get("OPENROUTER_API_KEY")
     if not api_key:
         raise Exception("OPENROUTER_API_KEY not set")
 
+    use_model = model or OPENROUTER_CHECKBOX_MODEL
+
     payload = {
-        "model": OPENROUTER_CHECKBOX_MODEL,
+        "model": use_model,
         "messages": [
             {
                 "role": "user",
@@ -42,9 +44,9 @@ def _call_openrouter_checkboxes(data_url, prompt, filename=None, image_size=0):
                 ],
             }
         ],
-        "reasoning": {"effort": "minimal"},
+        "reasoning": {"enabled": False},
         "temperature": 0.0,
-        "max_tokens": 1000,
+        "max_tokens": 5000,
     }
 
     headers = {
@@ -52,10 +54,8 @@ def _call_openrouter_checkboxes(data_url, prompt, filename=None, image_size=0):
         "Content-Type": "application/json",
     }
 
-    logger.info(
-        "[WAYBILL-OR] Sending %s (%d bytes) to %s",
-        filename or "unknown", image_size, OPENROUTER_CHECKBOX_MODEL,
-    )
+    logger.info("[WAYBILL-OR] Sending %s (%d bytes) to %s",
+                filename or "unknown", image_size, use_model)
 
     t0 = time.perf_counter()
     resp = requests.post(OPENROUTER_URL, headers=headers, json=payload, timeout=120.0)
@@ -72,8 +72,7 @@ def _call_openrouter_checkboxes(data_url, prompt, filename=None, image_size=0):
     if choices:
         result = choices[0].get("message", {}).get("content", "")
 
-    logger.info("[WAYBILL-OR] %s OK: len=%d elapsed=%.2fs",
-                OPENROUTER_CHECKBOX_MODEL, len(result), elapsed)
+    logger.info("[WAYBILL-OR] %s OK: len=%d elapsed=%.2fs", use_model, len(result), elapsed)
 
     return result.strip()
 
@@ -320,40 +319,69 @@ def extract_waybill_main(image_data, filename=None):
 
 
 def verify_checkboxes(data_url, filename=None, image_size=0):
-    """Step 2: Checkbox verification (OpenRouter Qwen → fallback KIE 3.1 Pro).
-    Returns: (checked_list, raw_checkboxes)
+    """Step 2: Checkbox verification.
+    Chain: nex-n2-pro (3 retries) → qwen (3 retries) → KIE 3.1 Pro.
     """
     t0 = _t()
     raw_checkboxes = None
+    checked = []
 
-    try:
-        raw_checkboxes = _call_openrouter_checkboxes(
-            data_url=data_url, prompt=CHECKBOX_VERIFICATION_PROMPT,
-            filename=filename, image_size=image_size,
-        )
-    except Exception as e:
-        logger.warning("[WAYBILL] OpenRouter failed: %s — trying KIE 3.1 Pro", e)
+    # ── 1. nex-n2-pro (3 retries) ──
+    for attempt in range(1, 4):
         try:
-            raw_checkboxes = _call_kie(
+            raw_checkboxes = _call_openrouter_checkboxes(
                 data_url=data_url, prompt=CHECKBOX_VERIFICATION_PROMPT,
-                endpoint_key="pro31", filename=filename, image_size=image_size,
+                filename=filename, image_size=image_size,
+                model=OPENROUTER_CHECKBOX_MODEL,
             )
-        except Exception as e2:
-            logger.warning("[WAYBILL] KIE 3.1 Pro also failed: %s", e2)
+            cb_data = _extract_json_object(raw_checkboxes)
+            checked = cb_data.get("checked", [])
+            if isinstance(checked, list) and len(checked) > 0:
+                logger.info("[WAYBILL] nex-n2-pro attempt %d OK: checked=%s", attempt, checked)
+                _log_t("Step 2: Checkbox verification (nex-n2-pro)", t0)
+                return checked, raw_checkboxes
+            logger.warning("[WAYBILL] nex-n2-pro attempt %d: invalid response", attempt)
+        except Exception as e:
+            logger.warning("[WAYBILL] nex-n2-pro attempt %d failed: %s", attempt, e)
+        if attempt < 3:
+            time.sleep(2 * attempt)
 
-    _log_t("Step 2: Checkbox verification", t0)
+    # ── 2. qwen fallback (3 retries) ──
+    for attempt in range(1, 4):
+        try:
+            raw_checkboxes = _call_openrouter_checkboxes(
+                data_url=data_url, prompt=CHECKBOX_VERIFICATION_PROMPT,
+                filename=filename, image_size=image_size,
+                model=OPENROUTER_CHECKBOX_FALLBACK,
+            )
+            cb_data = _extract_json_object(raw_checkboxes)
+            checked = cb_data.get("checked", [])
+            if isinstance(checked, list) and len(checked) > 0:
+                logger.info("[WAYBILL] qwen attempt %d OK: checked=%s", attempt, checked)
+                _log_t("Step 2: Checkbox verification (qwen)", t0)
+                return checked, raw_checkboxes
+            logger.warning("[WAYBILL] qwen attempt %d: invalid response", attempt)
+        except Exception as e:
+            logger.warning("[WAYBILL] qwen attempt %d failed: %s", attempt, e)
+        if attempt < 3:
+            time.sleep(2 * attempt)
 
-    if not raw_checkboxes:
-        return [], None
+    # ── 3. KIE 3.1 Pro fallback ──
+    try:
+        raw_checkboxes = _call_kie(
+            data_url=data_url, prompt=CHECKBOX_VERIFICATION_PROMPT,
+            endpoint_key="pro31", filename=filename, image_size=image_size,
+        )
+        cb_data = _extract_json_object(raw_checkboxes)
+        checked = cb_data.get("checked", [])
+        if isinstance(checked, list) and len(checked) > 0:
+            logger.info("[WAYBILL] KIE 3.1 Pro OK: checked=%s", checked)
+            _log_t("Step 2: Checkbox verification (KIE 3.1 Pro)", t0)
+            return checked, raw_checkboxes
+    except Exception as e:
+        logger.warning("[WAYBILL] KIE 3.1 Pro failed: %s", e)
 
-    cb_data = _extract_json_object(raw_checkboxes)
-    checked = cb_data.get("checked", [])
-
-    if isinstance(checked, list) and len(checked) > 0:
-        logger.info("[WAYBILL] Checkbox verification: checked=%s", checked)
-        return checked, raw_checkboxes
-
-    logger.warning("[WAYBILL] Invalid checkbox data: %r", raw_checkboxes[:300])
+    _log_t("Step 2: Checkbox verification (all failed)", t0)
     return [], raw_checkboxes
 
 # ============================================================
