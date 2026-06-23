@@ -526,7 +526,7 @@ def is_waybill_duplicate(user, document_number, exclude_doc_id=None):
     qs = ScannedWaybill.objects.filter(
         user=user,
         document_number=str(document_number).strip(),
-        status__in=("completed", "exported"),
+        status__in=("completed", "exported", "processing"),
     )
     if exclude_doc_id:
         qs = qs.exclude(pk=exclude_doc_id)
