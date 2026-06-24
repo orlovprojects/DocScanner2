@@ -445,6 +445,13 @@ def _apply_top_level_fields(
     # sumiskai: iš LLM atsakymo; detaliai: perskaičiuosime iš line_items (_save_line_items)
     db_doc.traded_type = doc_struct.get("traded_type")
 
+    # ── Ilgalaikis turtas ──
+    if scan_type == "sumiskai":
+        db_doc.is_long_term_asset_candidate = bool(doc_struct.get("is_long_term_asset_candidate", False))
+        db_doc.suggested_asset_type = doc_struct.get("suggested_asset_type") or ""
+    else:
+        db_doc.is_long_term_asset_candidate = False
+        db_doc.suggested_asset_type = ""
 
     # Определяем pirkimas/pardavimas
     db_doc.pirkimas_pardavimas = determine_pirkimas_pardavimas(doc_struct, user)
@@ -728,6 +735,8 @@ def _save_line_items(db_doc, doc_struct: Dict[str, Any], scan_type: str):
                 serijos_pavadinimas=item.get("serijos_pavadinimas"),
                 centro_kodas=item.get("centro_kodas"),
                 centro_pavadinimas=item.get("centro_pavadinimas"),
+                is_long_term_asset_candidate=bool(item.get("is_long_term_asset_candidate", False)),
+                suggested_asset_type=item.get("suggested_asset_type") or "",
             )
 
     # 2) Агрегация/выбор PVM кода — ВСЕГДА (и для single, и для multi)
@@ -779,6 +788,21 @@ def _save_line_items(db_doc, doc_struct: Dict[str, Any], scan_type: str):
                 db_doc.traded_type = "goods"
             else:
                 db_doc.traded_type = "mixed"
+        
+        # ── Ilgalaikis turtas: agregacija iš eilučių ──
+        ilt_items = [li for li in line_items if li.get("is_long_term_asset_candidate")]
+        db_doc.is_long_term_asset_candidate = bool(ilt_items)
+        if ilt_items:
+            unique_types = {li.get("suggested_asset_type") or "" for li in ilt_items}
+            unique_types.discard("")
+            if len(unique_types) == 1:
+                db_doc.suggested_asset_type = unique_types.pop()
+            elif len(unique_types) > 1:
+                db_doc.suggested_asset_type = "Kelios kategorijos"
+            else:
+                db_doc.suggested_asset_type = ""
+        else:
+            db_doc.suggested_asset_type = ""
 
     db_doc.save()
 

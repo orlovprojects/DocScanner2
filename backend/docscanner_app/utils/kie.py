@@ -480,7 +480,8 @@ def _notify_kie_api_error(exc: Exception, model: str, log, *, attempt: int | Non
         log.warning("[KIE Gemini] Failed to send Telegram notification: %s", tg_err)
 
 
-def ask_llm_with_fallback(text: str, scan_type: str, logger: logging.Logger | None = None):
+def ask_llm_with_fallback(text: str, scan_type: str, user=None, logger: logging.Logger | None = None):
+
     """
     Primary: KIE Gemini.
     Fallback: direct Gemini.
@@ -488,6 +489,10 @@ def ask_llm_with_fallback(text: str, scan_type: str, logger: logging.Logger | No
     """
     log = logger or LOGGER
     prompt = GEMINI_DETAILED_PROMPT if scan_type == "detaliai" else GEMINI_DEFAULT_PROMPT
+
+    # ── Ilgalaikis turtas: подставляем порог ──
+    ilt_min = str(int(user.min_ilgalaikis_turtas_amount)) if user and hasattr(user, "min_ilgalaikis_turtas_amount") else "500"
+    prompt = prompt.replace("{long_term_asset_min_value}", ilt_min)
 
     log.info("[LLM] Try primary provider=%s model=gemini-2.5-flash", LLM_PRIMARY)
 

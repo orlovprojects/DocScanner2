@@ -6,6 +6,8 @@ import React from 'react';
 import SwapBuyerSellerButton from './SwapBuyerSellerButton';
 import SwapHorizontalCircleIcon from "@mui/icons-material/SwapHorizontalCircle";
 import FindReplaceIcon from "@mui/icons-material/FindReplace";
+import WeekendIcon from "@mui/icons-material/Weekend";
+
 
 import {
   Dialog,
@@ -50,6 +52,163 @@ const errorFieldSx = {
   borderRadius: '4px',
   boxShadow: '0 0 4px 1px rgba(211, 47, 47, 0.25)',
   px: 0.5,
+};
+
+const ILT_MONTHS = {
+  "kompiuterinė technika": 36,
+  "ryšių priemonės": 36,
+  "programinė įranga": 36,
+  "įsigytos teisės": 36,
+  "baldai": 72,
+  "lengvasis automobilis": 72,
+  "krovininis automobilis": 48,
+  "mašinos ir įrengimai": 60,
+  "įrenginiai": 96,
+  "inventorius": 72,
+  "kitas materialusis turtas": 48,
+  "kitas nematerialusis turtas": 48,
+};
+
+const IltBanner = ({ assetType, subtotal, currency, variant = "full", showMonthly = false }) => {
+  const months = assetType ? ILT_MONTHS[assetType] : null;
+  const monthlyAmount =
+    months && subtotal && currency === "EUR"
+      ? Math.round((Number(subtotal) / months) * 100) / 100
+      : null;
+
+  const colors = {
+    bg: "#FFF8EE",
+    border: "#F0D7B1",
+    icon: "#e08d21",
+    iconBg: "#F8E7CF",
+    title: "#7A4A12",
+    text: "#5F513A",
+  };
+
+  const InfoLine = ({ label, children }) => (
+    <Typography sx={{ fontSize: "0.8rem", color: colors.text, mt: 0.25 }}>
+      {label}: <Box component="span" sx={{ fontWeight: 700 }}>{children}</Box>
+    </Typography>
+  );
+
+  if (variant === "line") {
+    return (
+      <Box sx={{ mt: 1.25, mb: 1.5 }}>
+        <Box
+          sx={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 0.75,
+            px: 1,
+            py: 0.45,
+            borderRadius: 1.5,
+            bgcolor: colors.bg,
+            border: `1px solid ${colors.border}`,
+          }}
+        >
+          <WeekendIcon sx={{ color: colors.icon, fontSize: 17 }} />
+          <Typography sx={{ fontWeight: 600, fontSize: "0.78rem", color: colors.title }}>
+            Galimas ilgalaikis turtas
+          </Typography>
+        </Box>
+
+        <Box
+          sx={{
+            mt: 1,
+            p: 1.25,
+            borderRadius: 2,
+            bgcolor: colors.bg,
+            border: `1px solid ${colors.border}`,
+          }}
+        >
+          <Typography sx={{ fontWeight: 600, fontSize: "0.82rem", color: colors.title, mb: 0.5 }}>
+            Ilgalaikio turto informacija
+          </Typography>
+
+          {assetType && (
+            <InfoLine label="Kategorija">
+              {assetType}
+            </InfoLine>
+          )}
+
+          {months && (
+            <InfoLine label="Rekomenduojamas nusidėvėjimo laikotarpis">
+              {months} mėn.
+            </InfoLine>
+          )}
+
+          {monthlyAmount != null && showMonthly && (
+            <InfoLine label="Numatomas mėnesinis nusidėvėjimas">
+              {monthlyAmount.toFixed(2)} EUR
+            </InfoLine>
+          )}
+        </Box>
+      </Box>
+    );
+  }
+
+  return (
+    <Box
+      sx={{
+        display: "flex",
+        alignItems: "flex-start",
+        gap: 1.5,
+        p: 1.5,
+        mb: 1.5,
+        borderRadius: 2,
+        bgcolor: colors.bg,
+        border: `1px solid ${colors.border}`,
+        boxShadow: "0 1px 2px rgba(124, 74, 18, 0.06)",
+      }}
+    >
+      <Box
+        sx={{
+          width: 34,
+          height: 34,
+          borderRadius: "50%",
+          bgcolor: colors.iconBg,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          flexShrink: 0,
+        }}
+      >
+        <WeekendIcon sx={{ color: colors.icon, fontSize: 20 }} />
+      </Box>
+
+      <Box sx={{ flex: 1 }}>
+        <Typography sx={{ fontWeight: 600, fontSize: "0.85rem", color: colors.title }}>
+          Atpažintas galimas ilgalaikis turtas
+        </Typography>
+
+        {variant === "detaliai_doc" && (
+          <Typography sx={{ fontSize: "0.8rem", color: colors.text, mt: 0.25 }}>
+            Išskleiskite eilutes
+          </Typography>
+        )}
+
+        {variant === "full" && assetType && (
+          <>
+            <InfoLine label="Kategorija">
+              {assetType}
+            </InfoLine>
+
+            {months && (
+              <InfoLine label="Rekomenduojamas nusidėvėjimo laikotarpis">
+                {months} mėn.
+              </InfoLine>
+            )}
+
+            {monthlyAmount != null && showMonthly && (
+              <InfoLine label="Numatomas mėnesinis nusidėvėjimas">
+                {monthlyAmount.toFixed(2)} EUR
+              </InfoLine>
+            )}
+          </>
+        )}
+      </Box>
+    </Box>
+  );
 };
 
 // Стили для accordion с ошибками
@@ -185,6 +344,7 @@ const LineItemCard = React.memo(({
   EXTRA_FIELDS_CONFIG,
   showErrors,
   isMobile,
+  currency,
 }) => {
   // Вычисляем missing fields для этой строки
   const missingFields = useMemo(() => {
@@ -234,6 +394,17 @@ const LineItemCard = React.memo(({
       >
         {`Prekė #${index + 1}`}
       </Typography>
+
+      {/* ── ILT banner per line item ── */}
+      {item.is_long_term_asset_candidate && (
+        <IltBanner
+          variant="line"
+          assetType={item.suggested_asset_type}
+          subtotal={item.subtotal}
+          currency={currency}
+          showMonthly
+        />
+      )}
 
       {PRODUCT_FIELDS.map(({ field, label }) => {
         const cfg = EXTRA_FIELDS_CONFIG.product.find(f => f.name === field);
@@ -1378,6 +1549,18 @@ export default function PreviewDialog({
       {/* Validation Flags */}
       {renderValidationFlags()}
 
+      {/* ── ILT banner ── */}
+      {selected.is_long_term_asset_candidate && selected.scan_type === "sumiskai" && (
+        <IltBanner
+          assetType={selected.suggested_asset_type}
+          subtotal={selected.amount_wo_vat}
+          currency={selected.currency}
+        />
+      )}
+      {selected.is_long_term_asset_candidate && selected.scan_type === "detaliai" && (
+        <IltBanner variant="detaliai_doc" />
+      )}
+
       <Typography gutterBottom sx={{ fontSize: isMobile ? "0.85rem" : "inherit" }}>
         Pirkimas/pardavimas:&nbsp;
         <b>{ppLabel}{isMulti && previewLoading ? "…" : ""}</b>
@@ -1699,6 +1882,7 @@ export default function PreviewDialog({
                     EXTRA_FIELDS_CONFIG={EXTRA_FIELDS_CONFIG}
                     showErrors={showFieldErrors}
                     isMobile={isMobile}
+                    currency={selected.currency}
                   />
                 );
               })}

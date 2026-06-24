@@ -46,6 +46,7 @@ import SellIcon from "@mui/icons-material/Sell";
 import RemoveCircleOutlineIcon from "@mui/icons-material/RemoveCircleOutline";
 import SwapHorizontalCircleIcon from "@mui/icons-material/SwapHorizontalCircle";
 import FindReplaceIcon from "@mui/icons-material/FindReplace";
+import WeekendIcon from "@mui/icons-material/Weekend";
 
 import { CreditInvoiceIcon, DebitInvoiceIcon } from "../components/Icons";
 
@@ -758,6 +759,13 @@ export default function DocumentsTable({
       icons.push(
         <Tooltip key="seller-replaced" title="Pardavėjas buvo pakeistas pagal taisyklę" {...tooltipProps}>
           <SwapHorizontalCircleIcon fontSize={iconFontSize} sx={{ ...iconSx, color: "#D4A84B" }} />
+        </Tooltip>
+      );
+    }
+    if (d.is_long_term_asset_candidate) {
+      icons.push(
+        <Tooltip key="ilt" title={`Galimas ilgalaikis turtas${d.suggested_asset_type ? `: ${d.suggested_asset_type}` : ""}`} {...tooltipProps}>
+          <WeekendIcon fontSize={iconFontSize} sx={{ ...iconSx, color: "#e08d21" }} />
         </Tooltip>
       );
     }

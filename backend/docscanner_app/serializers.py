@@ -54,6 +54,8 @@ class LineItemSerializer(serializers.ModelSerializer):
             'discount_wo_vat',
             'discount_with_vat',
             "pvm_kodas_label",
+            'is_long_term_asset_candidate',
+            'suggested_asset_type',
 
             # product autocomplete fields
             'sandelio_kodas',
@@ -235,6 +237,7 @@ class ScannedDocumentListSerializer(serializers.ModelSerializer):
             'is_debit_invoice',
             'buyer_replaced_by_rule',
             'seller_replaced_by_rule',
+            'is_long_term_asset_candidate',
             # ...и т.п., без тяжелых полей и line_items
         ]
 
@@ -514,7 +517,7 @@ class CustomUserSerializer(serializers.ModelSerializer):
             'rivile_erp_extra_fields', 'rivile_gama_extra_fields', 'butent_extra_fields','finvalda_extra_fields',
             'centas_extra_fields','agnum_extra_fields','debetas_extra_fields','site_pro_extra_fields',
             'pragma3_extra_fields', 'pragma4_extra_fields', 'optimum_extra_fields', 'dineta_extra_fields',
-            'inbox_email_address', 'has_waybill_access', 'company_replace_rules'
+            'inbox_email_address', 'has_waybill_access', 'company_replace_rules', 'min_ilgalaikis_turtas_amount'
         ]
         read_only_fields = ('credits', 'has_waybill_access')
         extra_kwargs = {
@@ -944,7 +947,7 @@ class CustomUserAdminListSerializer(CustomUserSerializer):
             # Новые поля:
             'last_payment_date',
             'inv_subscription_status',
-            'total_spent',
+            'total_spent', 
         ]
         read_only_fields = getattr(CustomUserSerializer.Meta, 'read_only_fields', ('credits',))
 

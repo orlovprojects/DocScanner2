@@ -94,8 +94,10 @@ Assign the detected type to the field "document_type".
 - paid_by_cash
 - doc_96_str
 - traded_type
+- is_long_term_asset_candidate
+- suggested_asset_type
 
-All boolean fields (seller_is_person, buyer_is_person, with_receipt, separate_vat, paid_by_cash, doc_96_str, is_credit_invoice, is_debit_invoice) must be returned as true/false, not as strings.
+All boolean fields (seller_is_person, buyer_is_person, with_receipt, separate_vat, paid_by_cash, doc_96_str, is_credit_invoice, is_debit_invoice, is_long_term_asset_candidate) must be returned as true/false, not as strings.
 
 *Return ONLY a valid JSON object in a SINGLE LINE (compact form): no newlines, no \n, no \r, no tabs, and no spaces outside string values. Do not use Markdown or code fences. No trailing commas. Do NOT wrap in quotes or escape characters. Do NOT include any explanations, comments, or extra text outside the JSON. The output must be directly parsable by JSON.parse().
 
@@ -123,8 +125,6 @@ Set "separate_vat": true ONLY when the document has 2 or more different VAT rate
 To decide this, you MUST check line items and VAT summary - if lines have different vat_percent (e.g., some 0%, some 21%) with subtotal > 0, set separate_vat: true.
 When separate_vat is true, omit document-level "vat_percent" (do NOT put a single rate like "21").
 
-
-
 Set "doc_96_str": true only if the document explicitly mentions Lietuvos PVM įstatymo 96 straipsnis, e.g. “PVM įstatymo 96 straipsnis”, “96 straipsnis”, “96 str.”, “taikomas 96 straipsnis”, “pagal PVMĮ 96 str.”. Otherwise set "doc_96_str": false.
 
 Set "is_credit_invoice": true ONLY if the document is a credit invoice (kreditinė sąskaita faktūra, credit note, grąžinimas). Signs: title contains "Kreditinė", "Credit note", "Grąžinimas", negative amounts, reference to original invoice number. If the document is a regular invoice, do NOT include this field.
@@ -144,6 +144,41 @@ If there are any signs of cash payment, for example, 'gryni', 'grąža' or simil
 
 If the document is a kasos čekis (cash receipt), for example, a fuel (kuro) receipt, buyer info is often at the bottom as a line with company name, company code, and VAT code—extract these as buyer details. For line items, find the quantity and unit next to price (like “50,01 l” for litres). Product name is usually above this line. document_number is usually next to kvitas, ignore long numer below "kasininkas" at the bottom of document but don't ignore date at the bottom.
 Extract all lineitems in kuro cekis, if item has units, it must be extracted as lineitem. For lineitems in kuro cekis, prices are usually stated including VAT, while discounts are usually including VAT but with minus symbol (don't extract discounts them as separate lineitems).
+
+---Long term asset detection---
+Check whether the document contains items that may qualify as long-term assets (used in business for more than 1 year; not intended for resale; equal to or above {long_term_asset_min_value} EUR excluding VAT)
+
+Evaluate each item/line separately, not the total document amount.
+If quantity and unit price are visible, evaluate the unit price excluding VAT.
+If only line total is visible, evaluate the line amount excluding VAT.
+
+Mark as possible long-term asset:
+computers, phones, servers, monitors, printers, office equipment, furniture, vehicles, machinery, equipment, tools, devices, photo/video equipment, software, licenses, or acquired rights used for more than 1 year.
+
+Do not mark:
+monthly subscriptions, hosting, advertising, SaaS, bank fees, accounting, fuel, telecom services, office supplies, inventory, goods for resale, repairs/maintenance without a new asset, or ordinary services.
+
+Exception: software, licenses, or acquired rights can be long-term assets if used for more than 1 year and above the minimum value.
+
+If at least one item matches, set is_long_term_asset_candidate True. Otherwise omit the field,
+If is_long_term_asset_candidate is True, choose only ONE type for that long term asset from these categories:
+
+"kompiuterinė technika" |
+"ryšių priemonės" |
+"programinė įranga" |
+"įsigytos teisės" |
+"baldai" |
+"lengvasis automobilis" |
+"krovininis automobilis" |
+"mašinos ir įrengimai" |
+"įrenginiai" |
+"inventorius" |
+"kitas materialusis turtas" |
+"kitas nematerialusis turtas" |
+"kelios kategorijos" |
+
+and set for suggested_asset_type, otherwise omit the field. If matching items belong to different categories, set suggested_asset_type to "kelios kategorijos".
+---
 
 If you cannot extract any documents, return exactly (one line):
 {"docs":0,"documents":[]}
@@ -299,6 +334,24 @@ If the document displays amounts in multiple currencies, always extract the EUR 
 For unit, try to identify any of these vnt kg g mg kompl t ct m cm mm km l ml m2 cm2 dm2 m3 cm3 dm3 val h min s d sav mėn metai pak kompl or similar. If units is not in Lithuanian, translate it (example: szt should be vnt). If can't identify unit, choose vnt.
 
 If the document is a kasos čekis (cash receipt), for example, a fuel (kuro) receipt, buyer info is often at the bottom as a line with company name, company code, and VAT code—extract these as buyer details. For line items, find the quantity and unit next to price (like "50,01 l" for litres). Product name is usually above this line. document_number is usually next to kvitas, ignore long numer below "kasininkas" at the bottom of document but don't ignore date at the bottom.
+
+---Long term asset detection (per line item)---
+For each line item, evaluate whether it may be a long-term asset (used in business for more than 1 year; not intended for resale; equal to or above {long_term_asset_min_value} EUR excluding VAT).
+Evaluate each line item's unit price (or line total if unit price not visible). 
+
+Mark as possible long-term asset: computers, phones, servers, monitors, printers, office equipment, furniture, vehicles, machinery, tools, photo/video equipment, software or licenses >1 year.
+Do not mark: subscriptions, hosting, ads, SaaS, bank fees, accounting, fuel, telecom, office supplies, inventory, goods for resale, repairs without new asset, services.
+Exception: software, licenses, or acquired rights can be long-term assets if used for more than 1 year and above the minimum value.
+
+For each matching line item add:
+- "is_long_term_asset_candidate": true
+- "suggested_asset_type": "kompiuterinė technika" | "ryšių priemonės" | "programinė įranga" | "įsigytos teisės" | "baldai" | "lengvasis automobilis" | "krovininis automobilis" | "mašinos ir įrengimai" | "įrenginiai" | "inventorius" | "kitas materialusis turtas" | "kitas nematerialusis turtas"
+
+For suggested_asset_type, choose only ONE type for that long term asset from categories above.
+
+Do NOT return these fields on document level — only on matching line items.
+Only include "is_long_term_asset_candidate" and "suggested_asset_type" in line items that match. Do not add these fields to line items that do not qualify.
+---
 
 If you cannot extract any documents, return exactly (one line):
 {"docs":0,"documents":[]}

@@ -10,6 +10,7 @@ import DeleteIcon from "@mui/icons-material/Delete";
 import { alpha } from "@mui/material/styles";
 import EditIcon from '@mui/icons-material/Edit';
 import HelpOutlineIcon from "@mui/icons-material/HelpOutline";
+import WeekendIcon from "@mui/icons-material/Weekend";
 import DeleteOutlineIcon from "@mui/icons-material/DeleteOutline";
 import Autocomplete from "@mui/material/Autocomplete";
 import PlayCircleIcon from "@mui/icons-material/PlayCircle";
@@ -855,6 +856,10 @@ export default function NustatymaiPage() {
   const [viewMode, setViewMode] = useState("single");
   const [savingViewMode, setSavingViewMode] = useState(false);
 
+  const [iltMinValue, setIltMinValue] = useState("500");
+  const [savingIlt, setSavingIlt] = useState(false);
+  const [successIlt, setSuccessIlt] = useState(false);
+
   const [extraSettings, setExtraSettings] = useState({});
 
   const [rivileErpFields, setRivileErpFields] = useState({
@@ -1281,6 +1286,9 @@ export default function NustatymaiPage() {
 
       setViewMode(data.view_mode || "single");
       setExtraSettings(data.extra_settings || {});
+
+      setExtraSettings(data.extra_settings || {});
+      setIltMinValue(String(data.min_ilgalaikis_turtas_amount ?? "500"));
 
       const lrList = Array.isArray(data.lineitem_rules)
         ? data.lineitem_rules
@@ -2592,6 +2600,120 @@ export default function NustatymaiPage() {
             )}
           </Box>
         )}        
+      </Paper>
+
+      {/* Ilgalaikis turtas */}
+      <Box mb={3}>
+        <Typography variant="h4" sx={{ mt: 10, fontWeight: 600 }}>
+          Ilgalaikis turtas
+        </Typography>
+      </Box>
+
+      <Paper
+        sx={{
+          p: 3,
+          mb: 3,
+          backgroundColor: "white",
+          border: "1px solid",
+          borderColor: "divider",
+          borderRadius: 3,
+          boxShadow: "none",
+        }}
+      >
+        <Box sx={{ display: "flex", alignItems: "flex-start", gap: 2, mb: 3 }}>
+          <Box
+            sx={{
+              width: 52,
+              height: 52,
+              borderRadius: 2,
+              backgroundColor: "#fef6e0",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              flexShrink: 0,
+            }}
+          >
+            <WeekendIcon sx={{ fontSize: 28, color: "#eaaa15" }} />
+          </Box>
+
+          <Box>
+            <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+              <Typography variant="h6" sx={{ fontWeight: 700 }}>
+                Automatinis ilgalaikio turto atpažinimas
+              </Typography>
+              <Tooltip
+                title="Nurodykite minimalią vertę be PVM, nuo kurios dokumento eilutė gali būti pažymėta kaip galimas ilgalaikis turtas."
+                arrow
+                enterTouchDelay={0}
+                leaveTouchDelay={4000}
+              >
+                <HelpOutlineIcon sx={{ fontSize: 20, color: "text.secondary" }} />
+              </Tooltip>
+            </Box>
+
+            <Typography variant="body2" sx={{ color: "text.secondary", mt: 0.75 }}>
+              Sistema pažymės prekes arba paslaugas, tinkančias ilgalaikiam turtui, kurių vertė be PVM yra lygi arba viršija nustatytą sumą.
+            </Typography>
+          </Box>
+        </Box>
+
+        <Box
+          sx={{
+            p: 3,
+            border: "1px solid",
+            borderColor: "divider",
+            borderRadius: 2,
+            backgroundColor: "#fafafa",
+          }}
+        >
+          <Stack
+            direction={{ xs: "column", sm: "row" }}
+            spacing={2}
+            alignItems={{ xs: "stretch", sm: "flex-start" }}
+          >
+            <TextField
+              label="Minimali vertė (EUR)"
+              size="small"
+              value={iltMinValue}
+              onChange={(e) => {
+                const val = e.target.value.replace(",", "").replace(".", "");
+                if (val === "" || /^\d+$/.test(val)) {
+                  setIltMinValue(val);
+                }
+              }}
+              sx={{ width: { xs: "100%", sm: 220 }, backgroundColor: "white" }}
+            />
+
+            <Button
+              variant="contained"
+              disabled={savingIlt || !iltMinValue || Number(iltMinValue) < 1}
+              onClick={async () => {
+                setSavingIlt(true);
+                try {
+                  await api.patch(
+                    "/profile/",
+                    { min_ilgalaikis_turtas_amount: iltMinValue },
+                    { withCredentials: true }
+                  );
+                  setSuccessIlt(true);
+                  setTimeout(() => setSuccessIlt(false), 2000);
+                } catch {
+                  alert("Nepavyko išsaugoti.");
+                } finally {
+                  setSavingIlt(false);
+                }
+              }}
+            >
+              Išsaugoti
+            </Button>
+          </Stack>
+
+          {successIlt && (
+            <Alert severity="success" sx={{ mt: 2 }}>
+              Išsaugota!
+            </Alert>
+          )}
+        </Box>
       </Paper>
 
       {/* 4. Duomenų importas */}

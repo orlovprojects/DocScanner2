@@ -382,7 +382,7 @@ def _is_pdf_multi_page(file_path: str) -> int:
 
 
 
-def ask_llm_with_fallback(raw_text: str, scan_type: str, logger):
+def ask_llm_with_fallback(raw_text: str, scan_type: str, user=None, logger=None):
     """
     Routing:
     - Если detaliai И текст > 5000 chars → primary: gemini-3.1-flash-lite-preview
@@ -394,6 +394,12 @@ def ask_llm_with_fallback(raw_text: str, scan_type: str, logger):
         gemini_prompt = GEMINI_DETAILED_PROMPT if scan_type == "detaliai" else GEMINI_DEFAULT_PROMPT
     except NameError:
         gemini_prompt = DETAILED_PROMPT if scan_type == "detaliai" else DEFAULT_PROMPT
+
+    # ── Ilgalaikis turtas: подставляем порог ──
+    ilt_min = str(int(user.min_ilgalaikis_turtas_amount)) if user and hasattr(user, "min_ilgalaikis_turtas_amount") else "500"
+    gemini_prompt = gemini_prompt.replace("{long_term_asset_min_value}", ilt_min)
+
+    text_len = len(raw_text or "")
 
     text_len = len(raw_text or "")
     use_31_as_primary = (scan_type == "detaliai" and text_len > 5000)
@@ -1176,7 +1182,7 @@ def process_uploaded_file_task(self, user_id, doc_id, scan_type, split_depth=0, 
         # 10) LLM: Gemini → GPT fallback (скармливаем склеенный текст)
         t0 = _t()
         try:
-            llm_resp, source_model = kie_ask_llm_with_fallback(glued_text_for_db or "", scan_type, logger)
+            llm_resp, source_model = kie_ask_llm_with_fallback(glued_text_for_db or "", scan_type, user=user, logger=logger)
         except Exception as e:
             logger.warning(f"[TASK] Gemini request failed: {e}")
             llm_resp = None
@@ -1193,7 +1199,7 @@ def process_uploaded_file_task(self, user_id, doc_id, scan_type, split_depth=0, 
             )
             t_retry = _t()
             try:
-                llm_resp2, source_model2 = kie_ask_llm_with_fallback(glued_text_for_db or "", scan_type, logger)
+                llm_resp2, source_model2 = kie_ask_llm_with_fallback(glued_text_for_db or "", scan_type, user=user, logger=logger)
                 if llm_resp2 and not _is_response_truncated(llm_resp2):
                     llm_resp = llm_resp2
                     source_model = source_model2

@@ -277,6 +277,8 @@ class ScannedDocument(models.Model):
     paid_by_cash = models.BooleanField(blank=True, null=True)
     buyer_replaced_by_rule = models.BooleanField(default=False)
     seller_replaced_by_rule = models.BooleanField(default=False)
+    is_long_term_asset_candidate = models.BooleanField(default=False)
+    suggested_asset_type = models.CharField(max_length=50, blank=True, default="")
 
     note = models.TextField(blank=True, null=True)
     report_to_isaf = models.BooleanField(blank=True, null=True)
@@ -436,6 +438,9 @@ class LineItem(models.Model):
 
     discount_with_vat = models.DecimalField(max_digits=10, decimal_places=4, blank=True, null=True)
     discount_wo_vat = models.DecimalField(max_digits=10, decimal_places=4, blank=True, null=True)
+
+    is_long_term_asset_candidate = models.BooleanField(default=False)
+    suggested_asset_type = models.CharField(max_length=50, blank=True, default="")
 
     # ДОБАВЛЕННЫЕ поля для product autocomplete (те же как в ProductAutocomplete)
 
@@ -653,6 +658,8 @@ class CustomUser(AbstractUser):
     pragma4_extra_fields       = models.JSONField(default=dict, blank=True)
     optimum_extra_fields       = models.JSONField(default=dict, blank=True)
     dineta_extra_fields       = models.JSONField(default=dict, blank=True)
+
+    min_ilgalaikis_turtas_amount = models.IntegerField(default=500)
 
     email_inbox_token = models.CharField(
         max_length=15,
