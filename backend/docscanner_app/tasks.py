@@ -3921,10 +3921,13 @@ def send_newsletter_task(
     exclude_user_ids: list[int] | None = None,
     registration_sources: list[str] | None = None,
     sender_user_id: int | None = None,
+    batch_size: int | None = None,
+    _target_user_ids: list[int] | None = None,
 ):
     """
-    Рассылка plain-text newsletter всем подходящим юзерам.
-    Запускается из NewsletterSendView.
+    Рассылка plain-text newsletter.
+    batch_size>0 — отправит batch_size писем, остаток перепланирует через 25ч.
+    _target_user_ids — внутренний параметр для последующих батчей.
     """
     from django.contrib.auth import get_user_model
     from django.core.mail import EmailMultiAlternatives
@@ -3933,37 +3936,52 @@ def send_newsletter_task(
 
     User = get_user_model()
 
-    qs = User.objects.filter(is_active=True)
+    if _target_user_ids is not None:
+        users = list(
+            User.objects.filter(id__in=_target_user_ids, is_active=True)
+            .order_by("id")
+            .values_list("id", "email", named=True)
+        )
+    else:
+        qs = User.objects.filter(is_active=True)
 
-    if exclude_user_ids:
-        qs = qs.exclude(id__in=exclude_user_ids)
+        if exclude_user_ids:
+            qs = qs.exclude(id__in=exclude_user_ids)
 
-    # registration_sources фильтр
-    if registration_sources:
-        source_q = Q()
-        for src in registration_sources:
-            if src == "null":
-                source_q |= Q(registration_source__isnull=True) | Q(registration_source="")
-            else:
-                source_q |= Q(registration_source=src)
-        qs = qs.filter(source_q)
+        if registration_sources:
+            source_q = Q()
+            for src in registration_sources:
+                if src == "null":
+                    source_q |= Q(registration_source__isnull=True) | Q(registration_source="")
+                else:
+                    source_q |= Q(registration_source=src)
+            qs = qs.filter(source_q)
 
-    users = list(qs.values_list("id", "email", named=True))
+        users = list(qs.order_by("id").values_list("id", "email", named=True))
+
     total = len(users)
 
     if total == 0:
         logger.info("[NEWSLETTER] No recipients matched filters.")
-        return {"sent": 0, "total": 0, "errors": 0}
+        return {"sent": 0, "total": 0, "errors": 0, "remaining": 0}
 
+    if batch_size and batch_size > 0:
+        current_batch = users[:batch_size]
+        remaining = users[batch_size:]
+    else:
+        current_batch = users
+        remaining = []
+
+    batch_num = f" (batch {batch_size}, this={len(current_batch)}, remaining={len(remaining)})" if batch_size else ""
     logger.info(
-        f"[NEWSLETTER START] total={total}, sources={registration_sources}, "
-        f"exclude={exclude_user_ids}, sender_user_id={sender_user_id}"
+        f"[NEWSLETTER START] total={total}{batch_num}, "
+        f"sender_user_id={sender_user_id}"
     )
 
     sent = 0
     errors = 0
 
-    for u in users:
+    for u in current_batch:
         try:
             msg = EmailMultiAlternatives(
                 subject=subject.strip(),
@@ -3983,8 +4001,107 @@ def send_newsletter_task(
             errors += 1
             logger.exception(f"[NEWSLETTER ERROR] user_id={u.id}, email={u.email}: {e}")
 
+    next_task_id = None
+    if remaining:
+        remaining_ids = [u.id for u in remaining]
+        result = send_newsletter_task.apply_async(
+            kwargs={
+                "subject": subject,
+                "body": body,
+                "batch_size": batch_size,
+                "_target_user_ids": remaining_ids,
+                "sender_user_id": sender_user_id,
+            },
+            countdown=25 * 3600,
+        )
+        next_task_id = result.id
+        logger.info(
+            f"[NEWSLETTER] Scheduled next batch: {len(remaining)} recipients "
+            f"in 25h, task_id={next_task_id}"
+        )
+
     logger.info(f"[NEWSLETTER DONE] sent={sent}, errors={errors}, total={total}")
-    return {"sent": sent, "total": total, "errors": errors}
+    return {
+        "sent": sent,
+        "total": total,
+        "errors": errors,
+        "remaining": len(remaining),
+        "next_task_id": next_task_id,
+    }
+
+# @shared_task(bind=True, max_retries=0)
+# def send_newsletter_task(
+#     self,
+#     *,
+#     subject: str,
+#     body: str,
+#     exclude_user_ids: list[int] | None = None,
+#     registration_sources: list[str] | None = None,
+#     sender_user_id: int | None = None,
+# ):
+#     """
+#     Рассылка plain-text newsletter всем подходящим юзерам.
+#     Запускается из NewsletterSendView.
+#     """
+#     from django.contrib.auth import get_user_model
+#     from django.core.mail import EmailMultiAlternatives
+#     from email.utils import formataddr
+#     from django.db.models import Q
+
+#     User = get_user_model()
+
+#     qs = User.objects.filter(is_active=True)
+
+#     if exclude_user_ids:
+#         qs = qs.exclude(id__in=exclude_user_ids)
+
+#     # registration_sources фильтр
+#     if registration_sources:
+#         source_q = Q()
+#         for src in registration_sources:
+#             if src == "null":
+#                 source_q |= Q(registration_source__isnull=True) | Q(registration_source="")
+#             else:
+#                 source_q |= Q(registration_source=src)
+#         qs = qs.filter(source_q)
+
+#     users = list(qs.values_list("id", "email", named=True))
+#     total = len(users)
+
+#     if total == 0:
+#         logger.info("[NEWSLETTER] No recipients matched filters.")
+#         return {"sent": 0, "total": 0, "errors": 0}
+
+#     logger.info(
+#         f"[NEWSLETTER START] total={total}, sources={registration_sources}, "
+#         f"exclude={exclude_user_ids}, sender_user_id={sender_user_id}"
+#     )
+
+#     sent = 0
+#     errors = 0
+
+#     for u in users:
+#         try:
+#             msg = EmailMultiAlternatives(
+#                 subject=subject.strip(),
+#                 body=body,
+#                 from_email=formataddr(("Denis iš DokSkeno", settings.DEFAULT_FROM_EMAIL)),
+#                 to=[u.email],
+#             )
+#             try:
+#                 msg.tags = ["newsletter"]
+#                 msg.metadata = {"event": "newsletter", "user_id": u.id}
+#             except Exception:
+#                 pass
+
+#             msg.send()
+#             sent += 1
+#         except Exception as e:
+#             errors += 1
+#             logger.exception(f"[NEWSLETTER ERROR] user_id={u.id}, email={u.email}: {e}")
+
+#     logger.info(f"[NEWSLETTER DONE] sent={sent}, errors={errors}, total={total}")
+#     return {"sent": sent, "total": total, "errors": errors}
 
 # ────────────────────────────────────────────────────────────
 # END ─── Dlia frontend newsletter ───

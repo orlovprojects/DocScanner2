@@ -12345,6 +12345,7 @@ class NewsletterSendView(APIView):
             exclude_user_ids=d.get("exclude_user_ids", []),
             registration_sources=d.get("registration_sources", []),
             sender_user_id=request.user.id,
+            batch_size=d.get("batch_size"),
         )
         return Response({"task_id": result.id, "status": "queued"})
 

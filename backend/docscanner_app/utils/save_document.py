@@ -449,9 +449,25 @@ def _apply_top_level_fields(
     if scan_type == "sumiskai":
         db_doc.is_long_term_asset_candidate = bool(doc_struct.get("is_long_term_asset_candidate", False))
         db_doc.suggested_asset_type = doc_struct.get("suggested_asset_type") or ""
+
+        # Safety-net: проверяем amount_wo_vat >= min_ilgalaikis_turtas_amount
+        if db_doc.is_long_term_asset_candidate:
+            try:
+                doc_amount = Decimal(str(db_doc.amount_wo_vat or 0))
+                min_amount = Decimal(str(getattr(user, "min_ilgalaikis_turtas_amount", 500)))
+                if doc_amount < min_amount:
+                    logger.info(
+                        "ILT safety-net (sumiskai): amount_wo_vat=%s < min=%s → reset",
+                        doc_amount, min_amount,
+                    )
+                    db_doc.is_long_term_asset_candidate = False
+                    db_doc.suggested_asset_type = ""
+            except Exception:
+                pass
     else:
         db_doc.is_long_term_asset_candidate = False
         db_doc.suggested_asset_type = ""
+
 
     # Определяем pirkimas/pardavimas
     db_doc.pirkimas_pardavimas = determine_pirkimas_pardavimas(doc_struct, user)
@@ -642,7 +658,7 @@ def _apply_sumiskai_defaults_from_user(db_doc, user) -> bool:
     return bool(changed_total)
 
 
-def _save_line_items(db_doc, doc_struct: Dict[str, Any], scan_type: str):
+def _save_line_items(db_doc, doc_struct: Dict[str, Any], scan_type: str, user=None):
     """
     Пересоздаёт строки LineItem из doc_struct["line_items"] для detaliai.
     АГРЕГИРУЕТ И/ИЛИ ВЫБИРАЕТ pvm_kodas ВСЕГДА (и для sumiskai тоже).
@@ -658,6 +674,24 @@ def _save_line_items(db_doc, doc_struct: Dict[str, Any], scan_type: str):
 
     # 1) Создаём строки ТОЛЬКО для detaliai
     if scan_type == "detaliai" and line_items:
+
+        # ── ILT safety-net: сбрасываем до создания строк ──
+        min_ilt = Decimal(str(getattr(user, "min_ilgalaikis_turtas_amount", 500))) if user else Decimal("500")
+        for li in line_items:
+            if not li.get("is_long_term_asset_candidate"):
+                continue
+            try:
+                li_subtotal = Decimal(str(li.get("subtotal") or 0))
+            except Exception:
+                li_subtotal = Decimal("0")
+            if li_subtotal < min_ilt:
+                logger.info(
+                    "ILT safety-net (detaliai): lineitem subtotal=%s < min=%s → reset",
+                    li_subtotal, min_ilt,
+                )
+                li["is_long_term_asset_candidate"] = False
+                li["suggested_asset_type"] = ""
+
         for raw_item in line_items:
             item = sanitize_line_item(raw_item)
 
@@ -789,7 +823,8 @@ def _save_line_items(db_doc, doc_struct: Dict[str, Any], scan_type: str):
             else:
                 db_doc.traded_type = "mixed"
         
-        # ── Ilgalaikis turtas: agregacija iš eilučių ──
+
+        # Агрегация на документ
         ilt_items = [li for li in line_items if li.get("is_long_term_asset_candidate")]
         db_doc.is_long_term_asset_candidate = bool(ilt_items)
         if ilt_items:
@@ -915,7 +950,7 @@ def update_scanned_document(
 
         db_doc.save()
 
-        _save_line_items(db_doc, doc_struct, scan_type)
+        _save_line_items(db_doc, doc_struct, scan_type, user)
 
         try:
             if scan_type == "detaliai":

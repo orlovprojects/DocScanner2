@@ -3427,6 +3427,7 @@ class NewsletterSerializer(serializers.Serializer):
         default=list,
         help_text="Filtras pagal registration_source. 'null' = be šaltinio.",
     )
+    batch_size = serializers.IntegerField(required=False, min_value=1, max_value=500, allow_null=True, default=None)
 
 # ────────────────────────────────────────────────────────────
 # END ─── Dlia frontend newsletter ───

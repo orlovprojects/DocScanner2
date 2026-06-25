@@ -25,6 +25,7 @@ import GroupIcon from "@mui/icons-material/Group";
 import FilterAltOutlinedIcon from "@mui/icons-material/FilterAltOutlined";
 import MailOutlineIcon from "@mui/icons-material/MailOutline";
 import WarningAmberRoundedIcon from "@mui/icons-material/WarningAmberRounded";
+import ScheduleSendIcon from "@mui/icons-material/ScheduleSend";
 import { api } from "../api/endpoints";
 
 const SOURCE_OPTIONS = [
@@ -97,6 +98,9 @@ const SummaryCard = memo(function SummaryCard({
     excludeIds,
     subjectReady,
     bodyReady,
+    batchEnabled,
+    batchSize,
+    batchCount,
 }) {
     return (
         <Card
@@ -145,6 +149,22 @@ const SummaryCard = memo(function SummaryCard({
                             {excludeIds.length ? excludeIds.join(", ") : "Nėra"}
                         </Typography>
                     </Box>
+
+                    {batchEnabled && (
+                        <Box>
+                            <Typography variant="caption" color="text.secondary">
+                                Partijos
+                            </Typography>
+                            <Stack direction="row" spacing={1} alignItems="center" sx={{ mt: 0.5 }}>
+                                <ScheduleSendIcon color="action" fontSize="small" />
+                                <Typography variant="body2" fontWeight={700}>
+                                    {batchCount
+                                        ? `${batchCount} × ${batchSize} laiškų (kas 25 val.)`
+                                        : `po ${batchSize} laiškų`}
+                                </Typography>
+                            </Stack>
+                        </Box>
+                    )}
 
                     <Box>
                         <Typography variant="caption" color="text.secondary">
@@ -221,6 +241,8 @@ export default function NewsletterPage() {
     const [confirmOpen, setConfirmOpen] = useState(false);
     const [result, setResult] = useState(null);
     const [error, setError] = useState(null);
+    const [batchEnabled, setBatchEnabled] = useState(false);
+    const [batchSize, setBatchSize] = useState(190);
 
     const excludeIds = useMemo(() => {
         return excludeIdsRaw
@@ -234,6 +256,10 @@ export default function NewsletterPage() {
     const subjectReady = subject.trim().length > 0;
     const bodyReady = body.trim().length > 0;
     const canSubmit = subjectReady && bodyReady;
+
+    const batchCount = batchEnabled && recipientCount
+        ? Math.ceil(recipientCount / batchSize)
+        : null;
 
     const selectedSourceLabels = useMemo(() => {
         if (!selectedSources.length) {
@@ -360,6 +386,7 @@ export default function NewsletterPage() {
                 body,
                 exclude_user_ids: excludeIds,
                 registration_sources: selectedSources,
+                batch_size: batchEnabled ? batchSize : null,
             });
 
             setResult(res.data);
@@ -470,6 +497,59 @@ export default function NewsletterPage() {
                                         }
                                     />
 
+                                    <Box
+                                        sx={(theme) => ({
+                                            p: 2,
+                                            borderRadius: 3,
+                                            border: `1px solid ${alpha(theme.palette.warning.main, 0.3)}`,
+                                            bgcolor: alpha(theme.palette.warning.main, 0.04),
+                                        })}
+                                    >
+                                        <Stack
+                                            direction="row"
+                                            alignItems="center"
+                                            justifyContent="space-between"
+                                        >
+                                            <Box>
+                                                <Typography variant="subtitle2" fontWeight={800}>
+                                                    Siųsti dalimis
+                                                </Typography>
+                                                <Typography variant="caption" color="text.secondary">
+                                                    Mailjet Free: 200 el. laiškų/d. Siunčiama kas 25 val.
+                                                </Typography>
+                                            </Box>
+
+                                            <Chip
+                                                label={batchEnabled ? "Įjungta" : "Išjungta"}
+                                                clickable
+                                                color={batchEnabled ? "warning" : "default"}
+                                                variant={batchEnabled ? "filled" : "outlined"}
+                                                onClick={() => setBatchEnabled((v) => !v)}
+                                                sx={{ borderRadius: 999, fontWeight: 700 }}
+                                            />
+                                        </Stack>
+
+                                        {batchEnabled && (
+                                            <TextField
+                                                label="Partijos dydis"
+                                                type="number"
+                                                size="small"
+                                                value={batchSize}
+                                                onChange={(e) => {
+                                                    const v = parseInt(e.target.value, 10);
+                                                    if (v > 0 && v <= 500) setBatchSize(v);
+                                                }}
+                                                inputProps={{ min: 1, max: 500 }}
+                                                helperText={
+                                                    batchCount
+                                                        ? `${batchCount} partij${batchCount === 1 ? "a" : "os"}, ~${Math.max(batchCount - 1, 0)} d. trukmė`
+                                                        : "Kiek laiškų siųsti per vieną partiją"
+                                                }
+                                                sx={{ mt: 2, width: 200 }}
+                                            />
+                                        )}
+                                    </Box>
+
                                     <Divider />
 
                                     <TextField
@@ -554,6 +634,9 @@ export default function NewsletterPage() {
                                 excludeIds={excludeIds}
                                 subjectReady={subjectReady}
                                 bodyReady={bodyReady}
+                                batchEnabled={batchEnabled}
+                                batchSize={batchSize}
+                                batchCount={batchCount}
                             />
 
                             <ResultAlerts
@@ -572,6 +655,7 @@ export default function NewsletterPage() {
                 onClose={() => setConfirmOpen(false)}
                 maxWidth="xs"
                 fullWidth
+                disableScrollLock
                 PaperProps={{
                     sx: {
                         borderRadius: 4,
@@ -591,6 +675,12 @@ export default function NewsletterPage() {
                     <Typography color="text.secondary">
                         Ar tikrai norite išsiųsti laišką{" "}
                         <strong>{recipientCount ?? "?"}</strong> gavėjams?
+                        {batchEnabled && batchCount > 1 && (
+                            <>
+                                {" "}Laiškai bus siunčiami {batchCount} partijomis
+                                po {batchSize}, kas 25 val.
+                            </>
+                        )}
                     </Typography>
                 </DialogContent>
 
