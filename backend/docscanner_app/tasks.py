@@ -3911,123 +3911,296 @@ def _save_multi_doc_debug_copy(doc, file_bytes=None):
 # ────────────────────────────────────────────────────────────
 # ─── Dlia frontend newsletter ───
 # ────────────────────────────────────────────────────────────
+def _next_batch_countdown():
+    """
+    Возвращает количество секунд до следующего допустимого окна отправки.
+    Правила: Пн-Пт 08:00–17:00 Vilnius, минимум 25ч от текущего момента.
+    """
+    import zoneinfo
 
-@shared_task(bind=True, max_retries=0)
-def send_newsletter_task(
-    self,
-    *,
-    subject: str,
-    body: str,
-    exclude_user_ids: list[int] | None = None,
-    registration_sources: list[str] | None = None,
-    sender_user_id: int | None = None,
-    batch_size: int | None = None,
-    _target_user_ids: list[int] | None = None,
-):
+    tz = zoneinfo.ZoneInfo("Europe/Vilnius")
+    now = timezone.now().astimezone(tz)
+    earliest = now + timedelta(hours=25)
+
+    def _next_window_start(dt):
+        d = dt
+        while d.weekday() >= 5:
+            d = d.replace(hour=8, minute=0, second=0, microsecond=0) + timedelta(days=1)
+        if d.hour < 8:
+            d = d.replace(hour=8, minute=0, second=0, microsecond=0)
+        elif d.hour >= 17:
+            d = (d + timedelta(days=1)).replace(hour=8, minute=0, second=0, microsecond=0)
+            while d.weekday() >= 5:
+                d += timedelta(days=1)
+        return d
+
+    send_at = _next_window_start(earliest)
+    return int((send_at - now).total_seconds())
+
+
+def _seconds_until_send_window():
     """
-    Рассылка plain-text newsletter.
-    batch_size>0 — отправит batch_size писем, остаток перепланирует через 25ч.
-    _target_user_ids — внутренний параметр для последующих батчей.
+    Если сейчас внутри окна (Пн-Пт 08:00–17:00 Vilnius) — возвращает 0.
+    Иначе — количество секунд до открытия окна.
     """
-    from django.contrib.auth import get_user_model
+    import zoneinfo
+
+    tz = zoneinfo.ZoneInfo("Europe/Vilnius")
+    now = timezone.now().astimezone(tz)
+
+    # Выходной
+    if now.weekday() >= 5:
+        days_ahead = 7 - now.weekday()
+        window_open = (now + timedelta(days=days_ahead)).replace(
+            hour=8, minute=0, second=0, microsecond=0,
+        )
+        return int((window_open - now).total_seconds())
+
+    # Рабочий день, до 08:00
+    if now.hour < 8:
+        window_open = now.replace(hour=8, minute=0, second=0, microsecond=0)
+        return int((window_open - now).total_seconds())
+
+    # Рабочий день, после 17:00
+    if now.hour >= 17:
+        next_day = now + timedelta(days=1)
+        while next_day.weekday() >= 5:
+            next_day += timedelta(days=1)
+        window_open = next_day.replace(hour=8, minute=0, second=0, microsecond=0)
+        return int((window_open - now).total_seconds())
+
+    # Внутри окна
+    return 0
+
+
+@shared_task(
+    bind=True,
+    max_retries=0,
+    acks_late=False,
+    reject_on_worker_lost=False,
+    time_limit=1800,
+    soft_time_limit=1740,
+    ignore_result=True,
+)
+def send_newsletter_task(self, *, campaign_id: int):
+    """
+    Идемпотентная рассылка newsletter по campaign_id.
+    Отправляет batch_size писем со статусом pending, помечает каждого sent/failed.
+    Если остались pending — планирует следующий батч через 25ч.
+    При крэше и перезапуске — дубликатов не будет.
+    """
+    import redis as _redis
     from django.core.mail import EmailMultiAlternatives
     from email.utils import formataddr
-    from django.db.models import Q
+    from .models import NewsletterCampaign, NewsletterRecipient
+    from .celery_signals import _send_telegram
 
-    User = get_user_model()
+    # ── Redis lock: не позволять параллельный запуск одной кампании ──
+    rconn = _redis.from_url(settings.CELERY_BROKER_URL)
+    lock_key = f"newsletter_lock:{campaign_id}"
+    lock = rconn.lock(lock_key, timeout=1800, blocking=False)
+    if not lock.acquire(blocking=False):
+        logger.warning(f"[NEWSLETTER] Campaign {campaign_id}: another instance running, skipping.")
+        return
 
-    if _target_user_ids is not None:
-        users = list(
-            User.objects.filter(id__in=_target_user_ids, is_active=True)
-            .order_by("id")
-            .values_list("id", "email", named=True)
-        )
-    else:
-        qs = User.objects.filter(is_active=True)
-
-        if exclude_user_ids:
-            qs = qs.exclude(id__in=exclude_user_ids)
-
-        if registration_sources:
-            source_q = Q()
-            for src in registration_sources:
-                if src == "null":
-                    source_q |= Q(registration_source__isnull=True) | Q(registration_source="")
-                else:
-                    source_q |= Q(registration_source=src)
-            qs = qs.filter(source_q)
-
-        users = list(qs.order_by("id").values_list("id", "email", named=True))
-
-    total = len(users)
-
-    if total == 0:
-        logger.info("[NEWSLETTER] No recipients matched filters.")
-        return {"sent": 0, "total": 0, "errors": 0, "remaining": 0}
-
-    if batch_size and batch_size > 0:
-        current_batch = users[:batch_size]
-        remaining = users[batch_size:]
-    else:
-        current_batch = users
-        remaining = []
-
-    batch_num = f" (batch {batch_size}, this={len(current_batch)}, remaining={len(remaining)})" if batch_size else ""
-    logger.info(
-        f"[NEWSLETTER START] total={total}{batch_num}, "
-        f"sender_user_id={sender_user_id}"
-    )
-
-    sent = 0
-    errors = 0
-
-    for u in current_batch:
-        try:
-            msg = EmailMultiAlternatives(
-                subject=subject.strip(),
-                body=body,
-                from_email=formataddr(("Denis iš DokSkeno", settings.DEFAULT_FROM_EMAIL)),
-                to=[u.email],
+    try:
+        # ── Проверка окна отправки ──
+        wait = _seconds_until_send_window()
+        if wait > 0:
+            import zoneinfo
+            send_at = (timezone.now() + timedelta(seconds=wait)).astimezone(
+                zoneinfo.ZoneInfo("Europe/Vilnius")
             )
-            try:
-                msg.tags = ["newsletter"]
-                msg.metadata = {"event": "newsletter", "user_id": u.id}
-            except Exception:
-                pass
+            logger.info(
+                f"[NEWSLETTER] Campaign {campaign_id}: outside send window, "
+                f"rescheduling to {send_at:%Y-%m-%d %H:%M} Vilnius ({wait}s)"
+            )
+            send_newsletter_task.apply_async(
+                kwargs={"campaign_id": campaign_id},
+                countdown=wait,
+            )
+            return  # finally освободит lock
 
-            msg.send()
-            sent += 1
-        except Exception as e:
-            errors += 1
-            logger.exception(f"[NEWSLETTER ERROR] user_id={u.id}, email={u.email}: {e}")
+        try:
+            campaign = NewsletterCampaign.objects.get(id=campaign_id)
+        except NewsletterCampaign.DoesNotExist:
+            logger.error(f"[NEWSLETTER] Campaign {campaign_id} not found.")
+            return
 
-    next_task_id = None
-    if remaining:
-        remaining_ids = [u.id for u in remaining]
-        result = send_newsletter_task.apply_async(
-            kwargs={
-                "subject": subject,
-                "body": body,
-                "batch_size": batch_size,
-                "_target_user_ids": remaining_ids,
-                "sender_user_id": sender_user_id,
-            },
-            countdown=25 * 3600,
+        if campaign.status in ("done", "failed"):
+            logger.info(f"[NEWSLETTER] Campaign {campaign_id} already {campaign.status}, skipping.")
+            return
+
+        if not campaign.started_at:
+            campaign.started_at = timezone.now()
+        campaign.status = NewsletterCampaign.Status.SENDING
+        campaign.celery_task_id = self.request.id or ""
+        campaign.save(update_fields=["status", "started_at", "celery_task_id"])
+
+        # Выбрать pending получателей для текущего батча
+        pending = list(
+            NewsletterRecipient.objects.filter(
+                campaign=campaign, status=NewsletterRecipient.Status.PENDING,
+            )
+            .select_related("user")
+            .order_by("id")[:campaign.batch_size]
         )
-        next_task_id = result.id
+
+        if not pending:
+            campaign.status = NewsletterCampaign.Status.DONE
+            campaign.finished_at = timezone.now()
+            campaign.save(update_fields=["status", "finished_at"])
+            logger.info(f"[NEWSLETTER] Campaign {campaign_id}: no pending recipients, done.")
+            _send_telegram(
+                f"✅ <b>Newsletter #{campaign_id}</b> baigtas.\n"
+                f"Išsiųsta: {campaign.sent_count}, klaidų: {campaign.failed_count}"
+            )
+            return
+
         logger.info(
-            f"[NEWSLETTER] Scheduled next batch: {len(remaining)} recipients "
-            f"in 25h, task_id={next_task_id}"
+            f"[NEWSLETTER] Campaign {campaign_id}: sending batch of {len(pending)}, "
+            f"total_pending={NewsletterRecipient.objects.filter(campaign=campaign, status='pending').count()}"
         )
 
-    logger.info(f"[NEWSLETTER DONE] sent={sent}, errors={errors}, total={total}")
-    return {
-        "sent": sent,
-        "total": total,
-        "errors": errors,
-        "remaining": len(remaining),
-        "next_task_id": next_task_id,
-    }
+        sent = 0
+        errors = 0
+
+        for recipient in pending:
+            try:
+                msg = EmailMultiAlternatives(
+                    subject=campaign.subject.strip(),
+                    body=campaign.body,
+                    from_email=formataddr(("Denis iš DokSkeno", settings.DEFAULT_FROM_EMAIL)),
+                    to=[recipient.email],
+                )
+                try:
+                    msg.tags = ["newsletter"]
+                    msg.metadata = {
+                        "event": "newsletter",
+                        "campaign_id": campaign.id,
+                        "user_id": recipient.user_id,
+                    }
+                except Exception:
+                    pass
+
+                msg.send()
+
+                recipient.status = NewsletterRecipient.Status.SENT
+                recipient.sent_at = timezone.now()
+                recipient.save(update_fields=["status", "sent_at"])
+                sent += 1
+
+            except Exception as e:
+                recipient.status = NewsletterRecipient.Status.FAILED
+                recipient.error_message = str(e)[:500]
+                recipient.save(update_fields=["status", "error_message"])
+                errors += 1
+                logger.exception(
+                    f"[NEWSLETTER] Campaign {campaign_id}: "
+                    f"failed for {recipient.email}: {e}"
+                )
+
+        # Обновить счётчики кампании
+        campaign.sent_count = NewsletterRecipient.objects.filter(
+            campaign=campaign, status=NewsletterRecipient.Status.SENT,
+        ).count()
+        campaign.failed_count = NewsletterRecipient.objects.filter(
+            campaign=campaign, status=NewsletterRecipient.Status.FAILED,
+        ).count()
+
+        remaining = NewsletterRecipient.objects.filter(
+            campaign=campaign, status=NewsletterRecipient.Status.PENDING,
+        ).count()
+
+        if remaining > 0:
+            # Запланировать следующий батч
+            countdown = _next_batch_countdown()
+            result = send_newsletter_task.apply_async(
+                kwargs={"campaign_id": campaign_id},
+                countdown=countdown,
+            )
+            campaign.status = NewsletterCampaign.Status.PAUSED
+            campaign.celery_task_id = result.id
+
+            import zoneinfo
+            send_at = (timezone.now() + timedelta(seconds=countdown)).astimezone(
+                zoneinfo.ZoneInfo("Europe/Vilnius")
+            )
+            logger.info(
+                f"[NEWSLETTER] Campaign {campaign_id}: batch done (sent={sent}, errors={errors}), "
+                f"remaining={remaining}, next_batch_at={send_at:%Y-%m-%d %H:%M} Vilnius, "
+                f"task_id={result.id}"
+            )
+            _send_telegram(
+                f"📨 <b>Newsletter #{campaign_id}</b> partija baigta.\n"
+                f"Šį kartą: {sent} išsiųsta, {errors} klaidų.\n"
+                f"Liko: {remaining} gavėjų.\n"
+                f"Kita partija: {send_at:%Y-%m-%d %H:%M} Vilnius"
+            )
+        else:
+            campaign.status = NewsletterCampaign.Status.DONE
+            campaign.finished_at = timezone.now()
+            logger.info(
+                f"[NEWSLETTER] Campaign {campaign_id}: ALL DONE. "
+                f"sent={campaign.sent_count}, failed={campaign.failed_count}"
+            )
+            _send_telegram(
+                f"✅ <b>Newsletter #{campaign_id}</b> baigtas!\n"
+                f"Išsiųsta: {campaign.sent_count}, klaidų: {campaign.failed_count}, "
+                f"iš viso: {campaign.total_recipients}"
+            )
+
+        campaign.save(update_fields=[
+            "sent_count", "failed_count", "status", "celery_task_id", "finished_at",
+        ])
+
+    except SoftTimeLimitExceeded:
+        logger.warning(f"[NEWSLETTER] Campaign {campaign_id}: soft time limit, will resume next run.")
+        try:
+            c = NewsletterCampaign.objects.get(id=campaign_id)
+            c.sent_count = NewsletterRecipient.objects.filter(campaign=c, status="sent").count()
+            c.failed_count = NewsletterRecipient.objects.filter(campaign=c, status="failed").count()
+            remaining = NewsletterRecipient.objects.filter(campaign=c, status="pending").count()
+            c.status = NewsletterCampaign.Status.PAUSED
+            c.save(update_fields=["sent_count", "failed_count", "status"])
+
+            send_newsletter_task.apply_async(
+                kwargs={"campaign_id": campaign_id},
+                countdown=300,
+            )
+            _send_telegram(
+                f"⚠️ <b>Newsletter #{campaign_id}</b> — soft time limit (29 min)!\n"
+                f"Išsiųsta: {c.sent_count}, klaidų: {c.failed_count}, liko: {remaining}.\n"
+                f"Tęsiama po 5 min.",
+                dedup_key=f"newsletter_timeout_{campaign_id}",
+                dedup_ttl=600,
+            )
+        except Exception:
+            pass
+
+    except Exception as exc:
+        logger.exception(f"[NEWSLETTER] Campaign {campaign_id}: unexpected error: {exc}")
+        try:
+            c = NewsletterCampaign.objects.get(id=campaign_id)
+            c.status = NewsletterCampaign.Status.FAILED
+            c.error_message = str(exc)[:1000]
+            c.finished_at = timezone.now()
+            c.save(update_fields=["status", "error_message", "finished_at"])
+            _send_telegram(
+                f"🔴 <b>Newsletter #{campaign_id}</b> — KLAIDA!\n"
+                f"<code>{str(exc)[:300]}</code>\n"
+                f"Išsiųsta: {c.sent_count}, klaidų: {c.failed_count}",
+                dedup_key=f"newsletter_error_{campaign_id}",
+                dedup_ttl=600,
+            )
+        except Exception:
+            pass
+
+    finally:
+        try:
+            lock.release()
+        except Exception:
+            pass
 
 # @shared_task(bind=True, max_retries=0)
 # def send_newsletter_task(

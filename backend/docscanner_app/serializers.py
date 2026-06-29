@@ -12,7 +12,7 @@ from datetime import date
 from decimal import Decimal
 from django.utils import timezone
 
-from .models import Payments, MeasurementUnit, InvoiceSeries, Product, RecurringInvoice, RecurringInvoiceLineItem, Invoice, InvoiceEmail, InvoiceSettings, RivileGamaAPIKey
+from .models import Payments, MeasurementUnit, InvoiceSeries, Product, RecurringInvoice, RecurringInvoiceLineItem, Invoice, InvoiceEmail, InvoiceSettings, RivileGamaAPIKey, NewsletterCampaign, NewsletterRecipient
 
 from .utils.lineitem_rules import normalize_lineitem_rules
 
@@ -3415,19 +3415,48 @@ class RecurringInvoiceAdminListSerializer(serializers.ModelSerializer):
 # ────────────────────────────────────────────────────────────
 # ─── Dlia frontend newsletter ───
 # ────────────────────────────────────────────────────────────
-class NewsletterSerializer(serializers.Serializer):
+
+class NewsletterCampaignCreateSerializer(serializers.Serializer):
     subject = serializers.CharField(max_length=255)
     body = serializers.CharField()
     exclude_user_ids = serializers.ListField(
-        child=serializers.IntegerField(), required=False, default=list
+        child=serializers.IntegerField(), required=False, default=list,
     )
     registration_sources = serializers.ListField(
         child=serializers.ChoiceField(choices=["skaitmenizavimas", "israsymas", "null"]),
-        required=False,
-        default=list,
+        required=False, default=list,
         help_text="Filtras pagal registration_source. 'null' = be šaltinio.",
     )
-    batch_size = serializers.IntegerField(required=False, min_value=1, max_value=500, allow_null=True, default=None)
+    batch_size = serializers.IntegerField(
+        required=False, min_value=1, max_value=500, allow_null=True, default=190,
+    )
+
+
+class NewsletterRecipientSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = NewsletterRecipient
+        fields = ["id", "email", "status", "sent_at", "error_message"]
+
+
+class NewsletterCampaignSerializer(serializers.ModelSerializer):
+    sender_email = serializers.EmailField(source="sender.email", read_only=True, default=None)
+    progress = serializers.SerializerMethodField()
+
+    class Meta:
+        model = NewsletterCampaign
+        fields = [
+            "id", "subject", "body", "status",
+            "sender_email", "batch_size",
+            "total_recipients", "sent_count", "failed_count",
+            "celery_task_id", "error_message",
+            "created_at", "started_at", "finished_at",
+            "progress",
+        ]
+
+    def get_progress(self, obj):
+        if obj.total_recipients == 0:
+            return 0
+        return round((obj.sent_count + obj.failed_count) / obj.total_recipients * 100, 1)
 
 # ────────────────────────────────────────────────────────────
 # END ─── Dlia frontend newsletter ───

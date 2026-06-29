@@ -16,7 +16,14 @@ import {
     LinearProgress,
     Paper,
     Stack,
+    Table,
+    TableBody,
+    TableCell,
+    TableContainer,
+    TableHead,
+    TableRow,
     TextField,
+    Tooltip,
     Typography,
 } from "@mui/material";
 import { alpha } from "@mui/material/styles";
@@ -26,6 +33,11 @@ import FilterAltOutlinedIcon from "@mui/icons-material/FilterAltOutlined";
 import MailOutlineIcon from "@mui/icons-material/MailOutline";
 import WarningAmberRoundedIcon from "@mui/icons-material/WarningAmberRounded";
 import ScheduleSendIcon from "@mui/icons-material/ScheduleSend";
+import CheckCircleIcon from "@mui/icons-material/CheckCircle";
+import ErrorIcon from "@mui/icons-material/Error";
+import PauseCircleIcon from "@mui/icons-material/PauseCircle";
+import HourglassEmptyIcon from "@mui/icons-material/HourglassEmpty";
+import RefreshIcon from "@mui/icons-material/Refresh";
 import { api } from "../api/endpoints";
 
 const SOURCE_OPTIONS = [
@@ -33,6 +45,14 @@ const SOURCE_OPTIONS = [
     { value: "israsymas", label: "Išrašymas" },
     { value: "null", label: "Nenustatytas" },
 ];
+
+const STATUS_CONFIG = {
+    draft:   { label: "Juodraštis", color: "default",  icon: HourglassEmptyIcon },
+    sending: { label: "Siunčiama",  color: "info",     icon: HourglassEmptyIcon },
+    paused:  { label: "Pristabdyta", color: "warning", icon: PauseCircleIcon },
+    done:    { label: "Baigta",     color: "success",   icon: CheckCircleIcon },
+    failed:  { label: "Klaida",     color: "error",     icon: ErrorIcon },
+};
 
 const SourceFilter = memo(function SourceFilter({
     selectedSources,
@@ -69,7 +89,6 @@ const SourceFilter = memo(function SourceFilter({
             <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
                 {SOURCE_OPTIONS.map((option) => {
                     const selected = selectedSources.includes(option.value);
-
                     return (
                         <Chip
                             key={option.value}
@@ -78,11 +97,7 @@ const SourceFilter = memo(function SourceFilter({
                             color={selected ? "primary" : "default"}
                             variant={selected ? "filled" : "outlined"}
                             onClick={() => onToggleSource(option.value)}
-                            sx={{
-                                borderRadius: 999,
-                                fontWeight: 700,
-                                px: 0.5,
-                            }}
+                            sx={{ borderRadius: 999, fontWeight: 700, px: 0.5 }}
                         />
                     );
                 })}
@@ -121,7 +136,6 @@ const SummaryCard = memo(function SummaryCard({
                         <Typography variant="caption" color="text.secondary">
                             Gavėjai
                         </Typography>
-
                         <Stack direction="row" spacing={1} alignItems="center" sx={{ mt: 0.5 }}>
                             <GroupIcon color="action" fontSize="small" />
                             <Typography variant="h5" fontWeight={900}>
@@ -170,7 +184,6 @@ const SummaryCard = memo(function SummaryCard({
                         <Typography variant="caption" color="text.secondary">
                             Laiško būsena
                         </Typography>
-
                         <Stack direction="row" spacing={1} sx={{ mt: 0.75 }}>
                             <Chip
                                 size="small"
@@ -178,7 +191,6 @@ const SummaryCard = memo(function SummaryCard({
                                 color={subjectReady ? "success" : "default"}
                                 variant={subjectReady ? "filled" : "outlined"}
                             />
-
                             <Chip
                                 size="small"
                                 label={bodyReady ? "Žinutė užpildyta" : "Trūksta žinutės"}
@@ -193,36 +205,141 @@ const SummaryCard = memo(function SummaryCard({
     );
 });
 
+const CampaignTable = memo(function CampaignTable({ campaigns, loading, onRefresh }) {
+    if (!campaigns.length && !loading) return null;
+
+    return (
+        <Paper
+            elevation={0}
+            sx={(theme) => ({
+                border: `1px solid ${theme.palette.divider}`,
+                borderRadius: 4,
+                overflow: "hidden",
+                mt: 3,
+            })}
+        >
+            <Stack
+                direction="row"
+                alignItems="center"
+                justifyContent="space-between"
+                sx={{ px: 3, py: 2 }}
+            >
+                <Typography variant="subtitle1" fontWeight={800}>
+                    Kampanijos
+                </Typography>
+                <Button
+                    size="small"
+                    startIcon={loading ? <CircularProgress size={14} /> : <RefreshIcon />}
+                    onClick={onRefresh}
+                    disabled={loading}
+                    sx={{ borderRadius: 999 }}
+                >
+                    Atnaujinti
+                </Button>
+            </Stack>
+
+            <TableContainer>
+                <Table size="small">
+                    <TableHead>
+                        <TableRow>
+                            <TableCell sx={{ fontWeight: 800 }}>ID</TableCell>
+                            <TableCell sx={{ fontWeight: 800 }}>Tema</TableCell>
+                            <TableCell sx={{ fontWeight: 800 }}>Būsena</TableCell>
+                            <TableCell sx={{ fontWeight: 800 }} align="center">Progresas</TableCell>
+                            <TableCell sx={{ fontWeight: 800 }} align="right">Išsiųsta</TableCell>
+                            <TableCell sx={{ fontWeight: 800 }} align="right">Klaidos</TableCell>
+                            <TableCell sx={{ fontWeight: 800 }} align="right">Iš viso</TableCell>
+                            <TableCell sx={{ fontWeight: 800 }}>Sukurta</TableCell>
+                        </TableRow>
+                    </TableHead>
+                    <TableBody>
+                        {campaigns.map((c) => {
+                            const cfg = STATUS_CONFIG[c.status] || STATUS_CONFIG.draft;
+                            const Icon = cfg.icon;
+                            return (
+                                <TableRow key={c.id} hover>
+                                    <TableCell>#{c.id}</TableCell>
+                                    <TableCell>
+                                        <Tooltip title={c.subject} arrow>
+                                            <Typography
+                                                variant="body2"
+                                                noWrap
+                                                sx={{ maxWidth: 220 }}
+                                            >
+                                                {c.subject}
+                                            </Typography>
+                                        </Tooltip>
+                                    </TableCell>
+                                    <TableCell>
+                                        <Chip
+                                            size="small"
+                                            icon={<Icon fontSize="small" />}
+                                            label={cfg.label}
+                                            color={cfg.color}
+                                            variant="outlined"
+                                            sx={{ fontWeight: 700, borderRadius: 999 }}
+                                        />
+                                    </TableCell>
+                                    <TableCell align="center" sx={{ minWidth: 120 }}>
+                                        <Stack spacing={0.5}>
+                                            <LinearProgress
+                                                variant="determinate"
+                                                value={c.progress || 0}
+                                                sx={{ height: 6, borderRadius: 3 }}
+                                            />
+                                            <Typography variant="caption" color="text.secondary">
+                                                {c.progress}%
+                                            </Typography>
+                                        </Stack>
+                                    </TableCell>
+                                    <TableCell align="right">
+                                        <Typography variant="body2" fontWeight={700} color="success.main">
+                                            {c.sent_count}
+                                        </Typography>
+                                    </TableCell>
+                                    <TableCell align="right">
+                                        <Typography
+                                            variant="body2"
+                                            fontWeight={700}
+                                            color={c.failed_count > 0 ? "error.main" : "text.secondary"}
+                                        >
+                                            {c.failed_count}
+                                        </Typography>
+                                    </TableCell>
+                                    <TableCell align="right">{c.total_recipients}</TableCell>
+                                    <TableCell>
+                                        <Typography variant="caption" color="text.secondary">
+                                            {new Date(c.created_at).toLocaleString("lt-LT", {
+                                                month: "2-digit",
+                                                day: "2-digit",
+                                                hour: "2-digit",
+                                                minute: "2-digit",
+                                            })}
+                                        </Typography>
+                                    </TableCell>
+                                </TableRow>
+                            );
+                        })}
+                    </TableBody>
+                </Table>
+            </TableContainer>
+        </Paper>
+    );
+});
+
 const ResultAlerts = memo(function ResultAlerts({ error, result, onClearError, onClearResult }) {
-    if (!error && !result) {
-        return null;
-    }
+    if (!error && !result) return null;
 
     return (
         <Stack spacing={1.5}>
             {error && (
-                <Alert
-                    severity="error"
-                    onClose={onClearError}
-                    sx={{ borderRadius: 3 }}
-                >
+                <Alert severity="error" onClose={onClearError} sx={{ borderRadius: 3 }}>
                     {error}
                 </Alert>
             )}
-
             {result && (
-                <Alert
-                    severity="success"
-                    onClose={onClearResult}
-                    sx={{ borderRadius: 3 }}
-                >
-                    Užduotis sukurta.
-                    {result.task_id && (
-                        <>
-                            {" "}
-                            Task ID: <strong>{result.task_id}</strong>
-                        </>
-                    )}
+                <Alert severity="success" onClose={onClearResult} sx={{ borderRadius: 3 }}>
+                    Kampanija #{result.campaign_id} sukurta — {result.total_recipients} gavėjų.
                 </Alert>
             )}
         </Stack>
@@ -243,14 +360,16 @@ export default function NewsletterPage() {
     const [error, setError] = useState(null);
     const [batchEnabled, setBatchEnabled] = useState(false);
     const [batchSize, setBatchSize] = useState(190);
+    const [campaigns, setCampaigns] = useState([]);
+    const [loadingCampaigns, setLoadingCampaigns] = useState(false);
 
     const excludeIds = useMemo(() => {
         return excludeIdsRaw
             .split(",")
-            .map((value) => value.trim())
+            .map((v) => v.trim())
             .filter(Boolean)
             .map(Number)
-            .filter((value) => Number.isInteger(value) && value > 0);
+            .filter((v) => Number.isInteger(v) && v > 0);
     }, [excludeIdsRaw]);
 
     const subjectReady = subject.trim().length > 0;
@@ -262,89 +381,63 @@ export default function NewsletterPage() {
         : null;
 
     const selectedSourceLabels = useMemo(() => {
-        if (!selectedSources.length) {
-            return "Visi šaltiniai";
-        }
-
+        if (!selectedSources.length) return "Visi šaltiniai";
         return SOURCE_OPTIONS
-            .filter((option) => selectedSources.includes(option.value))
-            .map((option) => option.label)
+            .filter((o) => selectedSources.includes(o.value))
+            .map((o) => o.label)
             .join(", ");
     }, [selectedSources]);
 
-    const handleSubjectChange = useCallback((e) => {
-        setSubject(e.target.value);
-    }, []);
-
-    const handleBodyChange = useCallback((e) => {
-        setBody(e.target.value);
-    }, []);
-
-    const handleExcludeIdsChange = useCallback((e) => {
-        setExcludeIdsRaw(e.target.value);
-    }, []);
-
-    const clearError = useCallback(() => {
-        setError(null);
-    }, []);
-
-    const clearResult = useCallback(() => {
-        setResult(null);
-    }, []);
-
-    const clearSources = useCallback(() => {
-        setSelectedSources([]);
-    }, []);
-
-    const toggleSource = useCallback((value) => {
-        setSelectedSources((prev) =>
-            prev.includes(value)
-                ? prev.filter((source) => source !== value)
-                : [...prev, value]
-        );
-    }, []);
-
     const fetchCount = useCallback(async () => {
         setLoadingCount(true);
-
         try {
             const params = new URLSearchParams();
-
-            selectedSources.forEach((source) => {
-                params.append("sources", source);
-            });
-
-            if (excludeIds.length) {
-                params.set("exclude_ids", excludeIds.join(","));
-            }
-
+            selectedSources.forEach((s) => params.append("sources", s));
+            if (excludeIds.length) params.set("exclude_ids", excludeIds.join(","));
             const query = params.toString();
             const res = await api.get(`/admin/newsletter/${query ? `?${query}` : ""}`);
-
             setRecipientCount(res.data.recipient_count);
-        } catch (e) {
-            console.error(e);
+        } catch {
             setRecipientCount(null);
         } finally {
             setLoadingCount(false);
         }
     }, [selectedSources, excludeIds]);
 
+    const fetchCampaigns = useCallback(async () => {
+        setLoadingCampaigns(true);
+        try {
+            const res = await api.get("/admin/newsletter/?list=1");
+            setCampaigns(res.data.campaigns || []);
+        } catch {
+            console.error("Failed to load campaigns");
+        } finally {
+            setLoadingCampaigns(false);
+        }
+    }, []);
+
     useEffect(() => {
         const timer = setTimeout(fetchCount, 400);
         return () => clearTimeout(timer);
     }, [fetchCount]);
 
-    const handleTestSend = async () => {
-        if (!canSubmit) {
-            setError("Užpildykite temą ir žinutę.");
-            return;
-        }
+    useEffect(() => {
+        fetchCampaigns();
+    }, [fetchCampaigns]);
 
+    // Auto-refresh campaigns every 30s if any are sending
+    useEffect(() => {
+        const hasSending = campaigns.some((c) => c.status === "sending");
+        if (!hasSending) return;
+        const interval = setInterval(fetchCampaigns, 30000);
+        return () => clearInterval(interval);
+    }, [campaigns, fetchCampaigns]);
+
+    const handleTestSend = async () => {
+        if (!canSubmit) { setError("Užpildykite temą ir žinutę."); return; }
         setSendingTest(true);
         setError(null);
         setResult(null);
-
         try {
             const res = await api.put("/admin/newsletter/", {
                 subject: subject.trim(),
@@ -352,26 +445,12 @@ export default function NewsletterPage() {
                 exclude_user_ids: [],
                 registration_sources: [],
             });
-
-            setResult(res.data);
+            setResult({ ...res.data, campaign_id: "TEST", total_recipients: 1 });
         } catch (e) {
-            setError(
-                e.response?.data?.detail ||
-                    JSON.stringify(e.response?.data) ||
-                    "Klaida siunčiant testą."
-            );
+            setError(e.response?.data?.detail || JSON.stringify(e.response?.data) || "Klaida siunčiant testą.");
         } finally {
             setSendingTest(false);
         }
-    };
-
-    const requestSend = () => {
-        if (!canSubmit) {
-            setError("Užpildykite temą ir žinutę.");
-            return;
-        }
-
-        setConfirmOpen(true);
     };
 
     const handleSend = async () => {
@@ -379,7 +458,6 @@ export default function NewsletterPage() {
         setSending(true);
         setError(null);
         setResult(null);
-
         try {
             const res = await api.post("/admin/newsletter/", {
                 subject: subject.trim(),
@@ -388,14 +466,10 @@ export default function NewsletterPage() {
                 registration_sources: selectedSources,
                 batch_size: batchEnabled ? batchSize : null,
             });
-
             setResult(res.data);
+            fetchCampaigns();
         } catch (e) {
-            setError(
-                e.response?.data?.detail ||
-                    JSON.stringify(e.response?.data) ||
-                    "Klaida siunčiant."
-            );
+            setError(e.response?.data?.detail || JSON.stringify(e.response?.data) || "Klaida siunčiant.");
         } finally {
             setSending(false);
         }
@@ -424,40 +498,23 @@ export default function NewsletterPage() {
                     <Box>
                         <Typography
                             variant="overline"
-                            sx={{
-                                color: "text.secondary",
-                                fontWeight: 800,
-                                letterSpacing: 1.4,
-                            }}
+                            sx={{ color: "text.secondary", fontWeight: 800, letterSpacing: 1.4 }}
                         >
                             Admin panel
                         </Typography>
-
                         <Typography variant="h4" fontWeight={800} sx={{ mt: 0.5 }}>
                             Newsletter
                         </Typography>
-
                         <Typography variant="body1" color="text.secondary" sx={{ mt: 0.75 }}>
                             Paruoškite, patikrinkite ir išsiųskite laišką pasirinktiems gavėjams.
                         </Typography>
                     </Box>
-
                     <Chip
                         icon={loadingCount ? <CircularProgress size={16} /> : <GroupIcon />}
-                        label={
-                            loadingCount
-                                ? "Skaičiuojama..."
-                                : `Gavėjų: ${recipientCount ?? "-"}`
-                        }
+                        label={loadingCount ? "Skaičiuojama..." : `Gavėjų: ${recipientCount ?? "-"}`}
                         color="default"
                         variant="outlined"
-                        sx={{
-                            height: 40,
-                            borderRadius: 999,
-                            fontWeight: 700,
-                            px: 1,
-                            bgcolor: "background.paper",
-                        }}
+                        sx={{ height: 40, borderRadius: 999, fontWeight: 700, px: 1, bgcolor: "background.paper" }}
                     />
                 </Stack>
 
@@ -474,13 +531,16 @@ export default function NewsletterPage() {
                             })}
                         >
                             {(sending || sendingTest) && <LinearProgress />}
-
                             <Box sx={{ p: { xs: 2.5, md: 3 } }}>
                                 <Stack spacing={3}>
                                     <SourceFilter
                                         selectedSources={selectedSources}
-                                        onToggleSource={toggleSource}
-                                        onClearSources={clearSources}
+                                        onToggleSource={useCallback((v) => {
+                                            setSelectedSources((prev) =>
+                                                prev.includes(v) ? prev.filter((s) => s !== v) : [...prev, v]
+                                            );
+                                        }, [])}
+                                        onClearSources={useCallback(() => setSelectedSources([]), [])}
                                     />
 
                                     <TextField
@@ -489,7 +549,7 @@ export default function NewsletterPage() {
                                         fullWidth
                                         size="small"
                                         value={excludeIdsRaw}
-                                        onChange={handleExcludeIdsChange}
+                                        onChange={useCallback((e) => setExcludeIdsRaw(e.target.value), [])}
                                         helperText={
                                             excludeIds.length
                                                 ? `${excludeIds.length} vartotojų bus praleista`
@@ -518,7 +578,6 @@ export default function NewsletterPage() {
                                                     Mailjet Free: 200 el. laiškų/d. Siunčiama kas 25 val.
                                                 </Typography>
                                             </Box>
-
                                             <Chip
                                                 label={batchEnabled ? "Įjungta" : "Išjungta"}
                                                 clickable
@@ -528,7 +587,6 @@ export default function NewsletterPage() {
                                                 sx={{ borderRadius: 999, fontWeight: 700 }}
                                             />
                                         </Stack>
-
                                         {batchEnabled && (
                                             <TextField
                                                 label="Partijos dydis"
@@ -557,9 +615,8 @@ export default function NewsletterPage() {
                                         fullWidth
                                         size="small"
                                         value={subject}
-                                        onChange={handleSubjectChange}
+                                        onChange={useCallback((e) => setSubject(e.target.value), [])}
                                     />
-
                                     <TextField
                                         label="Žinutė"
                                         placeholder="Įrašykite newsletter tekstą..."
@@ -568,7 +625,7 @@ export default function NewsletterPage() {
                                         minRows={10}
                                         maxRows={22}
                                         value={body}
-                                        onChange={handleBodyChange}
+                                        onChange={useCallback((e) => setBody(e.target.value), [])}
                                         helperText="Plain text formatas"
                                     />
 
@@ -580,42 +637,20 @@ export default function NewsletterPage() {
                                         <Button
                                             variant="outlined"
                                             size="large"
-                                            startIcon={
-                                                sendingTest ? (
-                                                    <CircularProgress size={18} color="inherit" />
-                                                ) : (
-                                                    <MailOutlineIcon />
-                                                )
-                                            }
+                                            startIcon={sendingTest ? <CircularProgress size={18} color="inherit" /> : <MailOutlineIcon />}
                                             onClick={handleTestSend}
                                             disabled={sendingTest || sending || !canSubmit}
-                                            sx={{
-                                                borderRadius: 2,
-                                                px: 3,
-                                                fontWeight: 800,
-                                            }}
+                                            sx={{ borderRadius: 2, px: 3, fontWeight: 800 }}
                                         >
                                             {sendingTest ? "Siunčiama..." : "Test email"}
                                         </Button>
-
                                         <Button
                                             variant="contained"
                                             size="large"
-                                            startIcon={
-                                                sending ? (
-                                                    <CircularProgress size={18} color="inherit" />
-                                                ) : (
-                                                    <SendIcon />
-                                                )
-                                            }
-                                            onClick={requestSend}
+                                            startIcon={sending ? <CircularProgress size={18} color="inherit" /> : <SendIcon />}
+                                            onClick={() => { if (canSubmit) setConfirmOpen(true); else setError("Užpildykite temą ir žinutę."); }}
                                             disabled={sending || sendingTest || !canSubmit}
-                                            sx={{
-                                                borderRadius: 2,
-                                                px: 3,
-                                                fontWeight: 800,
-                                                boxShadow: "none",
-                                            }}
+                                            sx={{ borderRadius: 2, px: 3, fontWeight: 800, boxShadow: "none" }}
                                         >
                                             {sending ? "Siunčiama..." : "Siųsti"}
                                         </Button>
@@ -638,16 +673,21 @@ export default function NewsletterPage() {
                                 batchSize={batchSize}
                                 batchCount={batchCount}
                             />
-
                             <ResultAlerts
                                 error={error}
                                 result={result}
-                                onClearError={clearError}
-                                onClearResult={clearResult}
+                                onClearError={useCallback(() => setError(null), [])}
+                                onClearResult={useCallback(() => setResult(null), [])}
                             />
                         </Stack>
                     </Grid2>
                 </Grid2>
+
+                <CampaignTable
+                    campaigns={campaigns}
+                    loading={loadingCampaigns}
+                    onRefresh={fetchCampaigns}
+                />
             </Box>
 
             <Dialog
@@ -656,11 +696,7 @@ export default function NewsletterPage() {
                 maxWidth="xs"
                 fullWidth
                 disableScrollLock
-                PaperProps={{
-                    sx: {
-                        borderRadius: 4,
-                    },
-                }}
+                PaperProps={{ sx: { borderRadius: 4 } }}
             >
                 <DialogTitle sx={{ pb: 1 }}>
                     <Stack direction="row" spacing={1.25} alignItems="center">
@@ -670,20 +706,17 @@ export default function NewsletterPage() {
                         </Typography>
                     </Stack>
                 </DialogTitle>
-
                 <DialogContent>
                     <Typography color="text.secondary">
                         Ar tikrai norite išsiųsti laišką{" "}
                         <strong>{recipientCount ?? "?"}</strong> gavėjams?
                         {batchEnabled && batchCount > 1 && (
                             <>
-                                {" "}Laiškai bus siunčiami {batchCount} partijomis
-                                po {batchSize}, kas 25 val.
+                                {" "}Laiškai bus siunčiami {batchCount} partijomis po {batchSize}, kas 25 val.
                             </>
                         )}
                     </Typography>
                 </DialogContent>
-
                 <DialogActions sx={{ px: 3, pb: 3 }}>
                     <Button
                         onClick={() => setConfirmOpen(false)}
@@ -691,7 +724,6 @@ export default function NewsletterPage() {
                     >
                         Atšaukti
                     </Button>
-
                     <Button
                         variant="contained"
                         onClick={handleSend}

@@ -16,6 +16,13 @@ import { initMetaPixel } from './metaPixel';
 import { initGTM } from "./gtm";
 import './styles/MainChart.css';
 
+import { useMediaQuery } from "@mui/material";
+import Box from "@mui/material/Box";
+import SidebarRail from "./components/SidebarRail";
+import { useAuth } from "./contexts/useAuth";
+import { useState } from "react";
+import { api } from "./api/endpoints";
+
 // ─── Lazy: все страницы ───
 const InvLayout = lazy(() => import('./components/InvLayout'));
 
@@ -80,6 +87,24 @@ const InvoicePublicPage = lazy(() => import('./pages/InvoicePublicPage'));
 const VeiklosZurnalasPage = lazy(() => import('./pages/VeiklosZurnalasPage'));
 const OSSReportPage = lazy(() => import('./pages/Ossreportpage'));
 const SVSReportPage = lazy(() => import('./pages/SVSReportPage'));
+
+// ─── Sidebar - Toolbar ───
+function SidebarRailWrapper() {
+  const { isAuthenticated } = useAuth();
+  const isMobile = useMediaQuery("(max-width:600px)");
+  const [hasWaybillAccess, setHasWaybillAccess] = useState(false);
+
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    api.get("/profile/", { withCredentials: true })
+      .then(({ data }) => setHasWaybillAccess(!!data?.has_waybill_access))
+      .catch(() => {});
+  }, [isAuthenticated]);
+
+  if (!isAuthenticated || isMobile) return null;
+
+  return <SidebarRail hasWaybillAccess={hasWaybillAccess} />;
+}
 
 // ─── Loader для Suspense ───
 function PageLoader() {
@@ -153,72 +178,77 @@ function App() {
     <AuthProvider>
       <ScrollToTop />
       <Header />
-      <Suspense fallback={<PageLoader />}>
-        <Routes>
-          <Route path="/" element={<AtlyginimoSkaiciuokle2026 />} />
-          <Route path="/apie-mus" element={<AboutUs />} />
-          <Route path="/2025" element={<AtlyginimoSkaiciuokle2025 />} />
-          <Route path="/2026" element={<Navigate to="/" replace />} />
-          <Route path="/individualios-veiklos-skaiciuokle" element={<IndividualiosVeiklosSkaiciuokle2026 />} />
-          <Route path="/mazosios-bendrijos-skaiciuokle" element={<MBSkaiciuokle />} />
-          <Route path="/saskaitu-skaitmenizavimas-dokskenas" element={<Dokskenas />} />
-          <Route path="/pvm-skaiciuokle" element={<PvmCalculator />} />
-          <Route path="/gpm-skaiciuokle" element={<GpmSkaiciuokle />} />
-          <Route path="/naudojimo-gidas" element={<NaudojimoGidas />} />
-          <Route path="/kategorija/:slug" element={<GidoCategories />} />
-          <Route path="/straipsnis/:slug" element={<GidoArticle />} />
+      <Box sx={{ display: "flex", minHeight: "calc(100vh - 64px)" }}>
+        <SidebarRailWrapper />
+        <Box sx={{ flex: 1, minWidth: 0 }}>
+          <Suspense fallback={<PageLoader />}>
+            <Routes>
+              <Route path="/" element={<AtlyginimoSkaiciuokle2026 />} />
+              <Route path="/apie-mus" element={<AboutUs />} />
+              <Route path="/2025" element={<AtlyginimoSkaiciuokle2025 />} />
+              <Route path="/2026" element={<Navigate to="/" replace />} />
+              <Route path="/individualios-veiklos-skaiciuokle" element={<IndividualiosVeiklosSkaiciuokle2026 />} />
+              <Route path="/mazosios-bendrijos-skaiciuokle" element={<MBSkaiciuokle />} />
+              <Route path="/saskaitu-skaitmenizavimas-dokskenas" element={<Dokskenas />} />
+              <Route path="/pvm-skaiciuokle" element={<PvmCalculator />} />
+              <Route path="/gpm-skaiciuokle" element={<GpmSkaiciuokle />} />
+              <Route path="/naudojimo-gidas" element={<NaudojimoGidas />} />
+              <Route path="/kategorija/:slug" element={<GidoCategories />} />
+              <Route path="/straipsnis/:slug" element={<GidoArticle />} />
 
-          <Route path="/site-pro" element={<SitePro />} />
-          <Route path="/rivile" element={<Rivile />} />
-          <Route path="/agnum" element={<Agnum />} />
-          <Route path="/centas" element={<Centas />} />
-          <Route path="/apsa" element={<Apsa />} />
-          <Route path="/apskaita5" element={<Apskaita5 />} />
-          <Route path="/finvalda" element={<Finvalda />} />
-          <Route path="/debetas" element={<Debetas />} />
-          <Route path="/pragma" element={<Pragma />} />
+              <Route path="/site-pro" element={<SitePro />} />
+              <Route path="/rivile" element={<Rivile />} />
+              <Route path="/agnum" element={<Agnum />} />
+              <Route path="/centas" element={<Centas />} />
+              <Route path="/apsa" element={<Apsa />} />
+              <Route path="/apskaita5" element={<Apskaita5 />} />
+              <Route path="/finvalda" element={<Finvalda />} />
+              <Route path="/debetas" element={<Debetas />} />
+              <Route path="/pragma" element={<Pragma />} />
 
-          <Route element={<InvLayout />}>
-            <Route path="/israsymas" element={<InvoiceListPage />} />
-            <Route path="/israsymas/nustatymai" element={<InvoiceSettingsPage />} />
-            <Route path="/israsymas/nauja" element={<InvoiceEditorPage />} />
-            <Route path="/israsymas/:id" element={<InvoiceEditorPage />} />
-            <Route path="/israsymas/serijos-numeracijos" element={<InvoiceSeriesPage />} />
-            <Route path="/israsymas/matavimo-vienetai" element={<MeasurementUnitsPage />} />
-            <Route path="/israsymas/klientai" element={<CounterpartiesPage />} />
-            <Route path="/israsymas/prekes-paslaugos" element={<ProductsPage />} />
-            <Route path="/israsymas/banko-israsai" element={<BankStatementsPage />} />
-          </Route>
+              <Route element={<InvLayout />}>
+                <Route path="/israsymas" element={<InvoiceListPage />} />
+                <Route path="/israsymas/nustatymai" element={<InvoiceSettingsPage />} />
+                <Route path="/israsymas/nauja" element={<InvoiceEditorPage />} />
+                <Route path="/israsymas/:id" element={<InvoiceEditorPage />} />
+                <Route path="/israsymas/serijos-numeracijos" element={<InvoiceSeriesPage />} />
+                <Route path="/israsymas/matavimo-vienetai" element={<MeasurementUnitsPage />} />
+                <Route path="/israsymas/klientai" element={<CounterpartiesPage />} />
+                <Route path="/israsymas/prekes-paslaugos" element={<ProductsPage />} />
+                <Route path="/israsymas/banko-israsai" element={<BankStatementsPage />} />
+              </Route>
 
-          <Route path="/suvestine" element={<PrivateRoute><UploadPage /></PrivateRoute>} />
-          <Route path="/vaztarasciai" element={<PrivateRoute><WaybillsPage /></PrivateRoute>} />
-          <Route path="/prisijungti" element={<RedirectIfAuthenticated><Login /></RedirectIfAuthenticated>} />
-          <Route path="/registruotis" element={<RedirectIfAuthenticated><Register /></RedirectIfAuthenticated>} />
-          <Route path="/veiklos-zurnalas" element={<PrivateRoute><VeiklosZurnalasPage /></PrivateRoute>} />
-          <Route path="/oss-zurnalas" element={<PrivateRoute><OSSReportPage /></PrivateRoute>} />
-          <Route path="/svs-deklaravimas" element={<PrivateRoute><SVSReportPage /></PrivateRoute>} />
-          <Route path="/papildyti" element={<Subscribe />} />
-          <Route path="/susisiekti" element={<Contact />} />
-          <Route path="/nustatymai" element={<PrivateRoute><NustatymaiPage /></PrivateRoute>} />
-          <Route path="/is-klientu" element={<PrivateRoute><IsKlientu /></PrivateRoute>} />
-          <Route path="/mokejimu-istorija" element={<PrivateRoute><MokejimuIstorija /></PrivateRoute>} />
-          <Route path="/priminti-slaptazodi" element={<PasswordReset />} />
-          <Route path="/buhalterine-apskaita" element={<BuhalterinenApskaita />} />
-          <Route path="/suma-zodziais" element={<SumaZodziais />} />
-          <Route path="/privatumo-politika" element={<Privacy />} />
-          <Route path="/naudojimo-taisykles" element={<Terms />} />
-          <Route path="/saskaitu-israsymas" element={<InvoiceGenerator />} />
-          <Route path="/admin-dashboard" element={<RequireSuperuser loginPath="/prisijungti" forbiddenPath="/403"><AdminDashboard /></RequireSuperuser>} />
-          <Route path="/admin-vaztarasciai" element={<RequireSuperuser loginPath="/prisijungti" forbiddenPath="/403"><AdminVaztarasciai /></RequireSuperuser>} />
-          <Route path="/admin-visi-failai" element={<RequireSuperuser loginPath="/prisijungti" forbiddenPath="/403"><AdminVisiFailai /></RequireSuperuser>} />
-          <Route path="/admin-suvestine" element={<RequireSuperuser loginPath="/prisijungti" forbiddenPath="/403"><AdminSuvestine /></RequireSuperuser>} />
-          <Route path="/admin-klientai" element={<RequireSuperuser loginPath="/prisijungti" forbiddenPath="/403"><AdminKlientai /></RequireSuperuser>} />
-          <Route path="/admin-israsytos-saskaitos" element={<RequireSuperuser loginPath="/prisijungti" forbiddenPath="/403"><AdminIsrasytosSaskaitos /></RequireSuperuser>} />
-          <Route path="/admin-newsletter" element={<RequireSuperuser loginPath="/prisijungti" forbiddenPath="/403"><NewsletterPage /></RequireSuperuser>} />
+              <Route path="/suvestine" element={<PrivateRoute><UploadPage /></PrivateRoute>} />
+              <Route path="/vaztarasciai" element={<PrivateRoute><WaybillsPage /></PrivateRoute>} />
+              <Route path="/prisijungti" element={<RedirectIfAuthenticated><Login /></RedirectIfAuthenticated>} />
+              <Route path="/registruotis" element={<RedirectIfAuthenticated><Register /></RedirectIfAuthenticated>} />
+              <Route path="/veiklos-zurnalas" element={<PrivateRoute><VeiklosZurnalasPage /></PrivateRoute>} />
+              <Route path="/oss-zurnalas" element={<PrivateRoute><OSSReportPage /></PrivateRoute>} />
+              <Route path="/svs-deklaravimas" element={<PrivateRoute><SVSReportPage /></PrivateRoute>} />
+              <Route path="/papildyti" element={<Subscribe />} />
+              <Route path="/susisiekti" element={<Contact />} />
+              <Route path="/nustatymai" element={<PrivateRoute><NustatymaiPage /></PrivateRoute>} />
+              <Route path="/is-klientu" element={<PrivateRoute><IsKlientu /></PrivateRoute>} />
+              <Route path="/mokejimu-istorija" element={<PrivateRoute><MokejimuIstorija /></PrivateRoute>} />
+              <Route path="/priminti-slaptazodi" element={<PasswordReset />} />
+              <Route path="/buhalterine-apskaita" element={<BuhalterinenApskaita />} />
+              <Route path="/suma-zodziais" element={<SumaZodziais />} />
+              <Route path="/privatumo-politika" element={<Privacy />} />
+              <Route path="/naudojimo-taisykles" element={<Terms />} />
+              <Route path="/saskaitu-israsymas" element={<InvoiceGenerator />} />
+              <Route path="/admin-dashboard" element={<RequireSuperuser loginPath="/prisijungti" forbiddenPath="/403"><AdminDashboard /></RequireSuperuser>} />
+              <Route path="/admin-vaztarasciai" element={<RequireSuperuser loginPath="/prisijungti" forbiddenPath="/403"><AdminVaztarasciai /></RequireSuperuser>} />
+              <Route path="/admin-visi-failai" element={<RequireSuperuser loginPath="/prisijungti" forbiddenPath="/403"><AdminVisiFailai /></RequireSuperuser>} />
+              <Route path="/admin-suvestine" element={<RequireSuperuser loginPath="/prisijungti" forbiddenPath="/403"><AdminSuvestine /></RequireSuperuser>} />
+              <Route path="/admin-klientai" element={<RequireSuperuser loginPath="/prisijungti" forbiddenPath="/403"><AdminKlientai /></RequireSuperuser>} />
+              <Route path="/admin-israsytos-saskaitos" element={<RequireSuperuser loginPath="/prisijungti" forbiddenPath="/403"><AdminIsrasytosSaskaitos /></RequireSuperuser>} />
+              <Route path="/admin-newsletter" element={<RequireSuperuser loginPath="/prisijungti" forbiddenPath="/403"><NewsletterPage /></RequireSuperuser>} />
 
-          <Route path="*" element={<NotFound />} />
-        </Routes>
-      </Suspense>
+              <Route path="*" element={<NotFound />} />
+            </Routes>
+          </Suspense>
+        </Box>
+        </Box>
       <Footer />
       <CookieConsent />
     </AuthProvider>

@@ -161,7 +161,9 @@ from .serializers import (
     RivileGamaAPIKeyUpdateSerializer,
     InvoiceAdminListSerializer,
     RecurringInvoiceAdminListSerializer,
-    NewsletterSerializer,
+    NewsletterCampaignCreateSerializer,
+    NewsletterRecipientSerializer,
+    NewsletterCampaignSerializer
 )
 from django.db.models import Prefetch
 from django.db.models import Count, Sum
@@ -12326,46 +12328,29 @@ class SVSReportExportView(APIView):
 # END ─── SVS
 # ────────────────────────────────────────────────────────────
 
-# ────────────────────────────────────────────────────────────
-# ─── Dlia frontend newsletter ───
-# ────────────────────────────────────────────────────────────
-
+# ─── Newsletter Campaign ───────────────────────────────────
 class NewsletterSendView(APIView):
     permission_classes = [IsAdminUser]
 
     def post(self, request):
-        ser = NewsletterSerializer(data=request.data)
+        """Создать кампанию и запустить рассылку."""
+        from .serializers import NewsletterCampaignCreateSerializer
+        from .models import NewsletterCampaign, NewsletterRecipient
+        from .tasks import send_newsletter_task
+
+        ser = NewsletterCampaignCreateSerializer(data=request.data)
         ser.is_valid(raise_exception=True)
         d = ser.validated_data
 
-        from .tasks import send_newsletter_task
-        result = send_newsletter_task.delay(
-            subject=d["subject"],
-            body=d["body"],
-            exclude_user_ids=d.get("exclude_user_ids", []),
-            registration_sources=d.get("registration_sources", []),
-            sender_user_id=request.user.id,
-            batch_size=d.get("batch_size"),
-        )
-        return Response({"task_id": result.id, "status": "queued"})
-
-    def get(self, request):
-        """Возвращает кол-во получателей для preview."""
-        from django.db.models import Q
-
-        sources = request.query_params.getlist("sources")
-        exclude_raw = request.query_params.get("exclude_ids", "")
-        exclude_ids = [
-            int(x.strip()) for x in exclude_raw.split(",")
-            if x.strip().isdigit()
-        ]
-
+        # Построить список получателей
         User = get_user_model()
         qs = User.objects.filter(is_active=True)
 
+        exclude_ids = d.get("exclude_user_ids", [])
         if exclude_ids:
             qs = qs.exclude(id__in=exclude_ids)
 
+        sources = d.get("registration_sources", [])
         if sources:
             source_q = Q()
             for src in sources:
@@ -12375,14 +12360,80 @@ class NewsletterSendView(APIView):
                     source_q |= Q(registration_source=src)
             qs = qs.filter(source_q)
 
-        return Response({"recipient_count": qs.count()})
+        users = list(qs.order_by("id").values_list("id", "email", named=True))
+
+        if not users:
+            return Response({"detail": "Nėra gavėjų pagal pasirinktus filtrus."}, status=400)
+
+        # Создать кампанию
+        campaign = NewsletterCampaign.objects.create(
+            subject=d["subject"],
+            body=d["body"],
+            sender=request.user,
+            exclude_user_ids=exclude_ids,
+            registration_sources=sources,
+            batch_size=d.get("batch_size") or 190,
+            total_recipients=len(users),
+        )
+
+        # Создать получателей
+        recipients = [
+            NewsletterRecipient(campaign=campaign, user_id=u.id, email=u.email)
+            for u in users
+        ]
+        NewsletterRecipient.objects.bulk_create(recipients, batch_size=500)
+
+        # Запустить таск
+        result = send_newsletter_task.delay(campaign_id=campaign.id)
+        campaign.celery_task_id = result.id
+        campaign.save(update_fields=["celery_task_id"])
+
+        return Response({
+            "campaign_id": campaign.id,
+            "task_id": result.id,
+            "total_recipients": len(users),
+            "status": "sending",
+        })
+
+    def get(self, request):
+        """Список кампаний или превью количества получателей."""
+        from .models import NewsletterCampaign
+        from .serializers import NewsletterCampaignSerializer
+
+        # Если есть параметр preview — возвращаем count (для совместимости)
+        if "sources" in request.query_params or "exclude_ids" in request.query_params:
+            sources = request.query_params.getlist("sources")
+            exclude_raw = request.query_params.get("exclude_ids", "")
+            exclude_ids = [
+                int(x.strip()) for x in exclude_raw.split(",")
+                if x.strip().isdigit()
+            ]
+            User = get_user_model()
+            qs = User.objects.filter(is_active=True)
+            if exclude_ids:
+                qs = qs.exclude(id__in=exclude_ids)
+            if sources:
+                source_q = Q()
+                for src in sources:
+                    if src == "null":
+                        source_q |= Q(registration_source__isnull=True) | Q(registration_source="")
+                    else:
+                        source_q |= Q(registration_source=src)
+                qs = qs.filter(source_q)
+            return Response({"recipient_count": qs.count()})
+
+        # Иначе — список кампаний
+        campaigns = NewsletterCampaign.objects.all()[:20]
+        serializer = NewsletterCampaignSerializer(campaigns, many=True)
+        return Response({"campaigns": serializer.data})
 
     def put(self, request):
         """Тестовая отправка на фиксированный email."""
-        ser = NewsletterSerializer(data=request.data)
+        from .serializers import NewsletterCampaignCreateSerializer
+
+        ser = NewsletterCampaignCreateSerializer(data=request.data)
         ser.is_valid(raise_exception=True)
         d = ser.validated_data
-
         try:
             msg = EmailMultiAlternatives(
                 subject=f"[TEST] {d['subject'].strip()}",
@@ -12400,10 +12451,7 @@ class NewsletterSendView(APIView):
         except Exception as e:
             logger.exception(f"[NEWSLETTER TEST ERROR] {e}")
             return Response({"detail": str(e)}, status=500)
-
-# ────────────────────────────────────────────────────────────
-# END ─── Dlia frontend newsletter ───
-# ────────────────────────────────────────────────────────────
+# END ─── Newsletter Campaign ──────────────────────────────
 
 # ────────────────────────────────────────────────────────────
 # ─── Waybill scan ───

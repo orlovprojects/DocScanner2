@@ -4141,3 +4141,70 @@ class ScannedWaybill(models.Model):
 
     def __str__(self):
         return f"Važtaraštis {self.document_number or '-'} ({self.user.email})"
+
+
+
+# ─── Newsletter Campaign ───────────────────────────────────
+class NewsletterCampaign(models.Model):
+    class Status(models.TextChoices):
+        DRAFT = "draft", "Juodraštis"
+        SENDING = "sending", "Siunčiama"
+        PAUSED = "paused", "Pristabdyta"
+        DONE = "done", "Baigta"
+        FAILED = "failed", "Klaida"
+
+    subject = models.CharField(max_length=255)
+    body = models.TextField()
+    status = models.CharField(
+        max_length=10, choices=Status.choices, default=Status.DRAFT, db_index=True,
+    )
+    sender = models.ForeignKey(
+        "CustomUser", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="newsletter_campaigns",
+    )
+    exclude_user_ids = models.JSONField(default=list, blank=True)
+    registration_sources = models.JSONField(default=list, blank=True)
+    batch_size = models.PositiveIntegerField(default=190)
+    total_recipients = models.PositiveIntegerField(default=0)
+    sent_count = models.PositiveIntegerField(default=0)
+    failed_count = models.PositiveIntegerField(default=0)
+    celery_task_id = models.CharField(max_length=255, blank=True, default="")
+    error_message = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    started_at = models.DateTimeField(null=True, blank=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"Campaign #{self.pk} — {self.subject[:50]}"
+
+
+class NewsletterRecipient(models.Model):
+    class Status(models.TextChoices):
+        PENDING = "pending", "Laukia"
+        SENT = "sent", "Išsiųsta"
+        FAILED = "failed", "Klaida"
+
+    campaign = models.ForeignKey(
+        NewsletterCampaign, on_delete=models.CASCADE, related_name="recipients",
+    )
+    user = models.ForeignKey(
+        "CustomUser", on_delete=models.SET_NULL, null=True, blank=True,
+    )
+    email = models.EmailField()
+    status = models.CharField(
+        max_length=10, choices=Status.choices, default=Status.PENDING, db_index=True,
+    )
+    sent_at = models.DateTimeField(null=True, blank=True)
+    error_message = models.TextField(blank=True, default="")
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["campaign", "status"]),
+        ]
+
+    def __str__(self):
+        return f"{self.email} — {self.status}"
+# END ─── Newsletter Campaign ──────────────────────────────
