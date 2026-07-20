@@ -1004,7 +1004,7 @@ def export_documents_to_rivile_erp_xlsx(
         ws_headers.cell(
             row=header_row,
             column=HeaderCols.TYPE_ID,
-            value=1 if doc_type == "pirkimai" and is_credit else 0,
+            value=1 if is_credit else 0,
         )
 
         if user_journal:
