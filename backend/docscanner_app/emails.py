@@ -25,6 +25,7 @@ def _get_hostinger_connection():
         password=settings.CONTACT_SMTP_PASSWORD,
         use_ssl=settings.CONTACT_SMTP_USE_SSL,
         use_tls=not settings.CONTACT_SMTP_USE_SSL,
+        timeout=10,
     )
 
 
