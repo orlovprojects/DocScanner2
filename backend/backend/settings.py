@@ -235,6 +235,14 @@ ANYMAIL = {
     "MAILJET_SECRET_KEY": os.getenv("MAILJET_SECRET_KEY"),
 }
 
+# Hostinger SMTP — tik kontaktų formai
+CONTACT_SMTP_HOST = os.getenv("CONTACT_SMTP_HOST", "smtp.hostinger.com")
+CONTACT_SMTP_PORT = int(os.getenv("CONTACT_SMTP_PORT", "465"))
+CONTACT_SMTP_USER = os.getenv("CONTACT_SMTP_USER", "")
+CONTACT_SMTP_PASSWORD = os.getenv("CONTACT_SMTP_PASSWORD", "")
+CONTACT_SMTP_USE_SSL = os.getenv("CONTACT_SMTP_USE_SSL", "true").lower() == "true"
+CONTACT_EMAIL = os.getenv("CONTACT_EMAIL", CONTACT_SMTP_USER)
+
 # ─── Cloud Integration ───
 GOOGLE_DRIVE_CLIENT_ID = os.getenv("GOOGLE_DRIVE_CLIENT_ID", default="")
 GOOGLE_DRIVE_CLIENT_SECRET = os.getenv("GOOGLE_DRIVE_CLIENT_SECRET", default="")

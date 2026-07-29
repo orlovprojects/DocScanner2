@@ -1,5 +1,5 @@
 # docscanner_app/emails.py
-from django.core.mail import EmailMultiAlternatives
+from django.core.mail import EmailMultiAlternatives, get_connection
 from django.template.loader import render_to_string
 from django.conf import settings
 from email.utils import formataddr
@@ -15,7 +15,17 @@ import logging.config
 logging.config.dictConfig(settings.LOGGING)
 logger = logging.getLogger('docscanner_app')
 
-
+def _get_hostinger_connection():
+    """Bendras SMTP ryšys per Hostinger — visiems transakciniams laiškams."""
+    return get_connection(
+        backend="django.core.mail.backends.smtp.EmailBackend",
+        host=settings.CONTACT_SMTP_HOST,
+        port=settings.CONTACT_SMTP_PORT,
+        username=settings.CONTACT_SMTP_USER,
+        password=settings.CONTACT_SMTP_PASSWORD,
+        use_ssl=settings.CONTACT_SMTP_USE_SSL,
+        use_tls=not settings.CONTACT_SMTP_USE_SSL,
+    )
 
 
 def siusti_kontakto_laiska(*, vardas: str, email: str, zinute: str, tema: str | None = None):
@@ -54,20 +64,18 @@ def siusti_kontakto_laiska(*, vardas: str, email: str, zinute: str, tema: str | 
 
     try:
         logger.info(f"[CONTACT EMAIL START] from={email} to={getattr(settings, 'CONTACT_EMAIL', None)}")
+
+        connection = _get_hostinger_connection()
+
         msg = EmailMultiAlternatives(
             subject=subject,
             body=text_body,
-            from_email=formataddr(("DokSkenas", settings.DEFAULT_FROM_EMAIL)),
-            to=[getattr(settings, "CONTACT_EMAIL", settings.DEFAULT_FROM_EMAIL)],
+            from_email=formataddr(("DokSkenas kontaktai", settings.CONTACT_SMTP_USER)),
+            to=[getattr(settings, "CONTACT_EMAIL", settings.CONTACT_SMTP_USER)],
             reply_to=[f"{vardas} <{email}>"],
+            connection=connection,
         )
         msg.attach_alternative(html_body, "text/html")
-
-        try:
-            msg.tags = ["contact"]
-            msg.metadata = {"event": "contact_form"}
-        except Exception:
-            pass
 
         msg.send()
         logger.info("[CONTACT EMAIL SUCCESS]")
@@ -75,6 +83,30 @@ def siusti_kontakto_laiska(*, vardas: str, email: str, zinute: str, tema: str | 
     except Exception as e:
         logger.exception(f"[CONTACT EMAIL ERROR] {e}")
         return False
+    
+    # try:
+    #     logger.info(f"[CONTACT EMAIL START] from={email} to={getattr(settings, 'CONTACT_EMAIL', None)}")
+    #     msg = EmailMultiAlternatives(
+    #         subject=subject,
+    #         body=text_body,
+    #         from_email=formataddr(("DokSkenas", settings.DEFAULT_FROM_EMAIL)),
+    #         to=[getattr(settings, "CONTACT_EMAIL", settings.DEFAULT_FROM_EMAIL)],
+    #         reply_to=[f"{vardas} <{email}>"],
+    #     )
+    #     msg.attach_alternative(html_body, "text/html")
+
+    #     try:
+    #         msg.tags = ["contact"]
+    #         msg.metadata = {"event": "contact_form"}
+    #     except Exception:
+    #         pass
+
+    #     msg.send()
+    #     logger.info("[CONTACT EMAIL SUCCESS]")
+    #     return True
+    # except Exception as e:
+    #     logger.exception(f"[CONTACT EMAIL ERROR] {e}")
+    #     return False
 
 
 
@@ -118,7 +150,14 @@ def siusti_sveikinimo_laiska(vartotojas):
             body=text_content,
             from_email=formataddr(("Denis iš DokSkeno", settings.DEFAULT_FROM_EMAIL)),
             to=[vartotojas.email],
+            connection=_get_hostinger_connection(),
         )
+        # msg = EmailMultiAlternatives(
+        #     subject="Pridėjome 50 nemokamų kreditų į jūsų sąskaitą",
+        #     body=text_content,
+        #     from_email=formataddr(("Denis iš DokSkeno", settings.DEFAULT_FROM_EMAIL)),
+        #     to=[vartotojas.email],
+        # )
         msg.attach_alternative(html_content, "text/html")
 
         # 4️⃣ Pridedame žymas ir metaduomenis
@@ -301,7 +340,16 @@ def siusti_mobilios_apps_kvietima(
                 ("Denis iš DokSkeno", settings.DEFAULT_FROM_EMAIL)
             ),
             to=[gavejo_email],
+            connection=_get_hostinger_connection(),
         )
+        # msg = EmailMultiAlternatives(
+        #     subject=subject.strip(),
+        #     body=text_body,
+        #     from_email=formataddr(
+        #         ("Denis iš DokSkeno", settings.DEFAULT_FROM_EMAIL)
+        #     ),
+        #     to=[gavejo_email],
+        # )
 
         if html_body:
             msg.attach_alternative(html_body, "text/html")
@@ -545,7 +593,14 @@ def _send_onboarding_to_user(user):
             body=email_data["body"],
             from_email=formataddr(("Denis iš DokSkeno", settings.DEFAULT_FROM_EMAIL)),
             to=[user.email],
+            connection=_get_hostinger_connection(),
         )
+        # msg = EmailMultiAlternatives(
+        #     subject=email_data["subject"],
+        #     body=email_data["body"],
+        #     from_email=formataddr(("Denis iš DokSkeno", settings.DEFAULT_FROM_EMAIL)),
+        #     to=[user.email],
+        # )
         try:
             msg.tags = ["onboarding"]
             msg.metadata = {
@@ -686,7 +741,14 @@ def send_trial_expired_emails():
                 body=email_data["body"],
                 from_email=formataddr(("Denis iš DokSkeno", settings.DEFAULT_FROM_EMAIL)),
                 to=[user.email],
+                connection=_get_hostinger_connection(),
             )
+            # msg = EmailMultiAlternatives(
+            #     subject=email_data["subject"],
+            #     body=email_data["body"],
+            #     from_email=formataddr(("Denis iš DokSkeno", settings.DEFAULT_FROM_EMAIL)),
+            #     to=[user.email],
+            # )
             try:
                 msg.tags = ["trial_expired"]
                 msg.metadata = {"event": "trial_expired", "user_id": user.id}

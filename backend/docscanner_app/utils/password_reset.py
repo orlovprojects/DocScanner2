@@ -9,6 +9,7 @@ from django.conf import settings
 from django.utils import timezone
 from django.template.loader import render_to_string
 from django.core.mail import EmailMultiAlternatives
+from ..emails import _get_hostinger_connection
 from django.contrib.auth import get_user_model
 
 from rest_framework import status
@@ -106,13 +107,19 @@ def send_password_reset_email(user, code):
                 </p>
             </div>
             """
-
         msg = EmailMultiAlternatives(
             subject="Slaptažodžio atkūrimas – DokSkenas",
             body=text_content,
             from_email=formataddr(("DokSkenas", settings.DEFAULT_FROM_EMAIL)),
             to=[user.email],
+            connection=_get_hostinger_connection(),
         )
+        # msg = EmailMultiAlternatives(
+        #     subject="Slaptažodžio atkūrimas – DokSkenas",
+        #     body=text_content,
+        #     from_email=formataddr(("DokSkenas", settings.DEFAULT_FROM_EMAIL)),
+        #     to=[user.email],
+        # )
         msg.attach_alternative(html_content, "text/html")
 
         try:
