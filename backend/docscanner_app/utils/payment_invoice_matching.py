@@ -164,15 +164,37 @@ class InvoiceMatchingEngine:
                 )
                 total_allocated += prop.amount
 
+            # Записать номер первого документа
+            first_alloc = r.allocations[0] if r.allocations else None
+            if first_alloc:
+                from ..models import Invoice
+                try:
+                    inv = Invoice.objects.only("document_series", "document_number").get(id=first_alloc.invoice_id)
+                    txn.matched_document_number = inv.full_number
+                except Invoice.DoesNotExist:
+                    pass
+
             txn.allocated_amount = total_allocated
             txn.save(update_fields=[
                 "match_status", "match_confidence", "match_details",
-                "allocated_amount", "updated_at",
+                "allocated_amount", "transaction_category",
+                "matched_document_number", "updated_at",
             ])
 
             if r.status == "auto_matched":
                 for prop in r.allocations:
                     self._recalc_invoice(prop.invoice_id)
+
+                    # Auto JE для оплаты
+                    try:
+                        alloc_obj = PaymentAllocation.objects.get(
+                            incoming_transaction=txn,
+                            invoice_id=prop.invoice_id,
+                        )
+                        from ..services.accounting_transfer import create_je_for_allocation
+                        create_je_for_allocation(alloc_obj)
+                    except Exception as e:
+                        logger.warning("[Match] Auto JE failed for alloc: %s", e)
 
     # ── Cache ───────────────────────────────────────────────
 
@@ -721,3 +743,793 @@ class InvoiceMatchingEngine:
             inv.recalc_payment_status()
         except Invoice.DoesNotExist:
             pass
+
+
+
+# ════════════════════════════════════════════════════════════
+# PurchaseMatchingEngine — OutgoingTransaction → Purchase
+# ════════════════════════════════════════════════════════════
+
+
+@dataclass
+class PurchaseMatchCandidate:
+    purchase_id: int
+    purchase_full_number: str
+    purchase_amount: Decimal
+    purchase_remaining: Decimal
+    seller_name: str
+    seller_code: str
+    score: Decimal = Decimal("0")
+    reasons: dict = field(default_factory=dict)
+
+
+@dataclass
+class PurchaseAllocationProposal:
+    purchase_id: int
+    amount: Decimal
+    confidence: Decimal
+    reasons: dict
+    status: str  # "auto" | "proposed"
+
+
+class PurchaseMatchingEngine:
+    """Matching OutgoingTransaction → Purchase with scoring."""
+
+    def __init__(self, user, company_profile=None):
+        self.user = user
+        self.company_profile = company_profile
+        self._cache = {}
+        self._number_idx = {}
+        self._bare_number_idx = {}
+        self._code_idx = {}
+        self._name_idx = {}
+        self._iban_idx = {}
+
+    # ── Public API ──────────────────────────────────────────
+
+    def match_transactions(self, transactions) -> list[MatchResult]:
+        self._build_cache()
+        results = []
+        for txn in transactions:
+            r = self._match_one(txn)
+            results.append(r)
+            if r.status != "unmatched":
+                logger.info(
+                    "[PurchaseMatch] txn=%s → %s (%.2f) purchases=%s",
+                    txn.id, r.status, r.confidence,
+                    [a.purchase_id for a in r.allocations],
+                )
+        return results
+
+    def apply_results(self, results):
+        from ..models import OutgoingTransaction, PaymentAllocation
+
+        for r in results:
+            txn = OutgoingTransaction.objects.get(id=r.transaction_id)
+            txn.match_status = r.status if r.status != "unmatched" else "unmatched"
+            txn.match_confidence = r.confidence
+            txn.match_details = r.details
+
+            if r.status == "unmatched":
+                txn.save(update_fields=[
+                    "match_status", "match_confidence", "match_details", "updated_at",
+                ])
+                continue
+
+            txn.transaction_category = "supplier_payment"
+            total_allocated = Decimal("0")
+
+            for prop in r.allocations:
+                PaymentAllocation.objects.update_or_create(
+                    outgoing_transaction=txn,
+                    purchase_id=prop.purchase_id,
+                    defaults={
+                        "amount": prop.amount,
+                        "confidence": prop.confidence,
+                        "match_reasons": prop.reasons,
+                        "status": prop.status,
+                        "source": "bank_import",
+                        "payment_date": txn.transaction_date,
+                    },
+                )
+                total_allocated += prop.amount
+
+            first_alloc = r.allocations[0] if r.allocations else None
+            if first_alloc:
+                from ..models import Purchase
+                try:
+                    p = Purchase.objects.only("document_series", "document_number").get(id=first_alloc.purchase_id)
+                    txn.matched_document_number = f"{p.document_series or ''}{p.document_number or ''}".strip()
+                except Purchase.DoesNotExist:
+                    pass
+
+            txn.allocated_amount = total_allocated
+            txn.save(update_fields=[
+                "match_status", "match_confidence", "match_details",
+                "allocated_amount", "transaction_category",
+                "matched_document_number", "updated_at",
+            ])
+
+            if r.status == "auto_matched":
+                for prop in r.allocations:
+                    self._recalc_purchase(prop.purchase_id)
+
+                    try:
+                        alloc_obj = PaymentAllocation.objects.get(
+                            outgoing_transaction=txn,
+                            purchase_id=prop.purchase_id,
+                        )
+                        from ..services.accounting_transfer import create_je_for_allocation
+                        create_je_for_allocation(alloc_obj)
+                    except Exception as e:
+                        logger.warning("[PurchaseMatch] Auto JE failed: %s", e)
+
+    # ── Cache ───────────────────────────────────────────────
+
+    def _build_cache(self):
+        from ..models import Purchase, PaymentAllocation, normalize_name
+
+        qs = (
+            Purchase.objects
+            .filter(user=self.user)
+            .filter(payment_status__in=["unpaid", "partially_paid"])
+            .exclude(amount_with_vat__isnull=True)
+            .exclude(amount_with_vat=0)
+        )
+        if self.company_profile:
+            qs = qs.filter(company_profile=self.company_profile)
+
+        for p in qs:
+            paid = (
+                PaymentAllocation.objects
+                .filter(purchase=p, status__in=["confirmed", "auto", "manual"])
+                .aggregate(t=Sum("amount"))["t"]
+            ) or Decimal("0")
+
+            remaining = p.amount_with_vat - paid
+            if remaining <= Decimal("0.01"):
+                continue
+
+            series = (p.document_series or "").strip()
+            number = (p.document_number or "").strip()
+            full_number = f"{series}{number}".strip()
+
+            entry = {
+                "id": p.id,
+                "full_number": full_number,
+                "series": series,
+                "number": number,
+                "amount": p.amount_with_vat,
+                "remaining": remaining,
+                "seller_name": p.seller_name or "",
+                "seller_norm": normalize_name(p.seller_name or ""),
+                "seller_code": (p.seller_id or "").strip(),
+                "seller_iban": (p.seller_iban or "").strip().upper(),
+                "invoice_date": p.invoice_date,
+                "due_date": p.due_date,
+            }
+            self._cache[p.id] = entry
+
+            if full_number and len(full_number) >= 3:
+                self._index_number(full_number, p.id)
+            if series and number:
+                for var in InvoiceMatchingEngine._number_variations(series, number):
+                    self._number_idx[var] = p.id
+
+            if number and len(number) >= 3:
+                self._bare_number_idx[number.upper()] = p.id
+
+            if p.seller_id and p.seller_id.strip():
+                self._code_idx.setdefault(p.seller_id.strip(), []).append(p.id)
+
+            sn = entry["seller_norm"]
+            if sn and len(sn) >= 3:
+                self._name_idx.setdefault(sn, []).append(p.id)
+
+            if entry["seller_iban"]:
+                self._iban_idx.setdefault(entry["seller_iban"], []).append(p.id)
+
+        logger.info(
+            "[PurchaseMatch] Cache: %d purchases, %d numbers, %d codes, %d names, %d ibans",
+            len(self._cache), len(self._number_idx),
+            len(self._code_idx), len(self._name_idx), len(self._iban_idx),
+        )
+
+    def _index_number(self, number_str: str, purchase_id: int):
+        if not number_str or len(number_str) < 3:
+            return
+        self._number_idx[number_str.upper()] = purchase_id
+        clean = re.sub(r"[\s\-/]", "", number_str).upper()
+        if clean != number_str.upper():
+            self._number_idx[clean] = purchase_id
+
+    # ── Single Match ────────────────────────────────────────
+
+    def _match_one(self, txn) -> MatchResult:
+        purpose = txn.payment_purpose or ""
+
+        from_purpose = self._numbers_from_purpose(purpose)
+
+        from_code = set()
+        if txn.counterparty_code:
+            from_code = set(self._code_idx.get(txn.counterparty_code.strip(), []))
+
+        from_name = set()
+        if txn.counterparty_name:
+            from ..models import normalize_name
+            tn = normalize_name(txn.counterparty_name)
+            if tn and len(tn) >= 3:
+                from_name = set(self._name_idx.get(tn, []))
+                for cn, ids in self._name_idx.items():
+                    if len(tn) >= 5 and len(cn) >= 5 and (tn in cn or cn in tn):
+                        from_name.update(ids)
+
+        from_iban = set()
+        if txn.counterparty_account:
+            iban = txn.counterparty_account.strip().upper()
+            from_iban = set(self._iban_idx.get(iban, []))
+
+        all_ids = from_purpose | from_code | from_name | from_iban
+
+        if not all_ids:
+            for pid, pdata in self._cache.items():
+                if (self._exact(txn.amount, pdata["remaining"])
+                        or self._exact(txn.amount, pdata["amount"])):
+                    all_ids.add(pid)
+
+        if not all_ids:
+            return MatchResult(
+                transaction_id=txn.id, status="unmatched",
+                details={"reason": "no_candidates"},
+            )
+
+        candidates = []
+        for pid in all_ids:
+            pdata = self._cache.get(pid)
+            if not pdata:
+                continue
+            candidates.append(self._score(txn, pdata, from_purpose))
+
+        if not candidates:
+            return MatchResult(
+                transaction_id=txn.id, status="unmatched",
+                details={"reason": "no_valid_candidates"},
+            )
+
+        candidates.sort(key=lambda c: c.score, reverse=True)
+        return self._build_result(txn, candidates)
+
+    # ── Number Extraction ───────────────────────────────────
+
+    def _numbers_from_purpose(self, purpose: str) -> set:
+        found = set()
+        pu = purpose.upper()
+
+        for purch_number, pid in self._number_idx.items():
+            if len(purch_number) >= 4 and purch_number in pu:
+                found.add(pid)
+
+        for bare_num, pid in self._bare_number_idx.items():
+            if len(bare_num) >= 4:
+                pattern = rf"(?<![0-9]){re.escape(bare_num)}(?![0-9])"
+                if re.search(pattern, pu):
+                    found.add(pid)
+
+        keywords = [
+            r"S[AĄ]SKAIT[\w]*\.?\s*(?:FAKT[UŪ]R[\w]*\.?\s*)?N[Rr]\.?\s*",
+            r"SF\s*N[Rr]\.?\s*",
+            r"N[Rr]\.?\s*",
+            r"DOK\.?\s*N[Rr]\.?\s*",
+            r"U[ZŽ]\s+(?:S[AĄ]SK[\w]*\.?\s*)?",
+            r"PAGAL\s+(?:S[AĄ]SK[\w]*\.?\s*)?(?:SF\s*)?",
+            r"APMOK[\w]*\s+(?:S[AĄ]SK[\w]*\.?\s*)?",
+        ]
+        for kw in keywords:
+            for m in re.finditer(kw + r"(\w{1,5}[\-/]?\d{1,10})", pu):
+                token = (m.group(m.lastindex) or "").upper()
+                if token in self._number_idx:
+                    found.add(self._number_idx[token])
+                clean = re.sub(r"[\s\-/]", "", token)
+                if clean in self._number_idx:
+                    found.add(self._number_idx[clean])
+                digits = re.sub(r"[^\d]", "", token)
+                if digits and digits in self._bare_number_idx:
+                    found.add(self._bare_number_idx[digits])
+
+        return found
+
+    # ── Scoring ─────────────────────────────────────────────
+
+    def _score(self, txn, purch: dict, from_purpose: set) -> PurchaseMatchCandidate:
+        c = PurchaseMatchCandidate(
+            purchase_id=purch["id"],
+            purchase_full_number=purch["full_number"],
+            purchase_amount=purch["amount"],
+            purchase_remaining=purch["remaining"],
+            seller_name=purch["seller_name"],
+            seller_code=purch["seller_code"],
+        )
+        score = Decimal("0")
+        reasons = {}
+
+        # Номер в назначении
+        number_found = purch["id"] in from_purpose
+        if number_found:
+            score += Decimal("0.30")
+            reasons["Dokumento numeris rastas mokėjimo paskirtyje"] = True
+
+        # Сумма
+        amount_match = False
+        if self._exact(txn.amount, purch["remaining"]):
+            score += Decimal("0.30")
+            reasons["Suma tiksliai sutampa su likučiu"] = str(purch["remaining"])
+            amount_match = True
+        elif self._exact(txn.amount, purch["amount"]):
+            score += Decimal("0.25")
+            reasons["Suma tiksliai sutampa su bendra suma"] = str(purch["amount"])
+            amount_match = True
+        elif self._close(txn.amount, purch["remaining"]):
+            score += Decimal("0.15")
+            reasons["Suma artima likučiui"] = str(purch["remaining"])
+            amount_match = True
+        elif self._close(txn.amount, purch["amount"]):
+            score += Decimal("0.15")
+            reasons["Suma artima bendrai sumai"] = str(purch["amount"])
+            amount_match = True
+        elif txn.amount < purch["remaining"]:
+            score += Decimal("0.05")
+            reasons["Dalinė įmoka"] = True
+
+        if number_found and amount_match:
+            score += Decimal("0.10")
+            reasons["Numeris ir suma sutampa"] = True
+
+        # Код поставщика
+        txn_code = (txn.counterparty_code or "").strip()
+        p_code = purch["seller_code"]
+        if txn_code and p_code:
+            if txn_code == p_code:
+                score += Decimal("0.40")
+                reasons["Tiekėjo kodas sutampa"] = txn_code
+            else:
+                score -= Decimal("0.30")
+                reasons["Tiekėjo kodas nesutampa"] = f"{txn_code} ≠ {p_code}"
+
+        # IBAN поставщика
+        txn_iban = (txn.counterparty_account or "").strip().upper()
+        p_iban = purch.get("seller_iban", "")
+        if txn_iban and p_iban and txn_iban == p_iban:
+            score += Decimal("0.25")
+            reasons["Tiekėjo IBAN sutampa"] = txn_iban
+
+        # Имя поставщика
+        from ..models import normalize_name
+        tn = normalize_name(txn.counterparty_name or "")
+        sn = purch["seller_norm"]
+        if tn and sn:
+            if tn == sn:
+                score += Decimal("0.20")
+                reasons["Tiekėjo pavadinimas sutampa"] = True
+            elif len(tn) >= 5 and len(sn) >= 5 and (tn in sn or sn in tn):
+                score += Decimal("0.10")
+                reasons["Tiekėjo pavadinimas panašus"] = True
+            elif len(tn) >= 4 and len(sn) >= 4:
+                score -= Decimal("0.15")
+                reasons["Tiekėjo pavadinimas nesutampa"] = (
+                    f"{(txn.counterparty_name or '')[:40]} ≠ {purch['seller_name'][:40]}"
+                )
+
+        # Дата
+        date_score, date_reason = self._date_score(txn, purch)
+        if date_score != Decimal("0"):
+            score += date_score
+            reasons[date_reason] = True
+
+        c.score = max(min(score, Decimal("1.00")), Decimal("-1.00"))
+        c.reasons = reasons
+        return c
+
+    @staticmethod
+    def _date_score(txn, purch: dict) -> tuple[Decimal, str]:
+        txn_date = txn.transaction_date
+        inv_date = purch.get("invoice_date")
+        due_date = purch.get("due_date")
+        if not txn_date or not inv_date:
+            return Decimal("0"), ""
+        if txn_date < inv_date:
+            days_before = (inv_date - txn_date).days
+            if days_before <= 3:
+                return Decimal("0"), ""
+            return Decimal("-0.20"), f"Mokėjimas {days_before} d. prieš dokumentą"
+        ref = due_date or inv_date
+        days = (txn_date - ref).days
+        if days <= 60:
+            return Decimal("0.05"), "Mokėjimas per 60 d."
+        elif days <= 120:
+            return Decimal("-0.05"), f"Mokėjimas vėluoja {days} d."
+        elif days <= 180:
+            return Decimal("-0.10"), f"Mokėjimas labai vėluoja ({days} d.)"
+        return Decimal("-0.20"), f"Mokėjimas per toli ({days} d.)"
+
+    @staticmethod
+    def _exact(a, b):
+        return abs(a - b) <= AMOUNT_TOLERANCE_ABS
+
+    @staticmethod
+    def _close(a, b):
+        if b == 0:
+            return False
+        return abs(a - b) / b <= AMOUNT_TOLERANCE_PCT
+
+    # ── Build Result ────────────────────────────────────────
+
+    def _build_result(self, txn, candidates: list[PurchaseMatchCandidate]) -> MatchResult:
+        best = candidates[0]
+        amt = txn.amount
+
+        if best.score < LIKELY_MATCH_THRESHOLD:
+            return MatchResult(
+                transaction_id=txn.id,
+                status="unmatched",
+                confidence=max(best.score, Decimal("0")),
+                details={
+                    "reason": "score_below_threshold",
+                    "best_score": str(best.score),
+                    "best_purchase": best.purchase_full_number,
+                },
+            )
+
+        if best.score >= AUTO_MATCH_THRESHOLD and self._exact(amt, best.purchase_remaining):
+            return MatchResult(
+                transaction_id=txn.id,
+                status="auto_matched",
+                confidence=best.score,
+                allocations=[PurchaseAllocationProposal(
+                    purchase_id=best.purchase_id,
+                    amount=best.purchase_remaining,
+                    confidence=best.score,
+                    reasons=best.reasons,
+                    status="auto",
+                )],
+                details={"match_type": "exact_1_to_1"},
+            )
+
+        multi = self._try_multi(txn, candidates)
+        if multi:
+            return multi
+
+        if amt < best.purchase_remaining:
+            is_auto = best.score >= AUTO_MATCH_THRESHOLD
+            return MatchResult(
+                transaction_id=txn.id,
+                status="auto_matched" if is_auto else "likely_matched",
+                confidence=best.score,
+                allocations=[PurchaseAllocationProposal(
+                    purchase_id=best.purchase_id,
+                    amount=amt,
+                    confidence=best.score,
+                    reasons={**best.reasons, "Dalinė įmoka": True},
+                    status="auto" if is_auto else "proposed",
+                )],
+                details={"match_type": "partial_payment"},
+            )
+
+        return MatchResult(
+            transaction_id=txn.id,
+            status="auto_matched" if best.score >= AUTO_MATCH_THRESHOLD else "likely_matched",
+            confidence=best.score,
+            allocations=[PurchaseAllocationProposal(
+                purchase_id=best.purchase_id,
+                amount=min(amt, best.purchase_remaining),
+                confidence=best.score,
+                reasons=best.reasons,
+                status="auto" if best.score >= AUTO_MATCH_THRESHOLD else "proposed",
+            )],
+            details={
+                "match_type": "likely_single",
+                "candidates": [
+                    {"id": c.purchase_id, "number": c.purchase_full_number,
+                     "score": str(c.score), "remaining": str(c.purchase_remaining)}
+                    for c in candidates[:5]
+                ],
+            },
+        )
+
+    def _try_multi(self, txn, candidates) -> Optional[MatchResult]:
+        amt = txn.amount
+        eligible = [c for c in candidates if c.score >= LIKELY_MATCH_THRESHOLD]
+        if len(eligible) < 2:
+            return None
+        selected = []
+        running = Decimal("0")
+        for c in eligible:
+            if running >= amt:
+                break
+            take = min(c.purchase_remaining, amt - running)
+            selected.append((c, take))
+            running += take
+        if not self._exact(running, amt) and running < amt:
+            return None
+        if len(selected) < 2:
+            return None
+        min_score = min(c.score for c, _ in selected)
+        avg_score = sum(c.score for c, _ in selected) / len(selected)
+        is_auto = min_score >= AUTO_MATCH_THRESHOLD
+        return MatchResult(
+            transaction_id=txn.id,
+            status="auto_matched" if is_auto else "likely_matched",
+            confidence=avg_score,
+            allocations=[
+                PurchaseAllocationProposal(
+                    purchase_id=c.purchase_id, amount=take,
+                    confidence=c.score,
+                    reasons={**c.reasons, "Kelių dokumentų mokėjimas": True},
+                    status="auto" if is_auto else "proposed",
+                )
+                for c, take in selected
+            ],
+            details={"match_type": "multi_purchase", "count": len(selected)},
+        )
+
+    def _recalc_purchase(self, purchase_id):
+        from ..models import Purchase
+        try:
+            Purchase.objects.get(id=purchase_id).recalc_from_allocations()
+        except Purchase.DoesNotExist:
+            pass
+
+
+# ════════════════════════════════════════════════════════════
+# Bidirectional: при переносе Purchase в apskaitą
+# ════════════════════════════════════════════════════════════
+
+
+def match_purchase_on_transfer(purchase):
+    """
+    Вызывается после purchase.save() при переносе в apskaitą.
+    Ищет unmatched OutgoingTransaction → auto-match.
+
+    Использование:
+        from .utils.payment_invoice_matching import match_purchase_on_transfer
+        match_purchase_on_transfer(purchase)
+    """
+    from ..models import OutgoingTransaction, PaymentAllocation, normalize_name
+
+    if not purchase.amount_with_vat or purchase.amount_with_vat <= 0:
+        return None
+    if purchase.payment_status == "paid":
+        return None
+
+    user = purchase.user
+    seller_code = (purchase.seller_id or "").strip()
+    seller_name = normalize_name(purchase.seller_name or "")
+    seller_iban = (purchase.seller_iban or "").strip().upper()
+    doc_series = (purchase.document_series or "").strip()
+    doc_number = (purchase.document_number or "").strip()
+    full_number = f"{doc_series}{doc_number}".strip()
+
+    paid = (
+        PaymentAllocation.objects
+        .filter(purchase=purchase, status__in=["confirmed", "auto", "manual"])
+        .aggregate(t=Sum("amount"))["t"]
+    ) or Decimal("0")
+    remaining = purchase.amount_with_vat - paid
+    if remaining <= Decimal("0.01"):
+        return None
+
+    best_txn = None
+    best_score = Decimal("0")
+    best_reasons = {}
+
+    qs = OutgoingTransaction.objects.filter(user=user, match_status="unmatched")
+
+    for txn in qs.iterator():
+        score = Decimal("0")
+        reasons = {}
+
+        txn_code = (txn.counterparty_code or "").strip()
+        if txn_code and seller_code:
+            if txn_code == seller_code:
+                score += Decimal("0.40")
+                reasons["Tiekėjo kodas sutampa"] = txn_code
+            else:
+                score -= Decimal("0.30")
+
+        txn_iban = (txn.counterparty_account or "").strip().upper()
+        if txn_iban and seller_iban and txn_iban == seller_iban:
+            score += Decimal("0.25")
+            reasons["Tiekėjo IBAN sutampa"] = txn_iban
+
+        txn_name = normalize_name(txn.counterparty_name or "")
+        if txn_name and seller_name:
+            if txn_name == seller_name:
+                score += Decimal("0.20")
+                reasons["Tiekėjo pavadinimas sutampa"] = True
+            elif len(txn_name) >= 5 and len(seller_name) >= 5:
+                if txn_name in seller_name or seller_name in txn_name:
+                    score += Decimal("0.10")
+                    reasons["Tiekėjo pavadinimas panašus"] = True
+
+        if abs(txn.amount - remaining) <= AMOUNT_TOLERANCE_ABS:
+            score += Decimal("0.30")
+            reasons["Suma tiksliai sutampa"] = str(txn.amount)
+        elif abs(txn.amount - purchase.amount_with_vat) <= AMOUNT_TOLERANCE_ABS:
+            score += Decimal("0.25")
+            reasons["Suma sutampa su bendra suma"] = str(txn.amount)
+
+        purpose_upper = (txn.payment_purpose or "").upper()
+        if full_number and len(full_number) >= 3 and full_number.upper() in purpose_upper:
+            score += Decimal("0.30")
+            reasons["Dokumento numeris rastas"] = full_number
+
+        if score < AUTO_MATCH_THRESHOLD:
+            continue
+        if score > best_score:
+            best_score = score
+            best_txn = txn
+            best_reasons = reasons
+
+    if not best_txn:
+        return None
+
+    alloc_amount = min(best_txn.amount, remaining)
+    alloc, _ = PaymentAllocation.objects.update_or_create(
+        outgoing_transaction=best_txn,
+        purchase=purchase,
+        defaults={
+            "amount": alloc_amount,
+            "confidence": best_score,
+            "match_reasons": best_reasons,
+            "status": "auto",
+            "source": "bank_import",
+            "payment_date": best_txn.transaction_date,
+        },
+    )
+    best_txn.matched_document_number = f"{purchase.document_series or ''}{purchase.document_number or ''}".strip()
+    best_txn.match_status = "auto_matched"
+    best_txn.match_confidence = best_score
+    best_txn.match_details = {"match_type": "bidirectional_purchase_transfer"}
+    best_txn.transaction_category = "supplier_payment"
+    best_txn.allocated_amount = alloc_amount
+    best_txn.save(update_fields=[
+        "match_status", "match_confidence", "match_details",
+        "transaction_category", "allocated_amount", "updated_at",
+        "matched_document_number",
+    ])
+
+    purchase.recalc_from_allocations()
+
+    logger.info(
+        "[BidirectionalMatch] Purchase %s ↔ txn %s (score=%.2f, amount=%s)",
+        purchase.id, best_txn.id, best_score, alloc_amount,
+    )
+    return alloc
+
+
+
+def match_invoice_on_transfer(invoice):
+    """
+    Вызывается при переносе pardavimo SF из skaitmenizavimo.
+    Ищет unmatched IncomingTransaction → auto-match.
+    """
+    from ..models import IncomingTransaction, PaymentAllocation, normalize_name
+
+    if not invoice.amount_with_vat or invoice.amount_with_vat <= 0:
+        return None
+    if invoice.status in ("cancelled", "draft"):
+        return None
+
+    user = invoice.user
+    buyer_code = (invoice.buyer_id or "").strip()
+    buyer_name = normalize_name(invoice.buyer_name or "")
+    buyer_iban = (invoice.buyer_iban or "").strip().upper()
+    full_number = invoice.full_number
+
+    paid = (
+        PaymentAllocation.objects
+        .filter(invoice=invoice, status__in=["confirmed", "auto", "manual"])
+        .aggregate(t=Sum("amount"))["t"]
+    ) or Decimal("0")
+    remaining = invoice.amount_with_vat - paid
+    if remaining <= Decimal("0.01"):
+        return None
+
+    best_txn = None
+    best_score = Decimal("0")
+    best_reasons = {}
+
+    qs = IncomingTransaction.objects.filter(user=user, match_status="unmatched")
+
+    for txn in qs.iterator():
+        score = Decimal("0")
+        reasons = {}
+
+        # Код покупателя
+        txn_code = (txn.counterparty_code or "").strip()
+        if txn_code and buyer_code:
+            if txn_code == buyer_code:
+                score += Decimal("0.25")
+                reasons["Pirkėjo kodas sutampa"] = txn_code
+            else:
+                score -= Decimal("0.30")
+
+        # IBAN
+        txn_iban = (txn.counterparty_account or "").strip().upper()
+        if txn_iban and buyer_iban and txn_iban == buyer_iban:
+            score += Decimal("0.15")
+            reasons["Pirkėjo IBAN sutampa"] = txn_iban
+
+        # Имя
+        txn_name = normalize_name(txn.counterparty_name or "")
+        if txn_name and buyer_name:
+            if txn_name == buyer_name:
+                score += Decimal("0.20")
+                reasons["Pirkėjo pavadinimas sutampa"] = True
+            elif len(txn_name) >= 5 and len(buyer_name) >= 5:
+                if txn_name in buyer_name or buyer_name in txn_name:
+                    score += Decimal("0.10")
+                    reasons["Pirkėjo pavadinimas panašus"] = True
+
+        # Сумма
+        if abs(txn.amount - remaining) <= AMOUNT_TOLERANCE_ABS:
+            score += Decimal("0.30")
+            reasons["Suma tiksliai sutampa"] = str(txn.amount)
+        elif abs(txn.amount - invoice.amount_with_vat) <= AMOUNT_TOLERANCE_ABS:
+            score += Decimal("0.25")
+            reasons["Suma sutampa su bendra suma"] = str(txn.amount)
+
+        # Номер документа в назначении
+        purpose_upper = (txn.payment_purpose or "").upper()
+        if full_number and len(full_number) >= 3 and full_number.upper() in purpose_upper:
+            score += Decimal("0.40")
+            reasons["Sąskaitos numeris rastas"] = full_number
+
+        if score < AUTO_MATCH_THRESHOLD:
+            continue
+        if score > best_score:
+            best_score = score
+            best_txn = txn
+            best_reasons = reasons
+
+    if not best_txn:
+        return None
+
+    alloc_amount = min(best_txn.amount, remaining)
+    alloc, _ = PaymentAllocation.objects.update_or_create(
+        incoming_transaction=best_txn,
+        invoice=invoice,
+        defaults={
+            "amount": alloc_amount,
+            "confidence": best_score,
+            "match_reasons": best_reasons,
+            "status": "auto",
+            "source": "bank_import",
+            "payment_date": best_txn.transaction_date,
+        },
+    )
+    best_txn.matched_document_number = invoice.full_number
+    best_txn.match_status = "auto_matched"
+    best_txn.match_confidence = best_score
+    best_txn.match_details = {"match_type": "bidirectional_invoice_transfer"}
+    best_txn.transaction_category = "customer_receipt"
+    best_txn.allocated_amount = alloc_amount
+    best_txn.save(update_fields=[
+        "match_status", "match_confidence", "match_details",
+        "transaction_category", "allocated_amount", "updated_at",
+        "matched_document_number",
+    ])
+
+    invoice.recalc_payment_status()
+
+    # Auto JE для оплаты
+    try:
+        from ..services.accounting_transfer import create_je_for_allocation
+        create_je_for_allocation(alloc)
+    except Exception as e:
+        logger.warning("[BidirectionalMatch] JE failed for invoice alloc: %s", e)
+
+    logger.info(
+        "[BidirectionalMatch] Invoice %s ↔ txn %s (score=%.2f, amount=%s)",
+        invoice.id, best_txn.id, best_score, alloc_amount,
+    )
+    return alloc

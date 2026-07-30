@@ -5,14 +5,15 @@ import json
 from typing import Optional
 from django.db.models import IntegerField, Value
 from django.db.models.functions import Cast
-from django.db.models import Case, When
+from django.db.models import Case, When, Q
 from .utils.password_encryption import encrypt_password
 from django.urls import reverse
 from datetime import date
 from decimal import Decimal
 from django.utils import timezone
 
-from .models import Payments, MeasurementUnit, InvoiceSeries, Product, RecurringInvoice, RecurringInvoiceLineItem, Invoice, InvoiceEmail, InvoiceSettings, RivileGamaAPIKey, NewsletterCampaign, NewsletterRecipient
+from .models import Payments, MeasurementUnit, InvoiceSeries, Product, RecurringInvoice, RecurringInvoiceLineItem, Invoice, InvoiceEmail, InvoiceSettings, RivileGamaAPIKey, NewsletterCampaign, NewsletterRecipient, CompanyProfile, PurchaseLine, Purchase, JournalEntry, JournalEntryLine
+
 
 from .utils.lineitem_rules import normalize_lineitem_rules
 
@@ -56,6 +57,8 @@ class LineItemSerializer(serializers.ModelSerializer):
             "pvm_kodas_label",
             'is_long_term_asset_candidate',
             'suggested_asset_type',
+            'pirkimo_saskaita',
+            "pardavimo_saskaita",
 
             # product autocomplete fields
             'sandelio_kodas',
@@ -92,10 +95,19 @@ class LineItemSerializer(serializers.ModelSerializer):
             'serijos_pavadinimas',
             'centro_kodas',
             'centro_pavadinimas',
+            "matched_prekes_pavadinimas",
+            "matched_prekes_kodas", 
+            "matched_prekes_barkodas",
+            "matched_unit",
+            "matched_preke_paslauga",
+            "catalog_match_user_override",
         ]
 
 class ScannedDocumentSerializer(serializers.ModelSerializer):
     line_items = LineItemSerializer(many=True, read_only=True)
+    kor_summary = serializers.SerializerMethodField()
+    perkelta_i_company_name = serializers.SerializerMethodField()
+
 
     class Meta:
         model = ScannedDocument
@@ -193,12 +205,65 @@ class ScannedDocumentSerializer(serializers.ModelSerializer):
             'centro_kodas',
             'centro_pavadinimas',
 
+            'pirkimo_saskaita',
+            "pardavimo_saskaita",
+            'kor_summary',
+            'perkelta_i_apskaita',
+            'perkelta_i_apskaita_at',
+            'perkelta_i_company_profile',
+            'perkelta_i_company_name',
+
+            'catalog_unmatched_count',
+
             # lines
             'line_items',
         ]
 
+    def get_perkelta_i_company_name(self, obj):
+        return obj.perkelta_i_company_profile.name if obj.perkelta_i_company_profile else None
+
+    def get_kor_summary(self, obj):
+        if obj.scan_type != "detaliai":
+            return None
+        from django.db.models import Sum, Count
+
+        return {
+            "pirkimas": [
+                {
+                    "code": g["pirkimo_saskaita"] or "",
+                    "subtotal_sum": str(g["subtotal_sum"] or 0),
+                    "count": g["count"],
+                }
+                for g in obj.line_items
+                    .values("pirkimo_saskaita")
+                    .annotate(
+                        subtotal_sum=Sum("subtotal"),
+                        count=Count("id"),
+                    )
+                    .order_by("pirkimo_saskaita")
+            ],
+            "pardavimas": [
+                {
+                    "code": g["pardavimo_saskaita"] or "",
+                    "pirkimo_saskaita": g["pirkimo_saskaita"] or "",
+                    "subtotal_sum": str(g["subtotal_sum"] or 0),
+                    "count": g["count"],
+                }
+                for g in obj.line_items
+                    .values("pardavimo_saskaita", "pirkimo_saskaita")
+                    .annotate(
+                        subtotal_sum=Sum("subtotal"),
+                        count=Count("id"),
+                    )
+                    .order_by("pardavimo_saskaita", "pirkimo_saskaita")
+            ],
+        }
+
+
 #Dlia dashboarda - limited info
 class ScannedDocumentListSerializer(serializers.ModelSerializer):
+    perkelta_i_company_name = serializers.SerializerMethodField()
+
     class Meta:
         model = ScannedDocument
         fields = [
@@ -238,8 +303,15 @@ class ScannedDocumentListSerializer(serializers.ModelSerializer):
             'buyer_replaced_by_rule',
             'seller_replaced_by_rule',
             'is_long_term_asset_candidate',
+            "perkelta_i_apskaita",
+            "perkelta_i_apskaita_at",
+            "perkelta_i_company_profile",
+            "perkelta_i_company_name",
             # ...и т.п., без тяжелых полей и line_items
         ]
+
+    def get_perkelta_i_company_name(self, obj):
+        return obj.perkelta_i_company_profile.name if obj.perkelta_i_company_profile else None
 
 
 # class ScannedDocumentDetailSerializer(serializers.ModelSerializer):
@@ -294,6 +366,7 @@ class ScannedDocumentListSerializer(serializers.ModelSerializer):
 
 class ScannedDocumentDetailSerializer(serializers.ModelSerializer):
     line_items_count = serializers.SerializerMethodField()
+    kor_summary = serializers.SerializerMethodField()
 
     class Meta:
         model = ScannedDocument
@@ -302,9 +375,47 @@ class ScannedDocumentDetailSerializer(serializers.ModelSerializer):
     def get_line_items_count(self, obj):
         return obj.line_items.count()
 
+    def get_kor_summary(self, obj):
+        if obj.scan_type != "detaliai":
+            return None
+        from django.db.models import Sum, Count
+
+        return {
+            "pirkimas": [
+                {
+                    "code": g["pirkimo_saskaita"] or "",
+                    "subtotal_sum": str(g["subtotal_sum"] or 0),
+                    "count": g["count"],
+                }
+                for g in obj.line_items
+                    .values("pirkimo_saskaita")
+                    .annotate(
+                        subtotal_sum=Sum("subtotal"),
+                        count=Count("id"),
+                    )
+                    .order_by("pirkimo_saskaita")
+            ],
+            "pardavimas": [
+                {
+                    "code": g["pardavimo_saskaita"] or "",
+                    "pirkimo_saskaita": g["pirkimo_saskaita"] or "",
+                    "subtotal_sum": str(g["subtotal_sum"] or 0),
+                    "count": g["count"],
+                }
+                for g in obj.line_items
+                    .values("pardavimo_saskaita", "pirkimo_saskaita")
+                    .annotate(
+                        subtotal_sum=Sum("subtotal"),
+                        count=Count("id"),
+                    )
+                    .order_by("pardavimo_saskaita", "pirkimo_saskaita")
+            ],
+        }
+
 
 class ScannedDocumentAdminDetailSerializer(serializers.ModelSerializer):
     line_items_count = serializers.SerializerMethodField()
+    kor_summary = serializers.SerializerMethodField()
 
     class Meta:
         model = ScannedDocument
@@ -313,6 +424,42 @@ class ScannedDocumentAdminDetailSerializer(serializers.ModelSerializer):
     def get_line_items_count(self, obj):
         return obj.line_items.count()
 
+    def get_kor_summary(self, obj):
+        if obj.scan_type != "detaliai":
+            return None
+        from django.db.models import Sum, Count
+
+        return {
+            "pirkimas": [
+                {
+                    "code": g["pirkimo_saskaita"] or "",
+                    "subtotal_sum": str(g["subtotal_sum"] or 0),
+                    "count": g["count"],
+                }
+                for g in obj.line_items
+                    .values("pirkimo_saskaita")
+                    .annotate(
+                        subtotal_sum=Sum("subtotal"),
+                        count=Count("id"),
+                    )
+                    .order_by("pirkimo_saskaita")
+            ],
+            "pardavimas": [
+                {
+                    "code": g["pardavimo_saskaita"] or "",
+                    "pirkimo_saskaita": g["pirkimo_saskaita"] or "",
+                    "subtotal_sum": str(g["subtotal_sum"] or 0),
+                    "count": g["count"],
+                }
+                for g in obj.line_items
+                    .values("pardavimo_saskaita", "pirkimo_saskaita")
+                    .annotate(
+                        subtotal_sum=Sum("subtotal"),
+                        count=Count("id"),
+                    )
+                    .order_by("pardavimo_saskaita", "pirkimo_saskaita")
+            ],
+        }
 
 
 
@@ -921,6 +1068,120 @@ class CustomUserSerializer(serializers.ModelSerializer):
         instance.save()
         return instance
 
+
+class CompanyProfileSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = CompanyProfile
+        fields = [
+            "id",
+            "entity_type",
+            "name",
+            "company_code",
+            "vat_code",
+            "iban",
+            "address",
+            "country_iso",
+            "owner_name",
+            "iv_certificate_nr",
+            "accounting_program",
+            "payment_providers",
+            "is_active",
+            "created_at",
+        ]
+        read_only_fields = ["id", "created_at"]
+
+    def validate(self, data):
+        entity_type = data.get(
+            "entity_type",
+            self.instance.entity_type if self.instance else None,
+        )
+
+        # --- обязательные поля ---
+        if entity_type == CompanyProfile.ENTITY_IMONE:
+            if not data.get(
+                "company_code",
+                getattr(self.instance, "company_code", None),
+            ):
+                raise serializers.ValidationError(
+                    {"company_code": "Įmonės kodas privalomas."}
+                )
+        elif entity_type == CompanyProfile.ENTITY_IV:
+            owner = data.get("owner_name", getattr(self.instance, "owner_name", None))
+            iv_nr = data.get(
+                "iv_certificate_nr",
+                getattr(self.instance, "iv_certificate_nr", None),
+            )
+            if not owner and not iv_nr:
+                raise serializers.ValidationError(
+                    "Nurodykite savininko vardą arba IV pažymėjimo nr."
+                )
+
+        # --- проверка на дубли (в рамках одного юзера) ---
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+
+        if user and user.is_authenticated:
+            qs = CompanyProfile.objects.filter(user=user, entity_type=entity_type)
+            if self.instance:
+                qs = qs.exclude(pk=self.instance.pk)
+
+            def _val(field):
+                return str(
+                    data.get(field, getattr(self.instance, field, None)) or ""
+                ).strip()
+
+            if entity_type == CompanyProfile.ENTITY_IMONE:
+                # дубль, если совпал ХОТЯ БЫ один из: kodas / PVM kodas / pavadinimas
+                code = _val("company_code")
+                vat = _val("vat_code")
+                name = _val("name")
+
+                match = Q()
+                has_criteria = False
+                if code:
+                    match |= Q(company_code__iexact=code)
+                    has_criteria = True
+                if vat:
+                    match |= Q(vat_code__iexact=vat)
+                    has_criteria = True
+                if name:
+                    match |= Q(name__iexact=name)
+                    has_criteria = True
+
+                if has_criteria and qs.filter(match).exists():
+                    raise serializers.ValidationError(
+                        "Toks įmonės profilis jau egzistuoja "
+                        "(sutampa įmonės kodas, PVM kodas arba pavadinimas)."
+                    )
+
+            elif entity_type == CompanyProfile.ENTITY_IV:
+                # дубль, если совпали pavadinimas И owner_name
+                name = _val("name")
+                owner = _val("owner_name")
+                if name and owner and qs.filter(
+                    name__iexact=name, owner_name__iexact=owner
+                ).exists():
+                    raise serializers.ValidationError(
+                        "Tokia individuali veikla jau egzistuoja."
+                    )
+
+        return data
+
+    def create(self, validated_data):
+        validated_data["user"] = self.context["request"].user
+        profile = super().create(validated_data)
+        profile.sync_to_user_billing()
+
+        user = profile.user
+        if user.active_company_profile is None:
+            user.active_company_profile = profile
+            user.onboarding_completed = True
+            user.save(update_fields=[
+                "active_company_profile",
+                "onboarding_completed",
+            ])
+
+        return profile
 
 
 class CustomUserAdminListSerializer(CustomUserSerializer):
@@ -1945,18 +2206,52 @@ class InvoiceLineItemSerializer(serializers.ModelSerializer):
             "discount_with_vat",
             "discount_wo_vat",
             "sort_order",
+            "kredito_saskaita",
+            "pvm_saskaita",
         ]
         read_only_fields = ["id"]
+
+
+class InvoiceScanPreviewMixin(serializers.Serializer):
+    source_document_id = serializers.IntegerField(
+        source="scanned_document_id",
+        read_only=True,
+    )
+    source_document_preview_url = serializers.SerializerMethodField()
+    source_document_original_filename = serializers.SerializerMethodField()
+
+    def get_source_document_original_filename(self, obj):
+        doc = getattr(obj, "scanned_document", None)
+        return getattr(doc, "original_filename", "") if doc else ""
+
+    def get_source_document_preview_url(self, obj):
+        doc = getattr(obj, "scanned_document", None)
+        if not doc:
+            return ""
+
+        request = self.context.get("request")
+
+        if doc.preview_url:
+            return doc.preview_url
+
+        if doc.file and hasattr(doc.file, "url"):
+            url = doc.file.url
+            return request.build_absolute_uri(url) if request else url
+
+        return ""
 
 
 # ────────────────────────────────────────────────────────────
 # Invoice — List (лёгкий, для таблицы)
 # ────────────────────────────────────────────────────────────
 
-class InvoiceListSerializer(serializers.ModelSerializer):
+class InvoiceListSerializer(InvoiceScanPreviewMixin, serializers.ModelSerializer):
     """Для списка счетов — без autocomplete полей, без line items."""
 
     full_number = serializers.ReadOnlyField()
+    is_from_scan = serializers.ReadOnlyField()
+    can_create_credit = serializers.ReadOnlyField()
+    can_delete = serializers.ReadOnlyField()
     line_items_count = serializers.IntegerField(read_only=True)
     buyer_display = serializers.SerializerMethodField()
     is_overdue = serializers.SerializerMethodField()
@@ -2002,7 +2297,13 @@ class InvoiceListSerializer(serializers.ModelSerializer):
             "dineta_api_status",
             "optimum_api_status",      
             "is_overdue",
-            "can_create_pvm_sf",       
+            "can_create_pvm_sf",  
+            "can_create_credit",
+            "is_from_scan",
+            "source_document_id",
+            "source_document_preview_url",
+            "can_delete",
+            "source_document_original_filename",
             "created_at",
             "updated_at",
             "paid_amount",
@@ -2010,6 +2311,7 @@ class InvoiceListSerializer(serializers.ModelSerializer):
             "has_proposed_payments",
             "email_sent_count",
             "email_last_status",
+        
         ]
 
     def get_is_overdue(self, obj):
@@ -2028,7 +2330,7 @@ class InvoiceListSerializer(serializers.ModelSerializer):
 # Invoice — Detail (полный, с line items)
 # ────────────────────────────────────────────────────────────
 
-class InvoiceDetailSerializer(serializers.ModelSerializer):
+class InvoiceDetailSerializer(InvoiceScanPreviewMixin, serializers.ModelSerializer):
     """Полный сериализатор для просмотра и редактирования."""
 
     line_items = InvoiceLineItemSerializer(many=True, read_only=True)
@@ -2036,6 +2338,9 @@ class InvoiceDetailSerializer(serializers.ModelSerializer):
     is_editable = serializers.ReadOnlyField()
     can_be_sent = serializers.ReadOnlyField()
     can_create_pvm_sf = serializers.ReadOnlyField()
+    can_create_credit = serializers.ReadOnlyField()
+    is_from_scan = serializers.ReadOnlyField()
+    can_delete = serializers.ReadOnlyField()
     public_url = serializers.ReadOnlyField()
     pdf_url = serializers.SerializerMethodField()
     paid_amount = serializers.DecimalField(
@@ -2161,6 +2466,15 @@ class InvoiceDetailSerializer(serializers.ModelSerializer):
             "paid_amount",
             "last_payment_date",
             "has_proposed_payments",
+            "can_create_credit",
+            "is_from_scan",
+            "source_document_id",
+            "source_document_preview_url",
+            "can_delete",
+            "source_document_original_filename",
+            "debeto_saskaita",
+            "kredito_saskaita",
+            "pvm_saskaita",
         ]
         read_only_fields = [
             "id",
@@ -2172,6 +2486,9 @@ class InvoiceDetailSerializer(serializers.ModelSerializer):
             "public_url",
             "pdf_url",
             "sent_at",
+            "source_document_id",
+            "source_document_preview_url",
+            "source_document_original_filename",
             "paid_at",
             "cancelled_at",
             "optimum_api_status",
@@ -2199,6 +2516,44 @@ class InvoiceDetailSerializer(serializers.ModelSerializer):
 # ────────────────────────────────────────────────────────────
 # Invoice — Create / Update (с nested line items)
 # ────────────────────────────────────────────────────────────
+
+def _apply_credit_signs(doc_data, lines_data, force=False):
+    """
+    Kreditinei sąskaitai visos sumos ir kiekiai BD saugomi neigiami.
+    Editorius siunčia teigiamas reikšmes — verčiame čia.
+    Price ir vat_percent lieka teigiami.
+    """
+    from decimal import Decimal, InvalidOperation
+
+    if not force and doc_data.get("invoice_type") != "kreditine":
+        return
+
+    def _neg(v):
+        if v in (None, ""):
+            return v
+        try:
+            d = Decimal(str(v))
+        except (InvalidOperation, TypeError, ValueError):
+            return v
+        return -abs(d) if d != 0 else d
+
+    NEG_DOC_FIELDS = (
+        "amount_wo_vat", "vat_amount", "amount_with_vat",
+        "invoice_discount_wo_vat", "invoice_discount_with_vat",
+    )
+    NEG_LINE_FIELDS = (
+        "quantity", "subtotal", "vat", "total",
+        "discount_wo_vat", "discount_with_vat",
+    )
+
+    for f in NEG_DOC_FIELDS:
+        if f in doc_data:
+            doc_data[f] = _neg(doc_data[f])
+
+    for line in lines_data:
+        for f in NEG_LINE_FIELDS:
+            if f in line:
+                line[f] = _neg(line[f])
 
 class InvoiceWriteSerializer(serializers.ModelSerializer):
     """
@@ -2295,6 +2650,9 @@ class InvoiceWriteSerializer(serializers.ModelSerializer):
             "auto_sf_series",
             "auto_sf_send",
             "send_payment_reminders",
+            "debeto_saskaita",
+            "kredito_saskaita",
+            "pvm_saskaita",
         ]
 
     def validate(self, data):
@@ -2469,6 +2827,12 @@ class InvoiceWriteSerializer(serializers.ModelSerializer):
         validated_data.setdefault("pirkimas_pardavimas", "pardavimas")
         validated_data["status"] = "draft"
 
+        # Visos išrašytos sąskaitos priskiriamos vartotojo aktyviam company profile.
+        if not validated_data.get("company_profile_id") and not validated_data.get("company_profile"):
+            active_id = getattr(user, "active_company_profile_id", None)
+            if active_id:
+                validated_data["company_profile_id"] = active_id
+
         invoice = Invoice.objects.create(user=user, **validated_data)
 
         # Line items
@@ -2487,18 +2851,39 @@ class InvoiceWriteSerializer(serializers.ModelSerializer):
     def update(self, instance, validated_data):
         line_items_data = validated_data.pop("line_items", None)
 
+        # Draft kreditinė lieka teigiama.
+        # Išrašyta kreditinė BD turi likti neigiama.
+        effective_type = validated_data.get(
+            "invoice_type",
+            instance.invoice_type,
+        )
+
+        if (
+            effective_type == "kreditine"
+            and instance.status != "draft"
+        ):
+            _apply_credit_signs(
+                validated_data,
+                line_items_data or [],
+                force=True,
+            )
+
         # Normalized names
         if validated_data.get("seller_name"):
-            validated_data["seller_name_normalized"] = validated_data["seller_name"].strip().upper()
+            validated_data["seller_name_normalized"] = (
+                validated_data["seller_name"].strip().upper()
+            )
+        
         if validated_data.get("buyer_name"):
-            validated_data["buyer_name_normalized"] = validated_data["buyer_name"].strip().upper()
+            validated_data["buyer_name_normalized"] = (
+                validated_data["buyer_name"].strip().upper()
+            )
 
         # Update invoice fields
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
         instance.save()
 
-        # Replace line items (full replace strategy — проще и надёжнее)
         if line_items_data is not None:
             instance.line_items.all().delete()
             for idx, li_data in enumerate(line_items_data):
@@ -2509,6 +2894,21 @@ class InvoiceWriteSerializer(serializers.ModelSerializer):
                     sort_order=idx,
                     **li_data,
                 )
+
+        # Perskaičiuoti PVM kodus, kredito sąskaitas ir vat sumas eilutėms
+        if line_items_data is not None:
+            instance.assign_pvm_codes()
+            instance.save(update_fields=[
+                "pvm_kodas", "amount_wo_vat", "vat_amount", "amount_with_vat",
+            ])
+
+            # Regeneruoti DK įrašą, jei sąskaita jau išrašyta
+            if instance.status == "issued" and instance.invoice_type != "isankstine":
+                try:
+                    from .utils.journal_generators import sync_invoice_journal_entry
+                    sync_invoice_journal_entry(instance)
+                except Exception as e:
+                    logger.warning("[InvoiceUpdate] DK sync failed for %s: %s", instance.id, e)
 
         return instance
 
@@ -2920,7 +3320,11 @@ class RecurringInvoiceWriteSerializer(serializers.ModelSerializer):
     @transaction.atomic
     def create(self, validated_data):
         line_items_data = validated_data.pop("line_items", [])
+
         user = self.context["request"].user
+
+        # Kreditinė: sumos ir kiekiai iš editoriaus ateina teigiami — verčiame į neigiamus.
+        _apply_credit_signs(validated_data, line_items_data)
 
         # Country defaults
         validated_data.setdefault("seller_country", "Lietuva")
@@ -3042,8 +3446,7 @@ from decimal import Decimal
 
 from rest_framework import serializers
 
-from .models import BankStatement, IncomingTransaction, PaymentAllocation
-
+from .models import BankStatement, IncomingTransaction, OutgoingTransaction, PaymentAllocation, BankTransactionRule, BaseTransaction
 
 # ────────────────────────────────────────────────────────────
 # BankStatement
@@ -3053,6 +3456,46 @@ from .models import BankStatement, IncomingTransaction, PaymentAllocation
 class BankStatementListSerializer(serializers.ModelSerializer):
     bank_display = serializers.CharField(source="get_bank_name_display", read_only=True)
     status_display = serializers.CharField(source="get_status_display", read_only=True)
+    bank_account_info = serializers.SerializerMethodField()
+    duplicate_details = serializers.JSONField(read_only=True)
+
+    def get_bank_account_info(self, obj):
+        """Grąžina banko sąskaitos mapping info."""
+        if not obj.account_iban and not obj.bank_name:
+            return None
+
+        try:
+            from .models import CompanyProfile
+
+            cp = CompanyProfile.objects.filter(
+                user=obj.user,
+                is_active=True,
+            ).first()
+
+            if not cp:
+                return None
+
+            currency = (obj.currency or "EUR").strip().upper()
+
+            key = CompanyProfile._bank_mapping_key(
+                obj.account_iban or "",
+                obj.bank_name or "",
+                currency,
+            )
+
+            mapping = cp.bank_accounts_mapping or {}
+            entry = mapping.get(key, {})
+
+            return {
+                "iban": obj.account_iban or "",
+                "chart_account": entry.get("account", "2711"),
+                "bank_label": entry.get("label", obj.get_bank_name_display()),
+                "currency": entry.get("currency", currency),
+                "key": key,
+            }
+
+        except Exception:
+            return None
 
     class Meta:
         model = BankStatement
@@ -3066,6 +3509,7 @@ class BankStatementListSerializer(serializers.ModelSerializer):
             "auto_matched_count", "likely_matched_count", "unmatched_count",
             "status", "status_display", "error_message",
             "created_at",
+            "bank_account_info", "duplicate_details",
         ]
         read_only_fields = fields
 
@@ -3105,6 +3549,104 @@ class BankStatementUploadSerializer(serializers.Serializer):
         return value
 
 
+class TransactionListSerializer(serializers.Serializer):
+    """Light serializer — без allocations, без payment_purpose."""
+    id = serializers.IntegerField()
+    direction = serializers.CharField()
+    transaction_date = serializers.DateField()
+    counterparty_name = serializers.CharField(allow_blank=True)
+    counterparty_code = serializers.CharField(allow_blank=True)
+    amount = serializers.DecimalField(max_digits=12, decimal_places=2)
+    currency = serializers.CharField()
+    tx_type = serializers.CharField(allow_blank=True)
+    match_status = serializers.CharField()
+    transaction_category = serializers.CharField(allow_blank=True)
+    category_display = serializers.CharField(allow_blank=True)
+    statement_id = serializers.IntegerField(allow_null=True)
+    bank_name = serializers.CharField(allow_blank=True)
+    matched_document_number = serializers.CharField(allow_blank=True)
+
+
+class TransactionDetailSerializer(serializers.Serializer):
+    """Full serializer для drawer — все поля."""
+    id = serializers.IntegerField()
+    direction = serializers.CharField()
+    uuid = serializers.UUIDField()
+    transaction_date = serializers.DateField()
+    value_date = serializers.DateField(allow_null=True)
+    counterparty_name = serializers.CharField(allow_blank=True)
+    counterparty_code = serializers.CharField(allow_blank=True)
+    counterparty_account = serializers.CharField(allow_blank=True)
+    payment_purpose = serializers.CharField(allow_blank=True)
+    amount = serializers.DecimalField(max_digits=12, decimal_places=2)
+    currency = serializers.CharField()
+    bank_operation_code = serializers.CharField(allow_blank=True)
+    doc_number = serializers.CharField(allow_blank=True)
+    reference_number = serializers.CharField(allow_blank=True)
+    tx_type = serializers.CharField(allow_blank=True)
+
+    match_status = serializers.CharField()
+    match_confidence = serializers.DecimalField(max_digits=3, decimal_places=2)
+    match_details = serializers.DictField()
+    allocated_amount = serializers.DecimalField(max_digits=12, decimal_places=2)
+
+    transaction_category = serializers.CharField(allow_blank=True)
+    category_display = serializers.CharField(allow_blank=True)
+    category_account_debit = serializers.CharField(allow_blank=True)
+    category_account_credit = serializers.CharField(allow_blank=True)
+
+    statement_id = serializers.IntegerField(allow_null=True)
+    bank_name = serializers.CharField(allow_blank=True)
+
+    allocations = serializers.ListField(child=serializers.DictField())
+
+
+class TransactionClassifySerializer(serializers.Serializer):
+    """Для ручной классификации транзакции."""
+    category = serializers.ChoiceField(
+        choices=BaseTransaction.TRANSACTION_CATEGORY_CHOICES,
+    )
+    debit_account = serializers.CharField(max_length=20, required=False, default="")
+    credit_account = serializers.CharField(max_length=20, required=False, default="")
+    create_rule = serializers.BooleanField(required=False, default=False)
+    rule_name = serializers.CharField(max_length=255, required=False, default="")
+    apply_to_similar = serializers.BooleanField(required=False, default=False)
+
+
+class TransactionManualMatchSerializer(serializers.Serializer):
+    """Для ручной привязки транзакции к документу."""
+    invoice_id = serializers.IntegerField(required=False, allow_null=True)
+    purchase_id = serializers.IntegerField(required=False, allow_null=True)
+    amount = serializers.DecimalField(
+        max_digits=12, decimal_places=2, required=False, allow_null=True,
+    )
+
+
+class BankTransactionRuleSerializer(serializers.ModelSerializer):
+    category_display = serializers.CharField(
+        source="get_category_display", read_only=True,
+    )
+    match_field_display = serializers.CharField(
+        source="get_match_field_display", read_only=True,
+    )
+
+    class Meta:
+        model = BankTransactionRule
+        fields = [
+            "id", "name",
+            "match_field", "match_field_display",
+            "match_operator", "match_value", "direction",
+            "category", "category_display",
+            "debit_account", "credit_account",
+            "description_template",
+            "priority", "is_active", "auto_create_je",
+            "times_applied", "last_applied_at",
+            "created_at",
+        ]
+        read_only_fields = [
+            "id", "times_applied", "last_applied_at", "created_at",
+        ]
+
 # ────────────────────────────────────────────────────────────
 # Payment Proof (для модалки в InvoiceListPage)
 # ────────────────────────────────────────────────────────────
@@ -3128,7 +3670,7 @@ class TransactionInfoSerializer(serializers.Serializer):
 
 
 class PaymentAllocationDetailSerializer(serializers.Serializer):
-    """Одна allocation — один платёж/матч для invoice."""
+    """Одна allocation — один платёж/матч для invoice или purchase."""
     id = serializers.IntegerField()
     source = serializers.CharField()
     source_display = serializers.CharField()
@@ -3139,8 +3681,11 @@ class PaymentAllocationDetailSerializer(serializers.Serializer):
     confidence = serializers.DecimalField(max_digits=3, decimal_places=2)
     match_reasons = serializers.DictField()
     note = serializers.CharField()
+    direction = serializers.CharField()
     created_at = serializers.DateTimeField()
     transaction = TransactionInfoSerializer(allow_null=True)
+    invoice_id = serializers.IntegerField(allow_null=True)
+    purchase_id = serializers.IntegerField(allow_null=True)
 
 
 class InvoicePaymentDetailsSerializer(serializers.Serializer):
@@ -3617,4 +4162,324 @@ class ScannedWaybillUpdateSerializer(serializers.ModelSerializer):
 
 # ────────────────────────────────────────────────────────────
 # END ─── Waybill scan ───
+# ────────────────────────────────────────────────────────────
+
+# ────────────────────────────────────────────────────────────
+# Pirkimai ───
+# ────────────────────────────────────────────────────────────
+
+class PurchaseLineSerializer(serializers.ModelSerializer):
+    effective_debeto_saskaita = serializers.SerializerMethodField()
+    effective_kredito_saskaita = serializers.SerializerMethodField()
+    effective_pvm_saskaita = serializers.SerializerMethodField()
+
+    class Meta:
+        model = PurchaseLine
+        fields = [
+            "id",
+            "source_line_item_id",
+
+            "prekes_kodas",
+            "prekes_barkodas",
+            "prekes_pavadinimas",
+            "preke_paslauga",
+
+            "unit",
+            "quantity",
+            "price",
+            "subtotal",
+            "vat",
+            "vat_percent",
+            "total",
+            "discount_with_vat",
+            "discount_wo_vat",
+
+            "is_long_term_asset_candidate",
+            "suggested_asset_type",
+
+            "pvm_kodas",
+
+            # Redaguojamos line-level korespondencijos
+            "debeto_saskaita",
+            "kredito_saskaita",
+            "pvm_saskaita",
+
+            # Tik preview/summary patogumui
+            "effective_debeto_saskaita",
+            "effective_kredito_saskaita",
+            "effective_pvm_saskaita",
+
+            "sort_order",
+        ]
+        read_only_fields = [
+            "id",
+            "source_line_item_id",
+            "effective_debeto_saskaita",
+            "effective_kredito_saskaita",
+            "effective_pvm_saskaita",
+        ]
+
+    def get_effective_debeto_saskaita(self, obj):
+        if obj.debeto_saskaita:
+            return obj.debeto_saskaita
+        return obj.purchase.debeto_saskaita
+
+    def get_effective_kredito_saskaita(self, obj):
+        if obj.kredito_saskaita:
+            return obj.kredito_saskaita
+        return obj.purchase.kredito_saskaita
+
+    def get_effective_pvm_saskaita(self, obj):
+        if obj.pvm_saskaita:
+            return obj.pvm_saskaita
+        return obj.purchase.pvm_saskaita
+
+
+class PurchaseSerializer(serializers.ModelSerializer):
+    line_items = PurchaseLineSerializer(many=True, read_only=True)
+
+    company_profile_name = serializers.CharField(
+        source="company_profile.name",
+        read_only=True,
+    )
+
+    preview_url = serializers.SerializerMethodField()
+    original_filename = serializers.SerializerMethodField()
+    line_items_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Purchase
+        fields = [
+            "id",
+            "company_profile",
+            "company_profile_name",
+
+            "scanned_document_id",
+            "preview_url",
+            "original_filename",
+
+            "status",
+            "exported",
+            "exported_at",
+
+            "payment_status",
+            "paid_amount",
+            "last_payment_date",
+            "pvm_kodas",
+            "scan_type",
+            "order_number",
+            "paid_by_cash",
+            "is_long_term_asset_candidate",
+            "suggested_asset_type",
+            "ready_for_export",
+            "math_validation_passed",
+
+            "period",
+            "debeto_saskaita",
+            "kredito_saskaita",
+            "pvm_saskaita",
+            "kor_balanced",
+
+            "document_type",
+            "is_credit_invoice",
+            "is_debit_invoice",
+
+            "document_series",
+            "document_number",
+            "invoice_date",
+            "due_date",
+            "operation_date",
+
+            "seller_name",
+            "seller_id",
+            "seller_vat_code",
+            "seller_address",
+            "seller_country_iso",
+            "seller_iban",
+
+            "buyer_name",
+            "buyer_id",
+            "buyer_vat_code",
+            "buyer_address",
+            "buyer_country_iso",
+            "buyer_iban",
+
+            "currency",
+            "amount_wo_vat",
+            "vat_amount",
+            "vat_percent",
+            "amount_with_vat",
+            "separate_vat",
+
+            "pirkimas_pardavimas",
+            "report_to_isaf",
+            "document_type_code",
+            "seller_vat_val",
+
+            "notes",
+
+            "line_items",
+            "line_items_count",
+
+            "created_at",
+            "updated_at",
+        ]
+
+        read_only_fields = [
+            "id",
+            "scanned_document_id",
+            "preview_url",
+            "original_filename",
+            "line_items",
+            "line_items_count",
+            "created_at",
+            "updated_at",
+            "seller_vat_val",
+        ]
+
+    def get_preview_url(self, obj):
+        """
+        Preview reikia naujam PurchasePreviewDialog.
+        Geriausia paimti tą patį preview_url, kurį jau grąžina ScannedDocumentSerializer.
+        """
+
+        doc = obj.scanned_document
+        if not doc:
+            return None
+
+        # Jei ScannedDocumentSerializer jau yra šiame serializers.py ir grąžina preview_url,
+        # čia nebereikia dubliuoti preview logikos.
+        try:
+            data = ScannedDocumentSerializer(
+                doc,
+                context=self.context,
+            ).data
+            return data.get("preview_url")
+        except Exception:
+            return None
+
+    def get_original_filename(self, obj):
+        doc = obj.scanned_document
+        if not doc:
+            return None
+        return getattr(doc, "original_filename", None)
+
+    def get_line_items_count(self, obj):
+        if hasattr(obj, "line_items_count"):
+            return obj.line_items_count
+        return obj.line_items.count()
+
+
+# ────────────────────────────────────────────────────────────
+# END - Pirkimai ───
+# ────────────────────────────────────────────────────────────
+
+# ────────────────────────────────────────────────────────────
+# END - Pirkimai ───
+# ────────────────────────────────────────────────────────────
+
+# ────────────────────────────────────────────────────────────
+# DK
+# ────────────────────────────────────────────────────────────
+
+LOCKED_CODES = {"2410", "2441", "4430", "4492"}
+LOCKED_PREFIXES = ("271", "272")
+
+
+class JournalEntryLineSerializer(serializers.ModelSerializer):
+    is_editable = serializers.SerializerMethodField()
+
+    class Meta:
+        model = JournalEntryLine
+        fields = [
+            "id", "side", "account_code", "account_name",
+            "amount", "description", "sort_order", "is_editable",
+            "is_user_modified", 
+        ]
+
+    def get_is_editable(self, obj):
+        if obj.entry.source_type == JournalEntry.SOURCE_MANUAL:
+            return False
+
+        code = str(obj.account_code or "").strip()
+
+        return not (
+            code in LOCKED_CODES
+            or any(
+                code.startswith(prefix)
+                for prefix in LOCKED_PREFIXES
+            )
+        )
+    
+
+
+class JournalEntrySerializer(serializers.ModelSerializer):
+    lines = JournalEntryLineSerializer(many=True, read_only=True)
+    source_type_display = serializers.CharField(source="get_source_type_display", read_only=True)
+    status_display = serializers.CharField(source="get_status_display", read_only=True)
+
+    # Ссылки на исходные документы
+    purchase_scanned_document_id = serializers.IntegerField(
+        source="purchase.scanned_document_id", read_only=True, allow_null=True,
+    )
+    invoice_scanned_document_id = serializers.IntegerField(
+        source="invoice.scanned_document_id", read_only=True, allow_null=True,
+    )
+
+    document_preview_url = serializers.SerializerMethodField()
+    is_credit = serializers.SerializerMethodField()
+
+    def get_is_credit(self, obj):
+        try:
+            if obj.source_type == "sale" and obj.invoice_id and obj.invoice:
+                return obj.invoice.invoice_type == "kreditine"
+            if obj.source_type == "purchase" and obj.purchase_id and obj.purchase:
+                return bool(getattr(obj.purchase, "is_credit_invoice", False))
+        except Exception:
+            pass
+        return False
+
+    def get_document_preview_url(self, obj):
+        try:
+            if obj.purchase_id and obj.purchase:
+                scan = getattr(obj.purchase, "scanned_document", None)
+                if scan:
+                    if getattr(scan, "preview_url", None):
+                        return scan.preview_url
+                    if getattr(scan, "file", None):
+                        return scan.file.url
+            if obj.invoice_id and obj.invoice:
+                if getattr(obj.invoice, "pdf_file", None):
+                    return obj.invoice.pdf_file.url
+                scan = getattr(obj.invoice, "scanned_document", None)
+                if scan:
+                    if getattr(scan, "preview_url", None):
+                        return scan.preview_url
+                    if getattr(scan, "file", None):
+                        return scan.file.url
+        except Exception:
+            pass
+        return None
+
+    class Meta:
+        model = JournalEntry
+        fields = [
+            "id", "source_type", "source_type_display",
+            "purchase", "invoice",
+            "purchase_scanned_document_id", "invoice_scanned_document_id",
+            "entry_date", "period",
+            "document_number", "counterparty_name", "counterparty_code", "counterparty_vat_code",
+            "description", "status", "status_display",
+            "total_debit", "total_credit", "difference",
+            "currency", "original_amount", "original_currency",
+            "exchange_rate", "exchange_rate_date",
+            "document_preview_url",
+            "is_credit",
+            "created_at", "updated_at",
+            "lines",
+        ]
+
+
+# ────────────────────────────────────────────────────────────
+# END - DK
 # ────────────────────────────────────────────────────────────

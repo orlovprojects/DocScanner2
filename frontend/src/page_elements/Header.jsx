@@ -64,7 +64,7 @@ const MEGA_MENUS = {
     tag: "Nauja",
     items: [
       { text: "Sąskaitos", path: "/israsymas" },
-      { text: "Banko išrašai", path: "/israsymas/banko-israsai" },
+      // { text: "Banko išrašai", path: "/israsymas/banko-israsai" },
       { text: "Klientai", path: "/israsymas/klientai" },
       { text: "Prekės / paslaugos", path: "/israsymas/prekes-paslaugos" },
       { text: "Serijos ir numeracijos", path: "/israsymas/serijos-numeracijos" },

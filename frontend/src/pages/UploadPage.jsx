@@ -18,6 +18,9 @@ import CloseIcon from "@mui/icons-material/Close";
 import HelpOutlineIcon from "@mui/icons-material/HelpOutline";
 import ContentCopyIcon from "@mui/icons-material/ContentCopy";
 import EmailIcon from "@mui/icons-material/Email";
+import ShoppingCartIcon from "@mui/icons-material/ShoppingCart";
+import SellIcon from "@mui/icons-material/Sell";
+import LayersIcon from "@mui/icons-material/Layers";
 
 import { api } from "../api/endpoints";
 import DocumentsTable from "../page_elements/DocumentsTable";
@@ -32,9 +35,17 @@ import ExportStatusBar from "../components/ExportStatusBar";
 import SettingsIcon from '@mui/icons-material/Settings';
 
 
-const SCAN_TYPES = [
-  { value: "sumiskai", label: "Sumiškai (be eilučių) – 1 kreditas" },
-  { value: "detaliai", label: "Detaliai (su eilutėmis) – 1.3 kredito" },
+const getScanTypes = (catalogMatchingEnabled) => [
+  {
+    value: "sumiskai",
+    label: "Sumiškai (be eilučių) – 1 kreditas",
+  },
+  {
+    value: "detaliai",
+    label: catalogMatchingEnabled
+      ? "Detaliai (su eilutėmis)* – 1,8 kredito"
+      : "Detaliai (su eilutėmis) – 1,3 kredito",
+  },
 ];
 
 const API_EXPORT_PROGRAMS = new Set(["optimum", "dineta", "rivile_gama_api"]);
@@ -128,6 +139,16 @@ export default function UploadPage() {
   const [userLoaded, setUserLoaded] = useState(false);
   const [scanType, setScanType] = useState("sumiskai");
 
+  const catalogMatchingEnabled =
+    user?.extra_settings?.match_catalog_items_on_detailed_scan === 1 ||
+    user?.extra_settings?.match_catalog_items_on_detailed_scan === true ||
+    user?.extra_settings?.match_catalog_items_on_detailed_scan === "1";
+
+  const scanTypes = useMemo(
+    () => getScanTypes(catalogMatchingEnabled),
+    [catalogMatchingEnabled]
+  );
+
   const [counterparties, setCounterparties] = useState([]);
   const [cpLoading, setCpLoading] = useState(false);
 
@@ -169,6 +190,10 @@ export default function UploadPage() {
 
   const [kitiBudaiOpen, setKitiBudaiOpen] = useState(false);
   const [copied, setCopied] = useState(false);
+
+  const [transferPreview, setTransferPreview] = useState(null);
+  const [transferPayload, setTransferPayload] = useState(null);
+  const [transferring, setTransferring] = useState(false);
 
   const handleCopyEmail = () => {
     if (user?.inbox_email_address) {
@@ -283,7 +308,7 @@ export default function UploadPage() {
   }, [openSidebar, isMobile]);
 
   useEffect(() => {
-    api.get("/profile/", { withCredentials: true })
+    api.get("/me/", { withCredentials: true })
       .then(res => setUser(res.data))
       .catch(() => setUser(null))
       .finally(() => setUserLoaded(true));
@@ -317,6 +342,8 @@ export default function UploadPage() {
     if (!programKey) return null;
     return EXPORT_TUTORIALS[programKey] || null;
   }, [user?.default_accounting_program]);
+
+  const isDokskenasERPMode = user?.default_accounting_program === "dokskenas_erp";
 
   const handleFileChange = async (e) => {
     const files = Array.from(e.target.files || []);
@@ -464,6 +491,48 @@ export default function UploadPage() {
 
   const handleFilter = (f) => (e) => setFilters((p) => ({ ...p, [f]: e.target.value }));
 
+  const executeTransfer = async (extraPayload = {}) => {
+    if (!transferPayload) return;
+
+    setTransferring(true);
+
+    try {
+      await api.post("/accounting/transfer/", {
+        ...transferPayload,
+        ...extraPayload,
+      });
+
+      setTransferPreview(null);
+      setTransferPayload(null);
+      setSelectedRows([]);
+      setSelectionMode("none");
+      setExcludedIds([]);
+
+      await fetchDocs();
+    } catch (err) {
+      const errMsg =
+        err?.response?.data?.detail ||
+        err?.response?.data?.error ||
+        err?.message ||
+        "Klaida";
+
+      alert("Perkėlimas nepavyko: " + errMsg);
+    } finally {
+      setTransferring(false);
+    }
+  };
+
+  const handleTransferConfirm = async () => {
+    await executeTransfer();
+  };
+
+  const handleTransferReplaceCompany = async () => {
+    await executeTransfer({
+      replace_document_company: true,
+    });
+  };
+
+
   const isCompanyReady =
     !!user?.company_name &&
     !!user?.company_code &&
@@ -494,6 +563,54 @@ export default function UploadPage() {
     }
 
     const currentProgram = user?.default_accounting_program;
+
+    // ── DokSkenas ERP: perkelti į apskaitą ──
+    if (currentProgram === "dokskenas_erp") {
+      const activeProfileId = user?.active_company_profile_id;
+      if (!activeProfileId) {
+        alert("Pasirinkite įmonės profilį prieš perkeldami į apskaitą.");
+        return;
+      }
+
+      let docIds;
+      if (selectionMode === "filtered") {
+        const exSet = new Set(excludedIds.map(Number));
+        docIds = exportableRows
+          .map((r) => r.id)
+          .filter((id) => !exSet.has(id));
+      } else {
+        docIds = selectedRows.map(Number).filter(Number.isFinite);
+      }
+
+      const payload = {
+        document_ids: docIds,
+        company_profile_id: activeProfileId,
+        cp_key: selectedCpKey || "",
+      };
+
+      try {
+        setExportStarting(true);
+        const { data } = await api.post("/accounting/transfer/", {
+          ...payload,
+          dry_run: true,
+        });
+        setExportStarting(false);
+
+        setTransferPreview(data);
+        setTransferPayload(payload);
+      } catch (err) {
+        setExportStarting(false);
+        const errMsg =
+          err?.response?.data?.detail ||
+          err?.response?.data?.error ||
+          err?.message ||
+          "Klaida";
+        alert("Perkėlimas nepavyko: " + errMsg);
+      }
+      return;
+    }
+
+    // ── Обычный экспорт (все остальные программы) ──
     const isApiExport = API_EXPORT_PROGRAMS.has(currentProgram);
 
     try {
@@ -521,7 +638,6 @@ export default function UploadPage() {
             };
 
       if (isApiExport) {
-        // --- API export (Optimum, Dineta) ---
         setExportStarting(true);
 
         const res = await api.post("/documents/export_xml/", payload, {
@@ -530,7 +646,6 @@ export default function UploadPage() {
 
         setExportStarting(false);
 
-        // Запускаем polling в ExportStatusBar с retry
         if (ExportStatusBar._triggerPoll) {
           ExportStatusBar._triggerPoll();
           setTimeout(() => ExportStatusBar._triggerPoll?.(), 500);
@@ -542,7 +657,6 @@ export default function UploadPage() {
         setExcludedIds([]);
 
       } else {
-        // --- File export (все остальные программы) ---
         const res = await api.post("/documents/export_xml/", payload, {
           withCredentials: true,
           responseType: "blob",
@@ -577,7 +691,6 @@ export default function UploadPage() {
       setExportStarting(false);
       console.error(err);
 
-      // Для API экспорта: ошибка может быть JSON в blob
       if (err?.response?.data instanceof Blob) {
         try {
           const text = await err.response.data.text();
@@ -651,6 +764,12 @@ export default function UploadPage() {
     let disabledReason = "";
     if (!userLoaded) {
       disabledReason = "Kraunama...";
+    } else if (isDokskenasERPMode) {
+      if (!user?.active_company_profile_id) {
+        disabledReason = "Pridėkite įmonės profilį";
+      } else if (exportCountToShow === 0) {
+        disabledReason = "Pažymėkite bent vieną dokumentą";
+      }
     } else if (!isCompanyReady) {
       disabledReason = "Pirmiausia užpildykite savo įmonės duomenis ir pasirinkite buhalterinę programą nustatymuose";
     } else if (user?.view_mode === "multi" && !selectedCpKey) {
@@ -660,7 +779,7 @@ export default function UploadPage() {
     }
 
     return { exportCountToShow, disabledReason, exportDisabled: Boolean(disabledReason) };
-  }, [selectedRows, exportableRows, excludedIds, selectionMode, exportableTotal, userLoaded, isCompanyReady, user?.view_mode, selectedCpKey]);
+  }, [selectedRows, exportableRows, excludedIds, selectionMode, exportableTotal, userLoaded, isCompanyReady, user?.view_mode, selectedCpKey, isDokskenasERPMode, user?.active_company_profile_id]);
 
   return (
     <Box sx={{ p: isMobile ? 2 : 4 }}>
@@ -773,9 +892,36 @@ export default function UploadPage() {
           gap: isMobile ? 2 : 0,
         }}
       >
-        <Typography variant={isMobile ? "h6" : "h5"}>
-          Sąskaitų skaitmenizavimo suvestinė
-        </Typography>
+        <Box sx={{ display: "flex", alignItems: "center", gap: 1.5, mb: 5 }}>
+          <Box
+            sx={{
+              width: 44,
+              height: 44,
+              borderRadius: 2,
+              display: "grid",
+              placeItems: "center",
+              bgcolor: "#d4d4d4",
+              color: "primary.contrastText",
+              flexShrink: 0,
+            }}
+          >
+            <LayersIcon />
+          </Box>
+          <Box>
+            <Typography
+              variant={isMobile ? "h6" : "h5"}
+              sx={{ fontWeight: 700, lineHeight: 1.15 }}
+            >
+              Bendra sąskaitų skaitmenizavimo suvestinė
+            </Typography>
+            <Typography
+              variant="caption"
+              sx={{ color: "text.secondary", fontWeight: 600 }}
+            >
+              Visų vedamų įmonių sąskaitų skaitmenizavimas vienoje vietoje
+            </Typography>
+          </Box>
+        </Box>
 
         {!isMobile && (
           <Box display="flex" flexDirection="column" alignItems="center" sx={{ minHeight: 70 }}>
@@ -797,7 +943,10 @@ export default function UploadPage() {
                     onClick={handleExport}
                     disabled={exportButtonContent.exportDisabled}
                   >
-                    Eksportuoti{exportButtonContent.exportCountToShow ? ` (${exportButtonContent.exportCountToShow})` : ""} į {programLabel}
+                    {isDokskenasERPMode
+                      ? `Perkelti į apskaitą${exportButtonContent.exportCountToShow ? ` (${exportButtonContent.exportCountToShow})` : ""}`
+                      : `Eksportuoti${exportButtonContent.exportCountToShow ? ` (${exportButtonContent.exportCountToShow})` : ""} į ${programLabel}`
+                    }
                   </Button>
                 </span>
               </Tooltip>
@@ -857,7 +1006,7 @@ export default function UploadPage() {
         </Alert>
       )}
 
-      {userLoaded && !isCompanyReady && (
+      {/* {userLoaded && !isCompanyReady && (
         <Alert severity="warning" sx={{ mb: 2 }}>
           <Box sx={{ display: "flex", flexDirection: "column", gap: 1.5 }}>
             <Box sx={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 1 }}>
@@ -897,7 +1046,7 @@ export default function UploadPage() {
             </Box>
           </Box>
         </Alert>
-      )}
+      )} */}
 
       {/* Upload controls - Mobile: stacked, Desktop: inline */}
       {isMobile ? (
@@ -912,7 +1061,7 @@ export default function UploadPage() {
             SelectProps={{ MenuProps: { disableScrollLock: true } }}
             fullWidth
           >
-            {SCAN_TYPES.map((type) => (
+            {scanTypes.map((type) => (
               <MenuItem key={type.value} value={type.value}>
                 {type.label}
               </MenuItem>
@@ -924,7 +1073,7 @@ export default function UploadPage() {
             variant="contained"
             component="label"
             startIcon={<CloudUpload />}
-            disabled={isUploading || !userLoaded || !isCompanyReady}
+            disabled={isUploading || !userLoaded}
             fullWidth
             sx={{ py: 1.5 }}
           >
@@ -956,7 +1105,10 @@ export default function UploadPage() {
                   fullWidth
                   sx={{ py: 1.25 }}
                 >
-                  Eksportuoti{exportButtonContent.exportCountToShow ? ` (${exportButtonContent.exportCountToShow})` : ""} į {programLabel}
+                  {isDokskenasERPMode
+                    ? `Perkelti į apskaitą${exportButtonContent.exportCountToShow ? ` (${exportButtonContent.exportCountToShow})` : ""}`
+                    : `Eksportuoti${exportButtonContent.exportCountToShow ? ` (${exportButtonContent.exportCountToShow})` : ""} į ${programLabel}`
+                  }
                 </Button>
               </span>
             </Tooltip>
@@ -1002,7 +1154,7 @@ export default function UploadPage() {
             SelectProps={{ MenuProps: { disableScrollLock: true } }}
             sx={{ minWidth: 270 }}
           >
-            {SCAN_TYPES.map((type) => (
+            {scanTypes.map((type) => (
               <MenuItem key={type.value} value={type.value}>
                 {type.label}
               </MenuItem>
@@ -1013,7 +1165,7 @@ export default function UploadPage() {
             variant="contained"
             component="label"
             startIcon={<CloudUpload />}
-            disabled={isUploading || !userLoaded || !isCompanyReady}
+            disabled={isUploading || !userLoaded}
           >
             Įkelti failus
             <input type="file" hidden multiple onChange={handleFileChange} />
@@ -1476,6 +1628,224 @@ export default function UploadPage() {
             Daugiau būdų (mobili programėlė, Google Drive ir kt.) — netrukus!
           </Typography>
         </DialogContent>
+      </Dialog>
+
+      {/* Transfer confirmation dialog */}
+      <Dialog
+        open={Boolean(transferPreview)}
+        onClose={() => {
+          setTransferPreview(null);
+          setTransferPayload(null);
+        }}
+        disableScrollLock
+        maxWidth="sm"
+        fullWidth
+        PaperProps={{ sx: { borderRadius: "14px" } }}
+      >
+        <DialogTitle sx={{ pb: 1 }}>
+          <Typography sx={{ fontSize: 18, fontWeight: 700 }}>
+            Perkelti į apskaitą
+          </Typography>
+        </DialogTitle>
+        <DialogContent>
+          {transferPreview && (
+            <Box>
+              <Typography sx={{ mb: 2, fontSize: 15 }}>
+                Perkeliama į{" "}
+                <strong>{transferPreview.company_name}</strong> apskaitą:
+              </Typography>
+
+              <Box sx={{ display: "flex", flexDirection: "column", gap: 1.5, mb: 2 }}>
+                {transferPreview.purchase_count > 0 && (
+                  <Box
+                    sx={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 1.5,
+                      p: 1.5,
+                      borderRadius: "10px",
+                      bgcolor: "#EFF6FF",
+                    }}
+                  >
+                    <ShoppingCartIcon sx={{ color: "#3B82F6" }} />
+                    <Typography sx={{ fontSize: 15, fontWeight: 500 }}>
+                      {transferPreview.purchase_count} pirkimo{" "}
+                      {transferPreview.purchase_count === 1
+                        ? "sąskaita"
+                        : transferPreview.purchase_count < 10
+                        ? "sąskaitos"
+                        : "sąskaitų"}
+                    </Typography>
+                  </Box>
+                )}
+
+                {transferPreview.sale_count > 0 && (
+                  <Box
+                    sx={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 1.5,
+                      p: 1.5,
+                      borderRadius: "10px",
+                      bgcolor: "#F0FDF4",
+                    }}
+                  >
+                    <SellIcon sx={{ color: "#22C55E" }} />
+                    <Typography sx={{ fontSize: 15, fontWeight: 500 }}>
+                      {transferPreview.sale_count} pardavimo{" "}
+                      {transferPreview.sale_count === 1
+                        ? "sąskaita"
+                        : transferPreview.sale_count < 10
+                        ? "sąskaitos"
+                        : "sąskaitų"}
+                    </Typography>
+                  </Box>
+                )}
+
+                {transferPreview.skipped?.length > 0 && (
+                  <Box
+                    sx={{
+                      p: 1.5,
+                      borderRadius: "10px",
+                      bgcolor: "#FEF3C7",
+                    }}
+                  >
+                    <Typography
+                      sx={{ fontSize: 13, fontWeight: 600, color: "#92400E", mb: 0.5 }}
+                    >
+                      Praleista ({transferPreview.skipped.length}):
+                    </Typography>
+                    {transferPreview.skipped.map((s, i) => (
+                      <Typography
+                        key={i}
+                        sx={{ fontSize: 13, color: "#92400E" }}
+                      >
+                        • {s.reason}
+                      </Typography>
+                    ))}
+                  </Box>
+                )}
+
+                {transferPreview.company_mismatch && (
+                  <Box
+                    sx={{
+                      mt: 1,
+                      mb: 2,
+                      p: 1.75,
+                      borderRadius: "10px",
+                      bgcolor: "#F9FAFB",
+                      border: "1px solid #E5E7EB",
+                    }}
+                  >
+                    <Typography sx={{ fontSize: 14, fontWeight: 700, mb: 0.75 }}>
+                      Pasirinkta įmonė dokumente skiriasi nuo įmonės profilio
+                    </Typography>
+
+                    <Typography sx={{ fontSize: 13, color: "#6B7280", mb: 1.25 }}>
+                      Dokumente pasirinkta įmonė bus pakeista tik perkeliamame dokumente.
+                      Skaitmenizavimo įrašas ir įmonės profilis nebus keičiami.
+                    </Typography>
+
+                    <Box sx={{ display: "flex", flexDirection: "column", gap: 0.5 }}>
+                      <Typography sx={{ fontSize: 13 }}>
+                        <strong>Dokumente:</strong>{" "}
+                        {transferPreview.company_mismatch.selected_company?.name || "—"}
+                        {transferPreview.company_mismatch.selected_company?.code
+                          ? `, ${transferPreview.company_mismatch.selected_company.code}`
+                          : ""}
+                      </Typography>
+
+                      <Typography sx={{ fontSize: 13 }}>
+                        <strong>Įmonės profilyje:</strong>{" "}
+                        {transferPreview.company_mismatch.active_profile?.name || "—"}
+                        {transferPreview.company_mismatch.active_profile?.code
+                          ? `, ${transferPreview.company_mismatch.active_profile.code}`
+                          : ""}
+                      </Typography>
+                    </Box>
+
+                    {transferPreview.company_mismatch.affected_count > 1 && (
+                      <Typography sx={{ fontSize: 12, color: "#6B7280", mt: 1 }}>
+                        Nesutapimas rastas {transferPreview.company_mismatch.affected_count} dokumentuose.
+                      </Typography>
+                    )}
+                  </Box>
+                )}
+
+                {transferPreview.purchase_count === 0 &&
+                  transferPreview.sale_count === 0 && (
+                    <Alert severity="warning">
+                      Nėra dokumentų perkėlimui. Patikrinkite, ar dokumentų
+                      pirkėjo/pardavėjo duomenys atitinka įmonės profilį.
+                    </Alert>
+                  )}
+              </Box>
+            </Box>
+          )}
+        </DialogContent>
+
+        <Box
+          sx={{
+            display: "flex",
+            justifyContent: "flex-end",
+            flexWrap: "wrap",
+            gap: 1,
+            px: 3,
+            pb: 2.5,
+          }}
+        >
+          <Button
+            onClick={() => {
+              setTransferPreview(null);
+              setTransferPayload(null);
+            }}
+            sx={{ textTransform: "none", color: "#6B7280" }}
+          >
+            Atšaukti
+          </Button>
+
+          <Button
+            variant={transferPreview?.company_mismatch ? "outlined" : "contained"}
+            onClick={handleTransferConfirm}
+            disabled={
+              transferring ||
+              (transferPreview?.purchase_count === 0 &&
+                transferPreview?.sale_count === 0)
+            }
+            sx={{
+              textTransform: "none",
+              fontWeight: 600,
+              px: 3,
+              borderRadius: "8px",
+            }}
+            startIcon={transferring ? <CircularProgress size={16} /> : null}
+          >
+            {transferring ? "Perkeliama..." : "Perkelti"}
+          </Button>
+
+          {transferPreview?.company_mismatch && (
+            <Button
+              variant="contained"
+              onClick={handleTransferReplaceCompany}
+              disabled={
+                transferring ||
+                (transferPreview?.purchase_count === 0 &&
+                  transferPreview?.sale_count === 0)
+              }
+              sx={{
+                textTransform: "none",
+                fontWeight: 700,
+                px: 3,
+                borderRadius: "8px",
+              }}
+              startIcon={transferring ? <CircularProgress size={16} /> : null}
+            >
+              {transferring
+                ? "Perkeliama..."
+                : "Perkelti pakeičiant įmonę dokumente"}
+            </Button>
+          )}
+        </Box>
       </Dialog>
     </Box>
   );

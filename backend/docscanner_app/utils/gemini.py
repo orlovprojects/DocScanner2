@@ -96,16 +96,18 @@ Assign the detected type to the field "document_type".
 - traded_type
 - is_long_term_asset_candidate
 - suggested_asset_type
+- pirkimo_saskaita
 
 All boolean fields (seller_is_person, buyer_is_person, with_receipt, separate_vat, paid_by_cash, doc_96_str, is_credit_invoice, is_debit_invoice, is_long_term_asset_candidate) must be returned as true/false, not as strings.
 
 *Return ONLY a valid JSON object in a SINGLE LINE (compact form): no newlines, no \n, no \r, no tabs, and no spaces outside string values. Do not use Markdown or code fences. No trailing commas. Do NOT wrap in quotes or escape characters. Do NOT include any explanations, comments, or extra text outside the JSON. The output must be directly parsable by JSON.parse().
 
 Example (structure and field names; values may be empty strings, booleans must be true/false, numbers should be numbers when available):
-{"docs":<number_of_documents>,"documents":[{"document_type":"","seller_id":"","seller_name":"","seller_vat_code":"","seller_address":"","seller_country":"","seller_country_iso":"","seller_iban":"","seller_is_person":false,"buyer_id":"","buyer_name":"","buyer_vat_code":"","buyer_address":"","buyer_country":"","buyer_country_iso":"","buyer_iban":"","buyer_is_person":false,"invoice_date":"","due_date":"","operation_date":"","document_series":"","document_number":"","order_number":"","amount_wo_vat":"","vat_amount":"","vat_percent":"","amount_with_vat":"","separate_vat":false,"currency":"","with_receipt":false,"paid_by_cash":false,"doc_96_str":false,"traded_type":""}]}
+{"docs":<number_of_documents>,"documents":[{"document_type":"","seller_id":"","seller_name":"","seller_vat_code":"","seller_address":"","seller_country":"","seller_country_iso":"","seller_iban":"","seller_is_person":false,"buyer_id":"","buyer_name":"","buyer_vat_code":"","buyer_address":"","buyer_country":"","buyer_country_iso":"","buyer_iban":"","buyer_is_person":false,"invoice_date":"","due_date":"","operation_date":"","document_series":"","document_number":"","order_number":"","amount_wo_vat":"","vat_amount":"","vat_percent":"","amount_with_vat":"","separate_vat":false,"currency":"","with_receipt":false,"paid_by_cash":false,"doc_96_str":false,"traded_type":"","pirkimo_saskaita":""}]}
 
 Format dates as yyyy-mm-dd. Delete country from addresses. seller_country and buyer_country must be full country name in language of address provided. country_iso must be 2-letter code.
 In lithuanian documents dates are usually displayed in yyyy-mm-dd or dd/mm/yyyy formats. For example, when parsing 12/01/2026, it's 12th January, not 1st December.
+For document_series, if not clearly stated, carefully inspect the text before Nr. / No. or similar. The series is usually written in uppercase letters and may include digits, for example: Sąskaita Faktūra SNT5 Nr. 067557 → document_series: "SNT5", document_number: "067557". Do not confuse similar uppercase letters, such as FI and FL; copy the series exactly as printed (consider series to be written in capitals).
 When identifying buyer/seller:
 - Look for "pirkėjas" / "paslaugos pirkėjas" label → this is BUYER
 - Look for "pardavėjas" / "tiekėjas" label→ this is SELLER
@@ -178,6 +180,65 @@ If is_long_term_asset_candidate is True, choose only ONE type for that long term
 "kelios kategorijos" |
 
 and set for suggested_asset_type, otherwise omit the field. If matching items belong to different categories, set suggested_asset_type to "kelios kategorijos".
+---
+
+---Purchase account classification---
+For each valid purchase document, set "pirkimo_saskaita" to ONE numeric account code as string.
+
+Choose from:
+2010 raw materials/components/packaging
+2040 goods for resale/inventory
+2080 supplier advances/prepayments
+291 prepaid future-period expenses
+6002 direct cost of purchased goods/services
+6003 direct production costs
+6004 indirect production overhead
+6200 sales/payment/marketplace commissions
+6202 advertising/marketing costs
+6208 other sales expenses
+6300 rent/operating lease
+6301 repairs, maintenance, utilities, car/equipment service
+6302 outsourced services: accounting, legal, consulting, freelancers, development
+6303 insurance
+6308 government/state fees and non-VAT operating taxes
+6311 operating fines and late payment penalties
+6312 general admin expenses: SaaS, hosting, telecom, office supplies, small purchases
+6401 other non-core expenses
+6802 loan/credit interest
+6803 foreign exchange losses
+6804 financial/bank/loan penalties
+6806 financial lease interest
+6810 bank fees and other financial/investment expenses
+
+Rules:
+- Return only the code, e.g. "6312".
+- Do not return account name or explanation.
+- Never return 2441, 4430, 271, 272, or 4492. Backend adds VAT, supplier debt, bank/cash, and reverse-charge accounts.
+- If unsure, return "6312".
+
+Mixed invoice rules for summary mode:
+- Pick the main/dominant purpose of the whole document.
+- If one category is clearly the largest or >70% of net amount, choose it.
+- Ignore small delivery, packaging, payment fee, or accessory lines.
+- Goods for resale + small delivery → "2040".
+- Advertising + small platform/service fee → "6202".
+- Rent + small utilities/service fee → "6300".
+- Repair + small parts → "6301".
+- If several different categories and none dominates → "6312".
+
+Examples:
+Telia → "6312"
+Google Ads / Meta Ads → "6202"
+Accounting/legal/freelancer/developer → "6302"
+Office rent → "6300"
+Car repair → "6301"
+Insurance → "6303"
+Bank fee → "6810"
+Stripe/marketplace fee → "6200"
+Loan interest → "6802"
+Leasing interest → "6806"
+Goods for resale → "2040"
+Raw materials → "2010"
 ---
 
 If you cannot extract any documents, return exactly (one line):
@@ -302,12 +363,13 @@ If there are any signs of cash payment, for example, 'gryni', 'grąža' or simil
 *Return ONLY a valid JSON object in a SINGLE LINE (compact form): no newlines, no \n, no \r, no tabs, and no spaces outside string values. Do not use Markdown or code fences. No trailing commas. Do NOT wrap in quotes or escape characters. Do NOT include any explanations, comments, or extra text outside the JSON. The output must be directly parsable by JSON.parse().
 
 Example (structure and field names; values may be empty strings, booleans must be true/false, numbers should be numbers when available):
-{"docs":<number_of_documents>,"total_lines":<total_number_of_lines>,"documents":[{"document_type":"","seller_id":"","seller_name":"","seller_vat_code":"","seller_address":"","seller_country":"","seller_country_iso":"","seller_iban":"","seller_is_person":false,"buyer_id":"","buyer_name":"","buyer_vat_code":"","buyer_address":"","buyer_country":"","buyer_country_iso":"","buyer_iban":"","buyer_is_person":false,"invoice_date":"","due_date":"","operation_date":"","document_series":"","document_number":"","order_number":"","invoice_discount_wo_vat":"","invoice_discount_with_vat":"","amount_wo_vat":"","vat_amount":"","vat_percent":"","amount_with_vat":"","separate_vat":false,"currency":"","with_receipt":false,"paid_by_cash":false,"doc_96_str":false,"line_items":[{"line_id":"","product_code":"","product_barcode":"","product_name":"","unit":"","quantity":"","price":"","subtotal":"","discount_wo_vat":"","vat":"","vat_percent":"","discount_with_vat":"","total":"","preke_paslauga":""}]}]}
+{"docs":<number_of_documents>,"total_lines":<total_number_of_lines>,"documents":[{"document_type":"","seller_id":"","seller_name":"","seller_vat_code":"","seller_address":"","seller_country":"","seller_country_iso":"","seller_iban":"","seller_is_person":false,"buyer_id":"","buyer_name":"","buyer_vat_code":"","buyer_address":"","buyer_country":"","buyer_country_iso":"","buyer_iban":"","buyer_is_person":false,"invoice_date":"","due_date":"","operation_date":"","document_series":"","document_number":"","order_number":"","invoice_discount_wo_vat":"","invoice_discount_with_vat":"","amount_wo_vat":"","vat_amount":"","vat_percent":"","amount_with_vat":"","separate_vat":false,"currency":"","with_receipt":false,"paid_by_cash":false,"doc_96_str":false,"line_items":[{"line_id":"","product_code":"","product_barcode":"","product_name":"","unit":"","quantity":"","price":"","subtotal":"","discount_wo_vat":"","vat":"","vat_percent":"","discount_with_vat":"","total":"","preke_paslauga":"","is_long_term_asset_candidate":"","suggested_asset_type":"","pirkimo_saskaita":""}]}]}
 
 If any of values are empty, don't include them in JSON. For example, if "product_barcode" is empty, omit it from that lineitem in JSON.
 
 Format dates as yyyy-mm-dd. Delete country from addresses. seller_country and buyer_country must be full country name in language of address provided. country_iso must be 2-letter code.
 In lithuanian documents dates are usually displayed in yyyy-mm-dd or dd/mm/yyyy formats. For example, when parsing 12/01/2026, it's 12th January, not 1st December.
+For document_series, if not clearly stated, carefully inspect the text before Nr. / No. or similar. The series is usually written in uppercase letters and may include digits, for example: Sąskaita Faktūra SNT5 Nr. 067557 → document_series: "SNT5", document_number: "067557". Do not confuse similar uppercase letters, such as FI and FL; copy the series exactly as printed (consider series to be written in capitals).
 When identifying buyer/seller:
 - Look for "pirkėjas" / "paslaugos pirkėjas" label → this is BUYER
 - Look for "pardavėjas" / "tiekėjas" label→ this is SELLER
@@ -351,6 +413,75 @@ For suggested_asset_type, choose only ONE type for that long term asset from cat
 
 Do NOT return these fields on document level — only on matching line items.
 Only include "is_long_term_asset_candidate" and "suggested_asset_type" in line items that match. Do not add these fields to line items that do not qualify.
+---
+---Line item purchase account classification---
+Set "pirkimo_saskaita" separately for EACH line item.
+
+Choose from:
+2010 raw materials/components/packaging
+2040 goods for resale/inventory
+2080 supplier advances/prepayments
+291 prepaid future-period expenses
+6002 direct cost of purchased goods/services
+6003 direct production costs
+6004 indirect production overhead
+6200 sales/payment/marketplace commissions
+6202 advertising/marketing costs
+6208 other sales expenses
+6300 rent/operating lease
+6301 repairs, maintenance, utilities, car/equipment service
+6302 outsourced services: accounting, legal, consulting, freelancers, development
+6303 insurance
+6308 government/state fees and non-VAT operating taxes
+6311 operating fines and late payment penalties
+6312 general admin expenses: SaaS, hosting, telecom, office supplies, small purchases
+6401 other non-core expenses
+6802 loan/credit interest
+6803 foreign exchange losses
+6804 financial/bank/loan penalties
+6806 financial lease interest
+6810 bank fees and other financial/investment expenses
+
+Rules:
+- Add "pirkimo_saskaita" inside every line item.
+- Return only the numeric code as string, e.g. "6312".
+- Do not return account name or explanation.
+- Never return 2441, 4430, 271, 272, or 4492. Backend adds VAT, supplier debt, bank/cash, and reverse-charge accounts.
+- If unsure, return "6312".
+- Classify each line independently based on product_name and line content.
+- Do not use the dominant document category for all lines if lines clearly differ.
+- Goods for resale/inventory → "2040".
+- Raw materials/components/packaging → "2010".
+- Advertising lines → "6202".
+- Accounting/legal/freelancer/developer/consulting lines → "6302".
+- Rent/lease lines → "6300".
+- Repair/maintenance/service/utilities lines → "6301".
+- Insurance lines → "6303".
+- Bank fees → "6810".
+- Stripe/marketplace/payment commission lines → "6200".
+- Loan interest → "6802".
+- Leasing interest → "6806".
+- SaaS/hosting/telecom/office supplies/small purchases → "6312".
+- Shipping/delivery related to goods for resale → usually "2040".
+- Shipping/delivery as a general service expense → usually "6312".
+- Small fees should be classified by their own nature if they are separate paid line items.
+- Discount/credit/refund negative line items should normally use the same pirkimo_saskaita as the item they relate to. If unclear, use "6312".
+
+Examples:
+Google Ads line → "6202"
+Meta Ads line → "6202"
+Telia telecom line → "6312"
+Hosting/SaaS line → "6312"
+Accounting service line → "6302"
+Legal service line → "6302"
+Freelancer/development line → "6302"
+Office rent line → "6300"
+Car repair line → "6301"
+Insurance line → "6303"
+Bank fee line → "6810"
+Stripe fee line → "6200"
+Goods for resale line → "2040"
+Raw materials line → "2010"
 ---
 
 If you cannot extract any documents, return exactly (one line):
@@ -627,6 +758,7 @@ ADDITIONAL RULES
   For example, if "product_barcode" is empty, omit it from that lineitem in JSON.
 - Format dates as yyyy-mm-dd.
   In lithuanian documents dates are usually displayed in yyyy-mm-dd or dd/mm/yyyy formats. For example, when parsing 12/01/2026, it's 12th January, not 1st December.
+- For document_series, if not clearly stated, carefully inspect the text before Nr. / No. or similar. The series is usually written in uppercase letters and may include digits, for example: Sąskaita Faktūra SNT5 Nr. 067557 → document_series: "SNT5", document_number: "067557". Do not confuse similar uppercase letters, such as FI and FL; copy the series exactly as printed (consider series to be written in capitals).
 - When identifying buyer/seller:
   Look for "pirkėjas" / "paslaugos pirkėjas" label → this is BUYER
   Look for "pardavėjas" / "tiekėjas" label→ this is SELLER

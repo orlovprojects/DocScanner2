@@ -41,11 +41,6 @@ import FilterListIcon from "@mui/icons-material/FilterList";
 
 import FailuPreviewDialog from "../page_elements/FailuPreviewDialog";
 
-const SCAN_TYPES = [
-  { value: "sumiskai", label: "Sumiškai (be eilučių) – 1 kreditas" },
-  { value: "detaliai", label: "Detaliai (su eilutėmis) – 1.3 kredito" },
-];
-
 const SOURCE_LABELS = {
   mob: "Mob. programėlė",
   email: "El. paštas",
@@ -92,6 +87,25 @@ export default function IsKlientu() {
   const [promoteCount, setPromoteCount] = useState(0);
 
   const [scanType, setScanType] = useState("sumiskai");
+  const [user, setUser] = useState(null);
+
+  const catalogMatchingEnabled =
+    user?.extra_settings?.match_catalog_items_on_detailed_scan === 1 ||
+    user?.extra_settings?.match_catalog_items_on_detailed_scan === true ||
+    user?.extra_settings?.match_catalog_items_on_detailed_scan === "1";
+
+  const scanTypes = [
+    {
+      value: "sumiskai",
+      label: "Sumiškai (be eilučių) – 1 kreditas",
+    },
+    {
+      value: "detaliai",
+      label: catalogMatchingEnabled
+        ? "Detaliai (su eilutėmis)* – 1,8 kredito"
+        : "Detaliai (su eilutėmis) – 1,3 kredito",
+    },
+  ];
 
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewRow, setPreviewRow] = useState(null);
@@ -189,6 +203,16 @@ export default function IsKlientu() {
       .get("/cloud/inbox/clients/", { withCredentials: true })
       .then(({ data }) => setCloudClients(Array.isArray(data) ? data : []))
       .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    api
+      .get("/me/", { withCredentials: true })
+      .then(({ data }) => setUser(data))
+      .catch((error) => {
+        console.error("Failed to load user settings", error);
+        setUser(null);
+      });
   }, []);
 
   const formatDate = (isoString) => {
@@ -553,8 +577,10 @@ export default function IsKlientu() {
             sx={{ minWidth: { xs: "100%", sm: 270 } }}
             SelectProps={SELECT_PROPS}
           >
-            {SCAN_TYPES.map((t) => (
-              <MenuItem key={t.value} value={t.value}>{t.label}</MenuItem>
+            {scanTypes.map((t) => (
+              <MenuItem key={t.value} value={t.value}>
+                {t.label}
+              </MenuItem>
             ))}
           </TextField>
 

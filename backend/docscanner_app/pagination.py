@@ -19,3 +19,7 @@ class MobileInboxCursorPagination(CursorPagination):
 class LineItemPagination(LimitOffsetPagination):
     default_limit = 30
     max_limit = 200
+
+class DkPagination(LimitOffsetPagination):
+    default_limit = 50
+    max_limit = 500

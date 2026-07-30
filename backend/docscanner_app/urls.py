@@ -98,6 +98,23 @@ from .views import (
     SVSContractorSearchView, 
     SVSReportGenerateView, 
     SVSReportExportView,
+    CompanyProfileViewSet,
+    PurchaseViewSet, transfer_to_accounting,
+    OperacijosViewSet,
+    apskaita_skolos,
+    apskaita_skolos_invoices,
+    apskaita_likuciai,
+    apskaita_summary_cards,
+    PurchaseLineItemsListView,
+    PurchaseInlineDocUpdateView,
+    PurchaseInlineLineUpdateView,
+    AllocationPreviewView,
+    BankMatchingDebugView,
+    TransactionDKTemplatesView,
+    TransactionRegisterDKView,
+    invoice_update_kor,
+    patch_dk_line,
+    onboarding_company_search,
 )
 from .views import (
     counterparty_list_create,
@@ -161,6 +178,18 @@ from .views import (
     inv_cancel_subscription,
     admin_all_invoices,
     admin_all_recurring_invoices,
+    CreateCreditInvoiceView,
+    TransactionListView,
+    TransactionClassifyView,
+    TransactionManualMatchView,
+    BankTransactionRuleListView,
+    BankTransactionRuleDetailView,
+    PurchaseSearchView,
+    BankAccountMappingView,
+    TransactionDetailView,
+    manual_dk_collection,
+    manual_dk_detail,
+    manual_dk_company_search,
 )
 from . import cloud_views
 from . import views
@@ -179,6 +208,10 @@ router = DefaultRouter()
 router.register(r"guides/categories", GuideCategoryViewSet, basename="guides-categories")
 router.register(r"scanned-documents", ScannedDocumentViewSet, basename="scanned-document") 
 router.register(r"invoicing/recurring-invoices", RecurringInvoiceViewSet, basename="recurring-invoice")
+router.register(r"company-profiles", CompanyProfileViewSet, basename="company-profile")
+router.register(r"purchases", PurchaseViewSet, basename="purchase")
+router.register(r"apskaita/operacijos", OperacijosViewSet, basename="apskaita-operacijos")
+
 
 
 urlpatterns = [
@@ -193,6 +226,7 @@ urlpatterns = [
     path('download/apskaita5-adapter/', download_apskaita5_adapter, name='download_apskaita5_adapter'),
 
     path('me/', user_me_view),
+    path("company-profiles/search/", onboarding_company_search, name="onboarding-company-search"),
     path("api/track-click/", TrackAdClickView.as_view(), name="TrackAdClickView"),
 
 
@@ -288,6 +322,11 @@ urlpatterns = [
 
     path('payments/', payments_list, name='payments-list'),
     path('payments/<int:pk>/invoice/', payment_invoice, name='payments-invoice'),
+
+    path("apskaita/skolos/", apskaita_skolos, name="apskaita-skolos"),
+    path("apskaita/skolos/invoices/", apskaita_skolos_invoices, name="apskaita-skolos-invoices"),
+    path("apskaita/likuciai/", apskaita_likuciai, name="apskaita-likuciai"),
+    path("apskaita/summary/", apskaita_summary_cards, name="apskaita-summary"),
 
 
 
@@ -447,6 +486,7 @@ urlpatterns = [
     path('invoicing/public/<uuid:uuid>/pdf/', invoice_public_pdf, name='invoice-public-pdf'),
     path('invoicing/search-companies/', invoice_search_companies, name='invoice-search-companies'),
     path('invoicing/invoices/<int:pk>/pdf/', invoice_pdf, name='invoice-pdf'),
+    path("invoicing/invoices/<int:pk>/create-credit/", CreateCreditInvoiceView.as_view()),
 
 
     path('invoicing/units/', measurement_unit_list, name='measurement-unit-list'),
@@ -476,6 +516,19 @@ urlpatterns = [
     path('invoicing/bank-statements/<int:pk>/', StatementDetailView.as_view(), name='bank-statement-detail'),
     path('invoicing/bank-statements/<int:pk>/re-match/', StatementReMatchView.as_view(), name='bank-statement-rematch'),
 
+    path('invoicing/bank-transactions/', TransactionListView.as_view(), name='bank-transactions'),
+    path('invoicing/bank-transactions/<int:pk>/', TransactionDetailView.as_view(), name='bank-transaction-detail'),
+    path('invoicing/bank-transactions/<int:pk>/classify/', TransactionClassifyView.as_view(), name='bank-transaction-classify'),
+    path('invoicing/bank-transactions/<int:pk>/match/', TransactionManualMatchView.as_view(), name='bank-transaction-match'),
+    path('invoicing/allocations/<int:pk>/preview/', AllocationPreviewView.as_view(), name='allocation-preview'),
+    path("apskaita/dk-eilutes/<int:pk>/", patch_dk_line),
+    path("apskaita/rankiniai-dk/", manual_dk_collection, name="manual-dk-collection"),
+    path("apskaita/rankiniai-dk/<int:pk>/", manual_dk_detail, name="manual-dk-detail"),
+    path("apskaita/rankiniai-dk/company-search/", manual_dk_company_search, name="manual-dk-company-search"),
+
+    path('invoicing/bank-rules/', BankTransactionRuleListView.as_view(), name='bank-rules-list'),
+    path('invoicing/bank-rules/<int:pk>/', BankTransactionRuleDetailView.as_view(), name='bank-rules-detail'),
+
     path('invoicing/invoices/<int:pk>/payments/', InvoicePaymentDetailsView.as_view(), name='invoice-payments'),
     path('invoicing/invoices/<int:pk>/remove-payment/<int:alloc_id>/', RemoveManualPaymentView.as_view(), name='remove-payment'),
 
@@ -484,6 +537,13 @@ urlpatterns = [
     path('invoicing/payments/reject/', RejectAllocationView.as_view(), name='payment-reject'),
 
     path('invoicing/payments/stats/', ImportStatsView.as_view(), name='payment-stats'),
+    path('invoicing/bank-accounts/', BankAccountMappingView.as_view()),
+    path("invoicing/bank-matching-debug/", BankMatchingDebugView.as_view(), name="bank-matching-debug"),
+
+    path('transactions/<int:pk>/dk-templates/', TransactionDKTemplatesView.as_view()),
+    path('transactions/<int:pk>/register-dk/', TransactionRegisterDKView.as_view()),
+    path('invoicing/invoices/<int:pk>/update-kor/', invoice_update_kor, name='invoice-update-kor'),
+
 
     # ─── Direct payment links ───
     # Payment providers
@@ -540,5 +600,11 @@ urlpatterns = [
     path('svs-report/contractors/', SVSContractorSearchView.as_view()),
     path('svs-report/generate/', SVSReportGenerateView.as_view()),
     path('svs-report/export/', SVSReportExportView.as_view()),
+
+    path("accounting/transfer/", transfer_to_accounting, name="transfer-to-accounting"),
+    path("purchases/<int:purchase_id>/line-items/", PurchaseLineItemsListView.as_view()),
+    path("purchases/<int:purchase_id>/inline/", PurchaseInlineDocUpdateView.as_view()),
+    path("purchases/<int:purchase_id>/line-items/<int:line_id>/inline/", PurchaseInlineLineUpdateView.as_view()),
+    path("purchases/search/", PurchaseSearchView.as_view()),
 
 ]

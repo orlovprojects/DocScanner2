@@ -3,13 +3,22 @@ import {
   Box, Typography, Divider, Table, TableBody, TableCell, TableContainer,
   TableHead, TableRow, Button, Dialog, DialogContent, IconButton,
   CircularProgress, Snackbar, Alert, useTheme, useMediaQuery,
+  MenuItem, TextField,
 } from '@mui/material';
+import EditIcon from "@mui/icons-material/Edit";
 import {
   PictureAsPdf as PdfIcon, Close as CloseIcon, Download as DownloadIcon,
   Print as PrintIcon, Visibility as PreviewIcon,
 } from '@mui/icons-material';
 import { invoicingApi } from '../api/invoicingApi';
 import { getInvSubscription } from '../api/endpoints';
+import {
+  Accordion, AccordionSummary, AccordionDetails,
+} from '@mui/material';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
+import {
+  PARDAVIMO_OPTIONS, getAccountName,
+} from './KorespondencijaComponents';
 
 // ═══════════════════════════════════════════════════════════
 // Helpers
@@ -88,7 +97,12 @@ const sumInWordsLt = (amount) => {
     if ((n % 100 >= 11 && n % 100 <= 19) || n % 10 === 0) return 'centų'; return n % 10 === 1 ? 'centas' : 'centai';
   };
 
-  const rounded = Math.round((Number(amount || 0) + Number.EPSILON) * 100) / 100;
+  const numericAmount = Number(amount || 0);
+  const isNegative = numericAmount < 0;
+
+  const rounded = Math.round(
+    (Math.abs(numericAmount) + Number.EPSILON) * 100
+  ) / 100;
   const euros = Math.floor(rounded);
   const cents = Math.round((rounded - euros) * 100);
   const parts = [];
@@ -102,8 +116,17 @@ const sumInWordsLt = (amount) => {
   parts.push(currencyForm(euros));
   if (cents > 0) parts.push(`${belowThousand(cents)} ${currencyForm(cents, 'cent')}`);
   const text = parts.filter(Boolean).join(' ').trim();
-  return text ? text.charAt(0).toUpperCase() + text.slice(1) : '';
-};
+
+  if (!text) {
+    return '';
+  }
+
+  if (isNegative) {
+    return `Minus ${text}`;
+  }
+
+  return text.charAt(0).toUpperCase() + text.slice(1);
+  };
 
 // ═══════════════════════════════════════════════════════════
 // Small components
@@ -212,40 +235,189 @@ function useComputedInvoice(invoice) {
   const currency = inv.currency || 'EUR';
   const isPvm = inv.pvm_tipas === 'taikoma';
 
+  const roundMoney = (value) =>
+    Math.round(
+      (Number(value || 0) + Number.EPSILON) * 100
+    ) / 100;
+
   const computedLines = lines.map((li) => {
     const qty = parseNum(li.quantity);
     const price = parseNum(li.price);
-    const discount = parseNum(li.discount_wo_vat || 0);
-    const net = Math.max(0, qty * price - discount);
-    const vatPct = li.vat_percent != null ? parseNum(li.vat_percent) : (isPvm ? parseNum(inv.vat_percent || 21) : 0);
-    const vat = isPvm ? net * vatPct / 100 : 0;
-    return { ...li, qty, price, discount, net, vatPct, vat, total: net + vat };
+    const discount = Math.abs(
+      parseNum(li.discount_wo_vat || 0)
+    );
+
+    /*
+     * Naudojame backend išsaugotą subtotal.
+     * Tik jeigu jo nėra, skaičiuojame quantity × price.
+     */
+    const hasStoredSubtotal =
+      li.subtotal !== null &&
+      li.subtotal !== undefined &&
+      li.subtotal !== '';
+
+    const net = Math.abs(
+      hasStoredSubtotal
+        ? parseNum(li.subtotal)
+        : roundMoney(qty * price - discount)
+    );
+
+    const vatPct =
+      li.vat_percent !== null &&
+      li.vat_percent !== undefined
+        ? parseNum(li.vat_percent)
+        : (
+            isPvm
+              ? parseNum(inv.vat_percent || 21)
+              : 0
+          );
+
+    const vat = isPvm
+      ? roundMoney(net * vatPct / 100)
+      : 0;
+
+    return {
+      ...li,
+      qty,
+      price,
+      discount,
+      net,
+      vatPct,
+      vat,
+      total: roundMoney(net + vat),
+    };
   });
 
-  const hasCode = computedLines.some((l) => l.prekes_kodas);
-  const hasDiscount = computedLines.some((l) => l.discount > 0);
-  const sumNet = computedLines.reduce((s, l) => s + l.net, 0);
-  const invoiceDiscount = Math.min(parseNum(inv.invoice_discount_wo_vat || 0), sumNet);
-  const base = Math.max(0, sumNet - invoiceDiscount);
+  const hasCode = computedLines.some(
+    (line) => line.prekes_kodas
+  );
+
+  const hasDiscount = computedLines.some(
+    (line) => line.discount > 0
+  );
+
+  const sumNet = computedLines.reduce(
+    (sum, line) => sum + line.net,
+    0
+  );
+
+  const invoiceDiscount = Math.min(
+    Math.abs(
+      parseNum(inv.invoice_discount_wo_vat || 0)
+    ),
+    sumNet
+  );
+
+  const calculatedBase = roundMoney(
+    Math.max(0, sumNet - invoiceDiscount)
+  );
 
   const groups = {};
-  computedLines.forEach((l) => { const r = Number(l.vatPct || 0); if (!groups[r]) groups[r] = { net: 0 }; groups[r].net += l.net; });
+
+  computedLines.forEach((line) => {
+    const rate = Number(line.vatPct || 0);
+
+    if (!groups[rate]) {
+      groups[rate] = {
+        net: 0,
+      };
+    }
+
+    groups[rate].net += line.net;
+  });
 
   const vatBreakdown = Object.entries(groups)
-    .map(([rate, g]) => {
-      const r = parseFloat(rate);
-      const ratio = sumNet > 0 ? g.net / sumNet : 0;
-      const discountedNet = Math.max(0, g.net - invoiceDiscount * ratio);
-      const vat = isPvm ? Math.max(0, discountedNet * r / 100) : 0;
-      return { rate: r, net: discountedNet, vat };
+    .map(([rate, group]) => {
+      const numericRate = parseFloat(rate);
+
+      const ratio =
+        sumNet > 0
+          ? group.net / sumNet
+          : 0;
+
+      /*
+       * Tas pats apvalinimas kaip backend:
+       * pirmiausia apvalinama PVM grupės bazė,
+       * tada apvalinamas grupės PVM.
+       */
+      const discountedNet = roundMoney(
+        Math.max(
+          0,
+          group.net - invoiceDiscount * ratio
+        )
+      );
+
+      const vat = isPvm
+        ? roundMoney(
+            discountedNet *
+            numericRate /
+            100
+          )
+        : 0;
+
+      return {
+        rate: numericRate,
+        net: discountedNet,
+        vat,
+      };
     })
     .sort((a, b) => b.rate - a.rate);
 
   const multiVat = vatBreakdown.length > 1;
-  const vatTotal = vatBreakdown.reduce((s, g) => s + g.vat, 0);
-  const grand = base + vatTotal;
 
-  return { inv, computedLines, sym, currency, isPvm, hasCode, hasDiscount, sumNet, invoiceDiscount, base, vatBreakdown, multiVat, vatTotal, grand };
+  const calculatedVatTotal = roundMoney(
+    vatBreakdown.reduce(
+      (sum, group) => sum + group.vat,
+      0
+    )
+  );
+
+  const calculatedGrand = roundMoney(
+    calculatedBase + calculatedVatTotal
+  );
+
+  /*
+   * Išrašytam dokumentui naudojame backend galutines sumas.
+   * Tai tie patys laukai, kuriuos naudoja DK generatorius.
+   */
+  const useStoredTotals =
+    inv.status &&
+    inv.status !== 'draft' &&
+    inv.amount_wo_vat !== null &&
+    inv.amount_wo_vat !== undefined &&
+    inv.vat_amount !== null &&
+    inv.vat_amount !== undefined &&
+    inv.amount_with_vat !== null &&
+    inv.amount_with_vat !== undefined;
+
+  const base = useStoredTotals
+    ? Math.abs(parseNum(inv.amount_wo_vat))
+    : calculatedBase;
+
+  const vatTotal = useStoredTotals
+    ? Math.abs(parseNum(inv.vat_amount))
+    : calculatedVatTotal;
+
+  const grand = useStoredTotals
+    ? Math.abs(parseNum(inv.amount_with_vat))
+    : calculatedGrand;
+
+  return {
+    inv,
+    computedLines,
+    sym,
+    currency,
+    isPvm,
+    hasCode,
+    hasDiscount,
+    sumNet,
+    invoiceDiscount,
+    base,
+    vatBreakdown,
+    multiVat,
+    vatTotal,
+    grand,
+  };
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -402,7 +574,19 @@ const InvoiceA4 = forwardRef(({
               <TableBody>
                 {visibleRows.map((li, i) => (
                   <TableRow key={rowStart + i} data-row-index={rowStart + i} sx={{ '&:nth-of-type(even)': { backgroundColor: '#fafafa' } }}>
-                    <TableCell sx={cellSx}>{rowStart + i + 1}</TableCell>
+                    <TableCell
+                      sx={{
+                        ...cellSx,
+                        width: 44,
+                        minWidth: 44,
+                        px: 1,
+                        whiteSpace: 'nowrap',
+                        wordBreak: 'normal',
+                        overflowWrap: 'normal',
+                      }}
+                    >
+                      {rowStart + i + 1}
+                    </TableCell>
                     <TableCell sx={cellTextSx}>
                       <Typography sx={{ fontSize: 10.5, color: '#222', lineHeight: 1.35 }}>{li.prekes_pavadinimas || ''}</Typography>
                       {li.prekes_barkodas && <Typography sx={{ fontSize: 8.5, color: '#888', lineHeight: 1.2, mt: 0.2 }}>Barkodas: {li.prekes_barkodas}</Typography>}
@@ -411,7 +595,11 @@ const InvoiceA4 = forwardRef(({
                     <TableCell sx={{ ...cellSx, textAlign: 'right' }}>{fmtQty(li.qty)}</TableCell>
                     <TableCell sx={{ ...cellSx, textAlign: 'center' }}>{li.unit || ''}</TableCell>
                     <TableCell sx={{ ...cellSx, textAlign: 'right' }}>{fmtPrice(li.price)}</TableCell>
-                    {hasDiscount && <TableCell sx={{ ...cellSx, textAlign: 'right' }}>{li.discount > 0 ? fmt(li.discount) : ''}</TableCell>}
+                    {hasDiscount && (
+                      <TableCell sx={{ ...cellSx, textAlign: 'right' }}>
+                        {Math.abs(li.discount) > 0 ? fmt(li.discount) : ''}
+                      </TableCell>
+                    )}
                     <TableCell sx={{ ...cellSx, textAlign: 'right', fontWeight: 700 }}>{fmt(li.net)}</TableCell>
                     {isPvm && multiVat && <TableCell sx={{ ...cellSx, textAlign: 'right' }}>{Number.isInteger(li.vatPct) ? li.vatPct : fmt(li.vatPct)}%</TableCell>}
                   </TableRow>
@@ -439,7 +627,19 @@ const InvoiceA4 = forwardRef(({
               )}
             </Box>
             <Box sx={{ ml: 'auto', width: 280 }}>
-              {invoiceDiscount > 0 && (<><TotalRow label="Tarpinė suma:" value={`${fmt(sumNet)} ${sym}`} /><TotalRow label="Nuolaida:" value={`-${fmt(invoiceDiscount)} ${sym}`} /></>)}
+              {Math.abs(invoiceDiscount) > 0 && (
+              <>
+                <TotalRow
+                  label="Tarpinė suma:"
+                  value={`${fmt(sumNet)} ${sym}`}
+                />
+
+                <TotalRow
+                  label="Nuolaida:"
+                  value={`-${fmt(Math.abs(invoiceDiscount))} ${sym}`}
+                />
+              </>
+            )}
               {isPvm ? (
                 <>
                   <TotalRow label="Suma be PVM:" value={`${fmt(base)} ${sym}`} />
@@ -917,7 +1117,16 @@ const InvoicePreviewDialog = ({ open, onClose, invoiceId, invoiceData }) => {
                 maxHeight: '100dvh',
                 overflow: 'hidden',
               }
-            : { maxWidth: 920, width: '100%', maxHeight: '95vh', borderRadius: 3 },
+            : {
+                maxWidth: 920,
+                width: '100%',
+                height: '95vh',
+                maxHeight: '95vh',
+                borderRadius: 3,
+                display: 'flex',
+                flexDirection: 'column',
+                overflow: 'hidden',
+              },
         }}
       >
         {/* ── Header ── */}
@@ -1040,6 +1249,12 @@ const InvoicePreviewDialog = ({ open, onClose, invoiceId, invoiceData }) => {
                       transformOrigin: 'top left',
                     }}
                   >
+                    <Box sx={{ width: PAGE_W, mb: 1.5 }}>
+                      <InvoiceKorAccordion
+                        invoice={invoice}
+                        onUpdate={setInvoice}
+                      />
+                    </Box>
                     <PaginatedInvoice ref={printRef} invoice={invoice} logoUrl={logoUrl} watermark={watermark} />
                   </Box>
                 </Box>
@@ -1047,12 +1262,30 @@ const InvoicePreviewDialog = ({ open, onClose, invoiceId, invoiceData }) => {
             )}
           </Box>
         ) : (
-          <DialogContent sx={{ p: 3, backgroundColor: '#e0e0e0', display: 'flex', justifyContent: 'center', overflow: 'auto' }}>
+          <DialogContent
+            sx={{
+              p: 3,
+              backgroundColor: '#e0e0e0',
+              display: 'flex',
+              justifyContent: 'center',
+              overflowX: 'auto',
+              overflowY: 'scroll',
+              scrollbarGutter: 'stable',
+              flex: 1,
+              minHeight: 0,
+            }}
+          >
             {loading && <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: 400 }}><CircularProgress /></Box>}
             {error && <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: 200 }}><Typography color="error">{error}</Typography></Box>}
             {invoice && !loading && (
               <Box sx={{ width: '100%', display: 'flex', justifyContent: 'center', alignItems: 'flex-start', py: 2 }}>
                 <Box sx={{ width: PAGE_W }}>
+                  <Box sx={{ width: PAGE_W, mb: 1.5 }}>
+                    <InvoiceKorAccordion
+                      invoice={invoice}
+                      onUpdate={setInvoice}
+                    />
+                  </Box>
                   <PaginatedInvoice ref={printRef} invoice={invoice} logoUrl={logoUrl} watermark={watermark} />
                 </Box>
               </Box>
@@ -1091,4 +1324,257 @@ const InvoicePdfButton = ({ invoiceId, filename, size = 'small', variant = 'outl
 };
 
 export { InvoiceA4, PaginatedInvoice, InvoicePreviewDialog, InvoicePreviewButton, InvoicePdfButton, useInvoicePdf, usePrintInvoice };
+const InvoiceKorAccordion = ({ invoice, onUpdate }) => {
+  const [editGroup, setEditGroup] = useState(null);
+  const [saving, setSaving] = useState(false);
+
+  if (!invoice) return null;
+  if (invoice.invoice_type === 'isankstine') return null;
+
+  const isKreditine = invoice.invoice_type === 'kreditine';
+  const isPvm = invoice.pvm_tipas === 'taikoma';
+  const lines = invoice.line_items || [];
+  const amountWithVat = Math.abs(
+    Number(invoice.amount_with_vat || 0)
+  );
+
+  const amountWoVat = Math.abs(
+    Number(invoice.amount_wo_vat || 0)
+  );
+
+  const vatAmount = Math.abs(
+    Number(invoice.vat_amount || 0)
+  );
+
+  const roundMoney = (value) =>
+    Math.round(
+      (Number(value || 0) + Number.EPSILON) * 100
+    ) / 100;
+
+  const rawGroups = {};
+
+  for (const li of lines) {
+    const code =
+      li.kredito_saskaita ||
+      (
+        li.preke_paslauga === 'preke'
+          ? '5000'
+          : '5001'
+      );
+
+    if (!rawGroups[code]) {
+      rawGroups[code] = {
+        suma: 0,
+        ids: [],
+      };
+    }
+
+    rawGroups[code].suma += Math.abs(
+      Number(li.subtotal || 0)
+    );
+
+    rawGroups[code].ids.push(li.id);
+  }
+
+  const rawSortedGroups = Object.entries(rawGroups)
+    .sort((a, b) => a[0].localeCompare(b[0]));
+
+  const rawGroupsTotal = rawSortedGroups.reduce(
+    (sum, [, group]) => sum + group.suma,
+    0
+  );
+
+  let allocatedIncome = 0;
+
+  const sortedGroups = rawSortedGroups.map(
+    ([code, group], index) => {
+      const isLast =
+        index === rawSortedGroups.length - 1;
+
+      let suma = 0;
+
+      if (rawGroupsTotal > 0) {
+        if (isLast) {
+          suma = roundMoney(
+            amountWoVat - allocatedIncome
+          );
+        } else {
+          suma = roundMoney(
+            amountWoVat *
+            group.suma /
+            rawGroupsTotal
+          );
+
+          allocatedIncome = roundMoney(
+            allocatedIncome + suma
+          );
+        }
+      }
+
+      return [
+        code,
+        {
+          ...group,
+          suma,
+        },
+      ];
+    }
+  );
+
+  const fmtSum = (n) => {
+    if (!n || isNaN(n)) return '—';
+    return Number(n).toLocaleString('lt-LT', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  };
+
+  const pajSide = isKreditine ? 'D' : 'K';
+  const pvmSide = isKreditine ? 'D' : 'K';
+
+  const allLines = [];
+
+  if (!isKreditine) {
+    allLines.push({ side: 'D', code: '2410', name: 'Pirkėjų skolos', suma: amountWithVat, editable: false, ids: [] });
+  }
+
+  for (const [code, group] of sortedGroups) {
+    allLines.push({ side: pajSide, code, name: getAccountName(code), suma: group.suma, editable: true, ids: group.ids });
+  }
+
+  if (isPvm && Math.abs(vatAmount) > 0.001) {
+    allLines.push({ side: pvmSide, code: '4492', name: 'Mokėtinas PVM', suma: vatAmount, editable: false, ids: [] });
+  }
+
+  if (isKreditine) {
+    allLines.push({ side: 'K', code: '2410', name: 'Pirkėjų skolos', suma: amountWithVat, editable: false, ids: [] });
+  }
+
+  const handleChange = async (lineIds, newCode) => {
+    if (!newCode || !lineIds.length) return;
+    setSaving(true);
+    try {
+      const { data } = await invoicingApi.updateInvoiceKor(invoice.id, {
+        line_item_ids: lineIds,
+        kredito_saskaita: newCode,
+      });
+      onUpdate?.(data);
+    } catch {}
+    setSaving(false);
+    setEditGroup(null);
+  };
+
+  return (
+    <Accordion
+      sx={{
+        mb: 1.5,
+        boxShadow: 'none',
+        border: '0.5px solid',
+        borderColor: 'divider',
+        borderRadius: '10px !important',
+        '&:before': { display: 'none' },
+        overflow: 'hidden',
+        bgcolor: 'transparent',
+      }}
+    >
+      <AccordionSummary
+        expandIcon={<ExpandMoreIcon sx={{ fontSize: 18 }} />}
+        sx={{
+          minHeight: 38,
+          '&.Mui-expanded': { minHeight: 38 },
+          '& .MuiAccordionSummary-content': { my: 0.5 },
+          px: 1.5,
+          bgcolor: '#f3f3f3ab',
+        }}
+      >
+        <Typography sx={{ fontSize: 13, fontWeight: 600, color: 'text.secondary' }}>
+          Korespondencija
+        </Typography>
+        <Box component="span" sx={{
+          fontSize: 10, fontWeight: 600, px: 0.75, py: 0.15,
+          borderRadius: '4px', bgcolor: '#F0FDF4', color: '#22C55E',
+          lineHeight: 1.4, ml: 1,
+        }}>
+          Pardavimas
+        </Box>
+        {saving && <CircularProgress size={14} sx={{ ml: 1 }} />}
+      </AccordionSummary>
+      <AccordionDetails sx={{ pt: 1, pb: 1.5, px: 1.5, bgcolor: '#fff' }}>
+        <Box sx={{ borderRadius: '8px', border: '0.5px solid', borderColor: 'divider', overflow: 'hidden' }}>
+          <Box sx={{ display: 'grid', gridTemplateColumns: '36px 60px 1fr 80px', px: 1.25, py: 0.5, bgcolor: '#f9f9f9', borderBottom: '0.5px solid', borderColor: 'divider' }}>
+            <Typography sx={{ fontSize: 10, color: 'text.secondary', fontWeight: 500 }}>D/K</Typography>
+            <Typography sx={{ fontSize: 10, color: 'text.secondary', fontWeight: 500 }}>Kodas</Typography>
+            <Typography sx={{ fontSize: 10, color: 'text.secondary', fontWeight: 500 }}>Pavadinimas</Typography>
+            <Typography sx={{ fontSize: 10, color: 'text.secondary', fontWeight: 500, textAlign: 'right' }}>Suma</Typography>
+          </Box>
+          {allLines.map((line, i) => (
+            <Box
+              key={`${line.side}-${line.code}-${i}`}
+              sx={{
+                display: 'grid', gridTemplateColumns: '36px 60px 1fr 80px',
+                px: 1.25, py: 0.75,
+                borderBottom: i < allLines.length - 1 ? '0.5px solid' : 'none',
+                borderColor: 'divider', alignItems: 'center',
+              }}
+            >
+              <Box>
+                <Box component="span" sx={{
+                  fontSize: 10, px: 0.5, py: 0.15, borderRadius: '3px', fontWeight: 600,
+                  bgcolor: line.side === 'D' ? '#EFF6FF' : '#FEF2F2',
+                  color: line.side === 'D' ? '#3B82F6' : '#EF4444',
+                }}>
+                  {line.side}
+                </Box>
+              </Box>
+
+              {line.editable && editGroup === line.code ? (
+                <Box sx={{ gridColumn: '2 / 4' }}>
+                  <TextField
+                    select size="small" autoFocus fullWidth
+                    value={line.code}
+                    onChange={(e) => handleChange(line.ids, e.target.value)}
+                    onBlur={() => setEditGroup(null)}
+                    SelectProps={{ MenuProps: { disableScrollLock: true, PaperProps: { sx: { maxHeight: 300 } } } }}
+                    sx={{ '& .MuiInputBase-root': { fontSize: 12, height: 32 } }}
+                  >
+                    {PARDAVIMO_OPTIONS.map((opt) => (
+                      <MenuItem key={opt.value} value={opt.value} sx={{ fontSize: 12 }}>
+                        {opt.label}
+                      </MenuItem>
+                    ))}
+                  </TextField>
+                </Box>
+              ) : (
+                <>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, minWidth: 0 }}>
+                    <Typography sx={{ fontSize: 12, fontWeight: 500 }}>
+                      {line.code}
+                    </Typography>
+                    {line.editable && (
+                      <EditIcon
+                        sx={{
+                          fontSize: 13,
+                          color: 'text.disabled',
+                          cursor: 'pointer',
+                          '&:hover': { color: 'primary.main' },
+                        }}
+                        onClick={() => setEditGroup(line.code)}
+                      />
+                    )}
+                  </Box>
+                  <Typography sx={{ fontSize: 11, color: 'text.secondary', fontWeight: 500 }}>
+                    {line.name}
+                  </Typography>
+                </>
+              )}
+
+              <Typography sx={{ fontSize: 12, fontWeight: 500, textAlign: 'right' }}>
+                {fmtSum(line.suma)}
+              </Typography>
+            </Box>
+          ))}
+        </Box>
+      </AccordionDetails>
+    </Accordion>
+  );
+};
+
+export { InvoiceKorAccordion };
 export default InvoicePreviewDialog;

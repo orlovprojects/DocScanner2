@@ -38,7 +38,7 @@ class BaseBankParser(ABC):
         if not date_str:
             return None
         date_str = date_str.strip()
-        for fmt in ("%Y-%m-%d", "%d.%m.%Y", "%d/%m/%Y", "%Y%m%d"):
+        for fmt in ("%Y-%m-%d", "%Y.%m.%d", "%d.%m.%Y", "%d/%m/%Y", "%Y%m%d"):
             try:
                 return datetime.strptime(date_str, fmt).date()
             except ValueError:
@@ -76,44 +76,88 @@ class BaseBankParser(ABC):
 
     def _detect_separator(self, text: str) -> str:
         """
-        Detect CSV separator from first few lines.
-        Checks: semicolon, comma, tab.
-        Returns the one that produces the most consistent column count.
+        Detect CSV separator by checking which delimiter produces real header columns.
+
+        Important:
+        SEB CSV uses semicolon, but amounts/descriptions contain commas:
+        562,78
+        FACEBK...,fb.me/ads,IE
+
+        So raw comma counting is unreliable.
         """
-        lines = [l for l in text.split("\n")[:10] if l.strip()]
+        lines = [line for line in text.splitlines()[:50] if line.strip()]
         if not lines:
             return ";"
 
-        candidates = {";": [], ",": [], "\t": []}
+        candidates = [";", ",", "\t"]
 
-        for line in lines:
-            for sep, counts in candidates.items():
-                counts.append(line.count(sep))
+        header_keywords = [
+            "data",
+            "suma",
+            "valiuta",
+            "dok",
+            "paskirtis",
+            "gavėjo",
+            "gavejo",
+            "mokėtojo",
+            "moketojo",
+            "debetas",
+            "kreditas",
+            "sąskaita",
+            "saskaita",
+            "description",
+            "amount",
+            "currency",
+            "started date",
+            "completed date",
+        ]
 
-        best_sep = ";"
-        best_score = 0
+        scores = {}
 
-        for sep, counts in candidates.items():
-            if not counts or max(counts) == 0:
-                continue
-            avg = sum(counts) / len(counts)
-            if avg < 1:
-                continue
-            variance = sum((c - avg) ** 2 for c in counts) / len(counts)
-            consistency = 1 / (1 + variance)
-            score = avg * consistency
+        for sep in candidates:
+            best_score = 0
+            best_cols = 0
+            best_hits = 0
 
-            if score > best_score:
-                best_score = score
-                best_sep = sep
+            for line in lines:
+                try:
+                    parsed = next(csv.reader([line], delimiter=sep, quotechar='"'))
+                except Exception:
+                    continue
+
+                cols = [c.strip().lower() for c in parsed if c.strip()]
+                if len(cols) <= 1:
+                    continue
+
+                joined = " ".join(cols)
+                hits = sum(1 for kw in header_keywords if kw in joined)
+
+                # Header-like row with many real columns should win.
+                # hits are more important than raw column count.
+                score = hits * 100 + len(cols)
+
+                if score > best_score:
+                    best_score = score
+                    best_cols = len(cols)
+                    best_hits = hits
+
+            scores[sep] = {
+                "score": best_score,
+                "cols": best_cols,
+                "hits": best_hits,
+            }
+
+        best_sep = max(scores, key=lambda s: scores[s]["score"])
+
+        if scores[best_sep]["score"] <= 1:
+            best_sep = ";"
 
         logger.info(
-            "[Parser] Separator detection: ';'=%s, ','=%s, 'tab'=%s → chose '%s'",
-            sum(candidates[";"]),
-            sum(candidates[","]),
-            sum(candidates["\t"]),
-            repr(best_sep),
+            "[Parser] Separator detection scores: %s → chose %r",
+            scores,
+            best_sep,
         )
+
         return best_sep
 
 
@@ -368,7 +412,7 @@ class SEBCSVParser(BaseBankParser):
         logger.info("[SEBCSV] Detected delimiter: %s", repr(delimiter))
         reader = csv.reader(io.StringIO(text), delimiter=delimiter, quotechar='"')
         logger.info("[SEBCSV] Encoding: %s, length: %d", encoding, len(text))
-        logger.info("[SEBCSV] Using delimiter: ';'")
+        logger.info("[SEBCSV] Using delimiter: %s", repr(delimiter))
         rows = list(reader)
         if len(rows) < 3:
             return []
@@ -409,6 +453,10 @@ class SEBCSVParser(BaseBankParser):
                 col["reference"] = i
             elif "DEBETAS/KREDITAS" in h or h == "D/K":
                 col["dk"] = i
+            elif "TRANSAKCIJOS TIPAS" in h:
+                col["tx_type"] = i
+            elif "TRANSAKCIJOS KODAS" in h:
+                col["tx_code"] = i
             elif h == "SĄSKAITOS NR" or h == "SASKAITOS NR":
                 col["account_iban"] = i
 
@@ -441,12 +489,12 @@ class SEBCSVParser(BaseBankParser):
                 "transaction_date": txn_date,
                 "value_date": self._parse_date(get("value_date")),
                 "doc_number": get("doc_number"),
-                "bank_operation_code": "",
+                "bank_operation_code": get("tx_type"),
                 "counterparty_name": get("counterparty_name"),
                 "counterparty_code": get("counterparty_code"),
                 "counterparty_account": get("counterparty_account"),
                 "payment_purpose": get("purpose"),
-                "reference_number": get("reference"),
+                "reference_number": get("reference") or get("tx_code"),
                 "amount": abs(amount),
                 "currency": get("currency") or "EUR",
                 "direction": direction,
@@ -666,6 +714,68 @@ class LuminorCSVParser(BaseBankParser):
 class RevolutCSVParser(BaseBankParser):
     bank_name = "revolut"
 
+    def _norm_key(self, key: str) -> str:
+        """
+        Normalize CSV header:
+        - trims spaces
+        - lowercases
+        - turns dashes/underscores into spaces
+        - collapses multiple spaces
+        """
+        key = (key or "").replace("\ufeff", "").strip().lower()
+
+        # Different dash symbols + underscore → space
+        key = re.sub(r"[\u2010\u2011\u2012\u2013\u2014\u2015\-_]+", " ", key)
+
+        # Remove repeated spaces
+        key = re.sub(r"\s+", " ", key).strip()
+
+        return key
+
+    def _normalize_row(self, row: dict) -> dict:
+        """
+        Convert row keys to normalized form.
+        Example:
+        'Started-Date' -> 'started date'
+        'Started_Date' -> 'started date'
+        'STARTED DATE ' -> 'started date'
+        """
+        normalized = {}
+
+        for key, value in row.items():
+            norm_key = self._norm_key(key)
+            if norm_key:
+                normalized[norm_key] = value
+
+        return normalized
+
+    def _get(self, row: dict, *names: str, default: str = "") -> str:
+        """
+        Get value by normalized header aliases.
+        """
+        for name in names:
+            norm_name = self._norm_key(name)
+            val = row.get(norm_name)
+            if val not in (None, ""):
+                return str(val).strip()
+
+        return default
+
+    def _revolut_ref(self, row: dict) -> str:
+        """
+        Revolut CSV neturi Transaction ID, todėl kuriame stabilų synthetic ref.
+        Svarbiausia: Started Date su laiku + Completed Date + Balance.
+        Tai leidžia atskirti 2 vienodus card payments tą pačią dieną.
+        """
+        tx_type = self._get(row, "Type")
+        product = self._get(row, "Product")
+        started = self._get(row, "Started Date", "Started")
+        completed = self._get(row, "Completed Date", "Completed")
+        balance = self._get(row, "Balance", "Balance after")
+        state = self._get(row, "State", "Status").upper()
+
+        return f"REV|{tx_type}|{product}|{started}|{completed}|{balance}|{state}"[:255]
+
     def parse(self, file_content) -> list[dict]:
         raw = self._to_bytes(file_content)
         text = raw.decode(self._detect_encoding(raw))
@@ -675,39 +785,80 @@ class RevolutCSVParser(BaseBankParser):
         reader = csv.DictReader(io.StringIO(text))
         logger.info("[RevolutCSV] Headers: %s", reader.fieldnames)
 
+        normalized_headers = [
+            self._norm_key(h) for h in (reader.fieldnames or [])
+        ]
+        logger.info("[RevolutCSV] Normalized headers: %s", normalized_headers)
+
         transactions = []
         skipped = 0
 
-        for row in reader:
-            amt_str = row.get("Amount", "") or row.get("amount", "")
+        for raw_row in reader:
+            row = self._normalize_row(raw_row)
+
+            amt_str = self._get(row, "Amount")
             amount = self._parse_amount(amt_str)
-            if not amount:
+
+            if amount is None:
                 skipped += 1
                 continue
 
-            date_str = row.get("Completed Date", "") or row.get("Started Date", "")
-            desc = row.get("Description", "") or row.get("description", "")
-            state = row.get("State", "") or row.get("state", "")
+            completed_date = self._get(row, "Completed Date", "Completed")
+            started_date = self._get(row, "Started Date", "Started")
+            date_str = completed_date or started_date
+
+            desc = self._get(
+                row,
+                "Description",
+                "Merchant",
+                "Counterparty",
+            )
+
+            state = self._get(row, "State", "Status")
+
             if state.lower() in ("reverted", "failed", "declined"):
                 skipped += 1
                 continue
 
+            txn_date = self._parse_date(date_str.split()[0] if date_str else "")
+            if not txn_date:
+                skipped += 1
+                logger.warning(
+                    "[RevolutCSV] Skipped row: could not parse date. date_str=%r row=%s",
+                    date_str,
+                    raw_row,
+                )
+                continue
+
+            tx_type = self._get(row, "Type")
+            bank_operation_code = " | ".join(
+                x for x in [tx_type, state]
+                if x
+            )
+
+            currency = self._get(row, "Currency", default="EUR")
+
             transactions.append({
-                "transaction_date": self._parse_date(date_str.split()[0] if date_str else ""),
+                "transaction_date": txn_date,
                 "value_date": None,
                 "doc_number": "",
-                "bank_operation_code": "",
+                "bank_operation_code": bank_operation_code,
                 "counterparty_name": desc,
                 "counterparty_code": "",
                 "counterparty_account": "",
                 "payment_purpose": desc,
-                "reference_number": "",
+                "reference_number": self._revolut_ref(row),
                 "amount": abs(amount),
-                "currency": row.get("Currency", "EUR"),
+                "currency": currency or "EUR",
                 "direction": "credit" if amount > 0 else "debit",
             })
 
-        logger.info("[RevolutCSV] Result: %d transactions, %d skipped", len(transactions), skipped)
+        logger.info(
+            "[RevolutCSV] Result: %d transactions, %d skipped",
+            len(transactions),
+            skipped,
+        )
+
         return transactions
 
 
@@ -738,24 +889,79 @@ def get_parser(bank_name: str, file_format: str) -> BaseBankParser:
 
 def detect_bank_from_content(content: bytes) -> Optional[str]:
     text = ""
+
     for enc in ("utf-8-sig", "utf-8", "windows-1257"):
         try:
-            text = content[:2000].decode(enc).lower()
+            text = content[:10000].decode(enc).lower()
             break
         except UnicodeDecodeError:
             continue
-    if "swedbank" in text or "habalt" in text:
-        return "swedbank"
-    if "7044" in text or ("seb" in text and "bank" in text):
+
+    compact = re.sub(r"\s+", " ", text)
+
+    # ── Revolut ─────────────────────────────────────────
+    # Revolut CSV turi specifinius stulpelius.
+    if "type,product,started date,completed date" in compact:
+        return "revolut"
+
+    if "started date" in compact and "completed date" in compact and "balance" in compact:
+        return "revolut"
+
+    if "revolut" in compact and "completed date" in compact:
+        return "revolut"
+
+    # ── SEB ─────────────────────────────────────────────
+    # Svarbu: SEB tikriname prieš Swedbank.
+    # SEB faile "Swedbank AB" gali būti tik kontrahento bankas.
+    seb_header_signals = [
+        "mokėtojo arba gavėjo pavadinimas",
+        "moketojo arba gavejo pavadinimas",
+        "debetas/kreditas",
+        "sąskaitos nr",
+        "saskaitos nr",
+        "sąskaitos valiuta",
+        "saskaitos valiuta",
+        "transakcijos tipas",
+        "transakcijos kodas",
+    ]
+
+    if (
+        ("dok nr" in compact or "dok nr." in compact)
+        and "data" in compact
+        and "suma" in compact
+        and sum(1 for s in seb_header_signals if s in compact) >= 2
+    ):
         return "seb"
-    if "luminor" in text or "dnb" in text:
+
+    # SEB IBAN bank code 7044 kaip fallback.
+    if "7044" in compact and "debetas/kreditas" in compact:
+        return "seb"
+
+    # ── Luminor ─────────────────────────────────────────
+    if "luminor" in compact or "dnb" in compact:
         return "luminor"
-    if "šiaulių" in text or "siauliu" in text:
+
+    # ── Šiaulių bankas ─────────────────────────────────
+    if "šiaulių" in compact or "siauliu" in compact:
         return "siauliu"
-    if "revolut" in text:
-        return "revolut"
-    if "type,product,started date,completed date" in text:
-        return "revolut"
+
+    # ── Swedbank ────────────────────────────────────────
+    # Neužtenka tiesiog rasti žodį "swedbank",
+    # nes SEB išraše jis gali būti kontrahento banko pavadinime.
+    swedbank_header_signals = [
+        "gavėjas/mokėtojas",
+        "gavejas/moketojas",
+        "operacijos paskirtis",
+        "banko žyma",
+        "d/k",
+    ]
+
+    if (
+        ("swedbank" in compact or "habalt" in compact)
+        and sum(1 for s in swedbank_header_signals if s in compact) >= 2
+    ):
+        return "swedbank"
+
     return None
 
 

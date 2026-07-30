@@ -398,6 +398,8 @@ def _apply_top_level_fields(
         db_doc.serijos_pavadinimas = first_item.get("serijos_pavadinimas") or ""
         db_doc.centro_kodas = first_item.get("centro_kodas") or ""
         db_doc.centro_pavadinimas = first_item.get("centro_pavadinimas") or ""
+        # ── Pirkimo sąskaita (AI) ──
+        db_doc.pirkimo_saskaita = doc_struct.get("pirkimo_saskaita") or ""
     else:
         # detaliai — чистим короткие поля
         db_doc.prekes_kodas = ""
@@ -439,6 +441,7 @@ def _apply_top_level_fields(
         db_doc.serijos_pavadinimas = ""
         db_doc.centro_kodas = ""
         db_doc.centro_pavadinimas = ""
+        db_doc.pirkimo_saskaita = ""
 
     # Стало:
     # ── traded_type (paslaugos/prekės/mišrus) ──
@@ -771,6 +774,7 @@ def _save_line_items(db_doc, doc_struct: Dict[str, Any], scan_type: str, user=No
                 centro_pavadinimas=item.get("centro_pavadinimas"),
                 is_long_term_asset_candidate=bool(item.get("is_long_term_asset_candidate", False)),
                 suggested_asset_type=item.get("suggested_asset_type") or "",
+                pirkimo_saskaita=item.get("pirkimo_saskaita") or "",
             )
 
     # 2) Агрегация/выбор PVM кода — ВСЕГДА (и для single, и для multi)

@@ -1,4 +1,5 @@
 export const ACCOUNTING_PROGRAMS = [
+  { value: "dokskenas_erp", label: "DokSkenas ERP (jau netrukus!)" },
   { value: "rivile", label: "Rivilė GAMA" },
   { value: "rivile_gama_api", label: "Rivilė GAMA (per API)" },
   { value: "rivile_erp", label: "Rivilė ERP" },

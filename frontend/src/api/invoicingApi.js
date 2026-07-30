@@ -79,6 +79,11 @@ export const invoicingApi = {
   createPvmSf: (id) =>
     api.post(`${BASE}/invoices/${id}/create-pvm-sf/`, {}, { withCredentials: true }),
 
+  createCreditInvoice: (id) =>
+    api.post(`/invoicing/invoices/${id}/create-credit/`, {}, { withCredentials: true }),
+
+  updateInvoiceKor: (id, data) => api.patch(`/invoicing/invoices/${id}/update-kor/`, data),
+
   // ── Measurement Units ────────────────────────────────
   getUnits: () =>
     api.get(`${BASE}/units/`, { withCredentials: true }),
@@ -218,6 +223,22 @@ export const invoicingApi = {
   reMatchBankStatement: (id) =>
     api.post(`${BASE}/bank-statements/${id}/re-match/`, {}, { withCredentials: true }),
 
+  // ── Bank Account Mapping ──
+  getBankAccounts: () =>
+    api.get('/invoicing/bank-accounts/', { withCredentials: true }),
+
+  updateBankAccount: (data) =>
+    api.post('/invoicing/bank-accounts/', data, { withCredentials: true }),
+
+  getBankTransactionDetail: (id, direction) =>
+    api.get(`/invoicing/bank-transactions/${id}/`, { params: { direction }, withCredentials: true }),
+
+  getAllocationPreview: (id) =>
+    api.get(`/invoicing/allocations/${id}/preview/`, { withCredentials: true }),
+
+  getBankMatchingDebug: (params) =>
+    api.get('/invoicing/bank-matching-debug/', { params }),
+
 
   getPaymentProviders: () =>
     api.get(`${BASE}/payment-providers/`, { withCredentials: true }),
@@ -234,6 +255,37 @@ export const invoicingApi = {
 
 
 
+  // ── Bank Transactions ──
+  getBankTransactions: (params, config) =>
+    api.get('/invoicing/bank-transactions/', { params, withCredentials: true, ...config }),
+
+  classifyTransaction: (id, data) =>
+    api.post(`/invoicing/bank-transactions/${id}/classify/`, data, { withCredentials: true }),
+
+  matchTransaction: (id, data) =>
+    api.post(`/invoicing/bank-transactions/${id}/match/`, data, { withCredentials: true }),
+
+  getDKTemplates: (txnId) => api.get(`/transactions/${txnId}/dk-templates/`),
+  registerDK: (txnId, data) => api.post(`/transactions/${txnId}/register-dk/`, data),
+
+  patchDkLine: (lineId, data) =>
+    api.patch(`/apskaita/dk-eilutes/${lineId}/`, data, { withCredentials: true }),
+
+  // ── Bank Rules ──
+  getBankRules: (params) =>
+    api.get('/invoicing/bank-rules/', { params, withCredentials: true }),
+
+  createBankRule: (data) =>
+    api.post('/invoicing/bank-rules/', data, { withCredentials: true }),
+
+  updateBankRule: (id, data) =>
+    api.put(`/invoicing/bank-rules/${id}/`, data, { withCredentials: true }),
+
+  deleteBankRule: (id) =>
+    api.delete(`/invoicing/bank-rules/${id}/`, { withCredentials: true }),
+
+  getPurchases: (params, config) =>
+    api.get('/purchases/search/', { params, withCredentials: true, ...config }),
 
   // ── Invoice Emails ───────────────────────────────────
   sendInvoiceEmail: (id, email, force = false) =>

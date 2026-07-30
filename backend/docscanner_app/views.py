@@ -10,7 +10,7 @@ import tempfile
 import zipfile, tarfile
 import json
 from datetime import date, datetime, timedelta, time as dt_time
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 import unicodedata
 from django.http import HttpRequest
 from django.contrib.auth import get_user_model
@@ -21,6 +21,7 @@ from django.db import models
 from django.core.mail import EmailMultiAlternatives
 from email.utils import formataddr
 from openpyxl import Workbook
+from rest_framework.exceptions import ValidationError
 
 from django.core.files.base import ContentFile
 from .tasks import process_uploaded_file_task 
@@ -131,6 +132,12 @@ from .models import (
     InvSubscription,
     RivileGamaAPIKey,
     PaymentAllocation,
+    CompanyProfile,
+    Purchase,
+    PurchaseLine,
+    JournalEntry,
+    JournalEntryLine,
+    Company,
 )
 
 from .serializers import (
@@ -163,7 +170,12 @@ from .serializers import (
     RecurringInvoiceAdminListSerializer,
     NewsletterCampaignCreateSerializer,
     NewsletterRecipientSerializer,
-    NewsletterCampaignSerializer
+    NewsletterCampaignSerializer,
+    CompanyProfileSerializer,
+    PurchaseSerializer,
+    PurchaseLineSerializer,
+    JournalEntrySerializer,
+    JournalEntryLineSerializer
 )
 from django.db.models import Prefetch
 from django.db.models import Count, Sum
@@ -2532,7 +2544,15 @@ def get_user_documents(request):
         include_archive_warnings = q.get("include_archive_warnings", "").lower() == "true"
         session_id = q.get("session_id")
 
-        qs = ScannedDocument.objects.filter(user=user, is_archive_container=False, is_multi_doc_container=False)
+        qs = (
+            ScannedDocument.objects
+            .select_related("perkelta_i_company_profile")
+            .filter(
+                user=user,
+                is_archive_container=False,
+                is_multi_doc_container=False,
+            )
+        )
 
         if status_param:
             qs = qs.filter(status=status_param)
@@ -2584,11 +2604,52 @@ def get_user_documents(request):
         exportable_total = 0 if (view_mode == "multi" and not cp) else exportable_qs.count()
 
         qs = qs.order_by("-uploaded_at", "-id").only(
-            "id","original_filename","status","uploaded_at","preview_url",
+            "id",
+            "original_filename",
+            "status",
+            "uploaded_at",
+            "preview_url",
+
             "document_number",
-            "seller_name","seller_id","seller_vat_code","seller_vat_val",
-            "buyer_name","buyer_id","buyer_vat_code","buyer_vat_val",
-            "pirkimas_pardavimas","scan_type","ready_for_export","math_validation_passed",
+
+            "seller_name",
+            "seller_id",
+            "seller_vat_code",
+            "seller_vat_val",
+
+            "buyer_name",
+            "buyer_id",
+            "buyer_vat_code",
+            "buyer_vat_val",
+
+            "separate_vat",
+
+            "pirkimas_pardavimas",
+            "scan_type",
+            "ready_for_export",
+            "math_validation_passed",
+
+            "optimum_api_status",
+            "optimum_last_try_date",
+
+            "dineta_api_status",
+            "dineta_last_try_date",
+
+            "rivile_api_status",
+            "rivile_api_last_try",
+
+            "is_credit_invoice",
+            "is_debit_invoice",
+
+            "buyer_replaced_by_rule",
+            "seller_replaced_by_rule",
+
+            "is_long_term_asset_candidate",
+
+            "perkelta_i_apskaita",
+            "perkelta_i_apskaita_at",
+            "perkelta_i_company_profile",
+            "perkelta_i_company_profile__name",
         )
 
         paginator = DocumentsCursorPagination()
@@ -3291,16 +3352,25 @@ def update_view_mode(request):
 @api_view(['PATCH'])
 @permission_classes([IsAuthenticated])
 def update_lineitem_fields(request, doc_id, lineitem_id):
-    from .serializers import LineItemSerializer  # убедись, что есть
+    from .serializers import LineItemSerializer
     doc = get_object_or_404(ScannedDocument, pk=doc_id, user=request.user)
     lineitem = get_object_or_404(LineItem, pk=lineitem_id, document=doc)
 
-    allowed = ['prekes_kodas', 'prekes_pavadinimas', 'prekes_barkodas']
+    allowed = [
+        'prekes_kodas', 'prekes_pavadinimas', 'prekes_barkodas',
+        'pirkimo_saskaita', 'pardavimo_saskaita',
+        'unit', 'preke_paslauga',
+        'matched_prekes_pavadinimas', 'matched_prekes_kodas',
+        'matched_prekes_barkodas', 'matched_unit', 'matched_preke_paslauga',
+        'catalog_match_user_override',
+    ]
+    changed = []
     for field in allowed:
         if field in request.data:
             setattr(lineitem, field, request.data[field])
-    lineitem.save()
-
+            changed.append(field)
+    if changed:
+        lineitem.save(update_fields=changed)
     return Response(LineItemSerializer(lineitem).data, status=200)
 
 
@@ -3328,6 +3398,7 @@ def autocomplete_products(request):
             "prekes_kodas": prod.prekes_kodas,
             "prekes_barkodas": prod.prekes_barkodas,
             "preke_paslauga": prod.preke_paslauga,
+            "unit": prod.unit,
         }
         for prod in qs
     ]
@@ -3558,7 +3629,12 @@ def export_products_view(request):
         ("prekes_pavadinimas*", "prekes_pavadinimas"),
         ("prekes_kodas*", "prekes_kodas"),
         ("prekes_barkodas", "prekes_barkodas"),
-        ("preke_paslauga_kodas* (galimos reikšmės: 1, 2, 3, 4)", "preke_paslauga"),
+        ("mato_vnt", "unit"),
+        (
+            "preke_paslauga_kodas* "
+            "(galimos reikšmės: 1, 2, 3, 4)",
+            "preke_paslauga",
+        ),
     ]
 
     wb = Workbook()
@@ -3694,6 +3770,14 @@ def user_profile(request):
         serializer = CustomUserSerializer(user, data=request.data, partial=True, context={'request': request})
         if serializer.is_valid():
             serializer.save()
+
+            # Veidrodis: pakeitus programą Nustatymuose – įrašom ją ir į aktyvų profilį.
+            # .update() rašo tiesiai į DB – aplenkia signalus ir instance cache.
+            if 'default_accounting_program' in request.data and user.active_company_profile_id:
+                CompanyProfile.objects.filter(
+                    pk=user.active_company_profile_id
+                ).update(accounting_program=user.default_accounting_program)
+
             new_company_code = serializer.validated_data.get('company_code', old_company_code)
 
             # Пытаемся найти старую строку по старому company_code
@@ -3747,14 +3831,39 @@ def update_currency_rates_view(request):
     return Response({'message': f'Updated {count} currency rates for {d}.'})
 
 
-
-
-
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def user_me_view(request):
     serializer = CustomUserSerializer(request.user)
-    return Response(serializer.data)
+    data = serializer.data
+
+    # ── Company profiles ──
+    data["company_profiles"] = CompanyProfileSerializer(
+        request.user.company_profiles.all(), many=True
+    ).data
+    data["active_company_profile_id"] = request.user.active_company_profile_id
+    data["onboarding_completed"] = request.user.onboarding_completed
+
+    # ── Subscription (вычисленный статус с lazy-expire — перезаписываем сырое поле) ──
+    data["subscription_status"] = request.user.get_subscription_status()
+
+    return Response(data)
+
+
+# @api_view(['GET'])
+# @permission_classes([IsAuthenticated])
+# def user_me_view(request):
+#     serializer = CustomUserSerializer(request.user)
+#     data = serializer.data
+
+#     # ── Company profiles ──
+#     data["company_profiles"] = CompanyProfileSerializer(
+#         request.user.company_profiles.all(), many=True
+#     ).data
+#     data["active_company_profile_id"] = request.user.active_company_profile_id
+#     data["onboarding_completed"] = request.user.onboarding_completed
+
+#     return Response(data)
 
 
 class TrackAdClickView(generics.CreateAPIView):
@@ -4035,6 +4144,39 @@ def register(request):
         return Response({"error": "An error occurred during registration."}, status=500)
 
 
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def onboarding_company_search(request):
+    query = str(request.query_params.get("q") or "").strip()[:100]
+
+    if len(query) < 2:
+        return Response({"results": []})
+
+    normalized_query = " ".join(query.upper().split())
+
+    companies = (
+        Company.objects
+        .filter(
+            Q(pavadinimas__icontains=query)
+            | Q(normalized_pavadinimas__icontains=normalized_query)
+            | Q(im_kodas__icontains=query)
+            | Q(pvm_kodas__icontains=query)
+        )
+        .order_by("pavadinimas", "im_kodas")[:20]
+    )
+
+    return Response({
+        "results": [
+            {
+                "id": c.id,
+                "pavadinimas": c.pavadinimas or "",
+                "im_kodas": c.im_kodas or "",
+                "pvm_kodas": c.pvm_kodas or "",
+                "adresas": c.adresas or "",
+            }
+            for c in companies
+        ]
+    })
 
 
 # Proveriajem status subscriptiona usera
@@ -4510,12 +4652,17 @@ ALLOWED_DOC_FIELDS = {
     "invoice_date","due_date","operation_date","document_series","document_number","order_number",
     "amount_wo_vat","vat_amount","vat_percent","amount_with_vat","currency","paid_by_cash",
     "buyer_name","buyer_id","buyer_vat_code","seller_name","seller_id","seller_vat_code",
-    "prekes_kodas","prekes_pavadinimas","prekes_barkodas", "invoice_discount_wo_vat", "invoice_discount_with_vat"
+    "prekes_kodas","prekes_pavadinimas","prekes_barkodas", "invoice_discount_wo_vat", "invoice_discount_with_vat",
+    "pirkimo_saskaita","pardavimo_saskaita",
 }
 
 ALLOWED_LINE_FIELDS = {
     "prekes_kodas","prekes_pavadinimas","prekes_barkodas",
-    "unit","quantity","price","subtotal","vat","vat_percent","total",
+    "unit","quantity","price","subtotal","vat","vat_percent","total","pirkimo_saskaita",
+    "pardavimo_saskaita",
+    # catalog matching
+    "matched_prekes_pavadinimas","matched_prekes_kodas","matched_prekes_barkodas",
+    "matched_unit","matched_preke_paslauga","catalog_match_user_override",
 }
 
 REQUIRED_FIELDS = {
@@ -6451,6 +6598,7 @@ def invoice_list(request):
     qs = (
         Invoice.objects
         .filter(user=user)
+        .select_related("scanned_document")
         .annotate(
             line_items_count=Count("line_items"),
             _has_proposed=Exists(
@@ -6534,7 +6682,11 @@ def invoice_list(request):
     total = qs.count()
 
     page = qs[offset : offset + limit]
-    serializer = InvoiceListSerializer(page, many=True)
+    serializer = InvoiceListSerializer(
+        page,
+        many=True,
+        context={"request": request},
+    )
 
     return Response({
         "count": total,
@@ -6560,10 +6712,13 @@ def invoice_create(request):
 @permission_classes([IsAuthenticated])
 def invoice_detail(request, pk):
     """Получить полный счёт с line items."""
+    qs = Invoice.objects.select_related("scanned_document")
+
     if request.user.is_superuser:
-        invoice = get_object_or_404(Invoice, pk=pk)
+        invoice = get_object_or_404(qs, pk=pk)
     else:
-        invoice = get_object_or_404(Invoice, pk=pk, user=request.user)
+        invoice = get_object_or_404(qs, pk=pk, user=request.user)
+
     serializer = InvoiceDetailSerializer(invoice, context={"request": request})
     return Response(serializer.data)
 
@@ -6571,27 +6726,79 @@ def invoice_detail(request, pk):
 @api_view(["PUT"])
 @permission_classes([IsAuthenticated])
 def invoice_update(request, pk):
-    """Обновить счёт (только draft)."""
+    """Обновить счёт."""
     invoice = get_object_or_404(Invoice, pk=pk, user=request.user)
     serializer = InvoiceWriteSerializer(
         invoice, data=request.data, partial=True, context={"request": request}
     )
     serializer.is_valid(raise_exception=True)
-    serializer.save()
+    instance = serializer.save()
+
+    # ── Пересоздать JE если invoice уже issued ────────
+    if instance.status not in ("draft", "cancelled") and instance.invoice_type != "isankstine":
+        from .services.accounting_transfer import recreate_je_for_invoice
+        try:
+            recreate_je_for_invoice(instance)
+        except Exception as e:
+            logger.warning("[InvoiceUpdate] Recreate JE failed for %s: %s", instance.id, e)
+
     return Response(serializer.data)
 
 
 @api_view(["DELETE"])
 @permission_classes([IsAuthenticated])
 def invoice_delete(request, pk):
-    """Удалить счёт (только draft)."""
+    """Ištrinti sąskaitą. Galima tik juodraščiams ir iš skaitmenizavimo perkeltoms."""
     invoice = get_object_or_404(Invoice, pk=pk, user=request.user)
-    if not invoice.is_editable:
+
+    if not invoice.can_delete:
         return Response(
-            {"detail": "Negalima ištrinti išrašytos sąskaitos."},
+            {"detail": "Galima ištrinti tik juodraščius arba iš skaitmenizavimo perkeltas sąskaitas."},
             status=status.HTTP_400_BAD_REQUEST,
         )
-    invoice.delete()
+
+    with transaction.atomic():
+        # ── Удалить JE ──
+        from .services.accounting_transfer import delete_je_for_invoice
+        delete_je_for_invoice(invoice)
+
+        # ── Сбросить флаг переноса на ScannedDocument ──
+        if invoice.scanned_document:
+            doc = invoice.scanned_document
+            doc.perkelta_i_apskaita = False
+            doc.perkelta_i_apskaita_at = None
+            doc.perkelta_i_company_profile = None
+            doc.save(update_fields=[
+                "perkelta_i_apskaita",
+                "perkelta_i_apskaita_at",
+                "perkelta_i_company_profile",
+            ])
+
+        # ── Удалить PaymentAllocations и вернуть транзакции в unmatched ──
+        for alloc in invoice.payment_allocations.all():
+            from .services.accounting_transfer import delete_je_for_allocation
+            delete_je_for_allocation(alloc)
+
+            txn = alloc.transaction
+            alloc.delete()
+
+            if txn:
+                from django.db.models import Sum
+                new_total = txn.allocations.aggregate(t=Sum("amount"))["t"] or 0
+                txn.allocated_amount = new_total
+                if not txn.allocations.exists():
+                    txn.match_status = "unmatched"
+                    txn.match_confidence = 0
+                    txn.transaction_category = ""
+                txn.save(update_fields=[
+                    "allocated_amount", "match_status",
+                    "match_confidence", "transaction_category", "updated_at",
+                ])
+                if txn.bank_statement:
+                    txn.bank_statement.refresh_stats()
+
+        invoice.delete()
+
     return Response(status=status.HTTP_204_NO_CONTENT)
 
 
@@ -6612,6 +6819,99 @@ def invoice_line_items(request, pk):
 # ════════════════════════════════════════════════════════════
 # Invoice — Бизнес-действия
 # ════════════════════════════════════════════════════════════
+
+def _recalculate_credit_draft_totals(invoice):
+    """
+    Perskaičiuoja kreditinės sumas prieš išrašymą.
+
+    Eilučių subtotal lieka prieš bendrą dokumento nuolaidą.
+    Bendra nuolaida proporcingai paskirstoma pagal PVM tarifus.
+    """
+    from decimal import Decimal, ROUND_HALF_UP
+
+    MONEY = Decimal("0.01")
+    ZERO = Decimal("0")
+
+    def dec(value):
+        if value in (None, ""):
+            return ZERO
+        return Decimal(str(value))
+
+    def round_money(value):
+        return Decimal(value).quantize(
+            MONEY,
+            rounding=ROUND_HALF_UP,
+        )
+
+    invoice_lines = list(
+        invoice.line_items.order_by("sort_order", "id")
+    )
+
+    sum_net = sum(
+        (
+            abs(dec(line.subtotal))
+            for line in invoice_lines
+        ),
+        ZERO,
+    )
+
+    invoice_discount = min(
+        abs(dec(invoice.invoice_discount_wo_vat)),
+        sum_net,
+    )
+
+    amount_wo_vat = round_money(
+        sum_net - invoice_discount
+    )
+
+    vat_groups = {}
+
+    for line in invoice_lines:
+        line_net = abs(dec(line.subtotal))
+
+        vat_percent = dec(
+            line.vat_percent
+            if line.vat_percent is not None
+            else invoice.vat_percent or 0
+        )
+
+        vat_percent = abs(vat_percent)
+
+        if vat_percent not in vat_groups:
+            vat_groups[vat_percent] = ZERO
+
+        vat_groups[vat_percent] += line_net
+
+    vat_amount = ZERO
+
+    if (
+        invoice.pvm_tipas == "taikoma"
+        and sum_net > ZERO
+    ):
+        for vat_percent, group_net in vat_groups.items():
+            ratio = group_net / sum_net
+
+            discounted_group_net = round_money(
+                group_net -
+                invoice_discount * ratio
+            )
+
+            group_vat = round_money(
+                discounted_group_net *
+                vat_percent /
+                Decimal("100")
+            )
+
+            vat_amount += group_vat
+
+    vat_amount = round_money(vat_amount)
+    amount_with_vat = round_money(
+        amount_wo_vat + vat_amount
+    )
+
+    invoice.amount_wo_vat = amount_wo_vat
+    invoice.vat_amount = vat_amount
+    invoice.amount_with_vat = amount_with_vat
 
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
@@ -6689,12 +6989,78 @@ def invoice_issue(request, pk):
 
         invoice.document_series = prefix
         invoice.document_number = number_str
+
+        update_fields = [
+            "document_series",
+            "document_number",
+            "status",
+            "pvm_kodas",
+        ]
+
+        # Kreditinė: prieš keičiant ženklus perskaičiuojame bendrą
+        # nuolaidą ir PVM pagal dabartines kreditinės eilutes.
+        if invoice.invoice_type == "kreditine":
+            _recalculate_credit_draft_totals(invoice)
+
+            from decimal import Decimal, InvalidOperation
+
+            def _negative(value):
+                if value in (None, ""):
+                    return value
+
+                try:
+                    decimal_value = Decimal(str(value))
+                except (InvalidOperation, TypeError, ValueError):
+                    return value
+
+                return -abs(decimal_value) if decimal_value != 0 else decimal_value
+
+            invoice_negative_fields = (
+                "amount_wo_vat",
+                "vat_amount",
+                "amount_with_vat",
+                "invoice_discount_wo_vat",
+                "invoice_discount_with_vat",
+                "delivery_fee",
+            )
+
+            for field in invoice_negative_fields:
+                setattr(invoice, field, _negative(getattr(invoice, field)))
+
+            update_fields.extend(invoice_negative_fields)
+
+            line_negative_fields = (
+                "quantity",
+                "subtotal",
+                "vat",
+                "total",
+                "discount_wo_vat",
+                "discount_with_vat",
+            )
+
+            for line in invoice.line_items.select_for_update():
+                for field in line_negative_fields:
+                    setattr(line, field, _negative(getattr(line, field)))
+
+                line.save(update_fields=list(line_negative_fields))
+
         invoice.status = "issued"
         invoice.assign_pvm_codes()
-        invoice.save(update_fields=[
-            "document_series", "document_number",
-            "status", "pvm_kodas",
-        ])
+
+        if not invoice.company_profile_id:
+            active_id = getattr(request.user, "active_company_profile_id", None)
+            if active_id:
+                invoice.company_profile_id = active_id
+                update_fields.append("company_profile")
+
+        invoice.save(update_fields=update_fields)
+
+        # ── Auto JE: pardavimo SF → DK įrašas ────────────
+        from .services.accounting_transfer import create_je_for_invoice
+        try:
+            create_je_for_invoice(invoice)
+        except Exception as e:
+            logger.warning("[InvoiceIssue] Auto JE failed for %s: %s", invoice.id, e)
 
     serializer = InvoiceDetailSerializer(invoice, context={"request": request})
     return Response(serializer.data)
@@ -6811,13 +7177,22 @@ def invoice_cancel(request, pk):
         invoice.cancelled_at = now
         invoice.save(update_fields=["status", "cancelled_at", "updated_at"])
 
+        # ── Удалить JE ────────────────────────────────────
+        from .services.accounting_transfer import delete_je_for_invoice
+        delete_je_for_invoice(invoice)
+
         # Каскад: išankstinė → derived SF/PVM SF
         if invoice.invoice_type == "isankstine":
-            invoice.derived_invoices.filter(
-                invoice_type__in=["pvm_saskaita", "saskaita"],
-            ).exclude(
-                status="cancelled",
-            ).update(status="cancelled", cancelled_at=now, updated_at=now)
+            derived = list(
+                invoice.derived_invoices.filter(
+                    invoice_type__in=["pvm_saskaita", "saskaita"],
+                ).exclude(status="cancelled")
+            )
+            for derived_inv in derived:
+                derived_inv.status = "cancelled"
+                derived_inv.cancelled_at = now
+                derived_inv.save(update_fields=["status", "cancelled_at", "updated_at"])
+                delete_je_for_invoice(derived_inv)
 
         # Каскад: SF/PVM SF → source išankstinė
         if (
@@ -6912,8 +7287,140 @@ def invoice_create_pvm_sf(request, pk):
     if not new_invoice:
         return Response({"detail": "SF jau sukurta."}, status=status.HTTP_400_BAD_REQUEST)
 
+    # DK įrašas jau sukurtas viduje create_sf_from_isankstine().
+
     serializer = InvoiceDetailSerializer(new_invoice, context={"request": request})
     return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+
+class CreateCreditInvoiceView(APIView):
+    """
+    POST /api/invoices/<id>/create-credit/
+
+    Создаёт kreditinę sąskaitą faktūrą из существующей SF/PVM SF.
+    Копирует все данные и строки. Возвращает draft kreditinę
+    для редактирования (юзер может убрать строки, изменить количество).
+
+    Также можно создать kreditinę вручную через обычный create endpoint
+    с invoice_type="kreditine" без source_invoice.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    # Поля для копирования из оригинала
+    COPY_FIELDS = [
+        # Seller
+        "seller_counterparty_id", "seller_id_programoje",
+        "seller_name", "seller_name_normalized", "seller_id", "seller_vat_code",
+        "seller_address", "seller_country", "seller_country_iso",
+        "seller_phone", "seller_email", "seller_bank_name",
+        "seller_iban", "seller_swift", "seller_is_person",
+        "seller_vat_val", "seller_extra_info",
+        # Buyer
+        "buyer_counterparty_id", "buyer_id_programoje",
+        "buyer_name", "buyer_name_normalized", "buyer_id", "buyer_vat_code",
+        "buyer_address", "buyer_country", "buyer_country_iso",
+        "buyer_phone", "buyer_email", "buyer_bank_name",
+        "buyer_iban", "buyer_swift", "buyer_is_person",
+        "buyer_vat_val", "buyer_extra_info", "buyer_delivery_address",
+        # Суммы
+        "currency", "pvm_tipas", "vat_percent",
+        "amount_wo_vat", "vat_amount", "amount_with_vat",
+        "invoice_discount_with_vat", "invoice_discount_wo_vat",
+        "delivery_fee", "separate_vat", "doc_96_str",
+        # Мета
+        "document_type", "document_type_code",
+        "pirkimas_pardavimas", "report_to_isaf",
+        "issued_by", "received_by",
+        # Экспорт
+        "prekes_kodas", "prekes_barkodas", "prekes_pavadinimas",
+        "prekes_tipas", "preke_paslauga", "pvm_kodas",
+        # Company profile
+        "company_profile_id",
+    ]
+
+    LINE_COPY_FIELDS = [
+        "line_id", "prekes_kodas", "prekes_barkodas",
+        "prekes_pavadinimas", "prekes_tipas", "preke_paslauga",
+        "unit", "quantity", "price", "subtotal", "vat", "vat_percent",
+        "total", "discount_with_vat", "discount_wo_vat",
+        "pvm_kodas", "sort_order",
+    ]
+
+    def post(self, request, pk):
+        from .models import Invoice, InvoiceLineItem, InvoiceSeries
+        from .serializers import InvoiceDetailSerializer
+
+        original = get_object_or_404(Invoice, pk=pk, user=request.user)
+
+        # ── Validations ────────────────────────────────────
+        if original.invoice_type not in ("pvm_saskaita", "saskaita"):
+            return Response(
+                {"detail": "Kreditinę galima išrašyti tik iš PVM SF arba SF."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if original.status not in ("issued", "sent", "partially_paid", "paid"):
+            return Response(
+                {"detail": "Sąskaita turi būti išrašyta, kad galima būtų kurti kreditinę."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # ── Получить серию для kreditinė ───────────────────
+        series = InvoiceSeries.get_default_for_type(request.user, "kreditine")
+        series_prefix = series.prefix if series else "KS"
+
+        # ── Копировать invoice ─────────────────────────────
+        credit = Invoice(
+            user=request.user,
+            invoice_type="kreditine",
+            source_invoice=original,
+            status="draft",
+            document_series=series_prefix,
+            # document_number — пусто, присвоится при issue
+        )
+
+        for field in self.COPY_FIELDS:
+            setattr(credit, field, getattr(original, field))
+
+        # Даты: invoice_date = сегодня, operation_date = из оригинала
+        from django.utils import timezone
+        credit.invoice_date = timezone.localdate()
+        credit.operation_date = original.operation_date or original.invoice_date
+        credit.due_date = None  # у кредитной нет срока оплаты
+
+        # Примечание со ссылкой на оригинал
+        credit.note = (
+            f"Kreditinė sąskaita pagal {original.full_number}"
+            f"{(' nuo ' + str(original.invoice_date)) if original.invoice_date else ''}"
+        )
+
+        # Korespondencija: pardavimo pajamų sąskaita (5000/5001) ir PVM sąskaita
+        # gyvena EILUTĖSE (InvoiceLineItem.kredito_saskaita / pvm_saskaita),
+        # o ne dokumento antraštėje. Debetas pardavimui visada 2410.
+        credit.debeto_saskaita = original.debeto_saskaita or "2410"
+        credit.kredito_saskaita = original.kredito_saskaita
+        credit.pvm_saskaita = original.pvm_saskaita
+        credit.pirkimo_saskaita = original.pirkimo_saskaita
+
+        credit.save()
+
+        # ── Копировать строки вместе с корреспонденцией ──
+        # Juodraštyje kiekiai ir sumos lieka teigiami.
+        for li in original.line_items.order_by("sort_order", "id"):
+            new_li = InvoiceLineItem(invoice=credit)
+
+            for field in self.LINE_COPY_FIELDS:
+                setattr(new_li, field, getattr(li, field))
+
+            new_li.kredito_saskaita = li.kredito_saskaita
+            new_li.pvm_saskaita = li.pvm_saskaita
+            new_li.pirkimo_saskaita = li.pirkimo_saskaita
+            new_li.save()
+
+        return Response(
+            InvoiceDetailSerializer(credit, context={"request": request}).data,
+            status=status.HTTP_201_CREATED,
+        )
 
 
 # ════════════════════════════════════════════════════════════
@@ -8152,7 +8659,7 @@ from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .models import BankStatement, PaymentAllocation
+from .models import BankStatement, PaymentAllocation, IncomingTransaction, OutgoingTransaction, BankTransactionRule
 from .serializers import (
     BankStatementListSerializer,
     BankStatementUploadSerializer,
@@ -8160,6 +8667,7 @@ from .serializers import (
     ConfirmAllocationSerializer,
     InvoicePaymentDetailsSerializer,
     MarkPaidSerializer,
+    BankTransactionRuleSerializer,
 )
 from .services.payment_service import BankImportService, PaymentService, BankImportError
 
@@ -8230,13 +8738,65 @@ class StatementDetailView(generics.RetrieveDestroyAPIView):
         return BankStatement.objects.filter(user=self.request.user)
  
     def perform_destroy(self, instance):
-        if instance.status != "error":
-            from rest_framework.exceptions import ValidationError
-            raise ValidationError(
-                {"detail": "Galima ištrinti tik išrašus su klaida. "
-                           "Sėkmingai importuoti išrašai negali būti ištrinti."}
-            )
-        instance.delete()
+        from .models import PaymentAllocation, JournalEntry
+        from django.db import transaction
+
+        stmt_id = instance.id  # сохраняем до удаления
+
+        with transaction.atomic():
+            # ── 1. Собрать затронутые документы ──
+            affected_invoice_ids = set()
+            affected_purchase_ids = set()
+            je_ids_to_delete = set()
+
+            for alloc in PaymentAllocation.objects.filter(
+                incoming_transaction__bank_statement=instance,
+            ).select_related("invoice", "purchase"):
+                if alloc.invoice_id:
+                    affected_invoice_ids.add(alloc.invoice_id)
+                if alloc.purchase_id:
+                    affected_purchase_ids.add(alloc.purchase_id)
+                if alloc.journal_entry_id:
+                    je_ids_to_delete.add(alloc.journal_entry_id)
+
+            for alloc in PaymentAllocation.objects.filter(
+                outgoing_transaction__bank_statement=instance,
+            ).select_related("invoice", "purchase"):
+                if alloc.invoice_id:
+                    affected_invoice_ids.add(alloc.invoice_id)
+                if alloc.purchase_id:
+                    affected_purchase_ids.add(alloc.purchase_id)
+                if alloc.journal_entry_id:
+                    je_ids_to_delete.add(alloc.journal_entry_id)
+
+            for txn in instance.incoming_transactions.filter(journal_entry__isnull=False):
+                je_ids_to_delete.add(txn.journal_entry_id)
+            for txn in instance.outgoing_transactions.filter(journal_entry__isnull=False):
+                je_ids_to_delete.add(txn.journal_entry_id)
+
+            # ── 2. Удалить JE ──
+            if je_ids_to_delete:
+                JournalEntry.objects.filter(id__in=je_ids_to_delete).delete()
+
+            # ── 3. Удалить statement (CASCADE удалит txn → allocations) ──
+            instance.delete()
+
+            # ── 4. Пересчитать документы ──
+            if affected_invoice_ids:
+                from .models import Invoice
+                for inv in Invoice.objects.filter(id__in=affected_invoice_ids):
+                    inv.recalc_payment_status()
+
+            if affected_purchase_ids:
+                from .models import Purchase
+                for p in Purchase.objects.filter(id__in=affected_purchase_ids):
+                    p.recalc_from_allocations()
+
+        logger.info(
+            "[BankStatement] Deleted stmt %s: %d JEs, %d invoices, %d purchases recalculated",
+            stmt_id, len(je_ids_to_delete),
+            len(affected_invoice_ids), len(affected_purchase_ids),
+        )
 
 
 class StatementReMatchView(APIView):
@@ -8244,17 +8804,19 @@ class StatementReMatchView(APIView):
  
     def post(self, request, pk):
         stmt = get_object_or_404(BankStatement, pk=pk, user=request.user)
- 
+
         if stmt.status != "processed":
             return Response(
                 {"detail": "Pakartotinis susiejimas galimas tik apdorotiems išrašams."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
- 
+
         svc = BankImportService(request.user)
         svc.re_match_statement(stmt)
- 
-        # Auto SF for any newly auto_matched
+
+        stmt.refresh_stats()
+
+        # Auto SF for any newly auto_matched incoming invoices
         for txn in stmt.incoming_transactions.filter(match_status="auto_matched"):
             for alloc in txn.allocations.filter(status="auto"):
                 try:
@@ -8263,13 +8825,1289 @@ class StatementReMatchView(APIView):
                     if created_sf:
                         logger.info(
                             "[ReMatch] Auto SF created: %s for invoice %s",
-                            created_sf.full_number, alloc.invoice.full_number,
+                            created_sf.full_number,
+                            alloc.invoice.full_number,
                         )
                 except Exception as e:
                     logger.warning("[ReMatch] Auto SF failed: %s", e)
- 
+
         return Response(BankStatementListSerializer(stmt).data)
 
+
+
+class BankAccountMappingView(APIView):
+    """
+    GET  /api/invoicing/bank-accounts/ — список банковских счетов
+    POST /api/invoicing/bank-accounts/ — обновить kor. sąskaitą
+         Body: { key, account, label? }
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        from .models import CompanyProfile
+        cp = CompanyProfile.objects.filter(
+            user=request.user, is_active=True,
+        ).first()
+        if not cp:
+            return Response([])
+        return Response(cp.get_all_bank_accounts())
+
+    def post(self, request):
+        from .models import CompanyProfile
+        cp = CompanyProfile.objects.filter(
+            user=request.user, is_active=True,
+        ).first()
+        if not cp:
+            return Response(
+                {"detail": "Įmonės profilis nerastas."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        key = request.data.get("key", "").strip().upper()
+        account = request.data.get("account", "").strip()
+        label = request.data.get("label", "").strip()
+        new_iban = request.data.get("iban", "").strip().upper()
+        bank = request.data.get("bank", "").strip().lower()
+        currency = request.data.get("currency", "EUR").strip().upper()
+
+        if not key or not account:
+            return Response(
+                {"detail": "key ir account privalomi."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        mapping = cp.bank_accounts_mapping or {}
+
+        if key in mapping:
+            entry = dict(mapping[key])
+            entry["account"] = account
+
+            if label:
+                entry["label"] = label
+
+            if bank:
+                entry["bank"] = bank
+
+            if currency:
+                entry["currency"] = currency
+
+            # Jei pridėtas IBAN — perkelti iš seno rakto į naują
+            if new_iban and len(new_iban) >= 10 and new_iban != key:
+                del mapping[key]
+                mapping[new_iban] = entry
+            else:
+                mapping[key] = entry
+        else:
+            mapping[key] = {
+                "account": account,
+                "bank": bank,
+                "label": label,
+                "currency": currency,
+            }
+
+        cp.bank_accounts_mapping = mapping
+        cp.save(update_fields=["bank_accounts_mapping"])
+
+        return Response({"status": "updated", "accounts": cp.get_all_bank_accounts()})
+
+
+
+# ────────────────────────────────────────────────────────────
+# Bank Transactions (unified list + actions)
+# ────────────────────────────────────────────────────────────
+
+
+# ── Transaction type mapping ──────────────────────────────
+
+def get_tx_type_display(bank_operation_code: str) -> str:
+    """Человекочитаемый тип транзакции из bank_operation_code."""
+    code = (bank_operation_code or "").upper()
+    if not code:
+        return ""
+    # SEB / ISO 20022 patterns
+    if "PMNTCCRD" in code:
+        return "Mokėjimas kortele"
+    if "PMNTICDTBOOK" in code:
+        return "Banko pavedimas"
+    if "PMNTICDTESCT" in code or "PMNTRCDTESCT" in code:
+        return "Momentinis mokėjimas"
+    if "ACMTMDOP" in code:
+        return "Banko mokestis"
+    if "PMNTMCOP" in code:
+        return "Korektūra"
+    if "PMNTRCDTBOOK" in code:
+        return "Vidinis pervedimas"
+    # Swedbank patterns
+    if code == "K":
+        return "Korespondentinis"
+    if code == "MK":
+        return "Memorialinis"
+    if code == "TT":
+        return "Tarptautinis pervedimas"
+    if code == "M":
+        return "Mokestis"
+    return ""
+
+
+def _build_txn_allocations(allocs):
+    """Сериализовать allocations для таблицы."""
+    return [
+        {
+            "id": a.id,
+            "amount": str(a.amount),
+            "confidence": str(a.confidence),
+            "status": a.status,
+            "invoice_id": a.invoice_id,
+            "invoice_number": a.invoice.full_number if a.invoice else None,
+            "purchase_id": a.purchase_id,
+            "purchase_number": (
+                f"{a.purchase.document_series or ''}{a.purchase.document_number or ''}"
+                if a.purchase else None
+            ),
+            "document_preview_url": _get_alloc_preview_url(a),
+        }
+        for a in allocs
+    ]
+
+
+def _get_alloc_preview_url(alloc):
+    """Preview URL документа из allocation."""
+    try:
+        if alloc.purchase_id and alloc.purchase:
+            scan = alloc.purchase.scanned_document
+            if scan:
+                if scan.preview_url:
+                    return scan.preview_url
+                if scan.file:
+                    return scan.file.url
+        if alloc.invoice_id and alloc.invoice:
+            if alloc.invoice.pdf_file:
+                return alloc.invoice.pdf_file.url
+    except Exception:
+        return None
+    return None
+
+
+def _build_txn_light(txn, direction_str, allocs):
+    """Light dict для таблицы."""
+    return {
+        "id": txn.id,
+        "direction": direction_str,
+        "transaction_date": txn.transaction_date,
+        "counterparty_name": txn.counterparty_name or "",
+        "counterparty_code": txn.counterparty_code or "",
+        "amount": txn.amount,
+        "currency": txn.currency,
+        "tx_type": get_tx_type_display(txn.bank_operation_code),
+        "match_status": txn.match_status,
+        "transaction_category": txn.transaction_category or "",
+        "category_display": (
+            txn.get_transaction_category_display()
+            if txn.transaction_category else ""
+        ),
+        "statement_id": txn.bank_statement_id,
+        "bank_name": (
+            txn.bank_statement.get_bank_name_display()
+            if txn.bank_statement else ""
+        ),
+        "allocations": _build_txn_allocations(allocs),
+    }
+
+
+def _build_txn_full(txn, direction_str, allocs):
+    """Full dict для drawer."""
+    data = _build_txn_light(txn, direction_str, allocs)
+    data.update({
+        "uuid": txn.uuid,
+        "value_date": txn.value_date,
+        "counterparty_account": txn.counterparty_account or "",
+        "payment_purpose": txn.payment_purpose or "",
+        "bank_operation_code": txn.bank_operation_code or "",
+        "doc_number": txn.doc_number or "",
+        "reference_number": txn.reference_number or "",
+        "match_confidence": txn.match_confidence,
+        "match_details": txn.match_details or {},
+        "allocated_amount": txn.allocated_amount,
+        "category_account_debit": txn.category_account_debit or "",
+        "category_account_credit": txn.category_account_credit or "",
+    })
+    return data
+
+
+# ═══════════════════════════════════════════════════════
+# Замены в views.py — банковские транзакции
+# ═══════════════════════════════════════════════════════
+
+
+# ── 1. TransactionListView.get() ──────────────────────
+# Заменить apply_filters и stats целиком
+
+
+class TransactionListView(APIView):
+    """
+    GET /api/invoicing/bank-transactions/
+    Light data для таблицы (без payment_purpose).
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        user = request.user
+        limit = min(int(request.query_params.get("limit", 50)), 200)
+        offset = int(request.query_params.get("offset", 0))
+
+        stmt_id = request.query_params.get("statement_id")
+        direction = request.query_params.get("direction", "")
+        match_status = request.query_params.get("match_status", "")
+        category = request.query_params.get("category", "")
+        q = request.query_params.get("q", "").strip()
+
+        def apply_filters(qs, include_match_status=True):
+            if stmt_id:
+                qs = qs.filter(bank_statement_id=stmt_id)
+            if include_match_status and match_status:
+                if match_status == "needs_action":
+                    from django.db.models import Q
+                    qs = qs.filter(
+                        Q(match_status="likely_matched")
+                        | Q(match_status="unmatched", transaction_category="")
+                    )
+                elif match_status == "processed":
+                    qs = qs.filter(
+                        match_status__in=[
+                            "auto_matched", "confirmed",
+                            "manually_matched", "classified",
+                        ]
+                    )
+                else:
+                    qs = qs.filter(match_status=match_status)
+            if category:
+                if category == "uncategorized":
+                    qs = qs.filter(transaction_category="")
+                else:
+                    qs = qs.filter(transaction_category=category)
+            if q:
+                from django.db.models import Q
+                qs = qs.filter(
+                    Q(counterparty_name__icontains=q)
+                    | Q(counterparty_code__icontains=q)
+                    | Q(doc_number__icontains=q)
+                )
+            return qs
+
+        # Для результатов таблицы — с match_status фильтром
+        inc_qs = apply_filters(
+            IncomingTransaction.objects.filter(user=user).select_related("bank_statement")
+        )
+        out_qs = apply_filters(
+            OutgoingTransaction.objects.filter(user=user).select_related("bank_statement")
+        )
+
+        # Для stats — без match_status фильтра
+        inc_stats = apply_filters(
+            IncomingTransaction.objects.filter(user=user),
+            include_match_status=False,
+        )
+        out_stats = apply_filters(
+            OutgoingTransaction.objects.filter(user=user),
+            include_match_status=False,
+        )
+
+        if direction == "incoming":
+            out_qs = OutgoingTransaction.objects.none()
+        elif direction == "outgoing":
+            inc_qs = IncomingTransaction.objects.none()
+
+        total = inc_qs.count() + out_qs.count()
+
+        fetch_size = offset + limit + 10
+        inc_list = list(inc_qs.order_by("-transaction_date", "-id")[:fetch_size])
+        out_list = list(out_qs.order_by("-transaction_date", "-id")[:fetch_size])
+
+        merged = [("incoming", t) for t in inc_list] + [("outgoing", t) for t in out_list]
+        merged.sort(key=lambda x: (x[1].transaction_date, x[1].id), reverse=True)
+
+        # likely_matched вверху при фильтре "Reikia veiksmų"
+        if match_status == "needs_action":
+            merged.sort(key=lambda x: (0 if x[1].match_status == "likely_matched" else 1))
+
+        page = merged[offset:offset + limit]
+
+        results = []
+        for dir_str, txn in page:
+            results.append({
+                "id": txn.id,
+                "direction": dir_str,
+                "transaction_date": txn.transaction_date,
+                "counterparty_name": txn.counterparty_name or "",
+                "counterparty_code": txn.counterparty_code or "",
+                "amount": txn.amount,
+                "currency": txn.currency,
+                "tx_type": get_tx_type_display(txn.bank_operation_code),
+                "match_status": txn.match_status,
+                "transaction_category": txn.transaction_category or "",
+                "category_display": (
+                    txn.get_transaction_category_display()
+                    if txn.transaction_category else ""
+                ),
+                "matched_document_number": txn.matched_document_number or "",
+                "match_confidence": txn.match_confidence,
+                "statement_id": txn.bank_statement_id,
+                "bank_name": (
+                    txn.bank_statement.get_bank_name_display()
+                    if txn.bank_statement else ""
+                ),
+            })
+
+        # ── Stats: 3 карточки ──
+        def count_status(qs, status):
+            return qs.filter(match_status=status).count()
+
+        processed_statuses = [
+            "auto_matched", "confirmed", "manually_matched", "classified",
+        ]
+
+        stats = {
+            "total": inc_stats.count() + out_stats.count(),
+            "processed": sum(
+                count_status(inc_stats, s) + count_status(out_stats, s)
+                for s in processed_statuses
+            ),
+            "needs_action": (
+                count_status(inc_stats, "likely_matched")
+                + count_status(out_stats, "likely_matched")
+                + inc_stats.filter(
+                    match_status="unmatched", transaction_category="",
+                ).count()
+                + out_stats.filter(
+                    match_status="unmatched", transaction_category="",
+                ).count()
+            ),
+        }
+
+        return Response({
+            "count": total,
+            "stats": stats,
+            "results": results,
+        })
+
+
+# ── 2. TransactionDetailView.get() ───────────────────
+# Добавить select_related("purchase__scanned_document")
+
+
+class TransactionDetailView(APIView):
+    """
+    GET /api/invoicing/bank-transactions/<id>/?direction=outgoing
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request, pk):
+        direction = request.query_params.get("direction", "")
+        txn = None
+        direction_str = direction
+
+        if direction == "incoming":
+            txn = IncomingTransaction.objects.filter(
+                id=pk, user=request.user,
+            ).select_related("bank_statement").first()
+        elif direction == "outgoing":
+            txn = OutgoingTransaction.objects.filter(
+                id=pk, user=request.user,
+            ).select_related("bank_statement").first()
+        else:
+            txn = OutgoingTransaction.objects.filter(
+                id=pk, user=request.user,
+            ).select_related("bank_statement").first()
+            if txn:
+                direction_str = "outgoing"
+            else:
+                txn = IncomingTransaction.objects.filter(
+                    id=pk, user=request.user,
+                ).select_related("bank_statement").first()
+                direction_str = "incoming"
+
+        if not txn:
+            return Response({"detail": "Nerasta."}, status=status.HTTP_404_NOT_FOUND)
+
+        fk = "incoming_transaction" if direction_str == "incoming" else "outgoing_transaction"
+        allocs = list(
+            PaymentAllocation.objects.filter(
+                **{fk: txn}
+            ).select_related("invoice", "purchase", "purchase__scanned_document")
+        )
+
+        data = _build_txn_full(txn, direction_str, allocs)
+        return Response(data)
+
+
+# ── 3. _build_txn_full — добавить journal_entry_id ────
+
+
+def _build_txn_full(txn, direction_str, allocs):
+    """Full dict для dialog."""
+    data = _build_txn_light(txn, direction_str, allocs)
+    data.update({
+        "uuid": txn.uuid,
+        "value_date": txn.value_date,
+        "counterparty_account": txn.counterparty_account or "",
+        "payment_purpose": txn.payment_purpose or "",
+        "bank_operation_code": txn.bank_operation_code or "",
+        "doc_number": txn.doc_number or "",
+        "reference_number": txn.reference_number or "",
+        "match_confidence": txn.match_confidence,
+        "match_details": txn.match_details or {},
+        "allocated_amount": txn.allocated_amount,
+        "category_account_debit": txn.category_account_debit or "",
+        "category_account_credit": txn.category_account_credit or "",
+        "journal_entry_id": txn.journal_entry_id,
+    })
+    return data
+
+
+# ── 4. _build_txn_allocations + preview URL ──────────
+
+
+def _build_txn_allocations(allocs):
+    """Сериализовать allocations для dialog."""
+    return [
+        {
+            "id": a.id,
+            "amount": str(a.amount),
+            "confidence": str(a.confidence),
+            "status": a.status,
+            "invoice_id": a.invoice_id,
+            "invoice_number": a.invoice.full_number if a.invoice else None,
+            "purchase_id": a.purchase_id,
+            "purchase_number": (
+                f"{a.purchase.document_series or ''}{a.purchase.document_number or ''}"
+                if a.purchase else None
+            ),
+            "document_preview_url": _get_alloc_preview_url(a),
+        }
+        for a in allocs
+    ]
+
+
+def _get_alloc_preview_url(alloc):
+    """Preview URL документа из allocation."""
+    try:
+        if alloc.purchase_id and alloc.purchase:
+            scan = alloc.purchase.scanned_document
+            if scan:
+                if scan.preview_url:
+                    return scan.preview_url
+                if scan.file:
+                    return scan.file.url
+        if alloc.invoice_id and alloc.invoice:
+            if alloc.invoice.pdf_file:
+                return alloc.invoice.pdf_file.url
+    except Exception:
+        return None
+    return None
+
+
+class BankMatchingDebugView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        statement_id = request.query_params.get("statement_id")
+        only_unmatched = str(request.query_params.get("only_unmatched", "true")).lower() == "true"
+
+        if not statement_id:
+            return Response(
+                {"detail": "statement_id is required"},
+                status=400,
+            )
+
+        stmt = get_object_or_404(
+            BankStatement,
+            id=statement_id,
+            user=request.user,
+        )
+
+        qs = (
+            stmt.outgoing_transactions
+            .all()
+            .order_by("transaction_date", "id")
+        )
+
+        # Debug page: показываем всё, кроме уже вручную подтверждённых,
+        # чтобы видеть и unmatched, и likely, и auto.
+        if only_unmatched:
+            qs = qs.exclude(match_status__in=[
+                "confirmed",
+                "manually_matched",
+            ])
+
+        from .utils.purchase_matching_signals import SignalPurchaseMatchingEngine
+
+        signal_engine = SignalPurchaseMatchingEngine(request.user)
+
+        # Загружаем candidates один раз, чтобы не делать query на каждую txn
+        signal_candidates = [
+            signal_engine._purchase_to_candidate(p)
+            for p in signal_engine._load_purchases()
+        ]
+
+        items = []
+
+        summary = {
+            "transactions": 0,
+
+            "actual_auto_matched": 0,
+            "actual_likely_matched": 0,
+            "actual_unmatched": 0,
+
+            "signal_auto_matched": 0,
+            "signal_likely_matched": 0,
+            "signal_unmatched": 0,
+            "signal_skipped": 0,
+        }
+
+        for txn in qs:
+            summary["transactions"] += 1
+
+            actual_match = self._build_actual_match(txn)
+
+            try:
+                signal_result = signal_engine._match_one(txn, signal_candidates)
+                signal_match = self._build_signal_match(signal_result)
+            except Exception as e:
+                logger.exception("[BankMatchingDebug] signal dry-run failed txn=%s", txn.id)
+                signal_match = {
+                    "status": "error",
+                    "confidence": "0",
+                    "confidence_pct": 0,
+                    "error": str(e),
+                    "purchase": None,
+                    "amount": "0",
+                    "matched_document_number": "",
+                    "reasons": {},
+                    "signals": {},
+                }
+
+            actual_status = actual_match.get("status") or "unmatched"
+            signal_status = signal_match.get("status") or "unmatched"
+
+            if actual_status == "auto_matched":
+                summary["actual_auto_matched"] += 1
+            elif actual_status == "likely_matched":
+                summary["actual_likely_matched"] += 1
+            else:
+                summary["actual_unmatched"] += 1
+
+            if signal_match.get("signals", {}).get("skip_matching"):
+                summary["signal_skipped"] += 1
+
+            if signal_status == "auto_matched":
+                summary["signal_auto_matched"] += 1
+            elif signal_status == "likely_matched":
+                summary["signal_likely_matched"] += 1
+            else:
+                summary["signal_unmatched"] += 1
+
+            # Backward-compatible fields, чтобы старый frontend не падал
+            display_match = actual_match if actual_status != "unmatched" else signal_match
+            display_purchase = display_match.get("purchase")
+
+            best_candidate = None
+            if display_purchase:
+                best_candidate = {
+                    **display_purchase,
+                    "score": display_match.get("confidence_pct", 0),
+                    "decision": display_match.get("status", "unmatched"),
+                    "reasons": self._short_reasons(display_match),
+                    "warnings": [],
+                }
+
+            items.append({
+                "transaction": self._serialize_txn(txn),
+                "actual_match": actual_match,
+                "signal_match": signal_match,
+
+                # deprecated, only for old UI compatibility
+                "best_candidate": best_candidate,
+                "candidates": [],
+            })
+
+        return Response({
+            "statement": {
+                "id": stmt.id,
+                "bank_name": stmt.bank_name,
+                "filename": stmt.original_filename,
+                "period_from": stmt.period_from.isoformat() if stmt.period_from else None,
+                "period_to": stmt.period_to.isoformat() if stmt.period_to else None,
+                "currency": stmt.currency,
+            },
+            "summary": summary,
+            "items": items,
+        })
+
+    def _build_actual_match(self, txn):
+        alloc = (
+            PaymentAllocation.objects
+            .filter(outgoing_transaction=txn)
+            .select_related("purchase")
+            .order_by("-confidence", "-created_at")
+            .first()
+        )
+
+        purchase = None
+        if alloc and alloc.purchase:
+            purchase = self._serialize_purchase(alloc.purchase)
+
+        details = txn.match_details or {}
+        signals = details.get("signals") or {}
+
+        return {
+            "status": txn.match_status or "unmatched",
+            "confidence": str(txn.match_confidence or "0"),
+            "confidence_pct": self._confidence_pct(txn.match_confidence),
+            "matched_document_number": txn.matched_document_number or "",
+            "allocated_amount": str(txn.allocated_amount or "0"),
+            "purchase": purchase,
+            "allocation": self._serialize_allocation(alloc) if alloc else None,
+            "match_details": details,
+            "signals": signals,
+        }
+
+    def _build_signal_match(self, result):
+        purchase = None
+
+        if result.purchase_id:
+            try:
+                purchase = self._serialize_purchase(
+                    Purchase.objects.get(id=result.purchase_id, user=self.request.user)
+                )
+            except Purchase.DoesNotExist:
+                purchase = None
+
+        return {
+            "status": result.status or "unmatched",
+            "confidence": str(result.confidence or "0"),
+            "confidence_pct": self._confidence_pct(result.confidence),
+            "matched_document_number": result.matched_document_number or "",
+            "amount": str(result.amount or "0"),
+            "purchase": purchase,
+            "reasons": result.reasons or {},
+            "signals": result.signals or {},
+        }
+
+    def _serialize_txn(self, txn):
+        return {
+            "id": txn.id,
+            "transaction_date": txn.transaction_date.isoformat() if txn.transaction_date else None,
+            "amount": str(txn.amount),
+            "currency": txn.currency,
+            "counterparty_name": txn.counterparty_name or "",
+            "counterparty_code": txn.counterparty_code or "",
+            "counterparty_account": txn.counterparty_account or "",
+            "payment_purpose": txn.payment_purpose or "",
+            "reference_number": txn.reference_number or "",
+            "doc_number": txn.doc_number or "",
+            "bank_operation_code": txn.bank_operation_code or "",
+            "match_status": txn.match_status or "unmatched",
+            "match_confidence": str(txn.match_confidence or "0"),
+            "matched_document_number": txn.matched_document_number or "",
+            "transaction_category": txn.transaction_category or "",
+            "allocated_amount": str(txn.allocated_amount or "0"),
+        }
+
+    def _serialize_purchase(self, p):
+        series = getattr(p, "document_series", "") or ""
+        number = getattr(p, "document_number", "") or ""
+        full_number = getattr(p, "full_number", "") or f"{series}{number}".strip()
+
+        return {
+            "id": p.id,
+            "full_number": full_number,
+            "document_series": series,
+            "document_number": number,
+            "invoice_date": p.invoice_date.isoformat() if p.invoice_date else None,
+            "seller_name": getattr(p, "seller_name", "") or "",
+            "seller_id": (
+                getattr(p, "seller_id", "") or
+                getattr(p, "seller_code", "") or
+                ""
+            ),
+            "seller_iban": getattr(p, "seller_iban", "") or "",
+            "amount_with_vat": str(getattr(p, "amount_with_vat", "") or "0"),
+            "paid_amount": str(getattr(p, "paid_amount", "") or "0"),
+            "currency": getattr(p, "currency", "") or "EUR",
+            "payment_status": getattr(p, "payment_status", "") or "",
+        }
+
+    def _serialize_allocation(self, alloc):
+        if not alloc:
+            return None
+
+        return {
+            "id": alloc.id,
+            "status": alloc.status,
+            "source": alloc.source,
+            "amount": str(alloc.amount),
+            "confidence": str(alloc.confidence or "0"),
+            "payment_date": alloc.payment_date.isoformat() if alloc.payment_date else None,
+            "purchase_id": alloc.purchase_id,
+            "match_reasons": alloc.match_reasons or {},
+        }
+
+    def _confidence_pct(self, value):
+        try:
+            d = Decimal(str(value or "0"))
+            if d <= Decimal("1"):
+                return int((d * Decimal("100")).quantize(Decimal("1")))
+            return int(d.quantize(Decimal("1")))
+        except Exception:
+            return 0
+
+    def _short_reasons(self, match):
+        reasons = []
+
+        signals = match.get("signals") or {}
+        if signals.get("merchant_name_clean"):
+            reasons.append(f"Merchant: {signals.get('merchant_name_clean')}")
+
+        refs = signals.get("references") or []
+        if refs:
+            refs_text = ", ".join(
+                r.get("value", "")
+                for r in refs[:3]
+                if r.get("value")
+            )
+            if refs_text:
+                reasons.append(f"Refs: {refs_text}")
+
+        if signals.get("original_amount"):
+            reasons.append(
+                f"Original amount: {signals.get('original_amount')} {signals.get('original_currency')}"
+            )
+
+        if signals.get("conversion_fee"):
+            reasons.append(
+                f"FX fee: {signals.get('conversion_fee')} {signals.get('settled_currency') or ''}"
+            )
+
+        if not reasons and match.get("matched_document_number"):
+            reasons.append(f"Matched: {match.get('matched_document_number')}")
+
+        return reasons
+
+
+class TransactionClassifyView(APIView):
+    """
+    POST /api/bank-import/transactions/<id>/classify/
+    Body: { category, debit_account, credit_account, create_rule?, apply_to_similar? }
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, pk):
+        from .serializers import TransactionClassifySerializer
+        from .models import (
+            IncomingTransaction, OutgoingTransaction,
+            BankTransactionRule, CompanyProfile,
+        )
+        from .services.accounting_transfer import (
+            create_je_for_classified_transaction,
+        )
+
+        ser = TransactionClassifySerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        data = ser.validated_data
+
+        # Find transaction
+        txn = None
+        direction_str = ""
+        try:
+            txn = OutgoingTransaction.objects.select_related(
+                "bank_statement",
+            ).get(id=pk, user=request.user)
+            direction_str = "outgoing"
+        except OutgoingTransaction.DoesNotExist:
+            try:
+                txn = IncomingTransaction.objects.select_related(
+                    "bank_statement",
+                ).get(id=pk, user=request.user)
+                direction_str = "incoming"
+            except IncomingTransaction.DoesNotExist:
+                return Response(
+                    {"detail": "Operacija nerasta."},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+
+        # Apply classification
+        CATEGORY_DEFAULTS = {
+            "bank_fee": "6880",
+            "tax_vmi": "4481",
+            "tax_sodra": "4482",
+            "salary": "4491",
+            "owner_withdrawal": "3120",
+            "owner_deposit": "3120",
+            "loan_payment": "3011",
+            "loan_received": "4010",
+            "provider_payout": "2719",
+        }
+
+        category = data["category"]
+        debit = data.get("debit_account", "").strip()
+        credit = data.get("credit_account", "").strip()
+
+        # Auto-fill default если юзер не указал
+        if not debit and category in CATEGORY_DEFAULTS:
+            debit = CATEGORY_DEFAULTS[category]
+
+        txn.transaction_category = category
+        txn.category_account_debit = debit
+        txn.category_account_credit = credit
+        txn.save(update_fields=[
+            "transaction_category",
+            "category_account_debit",
+            "category_account_credit",
+            "updated_at",
+        ])
+
+        # Auto JE
+        cp = CompanyProfile.objects.filter(
+            user=request.user, is_active=True,
+        ).first()
+        if cp and data.get("debit_account"):
+            try:
+                create_je_for_classified_transaction(txn, cp)
+            except Exception as e:
+                logger.warning("[Classify] JE failed: %s", e)
+
+        # Create rule
+        if data.get("create_rule") and cp:
+            rule_name = data.get("rule_name") or (
+                f"{txn.get_transaction_category_display()} – "
+                f"{txn.counterparty_name or 'be pavadinimo'}"
+            )
+            BankTransactionRule.objects.create(
+                user=request.user,
+                company_profile=cp,
+                name=rule_name[:255],
+                match_field="counterparty_name",
+                match_operator="contains",
+                match_value=(txn.counterparty_name or "")[:500],
+                direction="debit" if direction_str == "outgoing" else "credit",
+                category=data["category"],
+                debit_account=data.get("debit_account", ""),
+                credit_account=data.get("credit_account", ""),
+                auto_create_je=True,
+            )
+
+        # Apply to similar
+        applied_count = 0
+        if data.get("apply_to_similar") and txn.counterparty_name:
+            from .utils.transaction_classifier import find_similar_transactions
+
+            if direction_str == "outgoing":
+                all_txns = list(OutgoingTransaction.objects.filter(
+                    user=request.user,
+                    match_status="unmatched",
+                    transaction_category="",
+                ))
+            else:
+                all_txns = list(IncomingTransaction.objects.filter(
+                    user=request.user,
+                    match_status="unmatched",
+                    transaction_category="",
+                ))
+
+            similar = find_similar_transactions(txn, all_txns)
+            for sim in similar:
+                sim.transaction_category = data["category"]
+                sim.category_account_debit = data.get("debit_account", "")
+                sim.category_account_credit = data.get("credit_account", "")
+                sim.save(update_fields=[
+                    "transaction_category",
+                    "category_account_debit",
+                    "category_account_credit",
+                    "updated_at",
+                ])
+                if cp and data.get("debit_account"):
+                    try:
+                        create_je_for_classified_transaction(sim, cp)
+                    except Exception as e:
+                        logger.warning("[Classify] JE for similar %s failed: %s", sim.id, e)
+                applied_count += 1
+
+        return Response({
+            "status": "classified",
+            "category": data["category"],
+            "applied_to_similar": applied_count,
+        })
+
+
+class TransactionManualMatchView(APIView):
+    """
+    POST /api/bank-import/transactions/<id>/match/
+    Body: { invoice_id?, purchase_id?, amount? }
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, pk):
+        from .serializers import TransactionManualMatchSerializer
+        from .models import (
+            IncomingTransaction, OutgoingTransaction,
+            PaymentAllocation, Invoice, Purchase,
+        )
+        from .services.accounting_transfer import create_je_for_allocation
+
+        ser = TransactionManualMatchSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        data = ser.validated_data
+
+        invoice_id = data.get("invoice_id")
+        purchase_id = data.get("purchase_id")
+
+        if not invoice_id and not purchase_id:
+            return Response(
+                {"detail": "Nurodykite invoice_id arba purchase_id."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Find transaction
+        txn = None
+        is_incoming = False
+        try:
+            txn = OutgoingTransaction.objects.get(id=pk, user=request.user)
+        except OutgoingTransaction.DoesNotExist:
+            try:
+                txn = IncomingTransaction.objects.get(id=pk, user=request.user)
+                is_incoming = True
+            except IncomingTransaction.DoesNotExist:
+                return Response(
+                    {"detail": "Operacija nerasta."},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+
+        # Validate direction
+        if is_incoming and purchase_id:
+            return Response(
+                {"detail": "Įplauka negali būti susieta su pirkimo dokumentu."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if not is_incoming and invoice_id:
+            return Response(
+                {"detail": "Išlaida negali būti susieta su pardavimo sąskaita."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Get document
+        invoice = None
+        purchase = None
+        if invoice_id:
+            invoice = get_object_or_404(Invoice, pk=invoice_id, user=request.user)
+        if purchase_id:
+            purchase = get_object_or_404(Purchase, pk=purchase_id, user=request.user)
+
+        amount = data.get("amount") or txn.amount
+
+        # Create allocation
+        alloc_kwargs = {
+            "amount": amount,
+            "source": "bank_import",
+            "status": "manual",
+            "confidence": Decimal("1.00"),
+            "match_reasons": {"manual_match": True},
+            "payment_date": txn.transaction_date,
+            "confirmed_at": timezone.now(),
+            "confirmed_by": request.user,
+        }
+
+        if is_incoming:
+            alloc, _ = PaymentAllocation.objects.update_or_create(
+                incoming_transaction=txn,
+                invoice=invoice,
+                defaults=alloc_kwargs,
+            )
+        else:
+            alloc, _ = PaymentAllocation.objects.update_or_create(
+                outgoing_transaction=txn,
+                purchase=purchase,
+                defaults=alloc_kwargs,
+            )
+
+        # Update transaction
+        from django.db.models import Sum
+        total_alloc = txn.allocations.aggregate(t=Sum("amount"))["t"] or Decimal("0")
+        txn.allocated_amount = total_alloc
+        if invoice:
+            txn.matched_document_number = invoice.full_number
+        elif purchase:
+            txn.matched_document_number = f"{purchase.document_series or ''}{purchase.document_number or ''}".strip()
+        txn.transaction_category = "customer_receipt" if is_incoming else "supplier_payment"
+        txn.save(update_fields=[
+            "allocated_amount", "match_status",
+            "transaction_category", "updated_at",
+        ])
+
+        # Recalc document
+        if invoice:
+            invoice.recalc_payment_status()
+        if purchase:
+            purchase.recalc_from_allocations()
+
+        # Auto JE
+        try:
+            create_je_for_allocation(alloc)
+        except Exception as e:
+            logger.warning("[ManualMatch] JE failed: %s", e)
+
+        # Refresh statement
+        if txn.bank_statement:
+            txn.bank_statement.refresh_stats()
+
+        return Response({
+            "status": "matched",
+            "allocation_id": alloc.id,
+        })
+
+
+class BankTransactionRuleListView(generics.ListCreateAPIView):
+    """GET/POST /api/bank-import/rules/"""
+    permission_classes = [permissions.IsAuthenticated]
+    serializer_class = BankTransactionRuleSerializer
+
+    def get_queryset(self):
+        return BankTransactionRule.objects.filter(user=self.request.user)
+
+    def perform_create(self, serializer):
+        from .models import CompanyProfile
+        cp = CompanyProfile.objects.filter(
+            user=self.request.user, is_active=True,
+        ).first()
+        if not cp:
+            from rest_framework.exceptions import ValidationError
+            raise ValidationError({"detail": "Reikia sukurti įmonės profilį."})
+        serializer.save(user=self.request.user, company_profile=cp)
+
+
+class BankTransactionRuleDetailView(generics.RetrieveUpdateDestroyAPIView):
+    """GET/PUT/DELETE /api/bank-import/rules/<id>/"""
+    permission_classes = [permissions.IsAuthenticated]
+    serializer_class = BankTransactionRuleSerializer
+
+    def get_queryset(self):
+        return BankTransactionRule.objects.filter(user=self.request.user)
+
+
+class AllocationPreviewView(APIView):
+    """
+    GET /api/invoicing/allocations/<id>/preview/
+    Возвращает документ + matching criteria для preview dialog.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request, pk):
+        from django.db.models import Q
+
+        alloc = PaymentAllocation.objects.select_related(
+            "invoice", "purchase",
+            "incoming_transaction", "outgoing_transaction",
+        ).filter(
+            Q(invoice__user=request.user) | Q(purchase__user=request.user),
+            id=pk,
+        ).first()
+
+        if not alloc:
+            return Response({"detail": "Nerasta."}, status=status.HTTP_404_NOT_FOUND)
+
+        result = {
+            "id": alloc.id,
+            "amount": alloc.amount,
+            "confidence": alloc.confidence,
+            "status": alloc.status,
+            "source": alloc.source,
+            "payment_date": alloc.effective_payment_date,
+            "match_reasons": alloc.match_reasons or {},
+            "direction": alloc.direction,
+        }
+
+        # Document info
+        if alloc.invoice:
+            inv = alloc.invoice
+            result["document_type"] = "invoice"
+            result["document"] = {
+                "id": inv.id,
+                "full_number": inv.full_number,
+                "invoice_type": inv.invoice_type,
+                "invoice_date": inv.invoice_date,
+                "due_date": inv.due_date,
+                "buyer_name": inv.buyer_name or "",
+                "buyer_id": inv.buyer_id or "",
+                "seller_name": inv.seller_name or "",
+                "seller_id": inv.seller_id or "",
+                "amount_with_vat": inv.amount_with_vat,
+                "amount_wo_vat": inv.amount_wo_vat,
+                "vat_amount": inv.vat_amount,
+                "currency": inv.currency or "EUR",
+                "status": inv.status,
+                "payment_status": inv.payment_status,
+                "is_from_scan": inv.is_from_scan,
+                "scanned_document_id": inv.scanned_document_id,
+            }
+        elif alloc.purchase:
+            p = alloc.purchase
+            result["document_type"] = "purchase"
+            result["document"] = {
+                "id": p.id,
+                "full_number": f"{p.document_series or ''}{p.document_number or ''}".strip(),
+                "document_series": p.document_series or "",
+                "document_number": p.document_number or "",
+                "invoice_date": p.invoice_date,
+                "due_date": p.due_date,
+                "seller_name": p.seller_name or "",
+                "seller_id": p.seller_id or "",
+                "seller_iban": p.seller_iban or "",
+                "amount_with_vat": p.amount_with_vat,
+                "amount_wo_vat": p.amount_wo_vat,
+                "vat_amount": p.vat_amount,
+                "currency": p.currency or "EUR",
+                "payment_status": p.payment_status,
+                "scanned_document_id": p.scanned_document_id,
+            }
+
+        # Transaction info
+        txn = alloc.transaction
+        if txn:
+            result["transaction"] = {
+                "id": txn.id,
+                "transaction_date": txn.transaction_date,
+                "counterparty_name": txn.counterparty_name or "",
+                "amount": txn.amount,
+                "payment_purpose": txn.payment_purpose or "",
+            }
+
+        return Response(result)
+
+
+class TransactionDKTemplatesView(APIView):
+    """
+    GET /api/bank-import/transactions/<id>/dk-templates/
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request, pk):
+        from .services.bank_dk_register import BankDKRegisterService
+
+        txn, direction = self._find_txn(pk, request.user)
+        if not txn:
+            return Response({"detail": "Operacija nerasta."}, status=status.HTTP_404_NOT_FOUND)
+
+        cp = CompanyProfile.objects.filter(user=request.user, is_active=True).first()
+        svc = BankDKRegisterService(request.user, cp)
+        data = svc.get_templates_for_transaction(txn, direction)
+
+        return Response(data)
+
+    @staticmethod
+    def _find_txn(pk, user):
+        try:
+            return OutgoingTransaction.objects.select_related("bank_statement").get(id=pk, user=user), "outgoing"
+        except OutgoingTransaction.DoesNotExist:
+            pass
+        try:
+            return IncomingTransaction.objects.select_related("bank_statement").get(id=pk, user=user), "incoming"
+        except IncomingTransaction.DoesNotExist:
+            pass
+        return None, ""
+
+
+class TransactionRegisterDKView(APIView):
+    """
+    POST /api/bank-import/transactions/<id>/register-dk/
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, pk):
+        from .services.bank_dk_register import BankDKRegisterService
+
+        txn, direction = self._find_txn(pk, request.user)
+        if not txn:
+            return Response({"detail": "Operacija nerasta."}, status=status.HTTP_404_NOT_FOUND)
+
+        lines = request.data.get("lines", [])
+        description = request.data.get("description", "")
+        category = request.data.get("category", "")
+
+        cp = CompanyProfile.objects.filter(user=request.user, is_active=True).first()
+        if not cp:
+            return Response({"detail": "Reikia sukurti įmonės profilį."}, status=status.HTTP_400_BAD_REQUEST)
+
+        svc = BankDKRegisterService(request.user, cp)
+
+        try:
+            entry = svc.register_dk(txn, direction, lines, description)
+        except ValueError as e:
+            return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Category
+        if category:
+            txn.refresh_from_db()
+            txn.transaction_category = category
+            txn.save(update_fields=["transaction_category", "updated_at"])
+
+        # Rule
+        if request.data.get("create_rule") and cp:
+            rule_name = request.data.get("rule_name") or (txn.counterparty_name or "Operacija")
+            debit_codes = [l["account_code"] for l in lines if l.get("side") == "debit"]
+            credit_codes = [l["account_code"] for l in lines if l.get("side") == "credit"]
+
+            BankTransactionRule.objects.create(
+                user=request.user,
+                company_profile=cp,
+                name=rule_name[:255],
+                match_field="counterparty_name",
+                match_operator="contains",
+                match_value=(txn.counterparty_name or "")[:500],
+                direction="debit" if direction == "outgoing" else "credit",
+                category=category or "other_expense",
+                debit_account=debit_codes[0] if debit_codes else "",
+                credit_account=credit_codes[0] if credit_codes else "",
+                auto_create_je=True,
+            )
+
+        # Apply to similar
+        applied_count = 0
+        if request.data.get("apply_to_similar") and txn.counterparty_name and category:
+            from .utils.transaction_classifier import find_similar_transactions
+
+            Model = OutgoingTransaction if direction == "outgoing" else IncomingTransaction
+            all_txns = list(Model.objects.filter(
+                user=request.user, match_status="unmatched", transaction_category="",
+            ))
+            similar = find_similar_transactions(txn, all_txns)
+
+            for sim in similar:
+                try:
+                    svc.register_dk(sim, direction, lines, description)
+                    if category:
+                        sim.refresh_from_db()
+                        sim.transaction_category = category
+                        sim.save(update_fields=["transaction_category", "updated_at"])
+                    applied_count += 1
+                except Exception as e:
+                    logger.warning("[RegisterDK] Similar txn %s failed: %s", sim.id, e)
+
+        return Response({
+            "status": "registered",
+            "journal_entry_id": entry.id,
+            "applied_to_similar": applied_count,
+        })
+
+    @staticmethod
+    def _find_txn(pk, user):
+        try:
+            return OutgoingTransaction.objects.select_related("bank_statement").get(id=pk, user=user), "outgoing"
+        except OutgoingTransaction.DoesNotExist:
+            pass
+        try:
+            return IncomingTransaction.objects.select_related("bank_statement").get(id=pk, user=user), "incoming"
+        except IncomingTransaction.DoesNotExist:
+            pass
+        return None, ""
 
 # ────────────────────────────────────────────────────────────
 # Invoice Payment Details (для PaymentProofDialog)
@@ -8434,26 +10272,46 @@ class ImportStatsView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):
-        from .models import IncomingTransaction
+        from .models import IncomingTransaction, OutgoingTransaction
         from django.db.models import Sum
 
         user = request.user
         stmts = BankStatement.objects.filter(user=user)
-        txns = IncomingTransaction.objects.filter(user=user)
+        inc = IncomingTransaction.objects.filter(user=user)
+        out = OutgoingTransaction.objects.filter(user=user)
 
         return Response({
             "total_statements": stmts.count(),
-            "total_incoming": txns.count(),
-            "auto_matched": txns.filter(match_status="auto_matched").count(),
-            "likely_matched": txns.filter(match_status="likely_matched").count(),
-            "confirmed": txns.filter(match_status="confirmed").count(),
-            "unmatched": txns.filter(match_status="unmatched").count(),
+            "total_incoming": inc.count(),
+            "total_outgoing": out.count(),
+            "auto_matched": (
+                inc.filter(match_status="auto_matched").count()
+                + out.filter(match_status="auto_matched").count()
+            ),
+            "likely_matched": (
+                inc.filter(match_status="likely_matched").count()
+                + out.filter(match_status="likely_matched").count()
+            ),
+            "confirmed": (
+                inc.filter(match_status="confirmed").count()
+                + out.filter(match_status="confirmed").count()
+            ),
+            "unmatched": (
+                inc.filter(match_status="unmatched").count()
+                + out.filter(match_status="unmatched").count()
+            ),
             "total_credit_amount": (
-                txns.aggregate(t=Sum("amount"))["t"] or 0
+                inc.aggregate(t=Sum("amount"))["t"] or 0
+            ),
+            "total_debit_amount": (
+                out.aggregate(t=Sum("amount"))["t"] or 0
             ),
             "total_allocated_amount": (
                 PaymentAllocation.objects
-                .filter(invoice__user=user, status__in=["confirmed", "auto", "manual"])
+                .filter(
+                    models.Q(invoice__user=user) | models.Q(purchase__user=user),
+                    status__in=["confirmed", "auto", "manual"],
+                )
                 .aggregate(t=Sum("amount"))["t"] or 0
             ),
         })
@@ -13378,3 +15236,3212 @@ def waybill_cancel_blocked(request, session_id):
 # ────────────────────────────────────────────────────────────
 
 
+class CompanyProfileViewSet(viewsets.ModelViewSet):
+    serializer_class = CompanyProfileSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        return CompanyProfile.objects.filter(user=self.request.user)
+
+    def perform_destroy(self, instance):
+        user = self.request.user
+        count = user.company_profiles.count()
+        if count <= 1:
+            raise ValidationError(
+                {"detail": "Negalima pašalinti paskutinės įmonės."}
+            )
+
+        was_active = user.active_company_profile_id == instance.id
+        instance.delete()
+
+        if was_active:
+            new_active = user.company_profiles.first()
+            user.active_company_profile = new_active
+            user.save(update_fields=["active_company_profile"])
+
+    @action(detail=True, methods=["post"], url_path="set-active")
+    def set_active(self, request, pk=None):
+        profile = self.get_object()
+        user = request.user
+        user.active_company_profile = profile
+
+        update_fields = ["active_company_profile"]
+        if profile.accounting_program:
+            user.default_accounting_program = profile.accounting_program
+            update_fields.append("default_accounting_program")
+
+        user.save(update_fields=update_fields)
+        return Response({"detail": "OK", "active_id": profile.id})
+
+
+
+
+
+# ────────────────────────────────────────────────────────────
+# ─── Pirkimai ───
+# ────────────────────────────────────────────────────────────
+
+from django.db.models import Count, Prefetch
+from rest_framework import status, viewsets
+from rest_framework.decorators import action
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+from rest_framework.pagination import LimitOffsetPagination
+
+class PurchasePagination(LimitOffsetPagination):
+    default_limit = 50
+    max_limit = 100
+
+class PurchaseViewSet(viewsets.ModelViewSet):
+    serializer_class = PurchaseSerializer
+    permission_classes = [IsAuthenticated]
+    pagination_class = PurchasePagination
+
+    def get_queryset(self):
+        qs = (
+            Purchase.objects
+            .filter(user=self.request.user)
+            .select_related("company_profile", "scanned_document")
+            .annotate(line_items_count=Count("line_items"))
+        )
+
+        # Company filter
+        company_id = self.request.query_params.get("company_profile")
+        if company_id:
+            qs = qs.filter(company_profile_id=company_id)
+        else:
+            active = self.request.user.active_company_profile_id
+            if active:
+                qs = qs.filter(company_profile_id=active)
+
+        # Search
+        search = self.request.query_params.get("search", "").strip()
+        if search:
+            qs = qs.filter(
+                Q(document_number__icontains=search) |
+                Q(document_series__icontains=search) |
+                Q(seller_name__icontains=search) |
+                Q(seller_id__icontains=search) |
+                Q(seller_vat_code__icontains=search)
+            )
+
+        # Payment status
+        payment = self.request.query_params.get("payment_status")
+        if payment and payment != "visi":
+            qs = qs.filter(payment_status=payment)
+
+        # Status (including computed reikia_perziuros)
+        status_filter = self.request.query_params.get("status_filter")
+        if status_filter == "nauja":
+            qs = qs.filter(status="new")
+        elif status_filter == "reikia_perziuros":
+            qs = qs.filter(Q(ready_for_export=False) | Q(math_validation_passed=False) | Q(kor_balanced=False))
+        elif status_filter == "uzregistruota":
+            qs = qs.filter(status="accounted")
+
+        # Period
+        period_from = self.request.query_params.get("period_from")
+        period_to = self.request.query_params.get("period_to")
+        if period_from:
+            qs = qs.filter(
+                Q(period__gte=period_from) | Q(period__isnull=True, invoice_date__gte=period_from)
+            )
+        if period_to:
+            qs = qs.filter(
+                Q(period__lte=period_to) | Q(period__isnull=True, invoice_date__lte=period_to)
+            )
+
+        return qs.order_by("-created_at")
+
+    def perform_destroy(self, instance):
+        scanned_doc = instance.scanned_document
+        instance.delete()
+
+        if scanned_doc:
+            has_others = Purchase.objects.filter(
+                scanned_document=scanned_doc
+            ).exists()
+            # Pozже добавить:
+            # or Invoice.objects.filter(scanned_document=scanned_doc).exists()
+
+            if not has_others:
+                scanned_doc.perkelta_i_apskaita = False
+                scanned_doc.perkelta_i_apskaita_at = None
+                scanned_doc.perkelta_i_company_profile = None
+                scanned_doc.save(update_fields=[
+                    "perkelta_i_apskaita",
+                    "perkelta_i_apskaita_at",
+                    "perkelta_i_company_profile",
+                ])
+
+    @action(
+        detail=True,
+        methods=["patch"],
+        url_path=r"line-items/(?P<line_id>[^/.]+)",
+    )
+    def update_line_item(self, request, pk=None, line_id=None):
+        purchase = self.get_object()
+
+        try:
+            line = purchase.line_items.get(id=line_id)
+        except PurchaseLine.DoesNotExist:
+            return Response(
+                {"detail": "Pirkimo eilutė nerasta."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        allowed_fields = {
+            "debeto_saskaita",
+            "kredito_saskaita",
+            "pvm_saskaita",
+        }
+
+        data = {
+            key: value
+            for key, value in request.data.items()
+            if key in allowed_fields
+        }
+
+        if not data:
+            return Response(
+                {"detail": "Nėra leidžiamų laukų atnaujinimui."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        serializer = PurchaseLineSerializer(
+            line,
+            data=data,
+            partial=True,
+            context=self.get_serializer_context(),
+        )
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+
+        # Пересчитать баланс
+        purchase.kor_balanced = compute_kor_balanced(purchase)
+        purchase.save(update_fields=["kor_balanced"])
+
+        from .utils.journal_generators import sync_purchase_journal_entry
+        try:
+            sync_purchase_journal_entry(purchase)
+        except Exception as e:
+            logger.warning("[Purchase] DK sync failed for %s: %s", purchase.id, e)
+
+        return Response(serializer.data)
+
+    @action(detail=True, methods=["post"], url_path="add-line-item")
+    def add_line_item(self, request, pk=None):
+        purchase = self.get_object()
+        line = PurchaseLine.objects.create(purchase=purchase)
+ 
+        # Пересчитать валидацию
+        purchase.ready_for_export = check_required_fields_for_export(purchase)
+        is_math_valid, _ = validate_document_math_for_export(purchase)
+        purchase.math_validation_passed = is_math_valid
+        purchase.kor_balanced = compute_kor_balanced(purchase)
+        purchase.save(update_fields=["ready_for_export", "math_validation_passed", "kor_balanced"])
+
+        from .utils.journal_generators import sync_purchase_journal_entry
+        try:
+            sync_purchase_journal_entry(purchase)
+        except Exception as e:
+            logger.warning("[Purchase] DK sync failed for %s: %s", purchase.id, e)
+
+        serializer = PurchaseLineSerializer(line)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+ 
+    @action(
+        detail=True,
+        methods=["delete"],
+        url_path=r"delete-line-item/(?P<line_id>[^/.]+)",
+    )
+    def delete_line_item(self, request, pk=None, line_id=None):
+        purchase = self.get_object()
+        try:
+            line = purchase.line_items.get(id=line_id)
+        except PurchaseLine.DoesNotExist:
+            return Response(
+                {"detail": "Line item not found"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+ 
+        line.delete()
+ 
+        # Пересчитать валидацию
+        purchase.ready_for_export = check_required_fields_for_export(purchase)
+        is_math_valid, _ = validate_document_math_for_export(purchase)
+        purchase.math_validation_passed = is_math_valid
+        purchase.kor_balanced = compute_kor_balanced(purchase)
+        purchase.save(update_fields=["ready_for_export", "math_validation_passed", "kor_balanced"])
+
+        from .utils.journal_generators import sync_purchase_journal_entry
+        try:
+            sync_purchase_journal_entry(purchase)
+        except Exception as e:
+            logger.warning("[Purchase] DK sync failed for %s: %s", purchase.id, e)
+
+        return Response(status=status.HTTP_204_NO_CONTENT)
+ 
+    def perform_update(self, serializer):
+        """Override чтобы пересчитывать валидацию при PATCH через ViewSet."""
+        instance = serializer.save()
+        changed = set(serializer.validated_data.keys())
+ 
+        update_fields = []
+        if changed & PURCHASE_REQUIRED_FIELDS:
+            instance.ready_for_export = check_required_fields_for_export(instance)
+            update_fields.append("ready_for_export")
+        if changed & PURCHASE_MATH_FIELDS:
+            is_valid, _ = validate_document_math_for_export(instance)
+            instance.math_validation_passed = is_valid
+            update_fields.append("math_validation_passed")
+        if changed & (PURCHASE_MATH_FIELDS | {"debeto_saskaita", "kredito_saskaita", "pvm_saskaita"}):
+            instance.kor_balanced = compute_kor_balanced(instance)
+            update_fields.append("kor_balanced")
+        if update_fields:
+            instance.save(update_fields=update_fields)
+
+        from .utils.journal_generators import sync_purchase_journal_entry
+        try:
+            sync_purchase_journal_entry(instance)
+        except Exception as e:
+            logger.warning("[Purchase] DK sync failed for %s: %s", instance.id, e)
+
+
+def compute_kor_balanced(document):
+    from decimal import Decimal
+
+    tolerance = Decimal("0.02")
+
+    def dec(value):
+        if value in (None, ""):
+            return Decimal("0")
+        return Decimal(str(value))
+
+    lines = list(document.line_items.all())
+
+    is_invoice = getattr(document, "pirkimas_pardavimas", None) == "pardavimas" or hasattr(document, "invoice_type")
+    is_purchase = getattr(document, "pirkimas_pardavimas", None) == "pirkimas" or hasattr(document, "is_credit_invoice") and not is_invoice
+
+    # ═══════════════════════════════════════════════════════
+    # PARDAVIMAI / Invoice
+    # D 2410 = amount_with_vat
+    # K 5000/5001 = amount_wo_vat
+    # K 4492 = vat_amount
+    # ═══════════════════════════════════════════════════════
+    if is_invoice:
+        # Debetas pardavimui yra document-level
+        if not document.debeto_saskaita:
+            return False
+
+        d_total = Decimal("0")
+        k_total = Decimal("0")
+
+        amount_with_vat = dec(document.amount_with_vat)
+
+        if amount_with_vat != 0:
+            d_total += amount_with_vat
+
+        if lines:
+            for line in lines:
+                subtotal = dec(line.subtotal)
+                vat = dec(line.vat)
+
+                kredito_saskaita = (
+                    getattr(line, "kredito_saskaita", None)
+                    or document.kredito_saskaita
+                )
+
+                pvm_saskaita = (
+                    getattr(line, "pvm_saskaita", None)
+                    or document.pvm_saskaita
+                )
+
+                if subtotal != 0 and not kredito_saskaita:
+                    return False
+
+                if vat != 0 and not pvm_saskaita:
+                    return False
+
+                k_total += subtotal + vat
+
+        else:
+            amount_wo_vat = dec(document.amount_wo_vat)
+            vat_amount = dec(document.vat_amount)
+
+            if amount_wo_vat != 0 and not document.kredito_saskaita:
+                return False
+
+            if vat_amount != 0 and not document.pvm_saskaita:
+                return False
+
+            k_total += amount_wo_vat + vat_amount
+
+        return abs(d_total - k_total) <= tolerance
+
+    # ═══════════════════════════════════════════════════════
+    # PIRKIMAI / Purchase
+    # D sąnaudos / prekės / turtas = subtotal
+    # D 2441 = vat
+    # K 4430 = total
+    # ═══════════════════════════════════════════════════════
+
+    # Kredito sąskaita pirkimui reikalinga visais atvejais
+    if not document.kredito_saskaita:
+        return False
+
+    if lines:
+        d_total = Decimal("0")
+        k_total = Decimal("0")
+
+        for line in lines:
+            subtotal = dec(line.subtotal)
+            vat = dec(line.vat)
+            total = dec(line.total)
+
+            debeto_saskaita = (
+                getattr(line, "effective_debeto", None)
+                or getattr(line, "debeto_saskaita", None)
+                or document.debeto_saskaita
+            )
+
+            kredito_saskaita = (
+                getattr(line, "kredito_saskaita", None)
+                or document.kredito_saskaita
+            )
+
+            pvm_saskaita = (
+                getattr(line, "pvm_saskaita", None)
+                or document.pvm_saskaita
+            )
+
+            if subtotal != 0 and not debeto_saskaita:
+                return False
+
+            if total != 0 and not kredito_saskaita:
+                return False
+
+            if vat != 0 and not pvm_saskaita:
+                return False
+
+            d_total += subtotal + vat
+            k_total += total
+
+    else:
+        amount_wo_vat = dec(document.amount_wo_vat)
+        vat_amount = dec(document.vat_amount)
+        amount_with_vat = dec(document.amount_with_vat)
+
+        if amount_wo_vat != 0 and not document.debeto_saskaita:
+            return False
+
+        if amount_with_vat != 0 and not document.kredito_saskaita:
+            return False
+
+        if vat_amount != 0 and not document.pvm_saskaita:
+            return False
+
+        d_total = amount_wo_vat + vat_amount
+        k_total = amount_with_vat
+
+    return abs(d_total - k_total) <= tolerance
+
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def transfer_to_accounting(request):
+    from decimal import Decimal, InvalidOperation
+    from django.utils import timezone
+    from .models import (
+        CompanyProfile,
+        ScannedDocument,
+        Purchase,
+        PurchaseLine,
+        Invoice,
+        InvoiceLineItem,
+    )
+
+    user = request.user
+    doc_ids = request.data.get("document_ids", [])
+    company_profile_id = request.data.get("company_profile_id")
+    cp_key = request.data.get("cp_key", "")
+    dry_run = request.data.get("dry_run", False)
+    replace_document_company = request.data.get("replace_document_company") in (
+        True,
+        "true",
+        "True",
+        "1",
+        1,
+    )
+
+    if not doc_ids:
+        return Response(
+            {"detail": "Nepateikti dokumentų ID."},
+            status=400,
+        )
+
+    try:
+        profile = CompanyProfile.objects.get(
+            id=company_profile_id,
+            user=user,
+        )
+    except CompanyProfile.DoesNotExist:
+        return Response(
+            {"detail": "Įmonės profilis nerastas."},
+            status=404,
+        )
+
+    documents = (
+        ScannedDocument.objects
+        .filter(id__in=doc_ids, user=user)
+        .prefetch_related("line_items")
+    )
+
+    # ═══════════════════════════════════════════════════════
+    # Helpers: signs / amounts
+    # ═══════════════════════════════════════════════════════
+
+    def _dec(val, default=None):
+        if val is None or val == "":
+            return default
+
+        try:
+            return Decimal(str(val))
+        except (InvalidOperation, TypeError, ValueError):
+            return default
+
+    def _has_amount(val):
+        d = _dec(val)
+        return d is not None and abs(d) > Decimal("0.001")
+
+    def _signed_amount(val, is_credit):
+        """
+        Normalizuoja sumas:
+        - įprastai SF visada teigiama
+        - kreditinei SF visada neigiama
+        """
+        d = _dec(val)
+        if d is None:
+            return None
+
+        if d == 0:
+            return Decimal("0")
+
+        return -abs(d) if is_credit else abs(d)
+
+    def _signed_quantity(val, is_credit, default=1):
+        """
+        Normalizuoja kiekį:
+        - įprastai SF kiekis teigiamas
+        - kreditinei SF kiekis neigiamas
+        """
+        d = _dec(val, Decimal(str(default)))
+
+        if d is None:
+            return None
+
+        if d == 0:
+            return Decimal("0")
+
+        return -abs(d) if is_credit else abs(d)
+
+    def _positive_amount(val, default=None):
+        """
+        Kaina visada turi būti teigiama.
+        """
+        d = _dec(val, default)
+
+        if d is None:
+            return None
+
+        return abs(d)
+
+    def _line_price(price, subtotal, quantity):
+        """
+        Jeigu OCR davė price, imam abs(price).
+        Jeigu price nėra, bandom paskaičiuoti iš subtotal / quantity.
+        """
+        price_dec = _dec(price)
+
+        if price_dec is not None and price_dec != 0:
+            return abs(price_dec)
+
+        subtotal_abs = _positive_amount(subtotal)
+        quantity_abs = _positive_amount(quantity)
+
+        if subtotal_abs is not None and quantity_abs not in (None, Decimal("0")):
+            return subtotal_abs / quantity_abs
+
+        return subtotal_abs
+
+    def _mark_doc_transferred(doc):
+        doc.perkelta_i_apskaita = True
+        doc.perkelta_i_apskaita_at = timezone.now()
+        doc.perkelta_i_company_profile = profile
+        doc.save(update_fields=[
+            "perkelta_i_apskaita",
+            "perkelta_i_apskaita_at",
+            "perkelta_i_company_profile",
+        ])
+
+    # ═══════════════════════════════════════════════════════
+    # Company detection helpers
+    # ═══════════════════════════════════════════════════════
+
+    profile_ids = set()
+
+    if profile.company_code:
+        profile_ids.add(profile.company_code.strip().upper())
+
+    if profile.vat_code:
+        profile_ids.add(profile.vat_code.strip().upper())
+
+    profile_name_norm = (profile.name or "").strip().upper()
+
+    if profile_name_norm:
+        profile_ids.add(profile_name_norm)
+
+    def _ids_from_doc(id_val, vat_val, name_val):
+        s = set()
+
+        if id_val:
+            s.add(id_val.strip().upper())
+
+        if vat_val:
+            s.add(vat_val.strip().upper())
+
+        if name_val:
+            s.add(name_val.strip().upper())
+
+        return s
+
+    def _cp_key(id_val, vat_val, name_val):
+        id_str = (str(id_val) if id_val else "").strip()
+
+        if id_str:
+            return f"id:{id_str}"
+
+        norm_vat = (vat_val or "").strip().lower()
+
+        if norm_vat:
+            return norm_vat
+
+        return (name_val or "").strip().lower()
+
+    def _norm(value):
+        return (str(value) if value else "").strip().upper()
+
+
+    def _selected_role_for_doc(doc):
+        """
+        Grąžina, kuri dokumento pusė buvo pasirinkta kaip 'mano įmonė':
+        buyer / seller / None.
+        """
+        if not cp_key:
+            return None
+
+        seller_cp = _cp_key(
+            doc.seller_id,
+            doc.seller_vat_code,
+            doc.seller_name,
+        )
+
+        buyer_cp = _cp_key(
+            doc.buyer_id,
+            doc.buyer_vat_code,
+            doc.buyer_name,
+        )
+
+        if cp_key == seller_cp:
+            return "seller"
+
+        if cp_key == buyer_cp:
+            return "buyer"
+
+        return None
+
+
+    def _party_payload(doc, role):
+        prefix = "seller" if role == "seller" else "buyer"
+
+        return {
+            "role": "Pardavėjas" if role == "seller" else "Pirkėjas",
+            "name": getattr(doc, f"{prefix}_name", "") or "",
+            "code": getattr(doc, f"{prefix}_id", "") or "",
+            "vat": getattr(doc, f"{prefix}_vat_code", "") or "",
+        }
+
+
+    def _profile_payload():
+        return {
+            "name": profile.name or "",
+            "code": profile.company_code or "",
+            "vat": profile.vat_code or "",
+        }
+
+
+    def _clean_name(value):
+        s = _norm(value)
+
+        remove_parts = [
+            "UAB",
+            "AB",
+            "MB",
+            "VŠĮ",
+            "VSI",
+            "IĮ",
+            "II",
+            "INDIVIDUALI ĮMONĖ",
+            "INDIVIDUALI IMONE",
+        ]
+
+        for part in remove_parts:
+            s = s.replace(part, " ")
+
+        s = s.replace('"', " ").replace("'", " ").replace(",", " ").replace(".", " ")
+
+        return " ".join(s.split())
+
+
+    def _party_matches_profile(party):
+        profile_code = _norm(profile.company_code)
+        party_code = _norm(party.get("code"))
+
+        profile_vat = _norm(profile.vat_code)
+        party_vat = _norm(party.get("vat"))
+
+        # 1. Jeigu įmonės kodas sutampa — laikome match
+        if profile_code and party_code and profile_code == party_code:
+            return True
+
+        # 2. Jeigu PVM kodas sutampa — laikome match
+        if profile_vat and party_vat and profile_vat == party_vat:
+            return True
+
+        # 3. Jeigu abu kodai yra ir abu nesutampa — mismatch
+        strong_checks_exist = False
+
+        if profile_code and party_code:
+            strong_checks_exist = True
+
+        if profile_vat and party_vat:
+            strong_checks_exist = True
+
+        if strong_checks_exist:
+            return False
+
+        # 4. Jei kodų palyginti negalime, naudojame name fallback
+        profile_name = _clean_name(profile.name)
+        party_name = _clean_name(party.get("name"))
+
+        if profile_name and party_name:
+            return profile_name == party_name
+
+        # 5. Jei nėra pakankamai duomenų — nerodome mismatch
+        return True
+
+
+    def _company_mismatch_for_docs(doc_list):
+        mismatches = []
+
+        for d in doc_list:
+            role = _selected_role_for_doc(d)
+
+            if not role:
+                continue
+
+            party = _party_payload(d, role)
+
+            if not _party_matches_profile(party):
+                mismatches.append({
+                    "doc_id": d.id,
+                    "selected_company": party,
+                })
+
+        if not mismatches:
+            return None
+
+        first = mismatches[0]
+
+        return {
+            "selected_company": first["selected_company"],
+            "active_profile": _profile_payload(),
+            "affected_count": len(mismatches),
+        }
+
+
+    def _profile_field(*names):
+        for name in names:
+            value = getattr(profile, name, None)
+
+            if value not in (None, ""):
+                return value
+
+        return ""
+
+
+    def _apply_profile_party_to_doc_in_memory(doc, role):
+        """
+        Pakeičia pasirinktą dokumento pusę tik šiame request'e.
+        ScannedDocument DB įrašas nekeičiamas.
+        Pakeisti duomenys naudojami tik kuriant Purchase / Invoice.
+        """
+        prefix = "seller" if role == "seller" else "buyer"
+
+        model_fields = {f.name for f in doc._meta.fields}
+        updates = {}
+
+        updates[f"{prefix}_name"] = profile.name or ""
+        updates[f"{prefix}_id"] = profile.company_code or ""
+        updates[f"{prefix}_vat_code"] = profile.vat_code or ""
+        updates[f"{prefix}_name_normalized"] = _norm(profile.name)
+
+        optional_updates = {
+            f"{prefix}_address": _profile_field("address", "company_address"),
+            f"{prefix}_country": _profile_field("country", "company_country"),
+            f"{prefix}_country_iso": _profile_field("country_iso", "company_country_iso"),
+            f"{prefix}_iban": _profile_field("iban", "bank_iban", "bank_account"),
+            f"{prefix}_is_person": False,
+        }
+
+        for field, value in optional_updates.items():
+            if value not in (None, ""):
+                updates[field] = value
+
+        for field, value in updates.items():
+            if field in model_fields:
+                setattr(doc, field, value)
+
+        return updates
+
+    def detect_direction(doc):
+        seller_cp = _cp_key(
+            doc.seller_id,
+            doc.seller_vat_code,
+            doc.seller_name,
+        )
+
+        buyer_cp = _cp_key(
+            doc.buyer_id,
+            doc.buyer_vat_code,
+            doc.buyer_name,
+        )
+
+        # Multi mode: kryptis nustatoma pagal pasirinktą įmonę dokumente
+        if cp_key:
+            if cp_key == seller_cp:
+                return "pardavimas"
+
+            if cp_key == buyer_cp:
+                return "pirkimas"
+
+        # Fallback pagal aktyvų profilį
+        buyer_ids = _ids_from_doc(
+            doc.buyer_id,
+            doc.buyer_vat_code,
+            doc.buyer_name,
+        )
+
+        seller_ids = _ids_from_doc(
+            doc.seller_id,
+            doc.seller_vat_code,
+            doc.seller_name,
+        )
+
+        if profile_ids & buyer_ids:
+            return "pirkimas"
+
+        if profile_ids & seller_ids:
+            return "pardavimas"
+
+        return None
+
+    # ═══════════════════════════════════════════════════════
+    # Split docs
+    # ═══════════════════════════════════════════════════════
+
+    purchase_docs = []
+    sale_docs = []
+    skipped = []
+
+    for doc in documents:
+        direction = detect_direction(doc)
+
+        if direction == "pirkimas":
+            existing_purchase = Purchase.objects.filter(
+                scanned_document=doc,
+                company_profile=profile,
+            ).first()
+
+            if existing_purchase:
+                if not doc.perkelta_i_apskaita:
+                    _mark_doc_transferred(doc)
+
+                skipped.append({
+                    "id": doc.id,
+                    "reason": "Jau perkeltas į pirkimus",
+                })
+                continue
+
+            selected_role = _selected_role_for_doc(doc)
+
+            if replace_document_company and not dry_run and selected_role:
+                selected_party = _party_payload(doc, selected_role)
+
+                if not _party_matches_profile(selected_party):
+                    _apply_profile_party_to_doc_in_memory(doc, selected_role)
+
+            purchase_docs.append(doc)
+
+        elif direction == "pardavimas":
+            existing_invoice = Invoice.objects.filter(
+                scanned_document=doc,
+                company_profile=profile,
+            ).first()
+
+            if existing_invoice:
+                if not doc.perkelta_i_apskaita:
+                    _mark_doc_transferred(doc)
+
+                skipped.append({
+                    "id": doc.id,
+                    "reason": "Jau perkeltas į pardavimus",
+                })
+                continue
+
+            selected_role = _selected_role_for_doc(doc)
+
+            if replace_document_company and not dry_run and selected_role:
+                selected_party = _party_payload(doc, selected_role)
+
+                if not _party_matches_profile(selected_party):
+                    _apply_profile_party_to_doc_in_memory(doc, selected_role)
+
+            sale_docs.append(doc)
+
+        else:
+            skipped.append({
+                "id": doc.id,
+                "filename": doc.original_filename,
+                "reason": "Nepavyko nustatyti krypties",
+            })
+
+    # ═══════════════════════════════════════════════════════
+    # Dry run
+    # ═══════════════════════════════════════════════════════
+
+    company_mismatch = _company_mismatch_for_docs(
+        purchase_docs + sale_docs
+    )
+
+    if dry_run:
+        return Response({
+            "company_name": profile.name,
+            "purchase_count": len(purchase_docs),
+            "sale_count": len(sale_docs),
+            "skipped": skipped,
+            "company_mismatch": company_mismatch,
+        })
+
+    # ═══════════════════════════════════════════════════════
+    # Create purchases
+    # ═══════════════════════════════════════════════════════
+
+    created_purchases = []
+
+    for doc in purchase_docs:
+        is_credit = bool(doc.is_credit_invoice)
+
+        doc_pvm_kodas = auto_select_pvm_code(
+            pirkimas_pardavimas="pirkimas",
+            buyer_country_iso=doc.buyer_country_iso,
+            seller_country_iso=doc.seller_country_iso,
+            preke_paslauga=doc.preke_paslauga,
+            vat_percent=(
+                float(doc.vat_percent)
+                if doc.vat_percent is not None
+                else None
+            ),
+            separate_vat=bool(doc.separate_vat),
+            buyer_has_vat_code=bool(doc.buyer_vat_code),
+            seller_has_vat_code=bool(doc.seller_vat_code),
+            doc_96_str=bool(getattr(doc, "doc_96_str", False)),
+        )
+
+        purchase = Purchase.objects.create(
+            user=user,
+            company_profile=profile,
+            scanned_document=doc,
+            status="new",
+
+            # Korespondencijos
+            debeto_saskaita=doc.pirkimo_saskaita or "6312",
+            kredito_saskaita="4430",
+            pvm_saskaita="2441" if _has_amount(doc.vat_amount) else None,
+
+            period=doc.invoice_date.replace(day=1) if doc.invoice_date else None,
+
+            # Dokumento duomenys
+            document_type=doc.document_type,
+            is_credit_invoice=doc.is_credit_invoice,
+            is_debit_invoice=doc.is_debit_invoice,
+            document_series=doc.document_series,
+            document_number=doc.document_number,
+            invoice_date=doc.invoice_date,
+            due_date=doc.due_date,
+            operation_date=doc.operation_date,
+
+            # Seller / tiekėjas
+            seller_name=doc.seller_name,
+            seller_id=doc.seller_id,
+            seller_vat_code=doc.seller_vat_code,
+            seller_address=doc.seller_address,
+            seller_country=doc.seller_country,
+            seller_country_iso=doc.seller_country_iso,
+            seller_iban=doc.seller_iban,
+            seller_is_person=doc.seller_is_person,
+            seller_vat_val=getattr(doc, "seller_vat_val", None),
+
+            # Buyer / mes
+            buyer_name=doc.buyer_name,
+            buyer_id=doc.buyer_id,
+            buyer_vat_code=doc.buyer_vat_code,
+            buyer_address=doc.buyer_address,
+            buyer_country=doc.buyer_country,
+            buyer_country_iso=doc.buyer_country_iso,
+            buyer_iban=doc.buyer_iban,
+            buyer_is_person=doc.buyer_is_person,
+
+            # Sumos
+            currency=doc.currency or "EUR",
+            amount_wo_vat=_signed_amount(doc.amount_wo_vat, is_credit),
+            vat_amount=_signed_amount(doc.vat_amount, is_credit),
+            vat_percent=doc.vat_percent,
+            amount_with_vat=_signed_amount(doc.amount_with_vat, is_credit),
+            invoice_discount_with_vat=_signed_amount(
+                doc.invoice_discount_with_vat,
+                is_credit,
+            ),
+            invoice_discount_wo_vat=_signed_amount(
+                doc.invoice_discount_wo_vat,
+                is_credit,
+            ),
+            separate_vat=doc.separate_vat,
+            doc_96_str=doc.doc_96_str,
+
+            # iSAF / klasifikatoriai
+            pirkimas_pardavimas="pirkimas",
+            report_to_isaf=doc.report_to_isaf,
+            document_type_code=doc.document_type_code or "",
+            pvm_kodas=doc_pvm_kodas or "",
+
+            # Prekė / sumiškai
+            prekes_kodas=doc.prekes_kodas,
+            prekes_pavadinimas=doc.prekes_pavadinimas,
+            preke_paslauga=doc.preke_paslauga,
+
+            # Meta
+            scan_type=doc.scan_type,
+            order_number=doc.order_number,
+            paid_by_cash=doc.paid_by_cash,
+            is_long_term_asset_candidate=doc.is_long_term_asset_candidate,
+            suggested_asset_type=doc.suggested_asset_type or "",
+        )
+
+        purchase_lines = []
+        source_lines = list(doc.line_items.all())
+
+        if source_lines:
+            for i, li in enumerate(source_lines):
+                li_vat_pct = (
+                    float(li.vat_percent)
+                    if li.vat_percent is not None
+                    else (
+                        float(doc.vat_percent)
+                        if doc.vat_percent is not None
+                        else None
+                    )
+                )
+
+                li_preke_paslauga = (
+                    li.preke_paslauga
+                    or doc.preke_paslauga
+                )
+
+                li_pvm_kodas = auto_select_pvm_code(
+                    pirkimas_pardavimas="pirkimas",
+                    buyer_country_iso=doc.buyer_country_iso,
+                    seller_country_iso=doc.seller_country_iso,
+                    preke_paslauga=li_preke_paslauga,
+                    vat_percent=li_vat_pct,
+                    separate_vat=False,
+                    buyer_has_vat_code=bool(doc.buyer_vat_code),
+                    seller_has_vat_code=bool(doc.seller_vat_code),
+                    doc_96_str=bool(getattr(doc, "doc_96_str", False)),
+                )
+
+                raw_quantity = (
+                    li.quantity
+                    if li.quantity is not None
+                    else 1
+                )
+
+                purchase_lines.append(
+                    PurchaseLine(
+                        purchase=purchase,
+
+                        prekes_kodas=li.prekes_kodas or doc.prekes_kodas or "",
+                        prekes_barkodas=li.prekes_barkodas or "",
+                        prekes_pavadinimas=(
+                            li.prekes_pavadinimas
+                            or doc.prekes_pavadinimas
+                            or "Prekės / paslaugos"
+                        ),
+                        preke_paslauga=li_preke_paslauga or "",
+
+                        unit=li.unit or "vnt.",
+
+                        # Kreditinei kiekis neigiamas, kaina teigiama
+                        quantity=_signed_quantity(raw_quantity, is_credit),
+                        price=_line_price(
+                            li.price,
+                            li.subtotal,
+                            raw_quantity,
+                        ),
+
+                        subtotal=_signed_amount(li.subtotal, is_credit),
+                        vat=_signed_amount(li.vat, is_credit),
+                        vat_percent=(
+                            li.vat_percent
+                            if li.vat_percent is not None
+                            else doc.vat_percent
+                        ),
+                        total=_signed_amount(li.total, is_credit),
+
+                        discount_with_vat=_signed_amount(
+                            li.discount_with_vat,
+                            is_credit,
+                        ),
+                        discount_wo_vat=_signed_amount(
+                            li.discount_wo_vat,
+                            is_credit,
+                        ),
+
+                        pvm_kodas=li_pvm_kodas or "",
+                        sort_order=i,
+                    )
+                )
+
+        else:
+            fallback_name = (
+                doc.prekes_pavadinimas
+                or doc.original_filename
+                or "Prekės / paslaugos"
+            )
+
+            fallback_subtotal = _signed_amount(doc.amount_wo_vat, is_credit)
+            fallback_vat = _signed_amount(doc.vat_amount, is_credit)
+            fallback_total = _signed_amount(doc.amount_with_vat, is_credit)
+
+            purchase_lines.append(
+                PurchaseLine(
+                    purchase=purchase,
+
+                    prekes_kodas=doc.prekes_kodas or "",
+                    prekes_barkodas="",
+                    prekes_pavadinimas=fallback_name,
+                    preke_paslauga=doc.preke_paslauga or "",
+
+                    unit="vnt.",
+
+                    # Sumiškai:
+                    # įprasta SF:  1 x 100 = 100
+                    # kreditinė:  -1 x 100 = -100
+                    quantity=_signed_quantity(1, is_credit),
+                    price=_positive_amount(doc.amount_wo_vat),
+
+                    subtotal=fallback_subtotal,
+                    vat=fallback_vat,
+                    vat_percent=doc.vat_percent,
+                    total=fallback_total,
+
+                    discount_with_vat=_signed_amount(
+                        doc.invoice_discount_with_vat,
+                        is_credit,
+                    ),
+                    discount_wo_vat=_signed_amount(
+                        doc.invoice_discount_wo_vat,
+                        is_credit,
+                    ),
+
+                    pvm_kodas=doc_pvm_kodas or "",
+                    sort_order=0,
+                )
+            )
+
+        if purchase_lines:
+            PurchaseLine.objects.bulk_create(purchase_lines)
+
+        purchase.ready_for_export = check_required_fields_for_export(purchase)
+
+        is_math_valid, _ = validate_document_math_for_export(purchase)
+        purchase.math_validation_passed = is_math_valid
+
+        purchase.kor_balanced = compute_kor_balanced(purchase)
+
+        purchase.save(update_fields=[
+            "ready_for_export",
+            "math_validation_passed",
+            "kor_balanced",
+        ])
+
+        try:
+            from .utils.journal_generators import sync_purchase_journal_entry
+
+            sync_purchase_journal_entry(purchase)
+        except Exception as e:
+            logger.warning(
+                "[Transfer] sync_purchase_journal_entry failed for %s: %s",
+                purchase.id,
+                e,
+            )
+
+        try:
+            from .utils.payment_invoice_matching import match_purchase_on_transfer
+
+            alloc = match_purchase_on_transfer(purchase)
+
+            if alloc:
+                logger.info(
+                    "[Transfer] Purchase %s auto-matched to bank txn, amount=%s",
+                    purchase.id,
+                    alloc.amount,
+                )
+        except Exception as e:
+            logger.warning(
+                "[Transfer] match_purchase_on_transfer failed: %s",
+                e,
+            )
+
+        created_purchases.append(purchase.id)
+        _mark_doc_transferred(doc)
+
+    # ═══════════════════════════════════════════════════════
+    # Create sales / pardavimai
+    # ═══════════════════════════════════════════════════════
+
+    created_sales = []
+
+    for doc in sale_docs:
+        if not doc.document_number:
+            skipped.append({
+                "id": doc.id,
+                "filename": doc.original_filename,
+                "reason": "Trūksta dokumento numerio",
+            })
+            continue
+
+        dup_qs = (
+            Invoice.objects
+            .filter(
+                user=user,
+                document_series=doc.document_series or "",
+                document_number=doc.document_number,
+            )
+            .exclude(status="cancelled")
+        )
+
+        if dup_qs.exists():
+            skipped.append({
+                "id": doc.id,
+                "filename": doc.original_filename,
+                "reason": (
+                    f"Dokumentas "
+                    f"{doc.document_series or ''}-{doc.document_number} "
+                    f"jau yra apskaitoje"
+                ),
+            })
+            continue
+
+        is_credit = bool(doc.is_credit_invoice)
+
+        if is_credit:
+            inv_type = "kreditine"
+        elif _has_amount(doc.vat_amount):
+            inv_type = "pvm_saskaita"
+        elif doc.separate_vat:
+            inv_type = "pvm_saskaita"
+        else:
+            inv_type = "saskaita"
+
+        doc_pvm_kodas = auto_select_pvm_code(
+            pirkimas_pardavimas="pardavimas",
+            buyer_country_iso=doc.buyer_country_iso,
+            seller_country_iso=doc.seller_country_iso,
+            preke_paslauga=doc.preke_paslauga,
+            vat_percent=(
+                float(doc.vat_percent)
+                if doc.vat_percent is not None
+                else None
+            ),
+            separate_vat=bool(doc.separate_vat),
+            buyer_has_vat_code=bool(doc.buyer_vat_code),
+            seller_has_vat_code=bool(doc.seller_vat_code),
+            doc_96_str=bool(getattr(doc, "doc_96_str", False)),
+        )
+
+        # Pardavimo korespondencijos
+        debit_account = "2410"  # Pirkėjų skolos
+
+        credit_account = (
+            getattr(doc, "pardavimo_saskaita", None)
+            or "5001"
+        )
+
+        pvm_account = "4492" if _has_amount(doc.vat_amount) else None
+
+        entry_date = doc.invoice_date
+        period = entry_date.replace(day=1) if entry_date else None
+
+        invoice = Invoice.objects.create(
+            user=user,
+            company_profile=profile,
+            scanned_document=doc,
+            invoice_type=inv_type,
+            status="issued",
+
+            # Numeracija
+            document_series=doc.document_series or "",
+            document_number=doc.document_number or "",
+
+            # Datos
+            invoice_date=doc.invoice_date,
+            due_date=doc.due_date,
+            operation_date=doc.operation_date,
+
+            # Korespondencijos
+            debeto_saskaita=debit_account,
+            kredito_saskaita=credit_account,
+            pvm_saskaita=pvm_account,
+            period=period,
+
+            # Seller / mes
+            seller_name=doc.seller_name or "",
+            seller_name_normalized=(doc.seller_name or "").strip().upper(),
+            seller_id=doc.seller_id or "",
+            seller_vat_code=doc.seller_vat_code or "",
+            seller_address=doc.seller_address or "",
+            seller_country=doc.seller_country or "",
+            seller_country_iso=doc.seller_country_iso or "",
+            seller_iban=doc.seller_iban or "",
+            seller_is_person=doc.seller_is_person,
+
+            # Buyer / pirkėjas
+            buyer_name=doc.buyer_name or "",
+            buyer_name_normalized=(doc.buyer_name or "").strip().upper(),
+            buyer_id=doc.buyer_id or "",
+            buyer_vat_code=doc.buyer_vat_code or "",
+            buyer_address=doc.buyer_address or "",
+            buyer_country=doc.buyer_country or "",
+            buyer_country_iso=doc.buyer_country_iso or "",
+            buyer_iban=doc.buyer_iban or "",
+            buyer_is_person=doc.buyer_is_person,
+
+            # Sumos
+            currency=doc.currency or "EUR",
+            pvm_tipas=(
+                "taikoma"
+                if inv_type in ("pvm_saskaita", "kreditine")
+                else "netaikoma"
+            ),
+            vat_percent=doc.vat_percent,
+
+            amount_wo_vat=_signed_amount(doc.amount_wo_vat, is_credit),
+            vat_amount=_signed_amount(doc.vat_amount, is_credit),
+            amount_with_vat=_signed_amount(doc.amount_with_vat, is_credit),
+
+            invoice_discount_with_vat=_signed_amount(
+                doc.invoice_discount_with_vat,
+                is_credit,
+            ),
+            invoice_discount_wo_vat=_signed_amount(
+                doc.invoice_discount_wo_vat,
+                is_credit,
+            ),
+
+            separate_vat=doc.separate_vat,
+            doc_96_str=doc.doc_96_str,
+
+            # iSAF
+            pirkimas_pardavimas="pardavimas",
+            report_to_isaf=doc.report_to_isaf,
+            document_type_code=doc.document_type_code or "",
+            document_type=doc.document_type or "",
+            pvm_kodas=doc_pvm_kodas or "",
+
+            # Prekė / sumiškai
+            prekes_kodas=doc.prekes_kodas or "",
+            prekes_pavadinimas=doc.prekes_pavadinimas or "",
+            preke_paslauga=doc.preke_paslauga or "",
+
+            # Meta
+            public_link_enabled=False,
+        )
+
+        invoice_lines = []
+        source_lines = list(doc.line_items.all())
+
+        if source_lines:
+            for i, li in enumerate(source_lines):
+                li_vat_pct = (
+                    float(li.vat_percent)
+                    if li.vat_percent is not None
+                    else (
+                        float(doc.vat_percent)
+                        if doc.vat_percent is not None
+                        else None
+                    )
+                )
+
+                li_preke_paslauga = (
+                    li.preke_paslauga
+                    or doc.preke_paslauga
+                )
+
+                li_pvm_kodas = auto_select_pvm_code(
+                    pirkimas_pardavimas="pardavimas",
+                    buyer_country_iso=doc.buyer_country_iso,
+                    seller_country_iso=doc.seller_country_iso,
+                    preke_paslauga=li_preke_paslauga,
+                    vat_percent=li_vat_pct,
+                    separate_vat=False,
+                    buyer_has_vat_code=bool(doc.buyer_vat_code),
+                    seller_has_vat_code=bool(doc.seller_vat_code),
+                    doc_96_str=bool(getattr(doc, "doc_96_str", False)),
+                )
+
+                raw_quantity = (
+                    li.quantity
+                    if li.quantity is not None
+                    else 1
+                )
+
+                invoice_lines.append(
+                    InvoiceLineItem(
+                        invoice=invoice,
+
+                        prekes_kodas=li.prekes_kodas or doc.prekes_kodas or "",
+                        prekes_barkodas=li.prekes_barkodas or "",
+                        prekes_pavadinimas=(
+                            li.prekes_pavadinimas
+                            or doc.prekes_pavadinimas
+                            or "Prekės / paslaugos"
+                        ),
+                        preke_paslauga=li_preke_paslauga or "",
+
+                        unit=li.unit or "vnt.",
+
+                        # Kreditinei kiekis neigiamas, kaina teigiama
+                        quantity=_signed_quantity(raw_quantity, is_credit),
+                        price=_line_price(
+                            li.price,
+                            li.subtotal,
+                            raw_quantity,
+                        ),
+
+                        subtotal=_signed_amount(li.subtotal, is_credit),
+                        vat=_signed_amount(li.vat, is_credit),
+                        vat_percent=(
+                            li.vat_percent
+                            if li.vat_percent is not None
+                            else doc.vat_percent
+                        ),
+                        total=_signed_amount(li.total, is_credit),
+
+                        discount_with_vat=_signed_amount(
+                            li.discount_with_vat,
+                            is_credit,
+                        ),
+                        discount_wo_vat=_signed_amount(
+                            li.discount_wo_vat,
+                            is_credit,
+                        ),
+
+                        pvm_kodas=li_pvm_kodas or "",
+
+                        # Korespondencijos line-level
+                        kredito_saskaita=credit_account,
+                        pvm_saskaita=pvm_account,
+
+                        sort_order=i,
+                    )
+                )
+
+        else:
+            fallback_name = (
+                doc.prekes_pavadinimas
+                or doc.original_filename
+                or "Prekės / paslaugos"
+            )
+
+            fallback_subtotal = _signed_amount(doc.amount_wo_vat, is_credit)
+            fallback_vat = _signed_amount(doc.vat_amount, is_credit)
+            fallback_total = _signed_amount(doc.amount_with_vat, is_credit)
+
+            invoice_lines.append(
+                InvoiceLineItem(
+                    invoice=invoice,
+
+                    prekes_kodas=doc.prekes_kodas or "",
+                    prekes_barkodas="",
+                    prekes_pavadinimas=fallback_name,
+                    preke_paslauga=doc.preke_paslauga or "",
+
+                    unit="vnt.",
+
+                    # Sumiškai:
+                    # įprasta SF:  1 x 100 = 100
+                    # kreditinė:  -1 x 100 = -100
+                    quantity=_signed_quantity(1, is_credit),
+                    price=_positive_amount(doc.amount_wo_vat),
+
+                    subtotal=fallback_subtotal,
+                    vat=fallback_vat,
+                    vat_percent=doc.vat_percent,
+                    total=fallback_total,
+
+                    discount_with_vat=_signed_amount(
+                        doc.invoice_discount_with_vat,
+                        is_credit,
+                    ),
+                    discount_wo_vat=_signed_amount(
+                        doc.invoice_discount_wo_vat,
+                        is_credit,
+                    ),
+
+                    pvm_kodas=doc_pvm_kodas or "",
+
+                    kredito_saskaita=credit_account,
+                    pvm_saskaita=pvm_account,
+
+                    sort_order=0,
+                )
+            )
+
+        if invoice_lines:
+            InvoiceLineItem.objects.bulk_create(invoice_lines)
+
+        invoice.ready_for_export = check_required_fields_for_export(invoice)
+
+        is_math_valid, _ = validate_document_math_for_export(invoice)
+        invoice.math_validation_passed = is_math_valid
+
+        invoice.kor_balanced = compute_kor_balanced(invoice)
+
+        invoice.save(update_fields=[
+            "ready_for_export",
+            "math_validation_passed",
+            "kor_balanced",
+        ])
+
+        try:
+            from .utils.journal_generators import sync_invoice_journal_entry
+
+            sync_invoice_journal_entry(invoice)
+        except Exception as e:
+            logger.warning(
+                "[Transfer] sync_invoice_journal_entry failed for %s: %s",
+                invoice.id,
+                e,
+            )
+        try:
+            from .utils.payment_invoice_matching import match_invoice_on_transfer
+
+            alloc = match_invoice_on_transfer(invoice)
+
+            if alloc:
+                logger.info(
+                    "[Transfer] Invoice %s auto-matched to bank txn, amount=%s",
+                    invoice.id,
+                    alloc.amount,
+                )
+        except Exception as e:
+            logger.warning(
+                "[Transfer] match_invoice_on_transfer failed: %s",
+                e,
+            )
+
+        created_sales.append(invoice.id)
+        _mark_doc_transferred(doc)
+
+    return Response({
+        "created_purchases": created_purchases,
+        "created_sales": created_sales,
+        "skipped": skipped,
+    })
+
+
+@api_view(["PATCH"])
+@permission_classes([IsAuthenticated])
+def invoice_update_kor(request, pk):
+    """
+    PATCH /api/invoicing/invoices/<id>/update-kor/
+    Body: { line_item_ids: [1,2,3], kredito_saskaita: "5000" }
+    """
+    invoice = get_object_or_404(Invoice, pk=pk, user=request.user)
+
+    line_ids = request.data.get("line_item_ids", [])
+    new_code = (request.data.get("kredito_saskaita") or "").strip()
+
+    if not new_code or not line_ids:
+        return Response({"detail": "line_item_ids ir kredito_saskaita privalomi"}, status=400)
+
+    updated = invoice.line_items.filter(id__in=line_ids).update(kredito_saskaita=new_code)
+
+    # Document level — если все line items одинаковые
+    codes = list(invoice.line_items.values_list("kredito_saskaita", flat=True).distinct())
+    if len(codes) == 1 and codes[0]:
+        invoice.kredito_saskaita = codes[0]
+    invoice.kor_balanced = compute_kor_balanced(invoice)
+    invoice.save(update_fields=["kredito_saskaita", "kor_balanced", "updated_at"])
+
+    # Regenerate DK
+    from .utils.journal_generators import sync_invoice_journal_entry
+    try:
+        sync_invoice_journal_entry(invoice)
+    except Exception:
+        pass
+
+    return Response(InvoiceDetailSerializer(invoice, context={"request": request}).data)
+
+
+
+
+
+# ── Allowed fields ──────────────────────────────────────────
+ 
+PURCHASE_ALLOWED_DOC_FIELDS = {
+    "invoice_date", "due_date", "operation_date",
+    "document_series", "document_number",
+    "amount_wo_vat", "vat_amount", "vat_percent", "amount_with_vat",
+    "currency",
+    "invoice_discount_wo_vat", "invoice_discount_with_vat",
+    "seller_name", "seller_id", "seller_vat_code", "seller_iban",
+    "debeto_saskaita", "kredito_saskaita", "pvm_saskaita", "pvm_kodas",
+    "order_number", "prekes_kodas", "prekes_pavadinimas", "prekes_barkodas",
+}
+ 
+PURCHASE_ALLOWED_LINE_FIELDS = {
+    "prekes_kodas", "prekes_pavadinimas", "prekes_barkodas",
+    "unit", "quantity", "price", "subtotal", "vat", "vat_percent", "total",
+    "debeto_saskaita", "kredito_saskaita", "pvm_saskaita", "pvm_kodas",
+}
+ 
+PURCHASE_REQUIRED_FIELDS = {
+    "invoice_date", "document_number",
+    "amount_wo_vat", "vat_amount", "amount_with_vat",
+    "currency", "seller_name",
+}
+ 
+PURCHASE_MATH_FIELDS = {
+    "amount_wo_vat", "vat_amount", "vat_percent", "amount_with_vat",
+    "invoice_discount_wo_vat", "invoice_discount_with_vat",
+}
+ 
+PURCHASE_LINE_MATH_FIELDS = {
+    "quantity", "price", "subtotal", "vat", "vat_percent", "total",
+}
+ 
+ 
+# ── Inline doc update ───────────────────────────────────────
+ 
+class PurchaseInlineDocUpdateView(APIView):
+    permission_classes = [IsAuthenticated]
+ 
+    def patch(self, request, purchase_id):
+        purchase = get_object_or_404(
+            Purchase, pk=purchase_id, user=request.user,
+        )
+ 
+        field = request.data.get("field")
+        value = request.data.get("value")
+ 
+        if field not in PURCHASE_ALLOWED_DOC_FIELDS:
+            return Response({"detail": "Field not allowed"}, status=400)
+ 
+        if value in ("", None):
+            value = None
+ 
+        setattr(purchase, field, value)
+        purchase.save(update_fields=[field])
+ 
+        response_data = {
+            "ok": True,
+            "id": purchase.id,
+            field: getattr(purchase, field),
+        }
+ 
+        try:
+            KOR_BALANCE_FIELDS = {
+                "amount_wo_vat", "vat_amount", "amount_with_vat",
+                "debeto_saskaita", "kredito_saskaita", "pvm_saskaita",
+            }
+
+            if field in PURCHASE_REQUIRED_FIELDS:
+                is_valid = check_required_fields_for_export(purchase)
+                purchase.ready_for_export = is_valid
+                response_data["ready_for_export"] = is_valid
+
+            if field in PURCHASE_MATH_FIELDS:
+                is_valid, _ = validate_document_math_for_export(purchase)
+                purchase.math_validation_passed = is_valid
+                response_data["math_validation_passed"] = is_valid
+
+            if field in KOR_BALANCE_FIELDS:
+                purchase.kor_balanced = compute_kor_balanced(purchase)
+                response_data["kor_balanced"] = purchase.kor_balanced
+
+            update_fields = []
+            if field in PURCHASE_REQUIRED_FIELDS:
+                update_fields.append("ready_for_export")
+            if field in PURCHASE_MATH_FIELDS:
+                update_fields.append("math_validation_passed")
+            if field in KOR_BALANCE_FIELDS:
+                update_fields.append("kor_balanced")
+            if update_fields:
+                purchase.save(update_fields=update_fields)
+        except Exception as e:
+            logger.error(f"Purchase validation error: {e}")
+
+        from .utils.journal_generators import sync_purchase_journal_entry
+        try:
+            sync_purchase_journal_entry(purchase)
+        except Exception as e:
+            logger.warning("[Purchase] DK sync failed for %s: %s", purchase.id, e)
+
+        return Response(response_data)
+
+
+class PurchaseSearchView(APIView):
+    """GET /api/purchases/search/?q=telia&limit=10 — для manual match в bank operations."""
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        from django.db.models import Q
+
+        q = request.query_params.get("q", "").strip()
+        limit = min(int(request.query_params.get("limit", 10)), 50)
+
+        qs = Purchase.objects.filter(
+            user=request.user,
+            payment_status__in=["unpaid", "partially_paid"],
+        )
+        if q:
+            qs = qs.filter(
+                Q(seller_name__icontains=q)
+                | Q(document_number__icontains=q)
+                | Q(document_series__icontains=q)
+                | Q(seller_id__icontains=q)
+                | Q(seller_iban__icontains=q)
+                | Q(seller_name_normalized__icontains=q.upper())
+            )
+        qs = qs.order_by("-invoice_date")[:limit]
+
+        results = [
+            {
+                "id": p.id,
+                "document_series": p.document_series or "",
+                "document_number": p.document_number or "",
+                "seller_name": p.seller_name or "",
+                "seller_id": p.seller_id or "",
+                "amount_with_vat": p.amount_with_vat,
+                "invoice_date": p.invoice_date,
+                "payment_status": p.payment_status,
+            }
+            for p in qs
+        ]
+        return Response({"results": results})
+ 
+ 
+# ── Inline line update ──────────────────────────────────────
+ 
+class PurchaseInlineLineUpdateView(APIView):
+    permission_classes = [IsAuthenticated]
+ 
+    def patch(self, request, purchase_id, line_id):
+        purchase = get_object_or_404(
+            Purchase, pk=purchase_id, user=request.user,
+        )
+        line = get_object_or_404(
+            PurchaseLine, pk=line_id, purchase=purchase,
+        )
+ 
+        field = request.data.get("field")
+        value = request.data.get("value")
+ 
+        if field not in PURCHASE_ALLOWED_LINE_FIELDS:
+            return Response({"detail": "Field not allowed"}, status=400)
+ 
+        if value in ("", None):
+            value = None
+ 
+        setattr(line, field, value)
+        line.save(update_fields=[field])
+ 
+        response_data = {
+            "ok": True,
+            "id": line.id,
+            field: getattr(line, field),
+        }
+ 
+        try:
+            LINE_KOR_BALANCE_FIELDS = {
+                "subtotal", "vat", "total",
+                "debeto_saskaita", "kredito_saskaita", "pvm_saskaita",
+            }
+
+            update_fields = []
+
+            if field in PURCHASE_LINE_MATH_FIELDS:
+                is_valid, _ = validate_document_math_for_export(purchase)
+                purchase.math_validation_passed = is_valid
+                response_data["math_validation_passed"] = is_valid
+                update_fields.append("math_validation_passed")
+
+            if field in {"subtotal", "total", "price", "quantity", "vat"}:
+                is_valid = check_required_fields_for_export(purchase)
+                purchase.ready_for_export = is_valid
+                response_data["ready_for_export"] = is_valid
+                update_fields.append("ready_for_export")
+
+            if field in LINE_KOR_BALANCE_FIELDS:
+                purchase.kor_balanced = compute_kor_balanced(purchase)
+                response_data["kor_balanced"] = purchase.kor_balanced
+                update_fields.append("kor_balanced")
+
+            if update_fields:
+                purchase.save(update_fields=update_fields)
+        except Exception as e:
+            logger.error(f"Purchase line validation error: {e}")
+
+        from .utils.journal_generators import sync_purchase_journal_entry
+        try:
+            sync_purchase_journal_entry(purchase)
+        except Exception as e:
+            logger.warning("[Purchase] DK sync failed for %s: %s", purchase.id, e)
+
+        return Response(response_data)
+ 
+ 
+# ── Paginated line items ────────────────────────────────────
+ 
+class PurchaseLineItemsListView(APIView):
+    permission_classes = [IsAuthenticated]
+ 
+    def get(self, request, purchase_id):
+        purchase = get_object_or_404(
+            Purchase, pk=purchase_id, user=request.user,
+        )
+ 
+        qs = purchase.line_items.all().order_by("sort_order", "id")
+ 
+        limit = min(int(request.query_params.get("limit", 30)), 100)
+        offset = max(int(request.query_params.get("offset", 0)), 0)
+        count = qs.count()
+ 
+        items = qs[offset: offset + limit]
+        serializer = PurchaseLineSerializer(items, many=True)
+ 
+        return Response({
+            "count": count,
+            "results": serializer.data,
+        })
+ 
+# ────────────────────────────────────────────────────────────
+# END ─── Pirkimai ───
+# ────────────────────────────────────────────────────────────
+
+
+# ═══════════════════════════════════════════════════════════
+# DK
+# ═══════════════════════════════════════════════════════════
+from django.db.models import Sum, Q, F, DecimalField, Count, Max, ExpressionWrapper, Value
+from django.db.models.functions import Coalesce
+from decimal import Decimal
+from datetime import date
+
+
+def _get_active_profile(request):
+    """Returns active CompanyProfile or None."""
+    company_id = request.query_params.get("company_profile")
+    if company_id:
+        try:
+            return CompanyProfile.objects.get(
+                id=company_id, user=request.user
+            )
+        except CompanyProfile.DoesNotExist:
+            return None
+    return request.user.active_company_profile
+
+
+def _parse_period(period_str):
+    """'2026-07' → date(2026, 7, 1). Возвращает None если некорректно."""
+    if not period_str:
+        return None
+    try:
+        year, month = period_str.split("-")
+        return date(int(year), int(month), 1)
+    except (ValueError, AttributeError):
+        return None
+
+
+# ═══════════════════════════════════════════════════════════
+# TAB 1: SKOLOS — кто кому должен
+# ═══════════════════════════════════════════════════════════
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def apskaita_skolos(request):
+    """
+    Skolos pagal kontrahentus.
+
+    GET /apskaita/skolos/?type=customer&limit=25&offset=0&search=abc&as_of=2026-07-31
+    GET /apskaita/skolos/?type=supplier&limit=25&offset=0&search=abc&as_of=2026-07-31
+
+    Возвращает только открытые долги:
+    balance = amount_with_vat - paid_amount > 0
+    """
+    profile = _get_active_profile(request)
+    if not profile:
+        return Response({"detail": "Nepasirinktas įmonės profilis."}, status=400)
+
+    debt_type = request.query_params.get("type", "customer")
+    if debt_type not in ["customer", "supplier"]:
+        return Response(
+            {"detail": "Netinkamas skolos tipas. Naudokite customer arba supplier."},
+            status=400,
+        )
+
+    search = request.query_params.get("search", "").strip()
+    as_of = request.query_params.get("as_of")
+
+    try:
+        limit = int(request.query_params.get("limit", 25))
+    except ValueError:
+        limit = 25
+
+    try:
+        offset = int(request.query_params.get("offset", 0))
+    except ValueError:
+        offset = 0
+
+    limit = max(1, min(limit, 100))
+    offset = max(0, offset)
+
+    as_of_date = None
+    if as_of:
+        try:
+            year, month, day = as_of.split("-")
+            as_of_date = date(int(year), int(month), int(day))
+        except (ValueError, AttributeError):
+            as_of_date = None
+
+    money_field = DecimalField(max_digits=14, decimal_places=4)
+    zero = Value(Decimal("0.00"), output_field=money_field)
+
+    open_balance_expr = ExpressionWrapper(
+        Coalesce(F("amount_with_vat"), zero) - Coalesce(F("paid_amount"), zero),
+        output_field=money_field,
+    )
+
+    if debt_type == "customer":
+        qs = Invoice.objects.filter(company_profile=profile)
+
+        date_field = "invoice_date"
+        name_field = "buyer_name"
+        code_field = "buyer_id"
+        counterparty_type = "pirkejas"
+
+        if as_of_date:
+            qs = qs.filter(invoice_date__lte=as_of_date)
+
+        if search:
+            qs = qs.filter(
+                Q(buyer_name__icontains=search) |
+                Q(buyer_id__icontains=search)
+            )
+
+    else:
+        qs = Purchase.objects.filter(company_profile=profile)
+
+        date_field = "invoice_date"
+        name_field = "seller_name"
+        code_field = "seller_id"
+        counterparty_type = "tiekejas"
+
+        if as_of_date:
+            qs = qs.filter(invoice_date__lte=as_of_date)
+
+        if search:
+            qs = qs.filter(
+                Q(seller_name__icontains=search) |
+                Q(seller_id__icontains=search)
+            )
+
+    # Берём только открытые invoices/purchases
+    qs = qs.annotate(open_balance=open_balance_expr).filter(
+        open_balance__gt=Decimal("0.009")
+    )
+
+    grouped = (
+        qs.values(name_field, code_field)
+        .annotate(
+            total_invoiced=Coalesce(Sum("amount_with_vat"), Decimal("0")),
+            total_paid=Coalesce(Sum("paid_amount"), Decimal("0")),
+            balance=Coalesce(Sum("open_balance"), Decimal("0")),
+            invoice_count=Count("id"),
+            newest_invoice_date=Max(date_field),
+        )
+    )
+
+    rows = []
+    total_balance = Decimal("0.00")
+
+    for row in grouped:
+        balance = row["balance"] or Decimal("0")
+        if balance <= Decimal("0.009"):
+            continue
+
+        paid = row["total_paid"] or Decimal("0")
+        payment_status = "partially_paid" if paid > 0 else "unpaid"
+
+        newest_date = row["newest_invoice_date"]
+
+        total_balance += balance
+
+        rows.append({
+            "counterparty_name": row.get(name_field) or "",
+            "counterparty_code": row.get(code_field) or "",
+            "counterparty_type": counterparty_type,
+            "total_invoiced": str(row["total_invoiced"] or Decimal("0")),
+            "total_paid": str(paid),
+            "balance": str(balance),
+            "invoice_count": row["invoice_count"] or 0,
+            "newest_invoice_date": newest_date.isoformat() if newest_date else None,
+            "payment_status": payment_status,
+        })
+
+    rows.sort(
+        key=lambda x: x["newest_invoice_date"] or "",
+        reverse=True,
+    )
+
+    total_count = len(rows)
+    paginated = rows[offset:offset + limit]
+    next_offset = offset + limit
+
+    return Response({
+        "type": debt_type,
+        "results": paginated,
+        "total_count": total_count,
+        "limit": limit,
+        "offset": offset,
+        "has_more": next_offset < total_count,
+        "next_offset": next_offset if next_offset < total_count else None,
+        "summary": {
+            "total_balance": str(total_balance),
+        },
+    })
+
+
+
+
+def _get_document_number(obj):
+    """
+    Универсально достаём номер документа, потому что в разных моделях
+    поле может называться invoice_number / document_number / number.
+    """
+    return (
+        getattr(obj, "invoice_number", None)
+        or getattr(obj, "document_number", None)
+        or getattr(obj, "number", None)
+        or f"#{obj.id}"
+    )
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def apskaita_skolos_invoices(request):
+    """
+    Возвращает открытые sąskaitos выбранного kontrahento.
+
+    GET /apskaita/skolos/invoices/?type=customer&counterparty_code=123&counterparty_name=Client&as_of=2026-07-31
+    GET /apskaita/skolos/invoices/?type=supplier&counterparty_code=123&counterparty_name=Telia&as_of=2026-07-31
+    """
+    profile = _get_active_profile(request)
+    if not profile:
+        return Response({"detail": "Nepasirinktas įmonės profilis."}, status=400)
+
+    debt_type = request.query_params.get("type", "customer")
+    if debt_type not in ["customer", "supplier"]:
+        return Response(
+            {"detail": "Netinkamas skolos tipas. Naudokite customer arba supplier."},
+            status=400,
+        )
+
+    counterparty_code = request.query_params.get("counterparty_code", "").strip()
+    counterparty_name = request.query_params.get("counterparty_name", "").strip()
+    as_of = request.query_params.get("as_of")
+
+    as_of_date = None
+    if as_of:
+        try:
+            year, month, day = as_of.split("-")
+            as_of_date = date(int(year), int(month), int(day))
+        except (ValueError, AttributeError):
+            as_of_date = None
+
+    money_field = DecimalField(max_digits=14, decimal_places=4)
+    zero = Value(Decimal("0.00"), output_field=money_field)
+
+    open_balance_expr = ExpressionWrapper(
+        Coalesce(F("amount_with_vat"), zero) - Coalesce(F("paid_amount"), zero),
+        output_field=money_field,
+    )
+
+    if debt_type == "customer":
+        qs = Invoice.objects.filter(company_profile=profile)
+        source_type = "sale"
+
+        if as_of_date:
+            qs = qs.filter(invoice_date__lte=as_of_date)
+
+        if counterparty_code:
+            qs = qs.filter(buyer_id=counterparty_code)
+        elif counterparty_name:
+            qs = qs.filter(buyer_name=counterparty_name)
+        else:
+            return Response({"detail": "Trūksta kontrahento."}, status=400)
+
+    else:
+        qs = Purchase.objects.filter(company_profile=profile)
+        source_type = "purchase"
+
+        if as_of_date:
+            qs = qs.filter(invoice_date__lte=as_of_date)
+
+        if counterparty_code:
+            qs = qs.filter(seller_id=counterparty_code)
+        elif counterparty_name:
+            qs = qs.filter(seller_name=counterparty_name)
+        else:
+            return Response({"detail": "Trūksta kontrahento."}, status=400)
+
+    qs = (
+        qs.annotate(open_balance=open_balance_expr)
+        .filter(open_balance__gt=Decimal("0.009"))
+        .order_by("-invoice_date", "-id")
+    )
+
+    results = []
+
+    for obj in qs:
+        amount = obj.amount_with_vat or Decimal("0")
+        paid = obj.paid_amount or Decimal("0")
+        balance = amount - paid
+
+        if balance <= Decimal("0.009"):
+            continue
+
+        payment_status = "partially_paid" if paid > 0 else "unpaid"
+
+        results.append({
+            "id": obj.id,
+            "source_type": source_type,
+            "document_number": _get_document_number(obj),
+            "invoice_date": obj.invoice_date.isoformat() if obj.invoice_date else None,
+            "amount_with_vat": str(amount),
+            "paid_amount": str(paid),
+            "balance": str(balance),
+            "payment_status": payment_status,
+            "scanned_document_id": getattr(obj, "scanned_document_id", None),
+        })
+
+    return Response({
+        "type": debt_type,
+        "results": results,
+    })
+
+
+# ═══════════════════════════════════════════════════════════
+# TAB 2: LIKUČIAI — остатки по sąskaitos
+# ═══════════════════════════════════════════════════════════
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def apskaita_likuciai(request):
+    """
+    Возвращает остатки по всем sąskaitos с движениями в выбранном периоде.
+    Pradinis likutis = все движения до начала периода.
+    Debetas/Kreditas per periodą = только выбранный период.
+    Galutinis likutis = pradinis + движение.
+    """
+    profile = _get_active_profile(request)
+    if not profile:
+        return Response({"detail": "Nepasirinktas įmonės profilis."}, status=400)
+
+    period_str = request.query_params.get("period")
+    period_start = _parse_period(period_str)
+    if not period_start:
+        # По умолчанию — текущий месяц
+        today = date.today()
+        period_start = date(today.year, today.month, 1)
+
+    # Первый день следующего месяца
+    if period_start.month == 12:
+        period_end = date(period_start.year + 1, 1, 1)
+    else:
+        period_end = date(period_start.year, period_start.month + 1, 1)
+
+    # ── Все sąskaitos с движениями (до конца периода) ──
+    all_lines = JournalEntryLine.objects.filter(
+        entry__company_profile=profile,
+        entry__entry_date__lt=period_end,
+        entry__status__in=[
+            JournalEntry.STATUS_DRAFT,
+            JournalEntry.STATUS_POSTED,
+            JournalEntry.STATUS_NEEDS_REVIEW,
+        ],
+    )
+
+    account_codes = (
+        all_lines
+        .values_list("account_code", flat=True)
+        .distinct()
+        .order_by("account_code")
+    )
+
+    result = []
+    for code in account_codes:
+        # Pradinis likutis: движения ДО начала периода
+        opening_lines = all_lines.filter(
+            account_code=code,
+            entry__entry_date__lt=period_start,
+        )
+        opening_d = opening_lines.filter(side="D").aggregate(
+            s=Coalesce(Sum("amount"), Decimal("0"))
+        )["s"]
+        opening_k = opening_lines.filter(side="K").aggregate(
+            s=Coalesce(Sum("amount"), Decimal("0"))
+        )["s"]
+        opening_balance = opening_d - opening_k
+
+        # Движения в периоде
+        period_lines = all_lines.filter(
+            account_code=code,
+            entry__entry_date__gte=period_start,
+            entry__entry_date__lt=period_end,
+        )
+        period_d = period_lines.filter(side="D").aggregate(
+            s=Coalesce(Sum("amount"), Decimal("0"))
+        )["s"]
+        period_k = period_lines.filter(side="K").aggregate(
+            s=Coalesce(Sum("amount"), Decimal("0"))
+        )["s"]
+
+        closing_balance = opening_balance + period_d - period_k
+
+        # Пропускаем sąskaitos без движений и без остатков
+        if (opening_balance == 0 and period_d == 0 and period_k == 0
+                and closing_balance == 0):
+            continue
+
+        # Название
+        first_line = all_lines.filter(account_code=code).first()
+        account_name = first_line.account_name if first_line else ""
+
+        result.append({
+            "code": code,
+            "name": account_name,
+            "opening_balance": str(opening_balance),
+            "opening_side": "D" if opening_balance >= 0 else "K",
+            "period_debit": str(period_d),
+            "period_credit": str(period_k),
+            "closing_balance": str(abs(closing_balance)),
+            "closing_side": "D" if closing_balance >= 0 else "K",
+        })
+
+    return Response({
+        "period": period_start.strftime("%Y-%m"),
+        "accounts": result,
+    })
+
+
+# ═══════════════════════════════════════════════════════════
+# TAB 3: OPERACIJOS — DK įrašai (журнал операций)
+# ═══════════════════════════════════════════════════════════
+
+MANUAL_DK_DEBT_CODES = {"2080", "2410", "4430"}
+MANUAL_DK_TOLERANCE = Decimal("0.01")
+MANUAL_DK_MONEY = Decimal("0.01")
+
+
+def _next_manual_dk_number(profile):
+    """
+    Возвращает следующий номер:
+    RDK-00001, RDK-00002...
+    """
+    prefix = "RDK-"
+    max_number = 0
+
+    numbers = JournalEntry.objects.filter(
+        company_profile=profile,
+        source_type=JournalEntry.SOURCE_MANUAL,
+        document_number__startswith=prefix,
+    ).values_list("document_number", flat=True)
+
+    for document_number in numbers:
+        suffix = str(document_number or "")[len(prefix):]
+
+        if suffix.isdigit():
+            max_number = max(
+                max_number,
+                int(suffix),
+            )
+
+    return f"{prefix}{max_number + 1:05d}"
+
+
+def _parse_manual_dk_payload(payload):
+    """
+    Tikrina ir normalizuoja rankinio DK įrašo duomenis.
+    Aprašymas nėra privalomas.
+    """
+    from .utils.journal_generators import _get_account_name
+
+    entry_date_raw = str(
+        payload.get("entry_date") or ""
+    ).strip()
+
+    try:
+        entry_date = date.fromisoformat(
+            entry_date_raw
+        )
+    except (TypeError, ValueError):
+        return None, "Nurodykite tinkamą datą."
+
+    description = str(
+        payload.get("description") or ""
+    ).strip()[:255]
+
+    counterparty_name = str(
+        payload.get("counterparty_name") or ""
+    ).strip()[:255]
+
+    counterparty_code = str(
+        payload.get("counterparty_code") or ""
+    ).strip()[:50]
+
+    counterparty_vat_code = str(
+        payload.get("counterparty_vat_code") or ""
+    ).strip()[:32]
+
+    raw_lines = payload.get("lines")
+
+    if not isinstance(raw_lines, list):
+        return None, "DK eilutės turi būti sąrašas."
+
+    if len(raw_lines) < 2:
+        return None, "Reikia bent dviejų DK eilučių."
+
+    parsed_lines = []
+    total_debit = Decimal("0")
+    total_credit = Decimal("0")
+    has_debit = False
+    has_credit = False
+
+    for index, raw_line in enumerate(
+        raw_lines,
+        start=1,
+    ):
+        if not isinstance(raw_line, dict):
+            return (
+                None,
+                f"Netinkama {index} DK eilutė.",
+            )
+
+        side = str(
+            raw_line.get("side") or ""
+        ).strip().upper()
+
+        if side not in ("D", "K"):
+            return (
+                None,
+                f"{index} eilutėje pasirinkite D arba K.",
+            )
+
+        account_code = str(
+            raw_line.get("account_code") or ""
+        ).strip()
+
+        if not account_code:
+            return (
+                None,
+                f"{index} eilutėje pasirinkite sąskaitą.",
+            )
+
+        if len(account_code) > 20:
+            return (
+                None,
+                f"{index} eilutės sąskaitos kodas per ilgas.",
+            )
+
+        account_name = _get_account_name(
+            account_code
+        )
+
+        if not account_name:
+            return (
+                None,
+                f"Nežinoma sąskaita: {account_code}.",
+            )
+
+        raw_amount = str(
+            raw_line.get("amount") or ""
+        ).strip().replace(",", ".")
+
+        try:
+            amount = Decimal(
+                raw_amount
+            ).quantize(
+                MANUAL_DK_MONEY,
+                rounding=ROUND_HALF_UP,
+            )
+        except (
+            InvalidOperation,
+            TypeError,
+            ValueError,
+        ):
+            return (
+                None,
+                f"{index} eilutėje nurodykite tinkamą sumą.",
+            )
+
+        if amount <= Decimal("0"):
+            return (
+                None,
+                f"{index} eilutės suma turi būti didesnė už nulį.",
+            )
+
+        line_description = str(
+            raw_line.get("description") or ""
+        ).strip()[:255]
+
+        parsed_lines.append({
+            "side": side,
+            "account_code": account_code,
+            "account_name": account_name,
+            "amount": amount,
+            "description": line_description,
+            "sort_order": index - 1,
+        })
+
+        if side == "D":
+            total_debit += amount
+            has_debit = True
+        else:
+            total_credit += amount
+            has_credit = True
+
+    requires_counterparty = any(
+        line["account_code"] in MANUAL_DK_DEBT_CODES
+        for line in parsed_lines
+    )
+
+    if requires_counterparty and not counterparty_name:
+        return (
+            None,
+            "Pasirinkite arba įveskite kontrahentą, nes naudojama skolų sąskaita.",
+        )
+
+    if not has_debit:
+        return None, "Reikia bent vienos debeto eilutės."
+
+    if not has_credit:
+        return None, "Reikia bent vienos kredito eilutės."
+
+    difference = total_debit - total_credit
+
+    if abs(difference) > MANUAL_DK_TOLERANCE:
+        return (
+            None,
+            (
+                "DK įrašas nesubalansuotas. "
+                f"Skirtumas: {abs(difference):.2f} EUR."
+            ),
+        )
+
+    return {
+        "entry_date": entry_date,
+        "period": entry_date.replace(day=1),
+        "description": description,
+        "counterparty_name": counterparty_name,
+        "counterparty_code": counterparty_code,
+        "counterparty_vat_code": counterparty_vat_code,
+        "lines": parsed_lines,
+        "total_debit": total_debit,
+        "total_credit": total_credit,
+    }, None
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def manual_dk_company_search(request):
+    query = str(request.query_params.get("q") or "").strip()[:100]
+
+    if len(query) < 2:
+        return Response({"results": []})
+
+    normalized_query = " ".join(query.upper().split())
+
+    companies = (
+        Company.objects
+        .filter(
+            Q(pavadinimas__icontains=query)
+            | Q(normalized_pavadinimas__icontains=normalized_query)
+            | Q(im_kodas__icontains=query)
+            | Q(pvm_kodas__icontains=query)
+        )
+        .order_by("pavadinimas", "im_kodas")[:20]
+    )
+
+    return Response({
+        "results": [
+            {
+                "id": company.id,
+                "pavadinimas": company.pavadinimas or "",
+                "im_kodas": company.im_kodas or "",
+                "pvm_kodas": company.pvm_kodas or "",
+                "adresas": company.adresas or "",
+            }
+            for company in companies
+        ]
+    })
+
+@api_view(["GET", "POST"])
+@permission_classes([IsAuthenticated])
+def manual_dk_collection(request):
+    """
+    GET:
+      grąžina kitą RDK numerį.
+
+    POST:
+      sukuria iš karto užregistruotą rankinį DK įrašą.
+    """
+    from .utils.journal_generators import (
+        finalize_journal_entry,
+    )
+
+    profile = _get_active_profile(request)
+
+    if not profile:
+        return Response(
+            {"detail": "Nepasirinktas profilis."},
+            status=400,
+        )
+
+    if request.method == "GET":
+        return Response({
+            "next_number":
+                _next_manual_dk_number(profile),
+        })
+
+    parsed, error = _parse_manual_dk_payload(
+        request.data
+    )
+
+    if error:
+        return Response(
+            {"detail": error},
+            status=400,
+        )
+
+    with transaction.atomic():
+        # Серилизуем выдачу RDK-номеров внутри профиля.
+        type(profile).objects.select_for_update().get(
+            pk=profile.pk
+        )
+
+        document_number = _next_manual_dk_number(
+            profile
+        )
+
+        entry = JournalEntry.objects.create(
+            user=request.user,
+            company_profile=profile,
+            source_type=JournalEntry.SOURCE_MANUAL,
+            entry_date=parsed["entry_date"],
+            period=parsed["period"],
+            document_number=document_number,
+            counterparty_name=parsed["counterparty_name"],
+            counterparty_code=parsed["counterparty_code"],
+            counterparty_vat_code=parsed["counterparty_vat_code"],
+            description=parsed["description"],
+            currency="EUR",
+            status=JournalEntry.STATUS_POSTED,
+        )
+
+        JournalEntryLine.objects.bulk_create([
+            JournalEntryLine(
+                entry=entry,
+                side=line["side"],
+                account_code=line["account_code"],
+                account_name=line["account_name"],
+                amount=line["amount"],
+                description=line["description"],
+                sort_order=line["sort_order"],
+            )
+            for line in parsed["lines"]
+        ])
+
+        finalize_journal_entry(entry)
+
+        entry.refresh_from_db()
+
+    serializer = JournalEntrySerializer(
+        entry,
+        context={"request": request},
+    )
+
+    return Response(
+        serializer.data,
+        status=201,
+    )
+
+
+@api_view(["GET", "PUT", "DELETE"])
+@permission_classes([IsAuthenticated])
+def manual_dk_detail(request, pk):
+    """
+    GET:
+      rankinio DK įrašo duomenys.
+
+    PUT:
+      atnaujina visą rankinį DK įrašą.
+
+    DELETE:
+      ištrina rankinį DK įrašą.
+    """
+    from .utils.journal_generators import (
+        finalize_journal_entry,
+    )
+
+    profile = _get_active_profile(request)
+
+    if not profile:
+        return Response(
+            {"detail": "Nepasirinktas profilis."},
+            status=400,
+        )
+
+    base_queryset = JournalEntry.objects.filter(
+        pk=pk,
+        company_profile=profile,
+        source_type=JournalEntry.SOURCE_MANUAL,
+    )
+
+    if request.method == "GET":
+        entry = (
+            base_queryset
+            .prefetch_related("lines")
+            .first()
+        )
+
+        if not entry:
+            return Response(
+                {"detail": "Rankinis DK įrašas nerastas."},
+                status=404,
+            )
+
+        serializer = JournalEntrySerializer(
+            entry,
+            context={"request": request},
+        )
+
+        return Response(serializer.data)
+
+    if request.method == "DELETE":
+        with transaction.atomic():
+            entry = (
+                base_queryset
+                .select_for_update()
+                .first()
+            )
+
+            if not entry:
+                return Response(
+                    {
+                        "detail":
+                        "Rankinis DK įrašas nerastas."
+                    },
+                    status=404,
+                )
+
+            entry.delete()
+
+        return Response(status=204)
+
+    parsed, error = _parse_manual_dk_payload(
+        request.data
+    )
+
+    if error:
+        return Response(
+            {"detail": error},
+            status=400,
+        )
+
+    with transaction.atomic():
+        entry = (
+            base_queryset
+            .select_for_update()
+            .first()
+        )
+
+        if not entry:
+            return Response(
+                {"detail": "Rankinis DK įrašas nerastas."},
+                status=404,
+            )
+
+        entry.entry_date = parsed["entry_date"]
+        entry.period = parsed["period"]
+        entry.description = parsed["description"]
+        entry.counterparty_name = parsed["counterparty_name"]
+        entry.counterparty_code = parsed["counterparty_code"]
+        entry.counterparty_vat_code = parsed["counterparty_vat_code"]
+        entry.currency = "EUR"
+        entry.status = JournalEntry.STATUS_POSTED
+
+        entry.save(update_fields=[
+            "entry_date",
+            "period",
+            "description",
+            "counterparty_name",
+            "counterparty_code",
+            "counterparty_vat_code",
+            "currency",
+            "status",
+            "updated_at",
+        ])
+
+        entry.lines.all().delete()
+
+        JournalEntryLine.objects.bulk_create([
+            JournalEntryLine(
+                entry=entry,
+                side=line["side"],
+                account_code=line["account_code"],
+                account_name=line["account_name"],
+                amount=line["amount"],
+                description=line["description"],
+                sort_order=line["sort_order"],
+            )
+            for line in parsed["lines"]
+        ])
+
+        finalize_journal_entry(entry)
+
+        entry.refresh_from_db()
+
+    serializer = JournalEntrySerializer(
+        entry,
+        context={"request": request},
+    )
+
+    return Response(serializer.data)
+
+@api_view(["PATCH"])
+@permission_classes([IsAuthenticated])
+def patch_dk_line(request, pk):
+    """
+    PATCH /api/apskaita/dk-eilutes/<id>/
+
+    Pakeičia leidžiamą DK sąskaitą.
+    Pirkimo / pardavimo atveju taip pat atnaujina
+    korespondenciją šaltinio dokumente.
+    """
+    from django.db import transaction
+    from django.utils import timezone
+
+    from .utils.journal_generators import (
+        finalize_journal_entry,
+        _get_account_name,
+    )
+    from .serializers import (
+        LOCKED_CODES,
+        LOCKED_PREFIXES,
+    )
+
+    profile = _get_active_profile(request)
+
+    if not profile:
+        return Response(
+            {"detail": "Nepasirinktas profilis."},
+            status=400,
+        )
+
+    new_code = (
+        request.data.get("account_code") or ""
+    ).strip()
+
+    if not new_code:
+        return Response(
+            {"detail": "Sąskaitos kodas privalomas."},
+            status=400,
+        )
+
+    with transaction.atomic():
+        line = (
+            JournalEntryLine.objects
+            .select_for_update(of=("self",))
+            .select_related(
+                "entry",
+                "entry__purchase",
+                "entry__invoice",
+            )
+            .filter(
+                entry__company_profile=profile,
+                id=pk,
+            )
+            .first()
+        )
+
+        if not line:
+            return Response(
+                {"detail": "Nerasta."},
+                status=404,
+            )
+    if line.entry.source_type == JournalEntry.SOURCE_MANUAL:
+        return Response(
+            {
+                "detail":
+                "Rankinis DK įrašas redaguojamas visas dialogo lange."
+            },
+            status=400,
+        )
+
+        old_code = (
+            line.account_code or ""
+        ).strip()
+
+        # Paliekame dabartinį leidimų principą:
+        # užrakintų eilučių redaguoti negalima.
+        old_code_locked = (
+            old_code in LOCKED_CODES
+            or any(
+                old_code.startswith(prefix)
+                for prefix in LOCKED_PREFIXES
+            )
+        )
+
+        if old_code_locked:
+            return Response(
+                {
+                    "detail":
+                    "Šios sąskaitos keisti negalima."
+                },
+                status=400,
+            )
+
+        # Neleidžiame redaguojamos eilutės pakeisti
+        # į sisteminę / užrakintą sąskaitą.
+        new_code_locked = (
+            new_code in LOCKED_CODES
+            or any(
+                new_code.startswith(prefix)
+                for prefix in LOCKED_PREFIXES
+            )
+        )
+
+        if new_code_locked:
+            return Response(
+                {
+                    "detail":
+                    "Šios sąskaitos pasirinkti negalima."
+                },
+                status=400,
+            )
+
+        if new_code == old_code:
+            return Response({
+                "status": "unchanged",
+                "account_code": old_code,
+                "account_name": line.account_name,
+                "is_user_modified":
+                    line.is_user_modified,
+            })
+
+        entry = line.entry
+
+        # ─────────────────────────────────────────────
+        # PIRKIMAS
+        # Redaguojama tik sąnaudų / turto DK eilutė.
+        # ─────────────────────────────────────────────
+        if entry.source_type == JournalEntry.SOURCE_PURCHASE:
+            purchase = entry.purchase
+
+            if not purchase:
+                return Response(
+                    {
+                        "detail":
+                        "Nerastas susietas pirkimo dokumentas."
+                    },
+                    status=409,
+                )
+
+            purchase_items = list(
+                purchase.line_items
+                .select_for_update()
+                .all()
+            )
+
+            if purchase_items:
+                changed_items = []
+
+                for item in purchase_items:
+                    effective_code = str(
+                        item.effective_debeto or "6312"
+                    ).strip()
+
+                    if effective_code == old_code:
+                        item.debeto_saskaita = new_code
+                        changed_items.append(item)
+
+                if not changed_items:
+                    return Response(
+                        {
+                            "detail":
+                            "Nepavyko rasti susietų "
+                            "pirkimo eilučių."
+                        },
+                        status=409,
+                    )
+
+                purchase.line_items.model.objects.bulk_update(
+                    changed_items,
+                    ["debeto_saskaita"],
+                )
+
+                type(purchase).objects.filter(
+                    pk=purchase.pk
+                ).update(
+                    updated_at=timezone.now(),
+                )
+
+            else:
+                type(purchase).objects.filter(
+                    pk=purchase.pk
+                ).update(
+                    debeto_saskaita=new_code,
+                    updated_at=timezone.now(),
+                )
+
+        # ─────────────────────────────────────────────
+        # PARDAVIMAS
+        # Redaguojama tik pajamų DK eilutė.
+        # ─────────────────────────────────────────────
+        elif entry.source_type == JournalEntry.SOURCE_SALE:
+            invoice = entry.invoice
+
+            if not invoice:
+                return Response(
+                    {
+                        "detail":
+                        "Nerastas susietas pardavimo dokumentas."
+                    },
+                    status=409,
+                )
+
+            invoice_items = list(
+                invoice.line_items
+                .select_for_update()
+                .all()
+            )
+
+            if invoice_items:
+                changed_items = []
+
+                for item in invoice_items:
+                    supply_kind = str(
+                        item.preke_paslauga or ""
+                    ).strip().lower()
+
+                    default_code = (
+                        "5000"
+                        if supply_kind in (
+                            "preke",
+                            "1",
+                            "3",
+                        )
+                        else "5001"
+                    )
+
+                    effective_code = str(
+                        item.kredito_saskaita
+                        or default_code
+                    ).strip()
+
+                    if effective_code == old_code:
+                        item.kredito_saskaita = new_code
+                        changed_items.append(item)
+
+                if not changed_items:
+                    return Response(
+                        {
+                            "detail":
+                            "Nepavyko rasti susietų "
+                            "pardavimo eilučių."
+                        },
+                        status=409,
+                    )
+
+                invoice.line_items.model.objects.bulk_update(
+                    changed_items,
+                    ["kredito_saskaita"],
+                )
+
+                type(invoice).objects.filter(
+                    pk=invoice.pk
+                ).update(
+                    updated_at=timezone.now(),
+                )
+
+            else:
+                type(invoice).objects.filter(
+                    pk=invoice.pk
+                ).update(
+                    kredito_saskaita=new_code,
+                    updated_at=timezone.now(),
+                )
+
+        # Banko ir rankinio DK atveju šaltinio
+        # dokumento korespondencijos neatnaujiname.
+
+        new_account_name = _get_account_name(
+            new_code
+        )
+
+        updated = (
+            JournalEntryLine.objects
+            .filter(pk=line.pk)
+            .update(
+                account_code=new_code,
+                account_name=new_account_name,
+                is_user_modified=True,
+            )
+        )
+
+        if not updated:
+            return Response(
+                {
+                    "detail":
+                    "Įrašo nebėra – atnaujinkite puslapį."
+                },
+                status=409,
+            )
+
+        line.account_code = new_code
+        line.account_name = new_account_name
+        line.is_user_modified = True
+
+        finalize_journal_entry(entry)
+
+    return Response({
+        "status": "updated",
+        "account_code": new_code,
+        "account_name": new_account_name,
+        "is_user_modified": True,
+    })
+
+from .pagination import DkPagination
+
+
+class OperacijosViewSet(viewsets.ReadOnlyModelViewSet):
+    serializer_class = JournalEntrySerializer
+    permission_classes = [IsAuthenticated]
+    pagination_class = DkPagination
+
+    def get_queryset(self):
+        profile = _get_active_profile(self.request)
+        if not profile:
+            return JournalEntry.objects.none()
+
+        qs = JournalEntry.objects.filter(
+            company_profile=profile,
+        ).select_related(
+            "purchase", "purchase__scanned_document",
+            "invoice", "invoice__scanned_document",
+        ).prefetch_related("lines")
+
+        # Filter by period
+        period_str = self.request.query_params.get("period")
+        date_from_str = self.request.query_params.get("date_from")
+        date_to_str = self.request.query_params.get("date_to")
+
+        period_start = _parse_period(period_str)
+        if period_start:
+            if period_start.month == 12:
+                period_end = date(period_start.year + 1, 1, 1)
+            else:
+                period_end = date(period_start.year, period_start.month + 1, 1)
+            qs = qs.filter(
+                entry_date__gte=period_start,
+                entry_date__lt=period_end,
+            )
+        else:
+            if date_from_str:
+                try:
+                    qs = qs.filter(entry_date__gte=date.fromisoformat(date_from_str))
+                except ValueError:
+                    pass
+            if date_to_str:
+                try:
+                    qs = qs.filter(entry_date__lte=date.fromisoformat(date_to_str))
+                except ValueError:
+                    pass
+
+        # Filter by source_type
+        source_type = self.request.query_params.get("source_type")
+        if source_type:
+            qs = qs.filter(source_type=source_type)
+
+        # Filter by counterparty
+        counterparty = self.request.query_params.get("counterparty", "").strip()
+        if counterparty:
+            qs = qs.filter(
+                Q(counterparty_name__icontains=counterparty) |
+                Q(counterparty_code__icontains=counterparty)
+            )
+
+        # Filter by account (показать только операции затрагивающие эту sąskaitą)
+        account_code = self.request.query_params.get("account_code")
+        if account_code:
+            qs = qs.filter(lines__account_code=account_code).distinct()
+
+        # Filter by status
+        status_param = self.request.query_params.get("status")
+        if status_param:
+            qs = qs.filter(status=status_param)
+
+        # Only problems (unbalanced/needs_review)
+        only_problems = self.request.query_params.get("only_problems", "").lower() == "true"
+        if only_problems:
+            qs = qs.filter(status__in=[
+                JournalEntry.STATUS_UNBALANCED,
+                JournalEntry.STATUS_NEEDS_REVIEW,
+            ])
+
+        return qs.order_by("-entry_date", "-id")
+
+    def list(self, request, *args, **kwargs):
+        qs = self.filter_queryset(self.get_queryset())
+        page = self.paginate_queryset(qs)
+        if page is not None:
+            serializer = self.get_serializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
+        serializer = self.get_serializer(qs, many=True)
+        return Response(serializer.data)
+
+
+# ═══════════════════════════════════════════════════════════
+# DASHBOARD CARDS — цифры для верха страницы Apskaita
+# ═══════════════════════════════════════════════════════════
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def apskaita_summary_cards(request):
+    """Возвращает цифры для карточек наверху страницы Apskaita."""
+    profile = _get_active_profile(request)
+    if not profile:
+        return Response({"detail": "Nepasirinktas įmonės profilis."}, status=400)
+
+    period_str = request.query_params.get("period")
+    date_from_str = request.query_params.get("date_from")
+    date_to_str = request.query_params.get("date_to")
+
+    period_start = _parse_period(period_str)
+    if period_start:
+        if period_start.month == 12:
+            period_end = date(period_start.year + 1, 1, 1)
+        else:
+            period_end = date(period_start.year, period_start.month + 1, 1)
+    elif date_from_str or date_to_str:
+        try:
+            period_start = date.fromisoformat(date_from_str) if date_from_str else date(2000, 1, 1)
+        except ValueError:
+            period_start = date(2000, 1, 1)
+        try:
+            d = date.fromisoformat(date_to_str) if date_to_str else date.today()
+            period_end = d + timedelta(days=1)
+        except ValueError:
+            period_end = date.today() + timedelta(days=1)
+    else:
+        today = date.today()
+        period_start = date(today.year, today.month, 1)
+        if today.month == 12:
+            period_end = date(today.year + 1, 1, 1)
+        else:
+            period_end = date(today.year, today.month + 1, 1)
+
+    # Customer debt (2410 balance)
+    customer_debt = Decimal("0")
+    for p in Purchase.objects.filter(company_profile=profile):
+        customer_debt += (p.amount_with_vat or Decimal("0")) - (p.paid_amount or Decimal("0"))
+    customer_debt = Decimal("0")
+    supplier_debt = Decimal("0")
+
+    for inv in Invoice.objects.filter(company_profile=profile):
+        balance = (inv.amount_with_vat or Decimal("0")) - (inv.paid_amount or Decimal("0"))
+        if balance > 0:
+            customer_debt += balance
+
+    for p in Purchase.objects.filter(company_profile=profile):
+        balance = (p.amount_with_vat or Decimal("0")) - (p.paid_amount or Decimal("0"))
+        if balance > 0:
+            supplier_debt += balance
+
+    # PVM per periodą
+    period_lines = JournalEntryLine.objects.filter(
+        entry__company_profile=profile,
+        entry__entry_date__gte=period_start,
+        entry__entry_date__lt=period_end,
+    )
+    vat_receivable = period_lines.filter(
+        account_code="2441", side="D",
+    ).aggregate(s=Coalesce(Sum("amount"), Decimal("0")))["s"]
+    vat_payable = period_lines.filter(
+        account_code="4492", side="K",
+    ).aggregate(s=Coalesce(Sum("amount"), Decimal("0")))["s"]
+    vat_net = vat_payable - vat_receivable
+
+    # DK problems
+    unbalanced_count = JournalEntry.objects.filter(
+        company_profile=profile,
+        status=JournalEntry.STATUS_UNBALANCED,
+    ).count()
+
+    return Response({
+        "period": period_start.strftime("%Y-%m"),
+        "customer_debt": str(customer_debt),
+        "supplier_debt": str(supplier_debt),
+        "vat_receivable": str(vat_receivable),
+        "vat_payable": str(vat_payable),
+        "vat_net": str(vat_net),
+        "unbalanced_entries": unbalanced_count,
+    })
+
+# ═══════════════════════════════════════════════════════════
+# END - DK
+# ═══════════════════════════════════════════════════════════

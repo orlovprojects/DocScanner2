@@ -6,3 +6,4 @@ class DocscannerAppConfig(AppConfig):
 
     def ready(self):
         import docscanner_app.celery_signals  # noqa
+        import docscanner_app.utils.signals  # noqa

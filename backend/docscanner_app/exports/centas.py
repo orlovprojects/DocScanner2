@@ -297,6 +297,24 @@ def _ensure_credit_abs_price(value, document):
     except Exception:
         return value
 
+def _use_matched_catalog(item) -> bool:
+    """Есть ли валидный каталог-матч на строке (и юзер его не отключил)."""
+    if getattr(item, "catalog_match_user_override", False):
+        return False
+    matched_code = (getattr(item, "matched_prekes_kodas", None) or "").strip()
+    return bool(matched_code) and matched_code.upper() != "UKN0"
+
+
+def _resolved_field(item, field_name: str) -> str:
+    """
+    Если у строки есть валидный каталог-матч — берём matched_ поле.
+    Если matched_ поле пустое — fallback на оригинальное.
+    """
+    if _use_matched_catalog(item):
+        matched_val = (getattr(item, f"matched_{field_name}", None) or "").strip()
+        if matched_val:
+            return matched_val
+    return (getattr(item, field_name, None) or "").strip()
 
 # =========================
 # PVM Kodas helpers
@@ -453,13 +471,13 @@ def export_document_to_centras_xml(
         for item in items_list:
             eilute = ET.SubElement(dok, "eilute")
             code_val = (
-                (getattr(item, "prekes_kodas", None) or "").strip()
-                or (getattr(item, "prekes_barkodas", None) or "").strip()
+                _resolved_field(item, "prekes_kodas")
+                or _resolved_field(item, "prekes_barkodas")
                 or "PREKES"
             )
             ET.SubElement(eilute, "kodas").text = smart_str(code_val)
-            ET.SubElement(eilute, "pavadinimas").text = smart_str(getattr(item, "prekes_pavadinimas", None) or "PIRKIMAS")
-            ET.SubElement(eilute, "matovnt").text = smart_str(getattr(item, "unit", None) or "vnt")
+            ET.SubElement(eilute, "pavadinimas").text = smart_str(_resolved_field(item, "prekes_pavadinimas") or direction_key.upper())
+            ET.SubElement(eilute, "matovnt").text = smart_str(_resolved_field(item, "unit") or "vnt")
             q = getattr(item, "quantity", None)
             q = q if q is not None else 1
             ET.SubElement(eilute, "kiekis").text = _fmt_qty(_ensure_credit_sign(q, document))
@@ -486,7 +504,7 @@ def export_document_to_centras_xml(
             or "PREKES"
         )
         ET.SubElement(eilute, "kodas").text = smart_str(code_val)
-        ET.SubElement(eilute, "pavadinimas").text = smart_str(getattr(document, "prekes_pavadinimas", None) or "PIRKIMAS")
+        ET.SubElement(eilute, "pavadinimas").text = smart_str(getattr(document, "prekes_pavadinimas", None) or direction_key.upper())
         ET.SubElement(eilute, "matovnt").text = "vnt"
         ET.SubElement(eilute, "kiekis").text = _fmt_qty(_ensure_credit_sign(1, document))
         ET.SubElement(eilute, "kaina").text = get_price_or_zero(_ensure_credit_abs_price(getattr(document, "amount_wo_vat", None), document))
@@ -549,13 +567,9 @@ _CENTAS_CSV_HEADER = [
 
 
 def _is_paslauga(item, document) -> bool:
-    """
-    preke_paslauga == 2 -> paslauga (T), всё остальное -> prekė (N).
-    Приоритет: значение на строке > значение на документе.
-    """
-    val = getattr(item, "preke_paslauga", None)
-    if val is None or str(val).strip() == "":
-        val = getattr(document, "preke_paslauga", None)
+    val = _resolved_field(item, "preke_paslauga") if hasattr(item, "matched_preke_paslauga") else (getattr(item, "preke_paslauga", None) or "").strip()
+    if not val:
+        val = (getattr(document, "preke_paslauga", None) or "").strip()
     try:
         return int(val) == 2
     except (ValueError, TypeError):
@@ -641,15 +655,9 @@ def generate_prekes_paslaugos_csv(
         }
 
     def _resolve_kodas_from_item(item, doc):
-        """
-        Код товара для строки (detaliai).
-        item.prekes_kodas → item.prekes_barkodas →
-        doc.prekes_kodas → doc.prekes_barkodas →
-        neraPrekesKodo + 4 случайные цифры.
-        """
         return smart_str(
-            (getattr(item, "prekes_kodas", None) or "").strip()
-            or (getattr(item, "prekes_barkodas", None) or "").strip()
+            _resolved_field(item, "prekes_kodas")
+            or _resolved_field(item, "prekes_barkodas")
             or (getattr(doc, "prekes_kodas", None) or "").strip()
             or (getattr(doc, "prekes_barkodas", None) or "").strip()
             or f"neraPrekesKodo{random.randint(0, 9999):04d}"
@@ -689,9 +697,9 @@ def generate_prekes_paslaugos_csv(
 
                 row = _base_row(
                     kodas,
-                    _s(getattr(item, "prekes_pavadinimas", None)) or "PIRKIMAS",
-                    _s(getattr(item, "unit", None)) or "vnt",
-                    _s(getattr(item, "prekes_barkodas", None)),
+                    _resolved_field(item, "prekes_pavadinimas") or "PIRKIMAS",
+                    _resolved_field(item, "unit") or "vnt",
+                    _resolved_field(item, "prekes_barkodas"),
                     "T" if _is_paslauga(item, document) else "N",
                     extra,
                 )
@@ -736,9 +744,9 @@ def generate_prekes_paslaugos_csv(
 
                 row = _base_row(
                     kodas,
-                    _s(getattr(item, "prekes_pavadinimas", None)) or "PIRKIMAS",
-                    _s(getattr(item, "unit", None)) or "vnt",
-                    _s(getattr(item, "prekes_barkodas", None)),
+                    _resolved_field(item, "prekes_pavadinimas") or "PARDAVIMAS",
+                    _resolved_field(item, "unit") or "vnt",
+                    _resolved_field(item, "prekes_barkodas"),
                     "T" if _is_paslauga(item, document) else "N",
                     extra,
                 )
@@ -762,7 +770,7 @@ def generate_prekes_paslaugos_csv(
             else:
                 row = _base_row(
                     kodas,
-                    _s(getattr(document, "prekes_pavadinimas", None)) or "PIRKIMAS",
+                    _s(getattr(document, "prekes_pavadinimas", None)) or "PARDAVIMAS",
                     "vnt",
                     _s(getattr(document, "prekes_barkodas", None)),
                     "T" if _is_paslauga(document, document) else "N",
@@ -832,8 +840,8 @@ def generate_pradiniai_likuciai_csv(
 
     def _resolve_kodas_from_item(item, doc):
         return smart_str(
-            (getattr(item, "prekes_kodas", None) or "").strip()
-            or (getattr(item, "prekes_barkodas", None) or "").strip()
+            _resolved_field(item, "prekes_kodas")
+            or _resolved_field(item, "prekes_barkodas")
             or (getattr(doc, "prekes_kodas", None) or "").strip()
             or (getattr(doc, "prekes_barkodas", None) or "").strip()
             or f"neraPrekesKodo{random.randint(0, 9999):04d}"
@@ -869,8 +877,8 @@ def generate_pradiniai_likuciai_csv(
                     seen[kodas]["kiekis"] += qty
                 else:
                     seen[kodas] = {
-                        "pavadinimas": _s(getattr(item, "prekes_pavadinimas", None)) or "PIRKIMAS",
-                        "matovnt": _s(getattr(item, "unit", None)) or "vnt",
+                        "pavadinimas": _resolved_field(item, "prekes_pavadinimas") or "PARDAVIMAS",
+                        "matovnt": _resolved_field(item, "unit") or "vnt",
                         "kiekis": qty,
                         "kaina": price,
                     }
@@ -886,7 +894,7 @@ def generate_pradiniai_likuciai_csv(
                 seen[kodas]["kiekis"] += 1.0
             else:
                 seen[kodas] = {
-                    "pavadinimas": _s(getattr(document, "prekes_pavadinimas", None)) or "PIRKIMAS",
+                    "pavadinimas": _s(getattr(document, "prekes_pavadinimas", None)) or "PARDAVIMAS",
                     "matovnt": "vnt",
                     "kiekis": 1.0,
                     "kaina": price,

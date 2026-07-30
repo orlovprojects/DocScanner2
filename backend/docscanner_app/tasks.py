@@ -21,7 +21,13 @@ from django.db import transaction
 from django.utils import timezone
 from datetime import timedelta
 
-from .models import ScannedDocument, CustomUser, UploadSession, CreditUsageLog
+from .models import (
+    ScannedDocument,
+    CustomUser,
+    UploadSession,
+    CreditUsageLog,
+    ProductAutocomplete,
+)
 
 from .utils.ocr import get_ocr_text as get_ocr_text_gcv
 from .utils.gemini_ocr import get_ocr_text_gemini
@@ -32,6 +38,7 @@ from .utils.gpt import ask_gpt_with_retry
 from .utils.kie import (
     ask_gemini_with_retry,
     ask_llm_with_fallback as kie_ask_llm_with_fallback,
+    ask_catalog_matching_kie,
     repair_truncated_json_with_gemini_lite,
     request_full_json_with_gemini_lite,
     is_truncated_json,
@@ -294,21 +301,42 @@ def _settle_and_finish_if_session(doc: ScannedDocument):
 
 
 
+def _count_line_items(structured: dict) -> int:
+    try:
+        docs = structured.get("documents") or []
+        cnt = 0
+        for d in docs:
+            li = d.get("line_items") or []
+            cnt += sum(1 for it in li if isinstance(it, dict))
+        return cnt
+    except Exception:
+        return 0
 
+def _is_response_truncated(resp: str) -> bool:
+    if not resp or not resp.strip():
+        return False
+    s = resp.strip()
+    if '{' not in s and '[' not in s:
+        return True
+    if s[0] not in ('{', '['):
+        return True
+    if s[-1] not in ('}', ']'):
+        return True
+    return False
 
+def _t():
+    return time.perf_counter()
 
+def _log_t(label: str, t0: float):
+    logger.info(f"[TIME] {label}: {time.perf_counter() - t0:.2f}s")
 
-
-
-
-
-
-
-
-
-
-
-
+def _is_pdf_multi_page(file_path: str) -> int:
+    if not file_path.lower().endswith('.pdf'):
+        return 0
+    try:
+        return get_pdf_page_count(file_path)
+    except Exception:
+        return 0
 
 
 
@@ -340,46 +368,552 @@ def _extract_json_object(s: str) -> dict:
     except Exception:
         return {}
     
+CATALOG_UNKNOWN_CODE = "UKN0"
 
-def _count_line_items(structured: dict) -> int:
-    try:
-        docs = structured.get("documents") or []
-        cnt = 0
-        for d in docs:
-            li = d.get("line_items") or []
-            cnt += sum(1 for it in li if isinstance(it, dict))
-        return cnt
-    except Exception:
-        return 0
+CATALOG_MATCHING_SETTING_KEY = (
+    "match_catalog_items_on_detailed_scan"
+)
 
-def _is_response_truncated(resp: str) -> bool:
-    """Ответ LLM обрезан: нет открывающей или закрывающей скобки."""
-    if not resp or not resp.strip():
+def _catalog_matching_enabled(user: CustomUser) -> bool:
+    extra_settings = getattr(user, "extra_settings", None)
+
+    if not isinstance(extra_settings, dict):
         return False
-    s = resp.strip()
-    if '{' not in s and '[' not in s:
-        return True
-    if s[0] not in ('{', '['):
-        return True
-    if s[-1] not in ('}', ']'):
-        return True
+
+    value = extra_settings.get(
+        CATALOG_MATCHING_SETTING_KEY
+    )
+
+    if isinstance(value, bool):
+        return value
+
+    if isinstance(value, (int, float)):
+        return value == 1
+
+    if isinstance(value, str):
+        return value.strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
+
     return False
 
-def _t():
-    return time.perf_counter()
+CATALOG_MATCHED_FIELDS = [
+    "matched_prekes_pavadinimas",
+    "matched_prekes_kodas",
+    "matched_prekes_barkodas",
+    "matched_unit",
+    "matched_preke_paslauga",
+]
 
-def _log_t(label: str, t0: float):
-    logger.info(f"[TIME] {label}: {time.perf_counter() - t0:.2f}s")
 
-def _is_pdf_multi_page(file_path: str) -> int:
-    """Возвращает кол-во страниц если PDF 2+, иначе 0."""
-    if not file_path.lower().endswith('.pdf'):
-        return 0
+def _clean_catalog_value(value) -> str:
+    if value is None:
+        return ""
+    return str(value).strip()
+
+
+def _set_line_item_unknown(line_item) -> None:
+    line_item.matched_prekes_pavadinimas = ""
+    line_item.matched_prekes_kodas = CATALOG_UNKNOWN_CODE
+    line_item.matched_prekes_barkodas = ""
+    line_item.matched_unit = ""
+    line_item.matched_preke_paslauga = ""
+
+
+def _set_line_item_catalog_product(line_item, product) -> None:
+    """
+    Matched reikšmes kopijuojame tik iš DB katalogo.
+
+    Gemini grąžina tik kodą. Gemini grąžintų pavadinimų,
+    barkodų ar mato vienetų nepasitikime.
+    """
+    line_item.matched_prekes_pavadinimas = _clean_catalog_value(
+        getattr(product, "prekes_pavadinimas", "")
+    )
+    line_item.matched_prekes_kodas = _clean_catalog_value(
+        getattr(product, "prekes_kodas", "")
+    )
+    line_item.matched_prekes_barkodas = _clean_catalog_value(
+        getattr(product, "prekes_barkodas", "")
+    )
+    line_item.matched_unit = _clean_catalog_value(
+        getattr(product, "unit", "")
+    )
+    line_item.matched_preke_paslauga = _clean_catalog_value(
+        getattr(product, "preke_paslauga", "")
+    )
+
+def _match_document_line_items_with_catalog(
+    *,
+    doc: ScannedDocument,
+    user: CustomUser,
+) -> bool:
+    """
+    Susieja ScannedDocument LineItem eilutes su vartotojo
+    ProductAutocomplete katalogu.
+
+    Matching paleidžiamas tik jeigu:
+    1. CustomUser.extra_settings turi įjungtą
+       match_catalog_items_on_detailed_scan
+    2. dokumentas skaitmenizuotas detaliai
+    3. math_validation_passed yra True
+    4. dokumentas turi LineItem eilučių
+    5. vartotojas turi importuotų katalogo prekių
+
+    Gemini grąžina tik katalogo prekes_kodas arba UKN0.
+    Kitus matched_* laukus užpildome tik duomenimis iš DB katalogo.
+
+    Matching klaida neturi atmesti jau sėkmingai apdoroto dokumento.
+    Todėl šios funkcijos išimtį turi pagauti ją kviečiantis kodas.
+    """
+
+    setting_key = "match_catalog_items_on_detailed_scan"
+    unknown_code = "UKN0"
+
+    matched_fields = [
+        "matched_prekes_pavadinimas",
+        "matched_prekes_kodas",
+        "matched_prekes_barkodas",
+        "matched_unit",
+        "matched_preke_paslauga",
+    ]
+
+    def clean(value) -> str:
+        if value is None:
+            return ""
+        return str(value).strip()
+
+    # ─────────────────────────────────────────────────────
+    # 1. Tikriname CustomUser.extra_settings
+    # ─────────────────────────────────────────────────────
+    extra_settings = getattr(user, "extra_settings", None)
+
+    if not isinstance(extra_settings, dict):
+        logger.info(
+            "[CATALOG MATCH] Skip doc_id=%s: "
+            "extra_settings is not a dict",
+            doc.pk,
+        )
+        return False
+
+    raw_setting_value = extra_settings.get(setting_key)
+
+    if isinstance(raw_setting_value, bool):
+        matching_enabled = raw_setting_value
+    elif isinstance(raw_setting_value, (int, float)):
+        matching_enabled = raw_setting_value == 1
+    elif isinstance(raw_setting_value, str):
+        matching_enabled = (
+            raw_setting_value.strip().lower()
+            in {"1", "true", "yes", "on"}
+        )
+    else:
+        matching_enabled = False
+
+    if not matching_enabled:
+        logger.info(
+            "[CATALOG MATCH] Skip doc_id=%s: "
+            "extra_settings.%s disabled or missing",
+            doc.pk,
+            setting_key,
+        )
+        return False
+
+    # ─────────────────────────────────────────────────────
+    # 2. Atnaujiname dokumento validacijos būseną iš DB
+    # ─────────────────────────────────────────────────────
+    doc.refresh_from_db(
+        fields=[
+            "scan_type",
+            "math_validation_passed",
+        ]
+    )
+
+    if clean(doc.scan_type).lower() != "detaliai":
+        logger.info(
+            "[CATALOG MATCH] Skip doc_id=%s: scan_type=%r",
+            doc.pk,
+            doc.scan_type,
+        )
+        return False
+
+    if doc.math_validation_passed is not True:
+        logger.info(
+            "[CATALOG MATCH] Skip doc_id=%s: "
+            "math_validation_passed=%r",
+            doc.pk,
+            doc.math_validation_passed,
+        )
+        return False
+
+    # ─────────────────────────────────────────────────────
+    # 3. Gauname visas dokumento eilutes
+    # ─────────────────────────────────────────────────────
+    line_items = list(
+        doc.line_items
+        .all()
+        .only(
+            "id",
+            "prekes_pavadinimas",
+            "prekes_kodas",
+            "prekes_barkodas",
+            "unit",
+            "matched_prekes_pavadinimas",
+            "matched_prekes_kodas",
+            "matched_prekes_barkodas",
+            "matched_unit",
+            "matched_preke_paslauga",
+        )
+        .order_by("line_id", "id")
+    )
+
+    if not line_items:
+        logger.info(
+            "[CATALOG MATCH] Skip doc_id=%s: no line items",
+            doc.pk,
+        )
+        return False
+
+    # ─────────────────────────────────────────────────────
+    # 4. Gauname visą vartotojo prekių katalogą
+    # ─────────────────────────────────────────────────────
+    products = list(
+        ProductAutocomplete.objects
+        .filter(user_id=user.pk)
+        .only(
+            "id",
+            "prekes_pavadinimas",
+            "prekes_kodas",
+            "prekes_barkodas",
+            "unit",
+            "preke_paslauga",
+        )
+        .order_by("id")
+    )
+
+    if not products:
+        logger.info(
+            "[CATALOG MATCH] Skip doc_id=%s: catalog is empty",
+            doc.pk,
+        )
+        return False
+
+    catalog_payload = []
+    catalog_by_code = {}
+
+    for product in products:
+        product_code = clean(product.prekes_kodas)
+
+        # Be kodo produkto negalima pasirinkti iš Gemini atsakymo
+        if not product_code:
+            continue
+
+        # UKN0 yra rezervuotas nežinomo rezultato kodas
+        if product_code.upper() == unknown_code:
+            logger.warning(
+                "[CATALOG MATCH] Ignore reserved catalog code "
+                "user_id=%s product_id=%s code=%r",
+                user.pk,
+                product.pk,
+                product_code,
+            )
+            continue
+
+        # Jei kataloge netyčia yra pasikartojantis kodas,
+        # naudojame pirmą įrašą.
+        if product_code in catalog_by_code:
+            logger.warning(
+                "[CATALOG MATCH] Duplicate catalog code "
+                "user_id=%s code=%r existing_product_id=%s "
+                "ignored_product_id=%s",
+                user.pk,
+                product_code,
+                catalog_by_code[product_code].pk,
+                product.pk,
+            )
+            continue
+
+        catalog_by_code[product_code] = product
+
+        catalog_row = {
+            "prekes_pavadinimas": clean(
+                product.prekes_pavadinimas
+            ),
+            "prekes_kodas": product_code,
+        }
+
+        product_barcode = clean(
+            product.prekes_barkodas
+        )
+        if product_barcode:
+            catalog_row["prekes_barkodas"] = product_barcode
+
+        product_unit = clean(product.unit)
+        if product_unit:
+            catalog_row["unit"] = product_unit
+
+        catalog_payload.append(catalog_row)
+
+    if not catalog_payload:
+        logger.info(
+            "[CATALOG MATCH] Skip doc_id=%s: "
+            "catalog has no products with valid codes",
+            doc.pk,
+        )
+        return False
+    
+    # После формирования catalog_payload, перед шагом 5:
+    MAX_CATALOG_ITEMS = 1500
+    if len(catalog_payload) > MAX_CATALOG_ITEMS:
+        logger.info(
+            "[CATALOG MATCH] Truncating catalog: %d → %d items",
+            len(catalog_payload), MAX_CATALOG_ITEMS,
+        )
+        catalog_payload = catalog_payload[:MAX_CATALOG_ITEMS]
+
+    # ─────────────────────────────────────────────────────
+    # 5. Formuojame LineItem sąrašą Gemini užklausai
+    # ─────────────────────────────────────────────────────
+    line_items_payload = []
+    line_items_by_id = {}
+
+    for line_item in line_items:
+        line_item_id = str(line_item.pk)
+        line_items_by_id[line_item_id] = line_item
+
+        line_row = {
+            "line_item_id": line_item.pk,
+            "prekes_pavadinimas": clean(
+                line_item.prekes_pavadinimas
+            ),
+            "prekes_kodas": clean(
+                line_item.prekes_kodas
+            ),
+            "unit": clean(line_item.unit),
+        }
+
+        line_barcode = clean(
+            line_item.prekes_barkodas
+        )
+        if line_barcode:
+            line_row["prekes_barkodas"] = line_barcode
+
+        line_items_payload.append(line_row)
+
+    logger.info(
+        "[CATALOG MATCH] Start doc_id=%s user_id=%s "
+        "catalog=%d line_items=%d",
+        doc.pk,
+        user.pk,
+        len(catalog_payload),
+        len(line_items_payload),
+    )
+
+    # ─────────────────────────────────────────────────────
+    # 6. Vienas papildomas KIE Gemini 2.5 Flash request
+    # ─────────────────────────────────────────────────────
+
+    response_text = ask_catalog_matching_kie(
+        catalog=catalog_payload,
+        line_items=line_items_payload,
+        logger=logger,
+    )
+
+    # Сохраняем сырой ответ в ScannedDocument
     try:
-        return get_pdf_page_count(file_path)
-    except Exception:
-        return 0
+        doc.matched_catalog_json = response_text or ""
+        doc.save(update_fields=["matched_catalog_json"])
+    except Exception as e:
+        logger.warning("[CATALOG MATCH] Failed to save matched_catalog_json doc_id=%s: %s", doc.pk, e)
 
+    if not response_text or not response_text.strip():
+        raise ValueError(
+            "Catalog matching returned an empty response"
+        )
+
+    parsed_response = _extract_json_object(
+        response_text
+    )
+
+    if not isinstance(parsed_response, dict):
+        raise ValueError(
+            "Catalog matching response is not a JSON object"
+        )
+
+    matches = parsed_response.get("matches")
+
+    if not isinstance(matches, list):
+        raise ValueError(
+            "Catalog matching response has no matches list"
+        )
+
+    # ─────────────────────────────────────────────────────
+    # 7. Validuojame Gemini atsakymą
+    # ─────────────────────────────────────────────────────
+    result_by_line_item_id = {}
+
+    for result in matches:
+        if not isinstance(result, dict):
+            logger.warning(
+                "[CATALOG MATCH] Ignore non-dict result "
+                "doc_id=%s result=%r",
+                doc.pk,
+                result,
+            )
+            continue
+
+        returned_line_item_id = clean(
+            result.get("line_item_id")
+        )
+
+        if not returned_line_item_id:
+            logger.warning(
+                "[CATALOG MATCH] Ignore result without "
+                "line_item_id doc_id=%s result=%r",
+                doc.pk,
+                result,
+            )
+            continue
+
+        # Neleidžiame modeliui atnaujinti kito dokumento eilutės
+        if returned_line_item_id not in line_items_by_id:
+            logger.warning(
+                "[CATALOG MATCH] Ignore unknown line_item_id "
+                "doc_id=%s line_item_id=%r",
+                doc.pk,
+                returned_line_item_id,
+            )
+            continue
+
+        returned_code = clean(
+            result.get("prekes_kodas")
+        )
+
+        if not returned_code:
+            returned_code = unknown_code
+
+        if returned_line_item_id in result_by_line_item_id:
+            logger.warning(
+                "[CATALOG MATCH] Duplicate result for line_item_id=%s "
+                "doc_id=%s. Last result will be used.",
+                returned_line_item_id,
+                doc.pk,
+            )
+
+        result_by_line_item_id[
+            returned_line_item_id
+        ] = returned_code
+
+    # ─────────────────────────────────────────────────────
+    # 8. Užpildome matched_* laukus
+    # ─────────────────────────────────────────────────────
+    matched_count = 0
+    unknown_count = 0
+    invalid_code_count = 0
+    missing_result_count = 0
+
+    for line_item_id, line_item in line_items_by_id.items():
+        returned_code = result_by_line_item_id.get(
+            line_item_id
+        )
+
+        # Gemini privalo grąžinti atsakymą kiekvienai eilutei.
+        # Jei negrąžino, saugiai laikome UKN0.
+        if returned_code is None:
+            returned_code = unknown_code
+            missing_result_count += 1
+
+            logger.warning(
+                "[CATALOG MATCH] Missing result "
+                "doc_id=%s line_item_id=%s",
+                doc.pk,
+                line_item_id,
+            )
+
+        if returned_code.upper() == unknown_code:
+            line_item.matched_prekes_pavadinimas = ""
+            line_item.matched_prekes_kodas = unknown_code
+            line_item.matched_prekes_barkodas = ""
+            line_item.matched_unit = ""
+            line_item.matched_preke_paslauga = ""
+
+            unknown_count += 1
+            continue
+
+        product = catalog_by_code.get(
+            returned_code
+        )
+
+        # Gemini grąžino kodą, kurio nėra vartotojo kataloge
+        if product is None:
+            logger.warning(
+                "[CATALOG MATCH] Invalid returned catalog code "
+                "doc_id=%s line_item_id=%s code=%r",
+                doc.pk,
+                line_item_id,
+                returned_code,
+            )
+
+            line_item.matched_prekes_pavadinimas = ""
+            line_item.matched_prekes_kodas = unknown_code
+            line_item.matched_prekes_barkodas = ""
+            line_item.matched_unit = ""
+            line_item.matched_preke_paslauga = ""
+
+            unknown_count += 1
+            invalid_code_count += 1
+            continue
+
+        # Visas matched reikšmes kopijuojame tik iš DB katalogo
+        line_item.matched_prekes_pavadinimas = clean(
+            product.prekes_pavadinimas
+        )
+        line_item.matched_prekes_kodas = clean(
+            product.prekes_kodas
+        )
+        line_item.matched_prekes_barkodas = clean(
+            product.prekes_barkodas
+        )
+        line_item.matched_unit = clean(
+            product.unit
+        )
+        line_item.matched_preke_paslauga = clean(
+            product.preke_paslauga
+        )
+
+        matched_count += 1
+
+    # ─────────────────────────────────────────────────────
+    # 9. Vienas bulk update vietoje atskirų save()
+    # ─────────────────────────────────────────────────────
+    line_item_model = line_items[0].__class__
+
+    line_item_model.objects.bulk_update(
+        line_items,
+        matched_fields,
+        batch_size=500,
+    )
+
+    logger.info(
+        "[CATALOG MATCH] Finished doc_id=%s "
+        "matched=%d unknown=%d invalid_codes=%d "
+        "missing_results=%d total=%d",
+        doc.pk,
+        matched_count,
+        unknown_count,
+        invalid_code_count,
+        missing_result_count,
+        len(line_items),
+    )
+
+    # 9.1 Обновляем счётчик незамэтченных строк на документе
+    doc.catalog_unmatched_count = unknown_count
+    doc.save(update_fields=["catalog_unmatched_count"])
+
+    return True
 
 
 def ask_llm_with_fallback(raw_text: str, scan_type: str, user=None, logger=None):
@@ -592,7 +1126,7 @@ def process_uploaded_file_task(self, user_id, doc_id, scan_type, split_depth=0, 
         pre_classify_result = None
 
         if split_depth == 0 and file_path.lower().endswith(".pdf"):
-            pdf_page_count_before_normalize = _is_pdf_multi_page(file_path)
+            pdf_page_count_before_normalize = get_pdf_page_count(file_path)
 
             if pdf_page_count_before_normalize >= 2:
                 t_pre = _t()
@@ -1510,16 +2044,75 @@ def process_uploaded_file_task(self, user_id, doc_id, scan_type, split_depth=0, 
         doc_struct["similarity_percent"] = similarity_percent
 
         t0 = _t()
+        # update_scanned_document(
+        #     db_doc=doc,
+        #     doc_struct=doc_struct,
+        #     raw_text=raw_json_for_db,         # <-- ВАЖНО: оставляем JSON/текст OCR
+        #     preview_url=preview_url,
+        #     user=user,
+        #     structured=structured,
+        #     glued_raw_text=glued_text_for_db  # <-- и передаём склейку отдельно
+        # )
+        # _log_t("update_scanned_document()", t0)
+
         update_scanned_document(
             db_doc=doc,
             doc_struct=doc_struct,
-            raw_text=raw_json_for_db,         # <-- ВАЖНО: оставляем JSON/текст OCR
+            raw_text=raw_json_for_db,
             preview_url=preview_url,
             user=user,
             structured=structured,
-            glued_raw_text=glued_text_for_db  # <-- и передаём склейку отдельно
+            glued_raw_text=glued_text_for_db
         )
         _log_t("update_scanned_document()", t0)
+
+        # 14.1) Automatinis LineItem susiejimas su vartotojo katalogu
+        #
+        # Matching выполняется только когда:
+        # - у CustomUser включён catalog_matching_enabled
+        # - math_validation_passed строго True
+        #
+        # Ошибка matching не должна отклонять уже корректно
+        # распознанный документ.
+        t0 = _t()
+        catalog_matched = False
+        try:
+            catalog_matched = _match_document_line_items_with_catalog(
+                doc=doc,
+                user=user,
+            )
+        except Exception as e:
+            logger.exception(
+                "[CATALOG MATCH] Failed doc_id=%s: %s",
+                doc.pk,
+                e,
+            )
+        _log_t("Catalog line-item matching", t0)
+
+        # 14.2) Списание дополнительных 0.50 кредита за каталог-matching
+        if catalog_matched:
+            try:
+                extra_cost = Decimal("0.50")
+                with transaction.atomic():
+                    u = CustomUser.objects.select_for_update().get(pk=user.id)
+                    u.credits = (u.credits or Decimal("0")) - extra_cost
+                    u.save(update_fields=["credits"])
+                    CreditUsageLog.objects.create(
+                        user=u,
+                        scanned_document=doc,
+                        credits_used=extra_cost,
+                        document_filename=doc.original_filename or '',
+                    )
+                logger.info(
+                    "[CATALOG MATCH] Charged extra %.2f credits for doc_id=%s",
+                    extra_cost, doc.pk,
+                )
+            except Exception as e:
+                logger.warning(
+                    "[CATALOG MATCH] Failed to charge extra credits for doc_id=%s: %s",
+                    doc.pk, e,
+                )
+
 
         # 15) Сопоставление продавца/покупателя
         # t0 = _t()

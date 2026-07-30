@@ -3,10 +3,13 @@ import {
   Box, Typography, FormControl, InputLabel, Select, MenuItem,
   Button, Alert, Tabs, Tab, Paper, TextField, Stack, RadioGroup,
   FormControlLabel, Radio, IconButton, Tooltip, Switch, Table, TableContainer,
-  TableHead, TableRow, TableCell, TableBody, Grid2, Chip,
+  TableHead, TableRow, TableCell, TableBody, Grid2, Chip, Menu,
 } from "@mui/material";
 
 import DeleteIcon from "@mui/icons-material/Delete";
+import AddIcon from "@mui/icons-material/Add";
+import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
+import CheckIcon from "@mui/icons-material/Check";
 import { alpha } from "@mui/material/styles";
 import EditIcon from '@mui/icons-material/Edit';
 import HelpOutlineIcon from "@mui/icons-material/HelpOutline";
@@ -22,6 +25,8 @@ import { Dialog, DialogTitle, DialogContent } from "@mui/material";
 import { api } from "../api/endpoints";
 import { COUNTRY_OPTIONS } from "../page_elements/Countries";
 import { ACCOUNTING_PROGRAMS } from "../page_elements/AccountingPrograms";
+import { useCompanyProfiles } from "../contexts/useCompanyProfiles";
+import AddCompanyProfileDialog from "../components/AddCompanyProfileDialog";
 import { Helmet } from "react-helmet";
 import CloudIntegrationSettings from '../components/CloudIntegrationSettings';
 import APIProviderKeys from "../components/APIProviderKeys";
@@ -764,6 +769,12 @@ function DefaultsCards({ rows, onDelete, onEdit }) {
 }
 
 export default function NustatymaiPage() {
+  const { profiles, activeId, switchCompany, refresh } = useCompanyProfiles();
+  const [switchingProfile, setSwitchingProfile] = useState(false);
+  const [profileSwitched, setProfileSwitched] = useState(false);
+  const [profileMenuAnchor, setProfileMenuAnchor] = useState(null);
+  const [addProfileOpen, setAddProfileOpen] = useState(false);
+
   const [user, setUser] = useState(null);
   const [program, setProgram] = useState("");
   const [saving, setSaving] = useState(false);
@@ -1084,6 +1095,14 @@ export default function NustatymaiPage() {
 
   const showKodasTipas = supportsKodasTipas(program);
 
+  // Kai aktyvus profilis pasikeičia bet kur (toolbar, dialogas) – persiskaitom programą
+  useEffect(() => {
+    if (activeId == null) return;
+    api.get("/profile/", { withCredentials: true }).then(({ data }) => {
+      setProgram(data.default_accounting_program || "");
+    });
+  }, [activeId]);
+
   useEffect(() => {
     api.get("/profile/", { withCredentials: true }).then(({ data }) => {
       setUser(data);
@@ -1340,12 +1359,42 @@ export default function NustatymaiPage() {
     });
   }, [showKodasTipas]);
 
+  const handleSwitchProfile = async (id) => {
+    setSwitchingProfile(true);
+    try {
+      await switchCompany(id);
+      // po profilio pakeitimo perskaitom /profile/ – backend'as jau
+      // nukopijavo profilio programą į user.default_accounting_program
+      const { data } = await api.get("/profile/", { withCredentials: true });
+      setProgram(data.default_accounting_program || "");
+      setProfileSwitched(true);
+      setTimeout(() => setProfileSwitched(false), 2000);
+    } catch (err) {
+      console.error("Failed to switch profile:", err);
+      alert("Nepavyko pakeisti profilio.");
+    } finally {
+      setSwitchingProfile(false);
+    }
+  };
+
+  const handleProfileCreated = async (data) => {
+    if (data?.id) {
+      await switchCompany(data.id);   // set-active + refresh контекста
+      // подтягиваем программу нового активного профиля в локальный стейт
+      const { data: profileData } = await api.get("/profile/", { withCredentials: true });
+      setProgram(profileData.default_accounting_program || "");
+    } else {
+      await refresh();
+    }
+  };
+
   const handleChange = async (e) => {
     const newProgram = e.target.value;
     setProgram(newProgram);
     setSaving(true);
     try {
       await api.patch("/profile/", { default_accounting_program: newProgram }, { withCredentials: true });
+      await refresh();
       setSuccess(true);
       setTimeout(() => setSuccess(false), 2000);
     } catch (err) {
@@ -2114,6 +2163,41 @@ export default function NustatymaiPage() {
     setPrekesAssemblyPirkimas(Number(e.target.value));
   };
 
+  const catalogMatchingKey = "match_catalog_items_on_detailed_scan";
+
+  const isCatalogMatchingEnabled = Boolean(
+    extraSettings &&
+      Object.prototype.hasOwnProperty.call(
+        extraSettings,
+        catalogMatchingKey
+      )
+  );
+
+  const toggleCatalogMatching = async (e) => {
+    const checked = e.target.checked;
+    const prev = extraSettings || {};
+    const next = { ...prev };
+
+    if (checked) {
+      next[catalogMatchingKey] = 1;
+    } else if (catalogMatchingKey in next) {
+      delete next[catalogMatchingKey];
+    }
+
+    setExtraSettings(next);
+
+    try {
+      await api.patch(
+        "/profile/",
+        { extra_settings: next },
+        { withCredentials: true }
+      );
+    } catch {
+      setExtraSettings(prev);
+      alert("Nepavyko išsaugoti katalogo susiejimo nustatymo.");
+    }
+  };
+
   const handlePrekesAssemblyPardavimasChange = (e) => {
     setPrekesAssemblyPardavimas(Number(e.target.value));
   };
@@ -2319,103 +2403,167 @@ export default function NustatymaiPage() {
       <Helmet><title>Nustatymai - DokSkenas</title></Helmet>
       <Typography variant="h4" sx={{ fontWeight: 600 }}>Nustatymai</Typography>
 
-      {/* 1. Company details */}
-      <Paper sx={{ p: 3, mb: 3 }}>
-        <Typography variant="subtitle1" sx={{ mb: 2 }}>
-          1. Įvesk savo įmonės informaciją
-        </Typography>
-        <Stack spacing={2} direction="column">
-          <TextField
-            label="Įmonės pavadinimas"
-            value={companyName}
-            onChange={(e) => setCompanyName(e.target.value)}
-            onBlur={() => setCompanyNameTouched(true)}
-            fullWidth
-            required
-            error={companyNameTouched && !companyName.trim()}
-            helperText={companyNameTouched && !companyName.trim() ? "Privalomas laukas" : ""}
-          />
-          <TextField
-            label="Įmonės kodas"
-            value={companyCode}
-            onChange={(e) => setCompanyCode(e.target.value)}
-            onBlur={() => setCompanyNameTouched(true)}
-            fullWidth
-            required
-            error={companyNameTouched && !companyCode.trim()}
-            helperText={companyNameTouched && !companyCode.trim() ? "Privalomas laukas" : ""}
-          />
-          <TextField label="PVM kodas" value={vatCode} onChange={(e) => setVatCode(e.target.value)} fullWidth />
-          <TextField label="Įmonės IBAN" value={companyIban} onChange={(e) => setCompanyIban(e.target.value)} fullWidth />
-          <TextField label="Įmonės adresas" value={companyAddress} onChange={(e) => setCompanyAddress(e.target.value)} fullWidth />
-          <Autocomplete
-            disablePortal
-            options={COUNTRY_OPTIONS}
-            getOptionLabel={(option) => option.name}
-            value={COUNTRY_OPTIONS.find((opt) => opt.code === companyCountryIso) || null}
-            onChange={(_, newValue) => setCompanyCountryIso(newValue ? newValue.code : "")}
-            renderInput={(params) => (
-              <TextField
-                {...params}
-                label="Įmonės šalis *"
-                fullWidth
-                required
-                error={companyNameTouched && !companyCountryIso}
-                helperText={companyNameTouched && !companyCountryIso ? "Privalomas laukas" : ""}
-              />
-            )}
-            isOptionEqualToValue={(option, value) => option.code === value.code}
-          />
+      {/* Įmonės profilis + programa */}
+      <Paper sx={{ p: 3, mb: 3, mt: 4, backgroundColor: "#f9f9f9" }}>
+        <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", mb: 2 }}>
+          <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
+            Įmonės profilis
+          </Typography>
           <Button
-            variant="contained"
-            onClick={saveCompanyDetails}
-            disabled={savingCompany}
-            sx={{ alignSelf: "flex-start", mt: 1 }}
+            variant="outlined"
+            size="small"
+            startIcon={<AddIcon />}
+            onClick={() => setAddProfileOpen(true)}
+            sx={{ textTransform: "none", fontWeight: 600 }}
           >
-            Išsaugoti
+            Pridėti įmonę
           </Button>
-          {companyError && <Alert severity="error">{companyError}</Alert>}
-          {successCompany && <Alert severity="success">Išsaugota!</Alert>}
-        </Stack>
-      </Paper>
+        </Box>
 
-      {/* 2. Accounting program + multi switch */}
-      <Typography variant="subtitle1" sx={{ mb: 2 }}>
-        2. Pasirink savo buhalterinę programą
-      </Typography>
-      <FormControl fullWidth sx={{ mb: 3 }}>
-        <InputLabel id="acc-prog-label">Numatytoji programa</InputLabel>
-        <Select 
-          labelId="acc-prog-label" 
-          value={program} 
-          label="Numatytoji programa" 
-          onChange={handleChange}
-          disabled={saving}
+        {/* Trigger – atrodo kaip kortelė, išsiskleidžia tik paspaudus */}
+        <Box
+          onClick={(e) =>
+            !switchingProfile && setProfileMenuAnchor(e.currentTarget)
+          }
+          sx={{
+            display: "flex",
+            alignItems: "center",
+            gap: 1.25,
+            px: 2,
+            py: 1.25,
+            maxWidth: 360,
+            borderRadius: 2,
+            cursor: switchingProfile ? "default" : "pointer",
+            border: "2px solid",
+            borderColor: profileMenuAnchor ? "primary.main" : "divider",
+            backgroundColor: "white",
+            opacity: switchingProfile ? 0.6 : 1,
+            transition: "all 0.15s",
+            "&:hover": { borderColor: "primary.light" },
+          }}
         >
-          {ACCOUNTING_PROGRAMS.map((p) => (
-            <MenuItem key={p.value} value={p.value}>{p.label}</MenuItem>
-          ))}
-        </Select>
+          <Box
+            sx={{
+              width: 36,
+              height: 36,
+              borderRadius: "50%",
+              flexShrink: 0,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              fontWeight: 700,
+              color: "white",
+              backgroundColor: "primary.main",
+            }}
+          >
+            {((profiles.find((p) => p.id === activeId)?.name) || "?")
+              .trim()
+              .charAt(0)
+              .toUpperCase()}
+          </Box>
+          <Box sx={{ minWidth: 0, flexGrow: 1 }}>
+            <Typography
+              variant="body2"
+              sx={{
+                fontWeight: 600,
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {profiles.find((p) => p.id === activeId)?.name || "—"}
+            </Typography>
+            <Typography variant="caption" sx={{ color: "text.secondary" }}>
+              Aktyvi įmonė
+            </Typography>
+          </Box>
+          <KeyboardArrowDownIcon sx={{ color: "text.secondary", flexShrink: 0 }} />
+        </Box>
 
-        {/* <Box sx={{ mt: 2 }}>
-          <FormControlLabel
-            control={<Switch checked={viewMode === "multi"} onChange={toggleViewMode} disabled={savingViewMode} />}
-            label={
-              <Box sx={{ display: "inline-flex", alignItems: "center", gap: 0.5 }}>
-                <span>Kelių įmonių režimas</span>
-                <Tooltip
-                  title="Pasirinkus šį režimą, galėsite vesti kelių įmonių apskaitą. Matysite visų kontrahentų sąrašą suvestinėje."
-                  arrow enterTouchDelay={0} leaveTouchDelay={4000}
+        <Menu
+          anchorEl={profileMenuAnchor}
+          open={Boolean(profileMenuAnchor)}
+          onClose={() => setProfileMenuAnchor(null)}
+          disableScrollLock
+          slotProps={{
+            paper: { sx: { maxHeight: 360, minWidth: 280, mt: 0.5 } },
+          }}
+        >
+          {profiles.map((p) => {
+            const isActive = p.id === activeId;
+            return (
+              <MenuItem
+                key={p.id}
+                selected={isActive}
+                onClick={() => {
+                  setProfileMenuAnchor(null);
+                  if (!isActive) handleSwitchProfile(p.id);
+                }}
+                sx={{ gap: 1.25, py: 1 }}
+              >
+                <Box
+                  sx={{
+                    width: 30,
+                    height: 30,
+                    borderRadius: "50%",
+                    flexShrink: 0,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    fontWeight: 700,
+                    fontSize: 14,
+                    color: "white",
+                    backgroundColor: isActive ? "primary.main" : "grey.400",
+                  }}
                 >
-                  <HelpOutlineIcon fontSize="small" />
-                </Tooltip>
-              </Box>
-            }
-          />
-        </Box> */}
-      </FormControl>
+                  {(p.name || "?").trim().charAt(0).toUpperCase()}
+                </Box>
+                <Typography
+                  variant="body2"
+                  sx={{
+                    fontWeight: isActive ? 600 : 400,
+                    flexGrow: 1,
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {p.name}
+                </Typography>
+                {isActive && (
+                  <CheckIcon fontSize="small" sx={{ color: "primary.main" }} />
+                )}
+              </MenuItem>
+            );
+          })}
+        </Menu>
 
-      {success && <Alert severity="success" sx={{ mb: 2 }}>Išsaugota!</Alert>}
+        {profileSwitched && (
+          <Alert severity="success" sx={{ mt: 2 }}>Profilis pakeistas!</Alert>
+        )}
+
+        {/* Programa aktyviam profiliui */}
+        <Typography variant="subtitle2" sx={{ mt: 3, mb: 1, fontWeight: 600 }}>
+          Įmonės profilio numatytoji apskaitos programa
+        </Typography>
+        <FormControl
+          size="small"
+          sx={{ width: { xs: "100%", sm: 280 }, backgroundColor: "white" }}
+        >
+          <Select
+            value={program}
+            onChange={handleChange}
+            disabled={saving}
+            displayEmpty
+            MenuProps={{ disableScrollLock: true }}
+          >
+            {ACCOUNTING_PROGRAMS.map((p) => (
+              <MenuItem key={p.value} value={p.value}>{p.label}</MenuItem>
+            ))}
+          </Select>
+        </FormControl>
+        {success && <Alert severity="success" sx={{ mt: 2 }}>Išsaugota!</Alert>}
+      </Paper>
 
       {program === "apskaita5" && (
         <Box sx={{ mb: 3 }}>
@@ -2467,6 +2615,42 @@ export default function NustatymaiPage() {
                 title="Eksportuojant duomenis nebus išskiriami PVM suma ir PVM klasifikatorius. Tinka ne PVM mokėtojų apskaitai, kai reikalingos tik bendros sumos."
               >
                 <HelpOutlineIcon fontSize="small" sx={{ color: "text.secondary" }} />
+              </Tooltip>
+            </Box>
+          </Box>
+
+          <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+            <Switch
+              checked={isCatalogMatchingEnabled}
+              onChange={toggleCatalogMatching}
+            />
+
+            <Box
+              sx={{
+                display: "flex",
+                alignItems: "center",
+                gap: 0.5,
+                minWidth: 0,
+              }}
+            >
+              <Typography variant="body2">
+                Automatiškai susieti eilutes su prekių / paslaugų katalogu (+0,5 kredito)
+              </Typography>
+
+              <Tooltip
+                arrow
+                enterTouchDelay={0}
+                leaveTouchDelay={4000}
+                title="Skaitmenizuojant detaliai sistema bandys susieti kiekvieną eilutę su preke / paslauga iš jūsų importuoto katalogo. Prieš įjungdami importuokite savo katalogą per žemiau esančią duomenų importo sekciją. LIMITAS: sistema naudos tik pirmas 1500 prekių/paslaugų iš katalogo."
+              >
+                <HelpOutlineIcon
+                  fontSize="small"
+                  sx={{
+                    color: "text.secondary",
+                    flexShrink: 0,
+                    cursor: "help",
+                  }}
+                />
               </Tooltip>
             </Box>
           </Box>
@@ -3980,7 +4164,12 @@ export default function NustatymaiPage() {
           </Box>
         </DialogContent>
       </Dialog>
+
+      <AddCompanyProfileDialog
+        open={addProfileOpen}
+        onClose={() => setAddProfileOpen(false)}
+        onCreated={handleProfileCreated}
+      />
     </Box>
   );
 }
-

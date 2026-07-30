@@ -45,6 +45,15 @@ const cleanNum = (v) => {
   if (s === '0' || s.startsWith('0,') || s.startsWith('0.')) return s;
   return s.replace(/^0+(?=\d)/, '');
 };
+const toEditorNum = (value, invoiceType, fallback = 0) => {
+  const resolved = value ?? fallback;
+
+  if (invoiceType === 'kreditine') {
+    return String(Math.abs(parseNum(resolved)));
+  }
+
+  return String(resolved);
+};
 
 const CURRENCY_SYMBOLS = {
   'EUR': '€', 'USD': '$', 'GBP': '£', 'PLN': 'zł', 'JPY': '¥',
@@ -473,7 +482,7 @@ const InvoiceEditorPage = () => {
     buyer_extra_info: '', buyer_delivery_address: '',
     issued_by: '', received_by: '',
     full_number: '', uuid: '', pdf_url: null,
-    is_editable: true, can_be_sent: false, can_create_pvm_sf: false,
+    is_editable: true, can_be_sent: false, can_create_pvm_sf: false, can_create_credit: false,
     public_url: null,
     auto_create_sf_on_paid: false, auto_sf_series: '', auto_sf_send: false,
     send_payment_reminders: false,
@@ -609,6 +618,7 @@ const InvoiceEditorPage = () => {
         price: String(product.price ?? li.price),
         unit: product.unit || li.unit,
         vat_percent: product.vat_percent != null ? String(product.vat_percent) : li.vat_percent,
+        preke_paslauga: product.preke_paslauga || li.preke_paslauga || 'preke',
       };
     }));
     setLinesFromSearch((prev) => new Set(prev).add(lineIndex));
@@ -907,16 +917,29 @@ const InvoiceEditorPage = () => {
             prekes_pavadinimas: li.prekes_pavadinimas || '',
             prekes_kodas: li.prekes_kodas || '',
             prekes_barkodas: li.prekes_barkodas || '',
-            quantity: String(li.quantity ?? 1),
+            quantity: toEditorNum(li.quantity, type, 1),
             unit: li.unit || 'vnt',
+
+            // Price не меняем.
             price: String(li.price ?? 0),
-            discount_value: String(li.discount_wo_vat || 0),
+
+            discount_value: toEditorNum(
+              li.discount_wo_vat,
+              type,
+              0
+            ),
             discount_type: 'amount',
             vat_percent: li.vat_percent != null ? String(li.vat_percent) : '',
             save_to_catalog: false,
             preke_paslauga: li.preke_paslauga || 'preke',
           })));
-          if (data.line_items.some((li) => parseFloat(li.discount_wo_vat || 0) > 0)) setShowLineDiscount(true);
+          if (
+            data.line_items.some(
+              (li) => Math.abs(parseFloat(li.discount_wo_vat || 0)) > 0
+            )
+          ) {
+            setShowLineDiscount(true);
+          }
           if (data.line_items.some((li) => li.vat_percent != null)) setShowPerLineVat(true);
         }
         if (data.note) setShowNote(true);
@@ -929,9 +952,17 @@ const InvoiceEditorPage = () => {
           setPaymentLink({ enabled: true, provider: data.payment_link_provider });
         }
 
-        if (parseFloat(data.invoice_discount_wo_vat || 0) > 0) {
+        if (Math.abs(parseFloat(data.invoice_discount_wo_vat || 0)) > 0) {
           setShowTotalDiscount(true);
-          setTotalDiscountValue(String(data.invoice_discount_wo_vat));
+
+          setTotalDiscountValue(
+            toEditorNum(
+              data.invoice_discount_wo_vat,
+              type,
+              0
+            )
+          );
+
           setTotalDiscountType('amount');
         }
         prevTypeRef.current = type;
@@ -1281,6 +1312,7 @@ const InvoiceEditorPage = () => {
           is_editable: data.is_editable ?? true,
           can_be_sent: data.can_be_sent ?? false,
           can_create_pvm_sf: data.can_create_pvm_sf ?? false,
+          can_create_credit: data.can_create_credit ?? false,
           public_url: data.public_url || null,
           auto_create_sf_on_paid: data.auto_create_sf_on_paid || false,
           auto_sf_series: data.auto_sf_series || '',
@@ -1292,22 +1324,43 @@ const InvoiceEditorPage = () => {
             prekes_pavadinimas: li.prekes_pavadinimas || '',
             prekes_kodas: li.prekes_kodas || '',
             prekes_barkodas: li.prekes_barkodas || '',
-            quantity: String(li.quantity ?? 1),
+            quantity: toEditorNum(li.quantity, data.invoice_type, 1),
             unit: li.unit || 'vnt',
+
+            // Цена кредитной остаётся положительной и в БД, и в редакторе.
             price: String(li.price ?? 0),
-            discount_value: String(li.discount_wo_vat || 0),
+
+            discount_value: toEditorNum(
+              li.discount_wo_vat,
+              data.invoice_type,
+              0
+            ),
             discount_type: 'amount',
             vat_percent: li.vat_percent != null ? String(li.vat_percent) : '',
             save_to_catalog: false,
             preke_paslauga: li.preke_paslauga || 'preke',
           })));
-          if (data.line_items.some((li) => parseFloat(li.discount_wo_vat || 0) > 0)) setShowLineDiscount(true);
+          if (
+            data.line_items.some(
+              (li) => Math.abs(parseFloat(li.discount_wo_vat || 0)) > 0
+            )
+          ) {
+            setShowLineDiscount(true);
+          }
           if (data.line_items.some((li) => li.vat_percent != null)) setShowPerLineVat(true);
         }
         if (data.note) setShowNote(true);
-        if (parseFloat(data.invoice_discount_wo_vat || 0) > 0) {
+        if (Math.abs(parseFloat(data.invoice_discount_wo_vat || 0)) > 0) {
           setShowTotalDiscount(true);
-          setTotalDiscountValue(String(data.invoice_discount_wo_vat));
+
+          setTotalDiscountValue(
+            toEditorNum(
+              data.invoice_discount_wo_vat,
+              data.invoice_type,
+              0
+            )
+          );
+
           setTotalDiscountType('amount');
         }
         if (data.buyer_delivery_address) setShowBuyerDelivery(true);
@@ -1584,7 +1637,22 @@ const InvoiceEditorPage = () => {
       vat_percent: showPerLineVat && li.vat_percent !== '' ? parseNum(li.vat_percent) : null,
       discount_wo_vat: round2(lineSums[i]?.lineDiscount || 0),
       preke_paslauga: li.preke_paslauga || '',
-    })),
+      kredito_saskaita:
+        li.kredito_saskaita ||
+        (
+          li.preke_paslauga === 'preke'
+            ? '5000'
+            : '5001'
+        ),
+
+      pvm_saskaita: isPvm
+        ? (li.pvm_saskaita || '4492')
+        : null,
+      })),
+
+      debeto_saskaita: '2410',
+      kredito_saskaita: null,
+      pvm_saskaita: isPvm ? '4492' : null,
   });
 
   const buildRecurringPayload = () => ({
@@ -1827,8 +1895,25 @@ const InvoiceEditorPage = () => {
 
       if (isNew && newId) {
         if (andAction === 'issue') {
-          await invoicingApi.issueInvoice(newId);
-          showMsg(paymentLinkError ? 'Sąskaita sukurta ir išrašyta, bet nepavyko sukurti mokėjimo nuorodos' : 'Sąskaita sukurta ir išrašyta', paymentLinkError ? 'warning' : 'success');
+          await invoicingApi.issueInvoice(newId || id);
+
+          showMsg(
+            paymentLinkError
+              ? 'Sąskaita išrašyta, bet nepavyko sukurti mokėjimo nuorodos'
+              : 'Sąskaita išrašyta',
+            paymentLinkError ? 'warning' : 'success'
+          );
+
+          if (lastSnackRef.current) {
+            sessionStorage.setItem(
+              'inv_snack',
+              JSON.stringify(lastSnackRef.current)
+            );
+          }
+
+          navigate('/israsymas', { replace: true });
+          return;
+
         } else if (andAction === 'issue_send') {
           await invoicingApi.issueInvoice(newId);
           if (form.buyer_email) {
@@ -1866,9 +1951,24 @@ const InvoiceEditorPage = () => {
         navigate('/israsymas', { replace: true });
       } else {
         if (andAction === 'issue') {
-          const r = await invoicingApi.issueInvoice(newId || id);
-          showMsg(paymentLinkError ? 'Sąskaita išrašyta, bet nepavyko sukurti mokėjimo nuorodos' : 'Sąskaita išrašyta', paymentLinkError ? 'warning' : 'success');
-          refreshForm(r.data);
+          await invoicingApi.issueInvoice(newId || id);
+
+          showMsg(
+            paymentLinkError
+              ? 'Sąskaita išrašyta, bet nepavyko sukurti mokėjimo nuorodos'
+              : 'Sąskaita išrašyta',
+            paymentLinkError ? 'warning' : 'success'
+          );
+
+          if (lastSnackRef.current) {
+            sessionStorage.setItem(
+              'inv_snack',
+              JSON.stringify(lastSnackRef.current)
+            );
+          }
+
+          navigate('/israsymas', { replace: true });
+          return;
 
         } else if (andAction === 'issue_send') {
           const r = await invoicingApi.issueInvoice(newId || id);
@@ -1896,9 +1996,23 @@ const InvoiceEditorPage = () => {
               }
             }
           } else {
-            showMsg(paymentLinkError ? 'Sąskaita išrašyta, bet nepavyko sukurti mokėjimo nuorodos' : 'Sąskaita išrašyta', paymentLinkError ? 'warning' : 'success');
+            showMsg(
+              paymentLinkError
+                ? 'Sąskaita išrašyta, bet nepavyko sukurti mokėjimo nuorodos'
+                : 'Sąskaita išrašyta',
+              paymentLinkError ? 'warning' : 'success'
+            );
           }
-          refreshForm(r.data);
+
+          if (lastSnackRef.current) {
+            sessionStorage.setItem(
+              'inv_snack',
+              JSON.stringify(lastSnackRef.current)
+            );
+          }
+
+          navigate('/israsymas', { replace: true });
+          return;
         } else {
           showMsg(paymentLinkError ? 'Išsaugota, bet nepavyko sukurti mokėjimo nuorodos' : 'Išsaugota', paymentLinkError ? 'warning' : 'success');
           refreshForm(res.data);
@@ -1941,6 +2055,7 @@ const InvoiceEditorPage = () => {
       is_editable: data.is_editable ?? false,
       can_be_sent: data.can_be_sent ?? false,
       can_create_pvm_sf: data.can_create_pvm_sf ?? false,
+      can_create_credit: data.can_create_credit ?? false,
       pdf_url: data.pdf_url || null,
       public_url: data.public_url || null,
     }));
@@ -2312,6 +2427,22 @@ const InvoiceEditorPage = () => {
                   Konvertuoti į {form.pvm_tipas === 'taikoma' ? 'PVM SF' : 'SF'}
                 </Button>
               )}
+              {form.can_create_credit && (
+                <Button size="small" variant="outlined" color="error"
+                  onClick={async () => {
+                    setSaving(true);
+                    try {
+                      const { data } = await invoicingApi.createCreditInvoice(id);
+                      showMsg('Kreditinė sąskaita sukurta kaip juodraštis');
+                      navigate(`/israsymas/${data.id}`);
+                    } catch (e) {
+                      showMsg(e.response?.data?.detail || 'Nepavyko sukurti kreditinės', 'error');
+                    } finally { setSaving(false); }
+                  }}
+                >
+                  Išrašyti kreditinę
+                </Button>
+              )}
               {form.status !== 'cancelled' && (
                 <Button size="small" variant="outlined" color="error" startIcon={<CancelIcon />}
                   onClick={() => confirm('Anuliuoti?', '', () => doAction('cancel'))}>
@@ -2555,7 +2686,7 @@ const InvoiceEditorPage = () => {
                 onChange={(e) => u('invoice_type', e.target.value)} disabled={!isEditable}
                 SelectProps={{ MenuProps: menuProps }}>
                 {Object.entries(TYPE_LABELS).map(([k, v]) => (
-                  <MenuItem key={k} value={k} disabled={k === 'kreditine'}>{v}{k === 'kreditine' ? ' (ruošiama)' : ''}</MenuItem>
+                  <MenuItem key={k} value={k}>{v}</MenuItem>
                 ))}
               </TextField>
             </Grid2>
@@ -2981,6 +3112,17 @@ const InvoiceEditorPage = () => {
                           InputProps={{ endAdornment: <InputAdornment position="end" sx={{ '& p': { fontSize: 11 } }}>%</InputAdornment> }} />
                       )}
 
+                      <TextField size="small" select
+                        label="Prekė ar paslauga"
+                        value={li.preke_paslauga || 'preke'}
+                        onChange={(e) => uLine(i, 'preke_paslauga', e.target.value)}
+                        disabled={!isEditable}
+                        sx={{ width: 130, '& .MuiInputLabel-root': { fontSize: 12 } }}
+                        SelectProps={{ MenuProps: { disableScrollLock: true } }}>
+                        <MenuItem value="preke">Prekė</MenuItem>
+                        <MenuItem value="paslauga">Paslauga</MenuItem>
+                      </TextField>
+
                       {/* ── Catalog save — redesigned ── */}
                       {isEditable && (
                         <Box sx={{
@@ -2996,17 +3138,6 @@ const InvoiceEditorPage = () => {
                             label={<Typography variant="caption" sx={{ fontSize: 11, whiteSpace: 'nowrap' }}>Išsaugoti į katalogą</Typography>}
                             sx={{ mr: 0 }}
                           />
-                          {li.save_to_catalog && (
-                            <TextField size="small" select
-                              label="Išsaugoti kaip"
-                              value={li.preke_paslauga || 'preke'}
-                              onChange={(e) => uLine(i, 'preke_paslauga', e.target.value)}
-                              sx={{ width: 140, '& .MuiInputLabel-root': { fontSize: 12 } }}
-                              SelectProps={{ MenuProps: { disableScrollLock: true } }}>
-                              <MenuItem value="preke">Prekė</MenuItem>
-                              <MenuItem value="paslauga">Paslauga</MenuItem>
-                            </TextField>
-                          )}
                         </Box>
                       )}
 
@@ -3077,25 +3208,23 @@ const InvoiceEditorPage = () => {
                       {showPerLineVat && showVatOptions && (
                         <Grid2 size={12}><DebouncedIntField size="small" fullWidth label="PVM %" value={li.vat_percent} onChange={(v) => uLine(i, 'vat_percent', v)} disabled={!isEditable} placeholder={form.vat_percent} /></Grid2>
                       )}
+                      <Grid2 size={6}>
+                        <TextField size="small" fullWidth select
+                          label="Prekė ar paslauga"
+                          value={li.preke_paslauga || 'preke'}
+                          onChange={(e) => uLine(i, 'preke_paslauga', e.target.value)}
+                          disabled={!isEditable}
+                          SelectProps={{ MenuProps: { disableScrollLock: true } }}>
+                          <MenuItem value="preke">Prekė</MenuItem>
+                          <MenuItem value="paslauga">Paslauga</MenuItem>
+                        </TextField>
+                      </Grid2>
                       {isEditable && (
-                        <Grid2 size={12}>
-                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                            <FormControlLabel
-                              control={<Switch checked={li.save_to_catalog || false} onChange={(e) => uLine(i, 'save_to_catalog', e.target.checked)} size="small" />}
-                              label={<Typography variant="caption">Išsaugoti į katalogą</Typography>}
-                            />
-                            {li.save_to_catalog && (
-                              <TextField size="small" select
-                                label="Išsaugoti kaip"
-                                value={li.preke_paslauga || 'preke'}
-                                onChange={(e) => uLine(i, 'preke_paslauga', e.target.value)}
-                                sx={{ width: 140 }}
-                                SelectProps={{ MenuProps: { disableScrollLock: true } }}>
-                                <MenuItem value="preke">Prekė</MenuItem>
-                                <MenuItem value="paslauga">Paslauga</MenuItem>
-                              </TextField>
-                            )}
-                          </Box>
+                        <Grid2 size={6}>
+                          <FormControlLabel
+                            control={<Switch checked={li.save_to_catalog || false} onChange={(e) => uLine(i, 'save_to_catalog', e.target.checked)} size="small" />}
+                            label={<Typography variant="caption">Išsaugoti į katalogą</Typography>}
+                          />
                         </Grid2>
                       )}
                       <Grid2 size={12}>

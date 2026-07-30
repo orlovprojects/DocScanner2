@@ -161,6 +161,13 @@ def create_sf_from_isankstine(source, user, series_prefix=None):
 
         new_invoice.recalc_payment_status()
 
+    # ── Auto DK įrašas naujai SF/PVM SF (ir rankinei, ir auto konvertacijai) ──
+    try:
+        from ..utils.journal_generators import sync_invoice_journal_entry
+        sync_invoice_journal_entry(new_invoice)
+    except Exception as e:
+        logger.warning("[AutoSF] DK sync failed for %s: %s", new_invoice.id, e)
+
     logger.info(
         "[AutoSF] Created %s %s from išankstinė %s (allocations: %d)",
         target_type, new_invoice.full_number, source.full_number,

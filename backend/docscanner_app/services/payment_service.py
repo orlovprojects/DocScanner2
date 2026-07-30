@@ -1,22 +1,30 @@
 import os
 import logging
-from datetime import datetime
+import re
+from datetime import datetime, date
 from decimal import Decimal
-from django.db.models import Sum
 
 from django.conf import settings
 from django.db import IntegrityError
 from django.db import transaction as db_transaction
+from django.db.models import Sum
 from django.utils import timezone
 
 from ..models import (
-    BankStatement, IncomingTransaction, OutgoingTransaction,
-    PaymentAllocation, normalize_name, Invoice
+    BankStatement,
+    IncomingTransaction,
+    OutgoingTransaction,
+    PaymentAllocation,
+    normalize_name,
+    Invoice,
+    JournalEntry,
+    JournalEntryLine,
 )
 from ..utils.bank_statement_parcers import (
     detect_bank_from_content, detect_format_from_content, get_parser,
 )
 from ..utils.payment_invoice_matching import InvoiceMatchingEngine
+from ..utils.journal_generators import finalize_journal_entry
 
 
 logger = logging.getLogger("docscanner_app")
@@ -47,6 +55,55 @@ class BankImportService:
     def __init__(self, user):
         self.user = user
 
+    def _log_duplicate(self, Model, txn, stmt, raw, direction):
+        existing = (
+            Model.objects
+            .filter(transaction_hash=txn.transaction_hash)
+            .select_related("bank_statement")
+            .first()
+        )
+
+        ex_stmt = existing.bank_statement if existing else None
+
+        logger.warning(
+            "[BANK_DUPLICATE] direction=%s hash=%s "
+            "NEW stmt_id=%s bank=%s stmt_iban=%s stmt_currency=%s "
+            "date=%s amount=%s currency=%s doc=%r ref=%r cp_name=%r cp_code=%r cp_acc=%r purpose=%r "
+            "EXISTING txn_id=%s stmt_id=%s bank=%s stmt_iban=%s stmt_currency=%s "
+            "date=%s amount=%s currency=%s doc=%r ref=%r cp_name=%r cp_code=%r cp_acc=%r purpose=%r",
+            direction,
+            txn.transaction_hash,
+
+            stmt.id,
+            stmt.bank_name,
+            stmt.account_iban,
+            stmt.currency,
+            txn.transaction_date,
+            txn.amount,
+            txn.currency,
+            txn.doc_number,
+            txn.reference_number,
+            txn.counterparty_name,
+            txn.counterparty_code,
+            txn.counterparty_account,
+            (txn.payment_purpose or "")[:300],
+
+            existing.id if existing else None,
+            ex_stmt.id if ex_stmt else None,
+            ex_stmt.bank_name if ex_stmt else None,
+            ex_stmt.account_iban if ex_stmt else None,
+            ex_stmt.currency if ex_stmt else None,
+            existing.transaction_date if existing else None,
+            existing.amount if existing else None,
+            existing.currency if existing else None,
+            existing.doc_number if existing else None,
+            existing.reference_number if existing else None,
+            existing.counterparty_name if existing else None,
+            existing.counterparty_code if existing else None,
+            existing.counterparty_account if existing else None,
+            (existing.payment_purpose or "")[:300] if existing else None,
+        )
+
     def import_statement(self, file, bank_name="", file_format="",
                          original_filename="") -> BankStatement:
 
@@ -63,6 +120,11 @@ class BankImportService:
             file.seek(0)
 
         logger.info("[BankImport] File size: %d bytes", len(content))
+
+        # ── 1.1 Save raw file immediately (for debugging/audit) ─
+        # Saugome prieš validacijas, kad net klaidingi importai liktų debug papkėje.
+        saved_path = self._save_raw_file(content, filename)
+        logger.info("[BankImport] Raw file saved: %s", saved_path)
 
         # ── 2. Validate extension ──────────────────────────────
         ext = os.path.splitext(filename)[1].lower() if filename else ""
@@ -86,10 +148,6 @@ class BankImportService:
 
         if len(content) < 10:
             raise BankImportError("Failas tuščias arba per mažas.")
-
-        # ── 4. Save raw file to disk (for debugging) ──────────
-        saved_path = self._save_raw_file(content, filename)
-        logger.info("[BankImport] Raw file saved: %s", saved_path)
 
         # ── 5. Detect bank ─────────────────────────────────────
         if not bank_name:
@@ -170,16 +228,69 @@ class BankImportService:
             stmt.period_from = meta.get("period_from")
             stmt.period_to = meta.get("period_to")
             stmt.account_iban = self._extract_iban(content)
+            if raw:
+                stmt.currency = raw[0].get("currency", "EUR")
+
+            stmt.save(update_fields=[
+                "period_from",
+                "period_to",
+                "account_iban",
+                "currency",
+                "updated_at",
+            ])
 
             logger.info(
-                "[BankImport] Metadata: period=%s..%s, iban=%s",
-                stmt.period_from, stmt.period_to, stmt.account_iban,
+                "[BankImport] Metadata: period=%s..%s, iban=%s, currency=%s",
+                stmt.period_from, stmt.period_to, stmt.account_iban, stmt.currency,
             )
+
+            # ── Register / resolve bank account BEFORE matching ─────────
+            try:
+                from ..models import CompanyProfile
+
+                cp = CompanyProfile.objects.filter(
+                    user=self.user,
+                    is_active=True,
+                ).first()
+
+                if cp:
+                    bank_info = cp.get_bank_chart_account(
+                        iban=stmt.account_iban or "",
+                        bank_name=bank_name,
+                        currency=stmt.currency or "EUR",
+                    )
+
+                    logger.info(
+                        "[BankImport] Bank account resolved before matching: "
+                        "bank=%s iban=%s currency=%s account=%s label=%s",
+                        bank_name,
+                        stmt.account_iban or "",
+                        stmt.currency or "EUR",
+                        bank_info.get("account"),
+                        bank_info.get("label"),
+                    )
+            except Exception as e:
+                logger.warning("[BankImport] Bank account pre-resolve failed: %s", e)
+            # ── Проверка пересечения периодов ──────────────
+            if stmt.account_iban and stmt.period_from and stmt.period_to:
+                overlap = BankStatement.objects.filter(
+                    user=self.user,
+                    account_iban=stmt.account_iban,
+                    status="processed",
+                    period_from__lte=stmt.period_to,
+                    period_to__gte=stmt.period_from,
+                ).exclude(id=stmt.id).first()
+                if overlap:
+                    logger.info(
+                        "[BankImport] Period overlap with stmt %s (%s – %s), "
+                        "duplicates will be skipped by hash",
+                        overlap.id, overlap.period_from, overlap.period_to,
+                    )
 
             # ── 9+10. Create transactions + match in atomic block ──
             # If matching fails, transactions are rolled back too
             with db_transaction.atomic():
-                created_inc, created_out, dupes = self._create_transactions(stmt, raw)
+                created_inc, created_out, dupes, duplicate_details = self._create_transactions(stmt, raw)
 
                 logger.info(
                     "[BankImport] Transactions created: incoming=%d, outgoing=%d, dupes=%d",
@@ -187,6 +298,7 @@ class BankImportService:
                 )
 
                 stmt.duplicates_skipped = dupes
+                stmt.duplicate_details = duplicate_details
 
                 if created_inc:
                     logger.info(
@@ -226,8 +338,63 @@ class BankImportService:
                                         prop.invoice_id, e,
                                     )
 
+                # ── Match outgoing → Purchase ──────────────────
+                if created_out:
+                    logger.info(
+                        "[BankImport] Starting SIGNAL purchase matching for %d outgoing transactions...",
+                        len(created_out),
+                    )
+
+                    from ..utils.purchase_matching_signals import SignalPurchaseMatchingEngine
+
+                    p_engine = SignalPurchaseMatchingEngine(self.user)
+                    p_results = p_engine.match_transactions(created_out)
+                    p_engine.apply_results(p_results)
+
+                    p_matched = sum(
+                        1 for r in p_results
+                        if getattr(r, "status", "unmatched") != "unmatched"
+                    )
+                    logger.info(
+                        "[BankImport] Purchase matching complete: %d/%d matched",
+                        p_matched, len(p_results),
+                    )
+
+                # ── Classify remaining unmatched ───────────────
+                from ..utils.transaction_classifier import TransactionClassifier
+                all_unmatched = list(
+                    stmt.outgoing_transactions.filter(
+                        match_status="unmatched", transaction_category="",
+                    )
+                ) + list(
+                    stmt.incoming_transactions.filter(
+                        match_status="unmatched", transaction_category="",
+                    )
+                )
+                if all_unmatched:
+                    classifier = TransactionClassifier(self.user)
+                    classified = classifier.classify_and_apply(all_unmatched)
+                    logger.info(
+                        "[BankImport] Classified %d/%d unmatched transactions",
+                        len(classified), len(all_unmatched),
+                    )
+
+                # ── Create DK for safe bank categories ─────────
+                category_dk = BankCategoryJournalBuilder(self.user)
+                dk_result = category_dk.create_for_statement(stmt)
+
+                logger.info(
+                    "[BankImport] Category DK created: %s",
+                    dk_result,
+                )
+
             stmt.status = "processed"
-            stmt.save()
+            stmt.save(update_fields=[
+                "status",
+                "duplicates_skipped",
+                "duplicate_details",
+                "updated_at",
+            ])
             stmt.refresh_stats()
 
             logger.info(
@@ -249,21 +416,146 @@ class BankImportService:
             raise BankImportError(f"Importavimo klaida: {e}") from e
 
     def re_match_statement(self, stmt: BankStatement):
-        """Повторный matching для unmatched/likely транзакций."""
-        txns = stmt.incoming_transactions.filter(
-            match_status__in=["unmatched", "likely_matched"],
-        )
-        if not txns.exists():
-            return
+        """Полный сброс и повторный matching всех транзакций выписки."""
+        from ..models import PaymentAllocation, JournalEntry
+        from ..utils.transaction_classifier import TransactionClassifier
+        from ..utils.purchase_matching_signals import SignalPurchaseMatchingEngine
 
-        PaymentAllocation.objects.filter(
-            incoming_transaction__in=txns, status="proposed",
-        ).delete()
+        with db_transaction.atomic():
+            # ── 1. Собрать затронутые документы ─────────────
+            affected_invoice_ids = set()
+            affected_purchase_ids = set()
+            je_ids_to_delete = set()
 
-        engine = InvoiceMatchingEngine(self.user)
-        results = engine.match_transactions(list(txns))
-        engine.apply_results(results)
+            for alloc in PaymentAllocation.objects.filter(
+                incoming_transaction__bank_statement=stmt,
+            ).select_related("invoice"):
+                if alloc.invoice_id:
+                    affected_invoice_ids.add(alloc.invoice_id)
+                if alloc.journal_entry_id:
+                    je_ids_to_delete.add(alloc.journal_entry_id)
+
+            for alloc in PaymentAllocation.objects.filter(
+                outgoing_transaction__bank_statement=stmt,
+            ).select_related("purchase"):
+                if alloc.purchase_id:
+                    affected_purchase_ids.add(alloc.purchase_id)
+                if alloc.journal_entry_id:
+                    je_ids_to_delete.add(alloc.journal_entry_id)
+
+            # JE от classified транзакций
+            for txn in stmt.incoming_transactions.filter(journal_entry__isnull=False):
+                je_ids_to_delete.add(txn.journal_entry_id)
+            for txn in stmt.outgoing_transactions.filter(journal_entry__isnull=False):
+                je_ids_to_delete.add(txn.journal_entry_id)
+
+            # ── 2. Удалить JE ──────────────────────────────
+            if je_ids_to_delete:
+                JournalEntry.objects.filter(id__in=je_ids_to_delete).delete()
+
+            # ── 3. Удалить все allocations ──────────────────
+            PaymentAllocation.objects.filter(
+                incoming_transaction__bank_statement=stmt,
+            ).delete()
+            PaymentAllocation.objects.filter(
+                outgoing_transaction__bank_statement=stmt,
+            ).delete()
+
+            # ── 4. Сбросить статусы транзакций ─────────────
+            stmt.incoming_transactions.update(
+                match_status="unmatched",
+                match_confidence=0,
+                match_details={},
+                transaction_category="",
+                category_account_debit="",
+                category_account_credit="",
+                category_rule=None,
+                matched_document_number="",
+                journal_entry=None,
+                allocated_amount=0,
+            )
+            stmt.outgoing_transactions.update(
+                match_status="unmatched",
+                match_confidence=0,
+                match_details={},
+                transaction_category="",
+                category_account_debit="",
+                category_account_credit="",
+                category_rule=None,
+                matched_document_number="",
+                journal_entry=None,
+                allocated_amount=0,
+            )
+
+            # ── 5. Matching incoming → Invoice ─────────────
+            inc_txns = list(stmt.incoming_transactions.all())
+            if inc_txns:
+                engine = InvoiceMatchingEngine(self.user)
+                results = engine.match_transactions(inc_txns)
+                engine.apply_results(results)
+
+            # ── 6. Matching outgoing → Purchase ────────────
+            out_txns = list(stmt.outgoing_transactions.all())
+            if out_txns:
+                logger.info(
+                    "[BankImport] Starting SIGNAL re-match for %d outgoing transactions...",
+                    len(out_txns),
+                )
+
+                p_engine = SignalPurchaseMatchingEngine(self.user)
+                p_results = p_engine.match_transactions(out_txns)
+                p_engine.apply_results(p_results)
+
+                p_matched = sum(
+                    1 for r in p_results
+                    if getattr(r, "status", "unmatched") != "unmatched"
+                )
+                logger.info(
+                    "[BankImport] SIGNAL purchase re-match complete: %d/%d matched",
+                    p_matched,
+                    len(p_results),
+                )
+
+            # ── 7. Classify remaining ──────────────────────
+            all_unmatched = list(
+                stmt.outgoing_transactions.filter(
+                    match_status="unmatched", transaction_category="",
+                )
+            ) + list(
+                stmt.incoming_transactions.filter(
+                    match_status="unmatched", transaction_category="",
+                )
+            )
+            if all_unmatched:
+                TransactionClassifier(self.user).classify_and_apply(all_unmatched)
+
+            # ── 8. Create / rebuild DK for safe bank categories ─
+            category_dk = BankCategoryJournalBuilder(self.user)
+            dk_result = category_dk.rebuild_for_statement(stmt)
+
+            logger.info(
+                "[BankImport] Category DK rebuilt: %s",
+                dk_result,
+            )
+
+            # ── 8. Пересчитать документы ───────────────────
+            if affected_invoice_ids:
+                from ..models import Invoice
+                for inv in Invoice.objects.filter(id__in=affected_invoice_ids):
+                    inv.recalc_payment_status()
+
+            if affected_purchase_ids:
+                from ..models import Purchase
+                for p in Purchase.objects.filter(id__in=affected_purchase_ids):
+                    p.recalc_from_allocations()
+
         stmt.refresh_stats()
+        logger.info(
+            "[BankImport] Re-match complete for stmt %s: "
+            "%d JEs deleted, %d invoices, %d purchases recalculated",
+            stmt.id, len(je_ids_to_delete),
+            len(affected_invoice_ids), len(affected_purchase_ids),
+        )
 
     # ── Private ─────────────────────────────────────────────
 
@@ -276,7 +568,7 @@ class BankImportService:
             user_dir = os.path.join(BANK_IMPORT_DIR, f"user_{self.user.id}")
             os.makedirs(user_dir, exist_ok=True)
 
-            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
             safe_name = "".join(
                 c if c.isalnum() or c in "._-" else "_"
                 for c in filename
@@ -290,11 +582,78 @@ class BankImportService:
         except Exception as e:
             logger.warning("[BankImport] Could not save raw file: %s", e)
             return "(failed to save)"
+        
+    def _make_own_account_key(self, bank_name="", currency="EUR", iban=""):
+        """
+        Returns own account key for dedupe:
+        - real IBAN if available
+        - otherwise bank_currency, e.g. revolut_USD
+        """
+        iban_clean = (iban or "").replace(" ", "").upper()
+        if iban_clean:
+            return iban_clean
+
+        bank = (bank_name or "other").strip().lower()
+        cur = (currency or "EUR").strip().upper()
+
+        return f"{bank}_{cur}"
+
+    def _serialize_txn_for_duplicate(self, txn):
+        if not txn:
+            return None
+
+        stmt = txn.bank_statement
+
+        return {
+            "id": txn.id,
+            "statement_id": stmt.id if stmt else None,
+            "bank": stmt.bank_name if stmt else "",
+            "statement_filename": stmt.original_filename if stmt else "",
+            "statement_iban": stmt.account_iban if stmt else "",
+            "statement_currency": stmt.currency if stmt else "",
+            "own_account_key": getattr(txn, "own_account_key", ""),
+            "date": txn.transaction_date.isoformat() if txn.transaction_date else "",
+            "amount": str(txn.amount),
+            "currency": txn.currency,
+            "doc_number": txn.doc_number or "",
+            "reference_number": txn.reference_number or "",
+            "counterparty_name": txn.counterparty_name or "",
+            "counterparty_code": txn.counterparty_code or "",
+            "counterparty_account": txn.counterparty_account or "",
+            "payment_purpose": (txn.payment_purpose or "")[:500],
+            "transaction_hash": txn.transaction_hash,
+        }
+
+    def _build_duplicate_info(self, new_txn, existing_txn, stmt, direction):
+        return {
+            "direction": "incoming" if direction == "credit" else "outgoing",
+            "transaction_hash": new_txn.transaction_hash,
+            "reason": "transaction_hash_exists",
+            "new": {
+                "statement_id": stmt.id,
+                "bank": stmt.bank_name,
+                "statement_filename": stmt.original_filename,
+                "statement_iban": stmt.account_iban or "",
+                "statement_currency": stmt.currency or "",
+                "own_account_key": getattr(new_txn, "own_account_key", ""),
+                "date": new_txn.transaction_date.isoformat() if new_txn.transaction_date else "",
+                "amount": str(new_txn.amount),
+                "currency": new_txn.currency,
+                "doc_number": new_txn.doc_number or "",
+                "reference_number": new_txn.reference_number or "",
+                "counterparty_name": new_txn.counterparty_name or "",
+                "counterparty_code": new_txn.counterparty_code or "",
+                "counterparty_account": new_txn.counterparty_account or "",
+                "payment_purpose": (new_txn.payment_purpose or "")[:500],
+            },
+            "existing": self._serialize_txn_for_duplicate(existing_txn),
+        }
 
     def _create_transactions(self, stmt, raw_list):
         created_inc = []
         created_out = []
         dupes = 0
+        duplicate_details = []
 
         for raw in raw_list:
             if not raw.get("transaction_date") or not raw.get("amount"):
@@ -303,10 +662,17 @@ class BankImportService:
             direction = raw.get("direction", "credit")
             Model = IncomingTransaction if direction == "credit" else OutgoingTransaction
 
+            own_account_key = self._make_own_account_key(
+                bank_name=stmt.bank_name,
+                currency=raw.get("currency") or stmt.currency or "EUR",
+                iban=stmt.account_iban,
+            )
+
             txn = Model(
                 user=self.user,
                 bank_statement=stmt,
                 source="bank_import",
+                own_account_key=own_account_key,
                 transaction_date=raw["transaction_date"],
                 value_date=raw.get("value_date"),
                 doc_number=raw.get("doc_number", ""),
@@ -327,27 +693,62 @@ class BankImportService:
             try:
                 with db_transaction.atomic():
                     txn.save()
+
                 if direction == "credit":
                     created_inc.append(txn)
                 else:
                     created_out.append(txn)
+
             except IntegrityError:
                 dupes += 1
 
-        return created_inc, created_out, dupes
+                existing = (
+                    Model.objects
+                    .filter(transaction_hash=txn.transaction_hash)
+                    .select_related("bank_statement")
+                    .first()
+                )
+
+                duplicate_info = self._build_duplicate_info(
+                    new_txn=txn,
+                    existing_txn=existing,
+                    stmt=stmt,
+                    direction=direction,
+                )
+                duplicate_details.append(duplicate_info)
+
+                logger.warning(
+                    "[BANK_DUPLICATE] direction=%s hash=%s new=%s existing=%s",
+                    direction,
+                    txn.transaction_hash,
+                    duplicate_info.get("new"),
+                    duplicate_info.get("existing"),
+                )
+
+        return created_inc, created_out, dupes, duplicate_details
 
     def _extract_iban(self, content: bytes) -> str:
         import re
+
         text = ""
         for enc in ("utf-8-sig", "utf-8", "windows-1257"):
             try:
-                text = content[:3000].decode(enc)
+                text = content[:5000].decode(enc)
                 break
             except UnicodeDecodeError:
                 continue
-        ibans = re.findall(r"LT\d{18}", text)
-        return ibans[0] if ibans else ""
 
+        # LT IBAN
+        ibans = re.findall(r"LT\d{18}", text)
+        if ibans:
+            return ibans[0]
+
+        # DE, PL ir kiti IBAN
+        ibans = re.findall(r"[A-Z]{2}\d{2}[A-Z0-9]{11,30}", text)
+        if ibans:
+            return ibans[0]
+
+        return ""
 
 # ────────────────────────────────────────────────────────────
 # PaymentService — управление платежами
@@ -397,13 +798,27 @@ class PaymentService:
         )
 
         invoice.recalc_payment_status()
+
+        # ── Auto JE ──
+        from .accounting_transfer import create_je_for_allocation
+        try:
+            create_je_for_allocation(alloc)
+        except Exception as e:
+            logger.warning("[MarkPaid] Auto JE failed for alloc %s: %s", alloc.id, e)
+
         return alloc
 
     def confirm_allocation(self, allocation_id):
         """Юзер подтверждает proposed allocation."""
+        from django.db.models import Q
+
         alloc = PaymentAllocation.objects.select_related(
-            "incoming_transaction", "invoice",
-        ).get(id=allocation_id, invoice__user=self.user)
+            "incoming_transaction", "outgoing_transaction",
+            "invoice", "purchase",
+        ).get(
+            Q(invoice__user=self.user) | Q(purchase__user=self.user),
+            id=allocation_id,
+        )
 
         alloc.status = "confirmed"
         alloc.confirmed_at = timezone.now()
@@ -411,28 +826,50 @@ class PaymentService:
         alloc.save(update_fields=["status", "confirmed_at", "confirmed_by"])
 
         # Обновляем транзакцию
-        if alloc.incoming_transaction:
-            txn = alloc.incoming_transaction
+        txn = alloc.transaction  # property: incoming or outgoing
+        if txn:
             has_proposed = txn.allocations.filter(status="proposed").exists()
             if not has_proposed:
                 txn.match_status = "confirmed"
                 txn.save(update_fields=["match_status", "updated_at"])
 
-        # Пересчитываем invoice
-        alloc.invoice.recalc_payment_status()
+        # Пересчитываем документ
+        if alloc.invoice:
+            alloc.invoice.recalc_payment_status()
+        elif alloc.purchase:
+            alloc.purchase.recalc_from_allocations()
 
-        # ── Refresh bank statement counters ──
-        if alloc.incoming_transaction and alloc.incoming_transaction.bank_statement:
-            alloc.incoming_transaction.bank_statement.refresh_stats()
+        # Refresh bank statement counters
+        if txn and txn.bank_statement:
+            txn.bank_statement.refresh_stats()
+
+        # ── Auto JE ──
+        from .accounting_transfer import create_je_for_allocation
+        try:
+            create_je_for_allocation(alloc)
+        except Exception as e:
+            logger.warning("[Confirm] Auto JE failed for alloc %s: %s", alloc.id, e)
 
         return alloc
 
     def reject_allocation(self, allocation_id):
         """Юзер отклоняет proposed allocation."""
-        alloc = PaymentAllocation.objects.get(
-            id=allocation_id, invoice__user=self.user,
+        from django.db.models import Q
+
+        alloc = PaymentAllocation.objects.select_related(
+            "incoming_transaction", "outgoing_transaction",
+            "invoice", "purchase",
+        ).get(
+            Q(invoice__user=self.user) | Q(purchase__user=self.user),
+            id=allocation_id,
         )
-        txn = alloc.incoming_transaction
+        txn = alloc.transaction  # property: incoming or outgoing
+        document = alloc.document  # property: invoice or purchase
+
+        # ── Delete JE ──
+        from .accounting_transfer import delete_je_for_allocation
+        delete_je_for_allocation(alloc)
+
         alloc.delete()
 
         # Пересчитываем транзакцию
@@ -448,23 +885,31 @@ class PaymentService:
             txn.save(update_fields=[
                 "allocated_amount", "match_status", "match_confidence", "updated_at",
             ])
-
-            # ── Refresh bank statement counters ──
             if txn.bank_statement:
                 txn.bank_statement.refresh_stats()
 
     def remove_manual_payment(self, allocation_id):
         """Удаление ручной пометки оплаты."""
+        from django.db.models import Q
+
         alloc = PaymentAllocation.objects.get(
+            Q(invoice__user=self.user) | Q(purchase__user=self.user),
             id=allocation_id,
-            invoice__user=self.user,
             source="manual",
         )
         invoice = alloc.invoice
-        alloc.delete()
-        invoice.recalc_payment_status()
+        purchase = alloc.purchase
 
-        # no bank_statement to refresh (manual has no transaction)
+        # ── Delete JE ──
+        from .accounting_transfer import delete_je_for_allocation
+        delete_je_for_allocation(alloc)
+
+        alloc.delete()
+
+        if invoice:
+            invoice.recalc_payment_status()
+        elif purchase:
+            purchase.recalc_from_allocations()
 
     def manual_match(self, transaction_id, invoice_id, amount=None):
         """Юзер вручную привязывает транзакцию к invoice."""
@@ -590,3 +1035,293 @@ class PaymentService:
             "payment_status": invoice.status,
             "allocations": allocations_data,
         }
+    
+
+
+# ════════════════════════════════════════════════════════════
+# Category DK entries for bank transactions
+# ════════════════════════════════════════════════════════════
+
+SAFE_BANK_DK_CATEGORIES = {
+    "bank_fee": {
+        "debit_account": "6880",
+        "debit_name": "Banko mokesčiai",
+        "description": "Banko mokestis",
+    },
+    "tax_vmi": {
+        "debit_account": "4481",
+        "debit_name": "Mokėtini mokesčiai VMI",
+        "description": "VMI įmoka",
+    },
+    "tax_sodra": {
+        "debit_account": "4482",
+        "debit_name": "Mokėtina Sodra",
+        "description": "Sodra įmoka",
+    },
+    "salary": {
+        "debit_account": "4461",
+        "debit_name": "Mokėtinas darbo užmokestis",
+        "description": "Darbo užmokesčio išmokėjimas",
+    },
+}
+
+
+class BankCategoryJournalBuilder:
+    """
+    DK įrašai banko operacijoms be sudengimo:
+    bank_fee / tax_vmi / tax_sodra / salary.
+
+    PaymentAllocation nekuriame.
+    Statusas visada draft / Nauja.
+    Užregistruota bus tik period lock metu.
+    """
+
+    def __init__(self, user, company_profile=None):
+        self.user = user
+        self.company_profile = company_profile or getattr(user, "active_company_profile", None)
+
+    def create_for_statement(self, statement) -> dict:
+        if not self.company_profile:
+            logger.warning("[BankCategoryDK] No company profile for user %s", self.user.id)
+            return {"created": 0, "skipped": 0, "errors": 0}
+
+        created = 0
+        skipped = 0
+        errors = 0
+
+        txns = list(
+            statement.outgoing_transactions.filter(
+                transaction_category__in=list(SAFE_BANK_DK_CATEGORIES.keys()),
+            ).order_by("transaction_date", "id")
+        )
+
+        for txn in txns:
+            try:
+                entry = self.create_for_transaction(txn)
+                if entry:
+                    created += 1
+                else:
+                    skipped += 1
+            except Exception as exc:
+                errors += 1
+                logger.exception(
+                    "[BankCategoryDK] Failed txn=%s: %s",
+                    txn.id,
+                    exc,
+                )
+
+        return {"created": created, "skipped": skipped, "errors": errors}
+
+    def rebuild_for_statement(self, statement) -> dict:
+        removed = self.delete_draft_category_entries(statement)
+        result = self.create_for_statement(statement)
+        result["removed"] = removed
+        return result
+
+    def delete_draft_category_entries(self, statement) -> int:
+        removed = 0
+
+        txns = list(
+            statement.outgoing_transactions.filter(
+                journal_entry__isnull=False,
+                journal_entry__source_type=JournalEntry.SOURCE_BANK,
+                journal_entry__purchase__isnull=True,
+                journal_entry__invoice__isnull=True,
+            ).select_related("journal_entry")
+        )
+
+        for txn in txns:
+            entry = txn.journal_entry
+            if not entry:
+                continue
+
+            if entry.status == JournalEntry.STATUS_POSTED:
+                continue
+
+            with db_transaction.atomic():
+                txn.journal_entry = None
+                txn.save(update_fields=["journal_entry", "updated_at"])
+                entry.delete()
+                removed += 1
+
+        return removed
+
+    def create_for_transaction(self, txn):
+        category = txn.transaction_category or ""
+        cfg = SAFE_BANK_DK_CATEGORIES.get(category)
+
+        if not cfg:
+            return None
+
+        if txn.journal_entry_id:
+            return None
+
+        # Jei susieta su dokumentu, category DK nekuriame.
+        if txn.match_status in (
+            "auto_matched",
+            "likely_matched",
+            "confirmed",
+            "manually_matched",
+        ):
+            return None
+
+        # Salary tik kai aiškiai parašyta paskirtyje.
+        if category == "salary" and not self._is_explicit_salary(txn):
+            return None
+
+        amount = abs(txn.amount or Decimal("0"))
+        if amount <= Decimal("0"):
+            return None
+
+        # Šitam pirmam sluoksniui auto-DK tik EUR.
+        if (txn.currency or "EUR").upper() != "EUR":
+            return None
+
+        debit_account = txn.category_account_debit or cfg["debit_account"]
+        debit_name = cfg["debit_name"]
+
+        credit_account = txn.category_account_credit or self._get_bank_account_code(txn)
+        credit_name = self._get_bank_account_name(txn)
+
+        description = self._build_description(txn, cfg["description"])
+        document_number = self._build_document_number(txn)
+
+        with db_transaction.atomic():
+            locked_txn = OutgoingTransaction.objects.select_for_update().get(id=txn.id)
+
+            if locked_txn.journal_entry_id:
+                return None
+
+            entry = JournalEntry.objects.create(
+                user=self.user,
+                company_profile=self.company_profile,
+                source_type=JournalEntry.SOURCE_BANK,
+                entry_date=locked_txn.transaction_date,
+                period=self._period_start(locked_txn.transaction_date),
+                document_number=document_number,
+                counterparty_name=locked_txn.counterparty_name or "",
+                counterparty_code=locked_txn.counterparty_code or "",
+                description=description,
+                status=JournalEntry.STATUS_DRAFT,
+                currency="EUR",
+            )
+
+            JournalEntryLine.objects.create(
+                entry=entry,
+                side=JournalEntryLine.SIDE_DEBIT,
+                account_code=debit_account,
+                account_name=debit_name,
+                amount=amount,
+                description=description,
+                sort_order=1,
+            )
+
+            JournalEntryLine.objects.create(
+                entry=entry,
+                side=JournalEntryLine.SIDE_CREDIT,
+                account_code=credit_account,
+                account_name=credit_name,
+                amount=amount,
+                description=description,
+                sort_order=2,
+            )
+
+            finalize_journal_entry(entry)
+
+            details = dict(locked_txn.match_details or {})
+            details["category_dk"] = {
+                "created": True,
+                "journal_entry_id": entry.id,
+                "category": category,
+                "debit_account": debit_account,
+                "credit_account": credit_account,
+                "amount": str(amount),
+            }
+
+            locked_txn.journal_entry = entry
+            locked_txn.match_status = "classified"
+            locked_txn.category_account_debit = debit_account
+            locked_txn.category_account_credit = credit_account
+            locked_txn.match_details = details
+            locked_txn.save(update_fields=[
+                "journal_entry",
+                "match_status",
+                "category_account_debit",
+                "category_account_credit",
+                "match_details",
+                "updated_at",
+            ])
+
+            logger.info(
+                "[BankCategoryDK] Created DK #%s for txn %s category=%s amount=%s",
+                entry.id,
+                locked_txn.id,
+                category,
+                amount,
+            )
+
+            return entry
+
+    @staticmethod
+    def _period_start(d):
+        return date(d.year, d.month, 1)
+
+    @staticmethod
+    def _is_explicit_salary(txn) -> bool:
+        text = f"{txn.payment_purpose or ''} {txn.counterparty_name or ''}".lower()
+        return bool(re.search(
+            r"(atlyginim|darbo\s+užmokest|darbo\s+uzmokest|\bdu\b|salary)",
+            text,
+            flags=re.IGNORECASE,
+        ))
+
+    @staticmethod
+    def _build_document_number(txn) -> str:
+        return txn.doc_number or txn.reference_number or f"BANK-{txn.id}"
+
+    @staticmethod
+    def _build_description(txn, base: str) -> str:
+        name = txn.counterparty_name or ""
+        purpose = (txn.payment_purpose or "").strip()
+
+        if name:
+            return f"{base}: {name}"[:255]
+
+        if purpose:
+            return f"{base}: {purpose[:180]}"[:255]
+
+        return base[:255]
+
+    def _get_bank_account_code(self, txn) -> str:
+        statement = getattr(txn, "bank_statement", None)
+
+        iban = getattr(statement, "account_iban", "") if statement else ""
+        bank_name = getattr(statement, "bank_name", "") if statement else ""
+        currency = getattr(statement, "currency", "") if statement else ""
+
+        if self.company_profile and hasattr(self.company_profile, "get_bank_chart_account"):
+            try:
+                info = self.company_profile.get_bank_chart_account(
+                    iban=iban,
+                    bank_name=bank_name,
+                    currency=currency or txn.currency,
+                )
+                if isinstance(info, dict) and info.get("account"):
+                    return str(info["account"])
+            except Exception:
+                logger.exception("[BankCategoryDK] Bank account mapping failed")
+
+        return "2710"
+
+    def _get_bank_account_name(self, txn) -> str:
+        statement = getattr(txn, "bank_statement", None)
+        bank_name = getattr(statement, "bank_name", "") if statement else ""
+        currency = getattr(statement, "currency", "") if statement else ""
+
+        label = "Bankas"
+        if bank_name:
+            label = bank_name.upper()
+        if currency:
+            label = f"{label} {currency}"
+
+        return label[:255]

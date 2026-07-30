@@ -7,6 +7,8 @@ import SwapBuyerSellerButton from './SwapBuyerSellerButton';
 import SwapHorizontalCircleIcon from "@mui/icons-material/SwapHorizontalCircle";
 import FindReplaceIcon from "@mui/icons-material/FindReplace";
 import WeekendIcon from "@mui/icons-material/Weekend";
+import { KorespondencijaSummary, PirkimoSaskaitaField } from '../components/KorespondencijaComponents';
+import HelpOutlineIcon from "@mui/icons-material/HelpOutline";
 
 
 import {
@@ -338,6 +340,9 @@ const LineItemCard = React.memo(({
   onDelete,
   onProductSelect,
   onProductClear,
+  onMatchedProductSelect,
+  // onMatchedProductClear,
+  onMatchedOverride,
   onSaveFields,
   formatNumberPreview,
   PRODUCT_FIELDS,
@@ -345,6 +350,9 @@ const LineItemCard = React.memo(({
   showErrors,
   isMobile,
   currency,
+  accountingProgram,
+  selectedCpKey,
+  parentDoc,
 }) => {
   // Вычисляем missing fields для этой строки
   const missingFields = useMemo(() => {
@@ -355,6 +363,21 @@ const LineItemCard = React.memo(({
   const getFieldErrorSx = (fieldName) => {
     return (showErrors && missingFields.has(fieldName)) ? errorFieldSx : {};
   };
+
+  const MATCHED_FIELDS = [
+    { field: "matched_prekes_pavadinimas", label: "Prekės pavadinimas:", searchField: "prekes_pavadinimas" },
+    { field: "matched_prekes_kodas", label: "Prekės kodas:", searchField: "prekes_kodas" },
+    { field: "matched_prekes_barkodas", label: "Prekės barkodas:", searchField: "prekes_barkodas" },
+    { field: "matched_unit", label: "Mato vnt.:", searchField: null },
+  ];
+
+  const matchedCode = (item.matched_prekes_kodas || "").trim();
+  const hasMatchedCatalog = !!(
+    (item.matched_prekes_pavadinimas || "").trim() ||
+    (matchedCode && matchedCode.toUpperCase() !== "UKN0") ||
+    (item.matched_prekes_barkodas || "").trim() ||
+    (item.matched_unit || "").trim()
+  );
 
   return (
     <Box
@@ -406,6 +429,182 @@ const LineItemCard = React.memo(({
         />
       )}
 
+      {/* ── Matched catalog section ── */}
+      {hasMatchedCatalog && (
+        <Box
+          sx={{
+            mb: 1.5,
+            px: isMobile ? 1 : 1.25,
+            py: 1,
+            borderRadius: 1.75,
+            bgcolor: item.catalog_match_user_override ? "#FAFAFA" : "#F8F7FC",
+            border: `1px solid ${item.catalog_match_user_override ? "#E0E0E0" : "#E4E0EE"}`,
+            boxShadow: "0 1px 2px rgba(76, 61, 105, 0.04)",
+            opacity: item.catalog_match_user_override ? 0.7 : 1,
+          }}
+        >
+          {/* Header */}
+          <Box
+            sx={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              gap: 1,
+              mb: 0.6,
+            }}
+          >
+            <Box sx={{ display: "flex", alignItems: "center", gap: 0.75 }}>
+              <Typography
+                sx={{
+                  fontWeight: 700,
+                  fontSize: isMobile ? "0.76rem" : "0.8rem",
+                  lineHeight: 1.2,
+                  color: item.catalog_match_user_override ? "#999" : "#51466F",
+                }}
+              >
+                Atpažinta iš katalogo
+              </Typography>
+
+              {item.catalog_match_user_override && (
+                <Chip
+                  label="Nenaudojama"
+                  size="small"
+                  sx={{
+                    height: 18,
+                    fontSize: "0.65rem",
+                    fontWeight: 700,
+                    bgcolor: "#FFF3E0",
+                    color: "#E65100",
+                    border: "1px solid #FFCC80",
+                    "& .MuiChip-label": { px: 0.75 },
+                  }}
+                />
+              )}
+            </Box>
+
+            <Button
+              size="small"
+              variant="outlined"
+              onClick={() => onMatchedOverride(item.id)(!item.catalog_match_user_override)}
+              sx={{
+                flexShrink: 0,
+                minWidth: "auto",
+                minHeight: 25,
+                px: 1,
+                py: 0.15,
+                borderRadius: 1.25,
+                borderColor: item.catalog_match_user_override ? "#A5D6A7" : "#F2B8C0",
+                bgcolor: item.catalog_match_user_override ? "#F1F8F1" : "#FFF4F5",
+                color: item.catalog_match_user_override ? "#2E7D32" : "#B4233D",
+                fontSize: "0.72rem",
+                fontWeight: 700,
+                lineHeight: 1.2,
+                textTransform: "none",
+
+                "&:hover": {
+                  borderColor: item.catalog_match_user_override ? "#66BB6A" : "#E58B99",
+                  bgcolor: item.catalog_match_user_override ? "#E8F5E9" : "#FFE9EC",
+                  color: item.catalog_match_user_override ? "#1B5E20" : "#981B32",
+                },
+              }}
+            >
+              {item.catalog_match_user_override ? "Naudoti" : "Nenaudoti"}
+            </Button>
+          </Box>
+
+          {/* Matched fields */}
+          <Stack spacing={0.3}>
+            {MATCHED_FIELDS.map(({ field, label, searchField }) => {
+              const cfg = searchField
+                ? EXTRA_FIELDS_CONFIG.product.find(
+                    (f) => f.name === searchField
+                  )
+                : null;
+
+              return (
+                <Stack
+                  key={`${item.id}-${field}`}
+                  direction={isMobile ? "column" : "row"}
+                  alignItems={isMobile ? "flex-start" : "center"}
+                  spacing={isMobile ? 0.15 : 0.75}
+                  sx={{
+                    minHeight: isMobile ? "auto" : 27,
+                  }}
+                >
+                  <Typography
+                    sx={{
+                      minWidth: isMobile ? "auto" : 118,
+                      flexShrink: 0,
+                      color: "#777087",
+                      fontSize: isMobile ? "0.72rem" : "0.75rem",
+                      fontWeight: 500,
+                      lineHeight: 1.15,
+                    }}
+                  >
+                    {label}
+                  </Typography>
+
+                  {cfg?.search ? (
+                    <EditableAutoCell
+                      label={cfg.label || "Pasirinkite…"}
+                      value={item[field] || ""}
+                      searchUrl={cfg.search}
+                      onSelect={onMatchedProductSelect(item.id)}
+                      onManualSave={(text) =>
+                        onSaveFields(item.id, {
+                          [field]: text || null,
+                        })
+                      }
+                      onClear={() => {}}
+                      sx={{
+                        flex: 1,
+                        width: isMobile ? "100%" : "auto",
+                        minWidth: 0,
+
+                        "& .MuiInputBase-root": {
+                          minHeight: "25px",
+                          background: "rgba(255, 255, 255, 0.55)",
+                          borderRadius: 1,
+                          fontSize: isMobile ? "12px" : "13px",
+                          lineHeight: 1.15,
+                          px: 0.75,
+                        },
+
+                        "& input": {
+                          padding: 0,
+                          fontSize: isMobile ? "12px" : "13px",
+                          fontWeight: 650,
+                          lineHeight: 1.15,
+                          color: item.catalog_match_user_override ? "#999" : "#302B3C",
+                        },
+                      }}
+                    />
+                  ) : (
+                    <Box
+                      sx={{
+                        flex: 1,
+                        minWidth: 0,
+                        fontSize: isMobile ? "12px" : "13px",
+                        fontWeight: 650,
+                        lineHeight: 1.15,
+                        color: item.catalog_match_user_override ? "#999" : "#302B3C",
+                      }}
+                    >
+                      <EditableCell
+                        value={item[field] || ""}
+                        onSave={(v) =>
+                          onSaveFields(item.id, field, v)
+                        }
+                      />
+                    </Box>
+                  )}
+                </Stack>
+              );
+            })}
+          </Stack>
+        </Box>
+      )}
+
       {PRODUCT_FIELDS.map(({ field, label }) => {
         const cfg = EXTRA_FIELDS_CONFIG.product.find(f => f.name === field);
         return (
@@ -454,6 +653,18 @@ const LineItemCard = React.memo(({
         <Typography>Suma (su PVM): <EditableCell value={item.total} inputType="number" onSave={(v) => onSaveFields(item.id, "total", v)} renderDisplay={(v) => <b>{formatNumberPreview(v)}</b>} sx={getFieldErrorSx('total')} /></Typography>
         <Typography>Nuolaida (be PVM): <b>{formatNumberPreview(item.discount_wo_vat)}</b></Typography>
         <Typography>Nuolaida (su PVM): <b>{formatNumberPreview(item.discount_with_vat)}</b></Typography>
+        {accountingProgram === "dokskenas_erp" && (
+          <Box sx={{ mt: 0.5 }}>
+            <PirkimoSaskaitaField
+              value={item.pirkimo_saskaita}
+              pardavimoValue={item.pardavimo_saskaita}
+              selectedCpKey={selectedCpKey}
+              isMobile={isMobile}
+              doc={parentDoc}
+              onChange={(val, field) => onSaveFields(item.id, field, val)}
+            />
+          </Box>
+        )}
       </Stack>
     </Box>
   );
@@ -506,51 +717,51 @@ export default function PreviewDialog({
   }, [closing]);
 
   // Блокируем скролл страницы когда диалог открыт
-  useEffect(() => {
-    if (!open) return;
+  // useEffect(() => {
+  //   if (!open) return;
     
-    const scrollY = window.scrollY;
-    const scrollbarWidth = window.innerWidth - document.documentElement.clientWidth;  // ← добавить
-    const html = document.documentElement;
-    const body = document.body;
-    const root = document.getElementById('root');
+  //   const scrollY = window.scrollY;
+  //   const scrollbarWidth = window.innerWidth - document.documentElement.clientWidth;  // ← добавить
+  //   const html = document.documentElement;
+  //   const body = document.body;
+  //   const root = document.getElementById('root');
     
-    // Сохраняем оригинальные стили
-    const originalHtmlOverflow = html.style.overflow;
-    const originalBodyOverflow = body.style.overflow;
-    const originalBodyPosition = body.style.position;
-    const originalBodyTop = body.style.top;
-    const originalBodyLeft = body.style.left;
-    const originalBodyRight = body.style.right;
-    const originalBodyWidth = body.style.width;
-    const originalBodyPaddingRight = body.style.paddingRight;  // ← добавить
-    const originalRootOverflow = root?.style.overflow;
+  //   // Сохраняем оригинальные стили
+  //   const originalHtmlOverflow = html.style.overflow;
+  //   const originalBodyOverflow = body.style.overflow;
+  //   const originalBodyPosition = body.style.position;
+  //   const originalBodyTop = body.style.top;
+  //   const originalBodyLeft = body.style.left;
+  //   const originalBodyRight = body.style.right;
+  //   const originalBodyWidth = body.style.width;
+  //   const originalBodyPaddingRight = body.style.paddingRight;  // ← добавить
+  //   const originalRootOverflow = root?.style.overflow;
     
-    // Блокируем скролл
-    html.style.overflow = 'hidden';
-    body.style.overflow = 'hidden';
-    body.style.position = 'fixed';
-    body.style.top = `-${scrollY}px`;
-    body.style.left = '0';
-    body.style.right = '0';
-    body.style.width = '100%';
-    body.style.paddingRight = `${scrollbarWidth}px`;
-    if (root) root.style.overflow = 'hidden';
+  //   // Блокируем скролл
+  //   html.style.overflow = 'hidden';
+  //   body.style.overflow = 'hidden';
+  //   body.style.position = 'fixed';
+  //   body.style.top = `-${scrollY}px`;
+  //   body.style.left = '0';
+  //   body.style.right = '0';
+  //   body.style.width = '100%';
+  //   body.style.paddingRight = `${scrollbarWidth}px`;
+  //   if (root) root.style.overflow = 'hidden';
     
-    return () => {
-      html.style.overflow = originalHtmlOverflow;
-      body.style.overflow = originalBodyOverflow;
-      body.style.position = originalBodyPosition;
-      body.style.top = originalBodyTop;
-      body.style.left = originalBodyLeft;
-      body.style.right = originalBodyRight;
-      body.style.width = originalBodyWidth;
-      body.style.paddingRight = originalBodyPaddingRight;  // ← добавить
-      if (root) root.style.overflow = originalRootOverflow;
+  //   return () => {
+  //     html.style.overflow = originalHtmlOverflow;
+  //     body.style.overflow = originalBodyOverflow;
+  //     body.style.position = originalBodyPosition;
+  //     body.style.top = originalBodyTop;
+  //     body.style.left = originalBodyLeft;
+  //     body.style.right = originalBodyRight;
+  //     body.style.width = originalBodyWidth;
+  //     body.style.paddingRight = originalBodyPaddingRight;  // ← добавить
+  //     if (root) root.style.overflow = originalRootOverflow;
       
-      window.scrollTo(0, scrollY);
-    };
-  }, [open]);
+  //     window.scrollTo(0, scrollY);
+  //   };
+  // }, [open]);
 
   // Вычисляем missing fields документа (memoized)
   const missingDocFields = useMemo(() => {
@@ -956,6 +1167,7 @@ export default function PreviewDialog({
       prekes_pavadinimas: valueObj.prekes_pavadinimas || valueObj.name || "",
       prekes_barkodas: valueObj.prekes_barkodas || valueObj.barkodas || valueObj.barcode || "",
       preke_paslauga: valueObj.preke_paslauga || null,
+      unit: valueObj.unit || null,
     };
 
     const res = await api.patch(
@@ -1002,6 +1214,89 @@ export default function PreviewDialog({
     if (isMulti) {
       await refreshDocument(selected.id);
     }
+  };
+
+  const handleMatchedProductSelect = (lineItemId) => async (valueObj) => {
+    if (!valueObj || !selected?.id) return;
+    const data = {
+      matched_prekes_pavadinimas: valueObj.prekes_pavadinimas || valueObj.name || "",
+      matched_prekes_kodas: valueObj.prekes_kodas || valueObj.code || "",
+      matched_prekes_barkodas: valueObj.prekes_barkodas || valueObj.barkodas || valueObj.barcode || "",
+      matched_unit: valueObj.unit || valueObj.mato_vnt || "",
+      matched_preke_paslauga: String(valueObj.preke_paslauga ?? valueObj.preke_paslauga_kodas ?? ""),
+    };
+
+    const res = await api.patch(
+      `/scanned-documents/${selected.id}/lineitem/${lineItemId}/`,
+      data,
+      { withCredentials: true }
+    );
+
+    setLineItemsLoaded(prev =>
+      prev.map(li => sameId(li.id, lineItemId) ? { ...li, ...res.data } : li)
+    );
+  };
+
+  const handleMatchedOverride = (lineItemId) => (newOverrideValue) => {
+    if (!selected?.id || !lineItemId) return;
+
+    const nextValue = Boolean(newOverrideValue);
+
+    // 1. Mgnovenno meniajem frontend
+    setLineItemsLoaded(prev =>
+      prev.map(item =>
+        sameId(item.id, lineItemId)
+          ? {
+              ...item,
+              catalog_match_user_override: nextValue,
+            }
+          : item
+      )
+    );
+
+    // 2. Zapros uxodit asinhronno, UI ego ne zhdiet
+    api.patch(
+      `/scanned-documents/${selected.id}/lineitem/${lineItemId}/`,
+      {
+        catalog_match_user_override: nextValue,
+      },
+      {
+        withCredentials: true,
+      }
+    )
+      .then(({ data }) => {
+        // Sinhroniziruem s realnym otvetom backend
+        setLineItemsLoaded(prev =>
+          prev.map(item =>
+            sameId(item.id, lineItemId)
+              ? {
+                  ...item,
+                  ...data,
+                  catalog_match_user_override:
+                    data?.catalog_match_user_override ?? nextValue,
+                }
+              : item
+          )
+        );
+      })
+      .catch(error => {
+        console.error(
+          "Failed to update catalog_match_user_override:",
+          error
+        );
+
+        // Esli backend ne soxranil, vozvrashiajem staroje sostojanije
+        setLineItemsLoaded(prev =>
+          prev.map(item =>
+            sameId(item.id, lineItemId)
+              ? {
+                  ...item,
+                  catalog_match_user_override: !nextValue,
+                }
+              : item
+          )
+        );
+      });
   };
 
   const gluedRawText = useMemo(() => {
@@ -1062,7 +1357,7 @@ export default function PreviewDialog({
 
     if (accordionRef.current) {
       setTimeout(() => {
-        accordionRef.current.scrollIntoView({ behavior: "smooth", block: "start" });
+        accordionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
       }, 200);
     }
   };
@@ -1200,6 +1495,24 @@ export default function PreviewDialog({
           }
         : d
     ));
+
+    // Refresh kor_summary after changing korespondencija fields
+    if (changed.pirkimo_saskaita !== undefined || changed.pardavimo_saskaita !== undefined) {
+      try {
+        const { data: updatedDoc } = await api.get(
+          `/scanned-documents/${selected.id}/`,
+          { withCredentials: true }
+        );
+        setSelected(prev => ({ ...prev, kor_summary: updatedDoc.kor_summary }));
+        setDocs(prev => prev.map(d =>
+          String(d.id) === String(selected.id)
+            ? { ...d, kor_summary: updatedDoc.kor_summary }
+            : d
+        ));
+      } catch (e) {
+        console.error("Failed to refresh kor_summary:", e);
+      }
+    }
 
     if (isMulti) await refreshDocument(selected.id);
   };
@@ -1407,6 +1720,49 @@ export default function PreviewDialog({
             }}
           />
         )}
+
+        {/* Catalog matching — unmatched count */}
+        {(() => {
+          const hasAnyMatch = lineItemsLoaded.some(li =>
+            (li.matched_prekes_pavadinimas || "").trim() ||
+            ((li.matched_prekes_kodas || "").trim() && (li.matched_prekes_kodas || "").trim().toUpperCase() !== "UKN0") ||
+            (li.matched_prekes_barkodas || "").trim() ||
+            (li.matched_unit || "").trim()
+          );
+          if (!hasAnyMatch && !(selected?.catalog_unmatched_count > 0)) return null;
+
+          const unmatchedCount = lineItemsLoaded.length > 0
+            ? lineItemsLoaded.filter(li => {
+                const code = (li.matched_prekes_kodas || "").trim();
+                return !code || code.toUpperCase() === "UKN0";
+              }).length
+            : (selected?.catalog_unmatched_count || 0);
+
+          if (unmatchedCount === 0) return null;
+
+          const last2 = unmatchedCount % 100;
+          const last1 = unmatchedCount % 10;
+          const word =
+            (last2 >= 11 && last2 <= 19) ? "prekių neatpažinta" :
+            last1 === 1 ? "prekė neatpažinta" :
+            (last1 >= 2 && last1 <= 9) ? "prekės neatpažintos" :
+            "prekių neatpažinta";
+
+          return (
+            <Chip
+              icon={<ErrorIcon />}
+              label={`${unmatchedCount} ${word}`}
+              size="small"
+              color="warning"
+              variant="filled"
+              sx={{
+                fontSize: isMobile ? '0.75rem' : '0.8125rem',
+                '& .MuiChip-icon': { fontSize: isMobile ? '1rem' : '1.1rem' },
+              }}
+            />
+          );
+        })()}
+
       </Box>
     );
   };
@@ -1569,6 +1925,70 @@ export default function PreviewDialog({
       <Typography gutterBottom sx={{ fontSize: isMobile ? "0.85rem" : "inherit" }}>
         Dokumento tipas: <b>{selected.document_type || "—"}</b>
       </Typography>
+
+      {/* ── Korespondencija ── */}
+      <Accordion
+        sx={{
+          my: 1,
+          boxShadow: "none",
+          border: "0.5px solid",
+          borderColor: "divider",
+          borderRadius: "10px !important",
+          "&:before": { display: "none" },
+          "&.Mui-expanded": { my: 1 },
+          overflow: "hidden",
+          bgcolor: "transparent",
+        }}
+      >
+        <AccordionSummary
+          expandIcon={<ExpandMoreIcon sx={{ fontSize: 18 }} />}
+          sx={{
+            minHeight: 38,
+            "&.Mui-expanded": { minHeight: 38 },
+            "& .MuiAccordionSummary-content": { my: 0.5 },
+            "& .MuiAccordionSummary-content.Mui-expanded": { my: 0.5 },
+            px: 1.5,
+            bgcolor: "#f3f3f3ab",
+          }}
+        >
+          <Box sx={{ display: "flex", alignItems: "center", gap: 0.75 }}>
+            <Typography sx={{ fontSize: 13, fontWeight: 600, color: "text.secondary" }}>
+              Korespondencija
+            </Typography>
+            <Tooltip
+              title="Korespondencija naudojama tik su DokSkenas ERP. Jei eksportuojate duomenis į išorinę apskaitos programą, šią sekciją ignoruokite."
+              arrow
+              placement="top"
+            >
+              <HelpOutlineIcon sx={{ fontSize: 16, color: "text.disabled", cursor: "help" }} />
+            </Tooltip>
+            <Box
+              component="span"
+              sx={{
+                fontSize: 10,
+                fontWeight: 600,
+                px: 0.75,
+                py: 0.15,
+                borderRadius: "4px",
+                bgcolor: "#EDE9FE",
+                color: "#7C3AED",
+                lineHeight: 1.4,
+                ml: 0.25,
+              }}
+            >
+              Nauja
+            </Box>
+          </Box>
+        </AccordionSummary>
+        <AccordionDetails sx={{ pt: 1, pb: 1.5, px: 1.5, bgcolor: "transparent" }}>
+          <KorespondencijaSummary
+            doc={selected}
+            selectedCpKey={selectedCpKey}
+            lineItems={lineItemsLoaded}
+          />
+        </AccordionDetails>
+      </Accordion>
+
       <Divider sx={{ my: 1 }} />
 
       {/* Buyer & Seller - на мобильном вертикально */}
@@ -1738,6 +2158,17 @@ export default function PreviewDialog({
           />
         </Typography>
 
+        {selected.scan_type === "sumiskai" && user?.default_accounting_program === "dokskenas_erp" && (
+          <PirkimoSaskaitaField
+            value={selected?.pirkimo_saskaita}
+            pardavimoValue={selected?.pardavimo_saskaita}
+            selectedCpKey={selectedCpKey}
+            isMobile={isMobile}
+            doc={selected}
+            onChange={(val, field) => saveDocFields(field, val)}
+          />
+        )}
+
         {selected.scan_type === "sumiskai" && (
           <Box sx={{ mt: 1 }}>
             {PRODUCT_FIELDS.map(({ field, label }) => {
@@ -1876,6 +2307,8 @@ export default function PreviewDialog({
                     onDelete={deleteLineItem}
                     onProductSelect={handleLineItemProductSelect}
                     onProductClear={handleLineItemProductClear}
+                    onMatchedProductSelect={handleMatchedProductSelect}
+                    onMatchedOverride={handleMatchedOverride}
                     onSaveFields={saveLineFields}
                     formatNumberPreview={formatNumberPreview}
                     PRODUCT_FIELDS={PRODUCT_FIELDS}
@@ -1883,6 +2316,9 @@ export default function PreviewDialog({
                     showErrors={showFieldErrors}
                     isMobile={isMobile}
                     currency={selected.currency}
+                    accountingProgram={user?.default_accounting_program}
+                    selectedCpKey={selectedCpKey}
+                    parentDoc={selected}
                   />
                 );
               })}
@@ -2072,7 +2508,7 @@ export default function PreviewDialog({
         maxWidth="xl" 
         fullWidth 
         fullScreen={isMobile}
-        disableScrollLock={false}
+        disableScrollLock={true}
         TransitionProps={{ timeout: 0.1 }}
         PaperProps={{
           sx: isMobile ? {
@@ -2254,8 +2690,8 @@ export default function PreviewDialog({
                   {selected.preview_url && (
                     <ZoomableImage
                       src={selected.preview_url}
-                      buttonSize={48}
-                      maxHeight="calc(100vh - 100px)"
+                      buttonSize={36}
+                      maxHeight="calc(75vh - 60px)"
                     />
                   )}
                 </Box>
@@ -2296,6 +2732,8 @@ export default function PreviewDialog({
                     src={selected.preview_url}
                     buttonSize={36}
                     maxHeight="calc(75vh - 60px)"
+                    fitOnLoad
+                    fitRatio={0.8}
                   />
                 ) : (
                   <Typography color="text.secondary">Peržiūra negalima</Typography>

@@ -22,12 +22,27 @@ def _get_xlsx_rows(file, required_fields):
     # 2) normalizacija
     def norm(h: str) -> str:
         h = (h or "").strip()
-        if '(' in h:
-            h = h[:h.index('(')]
-        h = h.strip()                 
+
+        if "(" in h:
+            h = h[:h.index("(")]
+
+        h = h.strip()
+
         if h.endswith("*"):
             h = h[:-1]
-        return h.strip().lower()
+
+        h = h.strip().lower()
+
+        aliases = {
+            "mato vnt": "mato_vnt",
+            "mato vnt.": "mato_vnt",
+            "mato_vnt.": "mato_vnt",
+            "matavimo vienetas": "mato_vnt",
+            "matavimo_vienetas": "mato_vnt",
+            "unit": "mato_vnt",
+        }
+
+        return aliases.get(h, h)
 
     norm_headers = [norm(h) for h in raw_headers]
 
@@ -111,6 +126,9 @@ def import_products_from_xlsx(user, file):
 
             preke_paslauga = _norm_preke_paslauga(data.get('preke_paslauga_kodas'))
 
+            unit_column_present = "mato_vnt" in data
+            unit = (data.get("mato_vnt") or "").strip()
+
             missing = []
             if not prekes_pavadinimas:
                 missing.append("prekes_pavadinimas")
@@ -130,13 +148,18 @@ def import_products_from_xlsx(user, file):
                 continue
             seen_codes.add(prekes_kodas)
 
-            preke_paslauga = _norm_preke_paslauga(data.get('preke_paslauga_kodas'))
+            field_values = {
+                "prekes_pavadinimas": prekes_pavadinimas,
+                "prekes_barkodas": (
+                    data.get("prekes_barkodas") or ""
+                ).strip(),
+                "preke_paslauga": preke_paslauga,
+            }
 
-            field_values = dict(
-                prekes_pavadinimas=prekes_pavadinimas,
-                prekes_barkodas=(data.get('prekes_barkodas') or '').strip(),
-                preke_paslauga=preke_paslauga,
-            )
+            # Если в Excel вообще есть колонка mato_vnt,
+            # обновляем unit. Если колонки нет, старое значение не трогаем.
+            if unit_column_present:
+                field_values["unit"] = unit or None
 
             existing = ProductAutocomplete.objects.filter(
                 user=user, prekes_kodas=prekes_kodas

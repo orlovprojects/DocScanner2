@@ -91,6 +91,7 @@ export default function EditableCell({
             setDraft(val);
             commit(val);
           }}
+          groupBy={(opt) => opt?.group || ""}
           disableClearable
           freeSolo={false}
           autoHighlight

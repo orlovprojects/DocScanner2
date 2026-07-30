@@ -186,7 +186,7 @@ def _validate_line_items(line_items, separate_vat: bool, report: Dict[str, Any])
 
         # CHECK 1
         if price != 0 and qty != 0:
-            expected_subtotal = price * qty
+            expected_subtotal = Q2(price * qty)
             delta = (expected_subtotal - subtotal).copy_abs()
             match = delta <= LINE_TOLERANCE
             line_check["checks"]["price_x_qty"] = {

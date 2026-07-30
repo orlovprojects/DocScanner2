@@ -558,6 +558,7 @@ export default function DocumentsTable({
     exportableIds.some((id) => selectedRows.includes(id)) && !allExportableSelected;
 
   const statusLabel = (d) => {
+    if (d.perkelta_i_apskaita) return "Perkelta į apskaitą";
     if (d.status === "exported") return "Eksportuotas";
     if (d.status === "completed") return "Atliktas";
     if (d.status === "processing" || d.status === "pending") return "Vykdomas";
@@ -567,6 +568,7 @@ export default function DocumentsTable({
   };
 
   const statusLabelFull = (d) => {
+    if (d.perkelta_i_apskaita) return "Perkelta į apskaitą";
     if (d.status === "exported") return "Atliktas (Eksportuotas)";
     if (d.status === "completed") return "Atliktas (Neeksportuotas)";
     if (d.status === "processing" || d.status === "pending") return "Vykdomas";
@@ -575,9 +577,66 @@ export default function DocumentsTable({
     return d.status || "";
   };
 
+  const formatAccountingTransferDate = (iso) => {
+    if (!iso) return "";
+    return new Date(iso).toLocaleString("lt-LT", {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  };
+
+  const accountingTransferTooltip = (d) => {
+    const companyName = d.perkelta_i_company_name || "pasirinktos įmonės";
+    const date = formatAccountingTransferDate(d.perkelta_i_apskaita_at);
+
+    return `Perkelta į ${companyName} apskaitą${date ? ` ${date}` : ""}`;
+  };
+
+  const renderStatusMain = (d, variant = "body2", label = statusLabelFull(d)) => {
+    const content = (
+      <Box
+        component="span"
+        sx={{
+          display: "inline-flex",
+          alignItems: "center",
+          gap: 0.5,
+        }}
+      >
+        {iconForStatus(d)}
+        <Typography
+          variant={variant}
+          component="span"
+          sx={{ fontWeight: 500 }}
+        >
+          {d.perkelta_i_apskaita ? "Perkelta į apskaitą" : label}
+        </Typography>
+      </Box>
+    );
+
+    if (!d.perkelta_i_apskaita) return content;
+
+    return (
+      <Tooltip
+        title={accountingTransferTooltip(d)}
+        arrow
+        {...(isMobile ? { enterTouchDelay: 50, leaveTouchDelay: 2500 } : {})}
+      >
+        <Box component="span" sx={{ display: "inline-flex", alignItems: "center" }}>
+          {content}
+        </Box>
+      </Tooltip>
+    );
+  };
+
   const iconForStatus = (d) => {
     const sxProps = isMobile ? { fontSize: 18, verticalAlign: 'middle' } : { verticalAlign: 'middle' };
-    
+
+    if (d.perkelta_i_apskaita) {
+      return <CheckCircleIcon sx={{ ...sxProps, color: "#3B82F6" }} />;
+    }
     if (d.status === "exported") {
       return <CheckCircleIcon color="success" sx={sxProps} />;
     }
@@ -769,6 +828,21 @@ export default function DocumentsTable({
         </Tooltip>
       );
     }
+    if (d.catalog_unmatched_count > 0) {
+      const n = d.catalog_unmatched_count;
+      const last2 = n % 100;
+      const last1 = n % 10;
+      const word =
+        (last2 >= 11 && last2 <= 19) ? "prekių neatpažinta" :
+        last1 === 1 ? "prekė neatpažinta" :
+        (last1 >= 2 && last1 <= 9) ? "prekės neatpažintos" :
+        "prekių neatpažinta";
+      icons.push(
+        <Tooltip key="catalog-unmatched" title={`${n} ${word} iš katalogo`} {...tooltipProps}>
+          <ShoppingCartIcon fontSize={iconFontSize} sx={{ ...iconSx, color: "#7B1FA2" }} />
+        </Tooltip>
+      );
+    }
 
     return icons.length > 0 ? (
       <Box
@@ -929,12 +1003,9 @@ export default function DocumentsTable({
                   {/* Row 3: Status + Icons + API status + Date */}
                   <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', pl: 4 }}>
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                      {iconForStatus(d)}
-                      <Typography variant="caption" sx={{ fontWeight: 500 }}>
-                        {statusLabel(d)}
-                      </Typography>
+                      {renderStatusMain(d, "caption", statusLabel(d))}
                       {renderStatusExtraIcons(d)}
-                      {/* API status icon inline on mobile */}
+
                       {showApiStatusCol && (
                         accountingProgram === "dineta"
                           ? d.dineta_api_status
@@ -1125,7 +1196,7 @@ export default function DocumentsTable({
 
                     <TableCell sx={{ verticalAlign: "middle", minHeight: 44 }}>
                       <Box display="flex" alignItems="center">
-                        {iconForStatus(d)}&nbsp;{statusLabelFull(d)}
+                        {renderStatusMain(d, "body2", statusLabelFull(d))}
                         {renderStatusExtraIcons(d)}
                       </Box>
                     </TableCell>

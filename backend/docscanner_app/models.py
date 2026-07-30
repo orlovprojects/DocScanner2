@@ -12,6 +12,7 @@ import string
 from django.core.validators import MaxValueValidator
 from dateutil.relativedelta import relativedelta
 from datetime import timedelta
+import re
 
 
 #wagtail importy
@@ -209,6 +210,11 @@ class ScannedDocument(models.Model):
     structured_json = models.JSONField(blank=True, null=True)
     enhanced_ocr_text = models.TextField(blank=True, null=True)
     enhanced_ocr_source = models.CharField(max_length=50, blank=True, null=True)
+    matched_catalog_json = models.TextField(
+        "Katalogo susiejimo atsakymas (JSON)",
+        blank=True,
+        default="",
+    )
 
     # Поля из структурированных данных (для фильтрации/поиска)
     document_type = models.CharField(max_length=100, blank=True, null=True)
@@ -279,6 +285,20 @@ class ScannedDocument(models.Model):
     seller_replaced_by_rule = models.BooleanField(default=False)
     is_long_term_asset_candidate = models.BooleanField(default=False)
     suggested_asset_type = models.CharField(max_length=50, blank=True, default="")
+    pirkimo_saskaita = models.CharField(
+        "Pirkimo sąskaita (AI)",
+        max_length=20,
+        blank=True,
+        null=True,
+        help_text="AI pasiūlytas pirkimo debeto sąskaitos kodas",
+    )
+    pardavimo_saskaita = models.CharField(
+        "Pardavimo sąskaita (user)",
+        max_length=20,
+        blank=True,
+        null=True,
+        help_text="Vartotojo nustatyta pardavimo kredito sąskaita",
+    )
 
     note = models.TextField(blank=True, null=True)
     report_to_isaf = models.BooleanField(blank=True, null=True)
@@ -393,9 +413,29 @@ class ScannedDocument(models.Model):
         help_text="Grąžintas Rivile GAMA operacijos numeris",
     )
 
+    catalog_unmatched_count = models.PositiveSmallIntegerField(default=0)
+
     is_multi_doc_container = models.BooleanField(default=False)
     source_pages = models.JSONField(null=True, blank=True)
     pre_extracted_ocr_text = models.TextField(null=True, blank=True)
+
+    perkelta_i_apskaita = models.BooleanField(
+        "Perkelta į apskaitą",
+        default=False,
+    )
+    perkelta_i_apskaita_at = models.DateTimeField(
+        "Perkelta į apskaitą (data)",
+        null=True,
+        blank=True,
+    )
+    perkelta_i_company_profile = models.ForeignKey(
+        "CompanyProfile",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="perkelti_dokumentai",
+        verbose_name="Perkelta į įmonę",
+    )
 
     class Meta:
         indexes = [
@@ -441,6 +481,19 @@ class LineItem(models.Model):
 
     is_long_term_asset_candidate = models.BooleanField(default=False)
     suggested_asset_type = models.CharField(max_length=50, blank=True, default="")
+    # ── Pirkimo sąskaita (AI) ──
+    pirkimo_saskaita = models.CharField(
+        "Pirkimo sąskaita (AI)",
+        max_length=20,
+        blank=True,
+        null=True,
+    )
+    pardavimo_saskaita = models.CharField(
+        "Pardavimo sąskaita (user)",
+        max_length=20,
+        blank=True,
+        null=True,
+    )
 
     # ДОБАВЛЕННЫЕ поля для product autocomplete (те же как в ProductAutocomplete)
 
@@ -479,6 +532,46 @@ class LineItem(models.Model):
     centro_kodas = models.CharField("Centro kodas", max_length=128, blank=True, null=True)
     centro_pavadinimas = models.CharField("Centro pavadinimas", max_length=255, blank=True, null=True)
 
+    # ── Automatinio susiejimo su katalogu rezultatas ─────────
+    matched_prekes_pavadinimas = models.CharField(
+        "Susietos prekės pavadinimas",
+        max_length=255,
+        blank=True,
+        default="",
+    )
+
+    matched_prekes_kodas = models.CharField(
+        "Susietos prekės kodas",
+        max_length=128,
+        blank=True,
+        default="",
+    )
+
+    matched_prekes_barkodas = models.CharField(
+        "Susietos prekės barkodas",
+        max_length=128,
+        blank=True,
+        default="",
+    )
+
+    matched_unit = models.CharField(
+        "Susietos prekės mato vienetas",
+        max_length=50,
+        blank=True,
+        default="",
+    )
+
+    matched_preke_paslauga = models.CharField(
+        "Susietos prekės / paslaugos tipas",
+        max_length=12,
+        blank=True,
+        default="",
+    )
+
+    catalog_match_user_override = models.BooleanField(
+        "Vartotojas pakeitė/atšaukė katalogo susiejimą",
+        default=False,
+    )
 
     def __str__(self):
         return f"{self.product_name or ''} ({self.product_code or ''}) x{self.quantity or ''}"
@@ -572,6 +665,7 @@ ACCOUNTING_PROGRAM_CHOICES = [
     ('isaf', 'iSAF'),
     ('paulita', 'Paulita'),
     ('rivile_gama_api', 'Rivilė GAMA (per API)'),
+    ('dokskenas_erp', 'DokSkenas ERP'),
     # добавь нужные программы
 ]
 
@@ -702,6 +796,16 @@ class CustomUser(AbstractUser):
         null=True,
     )
 
+    active_company_profile = models.ForeignKey(
+        "CompanyProfile",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="+",
+        verbose_name="Aktyvi įmonė",
+    )
+    onboarding_completed = models.BooleanField(default=False)
+
     # mobile_key = models.CharField(max_length=64, unique=True, null=True, blank=True)
 
     # def generate_mobile_key(self, save: bool = True) -> str:
@@ -779,6 +883,298 @@ class CustomUser(AbstractUser):
         return None
 
 
+
+class CompanyProfile(models.Model):
+    ENTITY_IMONE = "imone"
+    ENTITY_IV = "iv"
+    ENTITY_TYPE_CHOICES = [
+        (ENTITY_IMONE, "Įmonė (UAB, MB, IĮ, ...)"),
+        (ENTITY_IV, "Individuali veikla"),
+    ]
+
+    user = models.ForeignKey(
+        "CustomUser",
+        on_delete=models.CASCADE,
+        related_name="company_profiles",
+    )
+    entity_type = models.CharField(
+        "Veiklos tipas",
+        max_length=10,
+        choices=ENTITY_TYPE_CHOICES,
+    )
+
+    # ── Общие ───────────────────────────────────────────
+    name = models.CharField("Pavadinimas", max_length=255)
+    vat_code = models.CharField("PVM kodas", max_length=50, blank=True, null=True)
+    iban = models.CharField("IBAN", max_length=255, blank=True, null=True)
+    address = models.CharField("Adresas", max_length=255, blank=True, null=True)
+    country_iso = models.CharField("Šalis", max_length=10, default="LT")
+
+    # ── Įmonė-specific ─────────────────────────────────
+    company_code = models.CharField(
+        "Įmonės kodas", max_length=50, blank=True, null=True
+    )
+
+    # ── IV-specific ─────────────────────────────────────
+    owner_name = models.CharField(
+        "Savininko vardas, pavardė", max_length=255, blank=True, null=True
+    )
+    iv_certificate_nr = models.CharField(
+        "IV pažymėjimo nr.", max_length=50, blank=True, null=True
+    )
+
+    # ── Apskaitos programa ──────────────────────────────
+    accounting_program = models.CharField(
+        "Apskaitos programa",
+        max_length=32,
+        choices=ACCOUNTING_PROGRAM_CHOICES,
+        blank=True,
+        null=True,
+    )
+
+    # ── Išrašymas ───────────────────────────────────────
+    payment_providers = models.JSONField(
+        "Mokėjimo nuorodų teikėjai", default=dict, blank=True
+    )
+
+    bank_accounts_mapping = models.JSONField(
+        "Banko sąskaitų susiejimas",
+        default=dict,
+        blank=True,
+        help_text=(
+            'IBAN → buhalterinė sąskaita. Formatas: '
+            '{"LT19...": {"account": "2711", "bank": "seb", "label": "SEB pagrindinė"}}'
+        ),
+    )
+
+    # ── Meta ────────────────────────────────────────────
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["created_at"]
+        verbose_name = "Įmonės profilis"
+        verbose_name_plural = "Įmonių profiliai"
+
+    def __str__(self):
+        return self.name
+
+    def clean(self):
+        from django.core.exceptions import ValidationError
+
+        if self.entity_type == self.ENTITY_IMONE:
+            if not self.company_code:
+                raise ValidationError(
+                    {"company_code": "Įmonės kodas privalomas įmonei."}
+                )
+        elif self.entity_type == self.ENTITY_IV:
+            if not self.owner_name and not self.iv_certificate_nr:
+                raise ValidationError(
+                    "Nurodykite savininko vardą arba IV pažymėjimo nr."
+                )
+
+    def sync_to_user_billing(self):
+        user = self.user
+        if user.company_profiles.count() == 1:
+            user.company_name = self.name
+            user.company_code = self.company_code or ""
+            user.vat_code = self.vat_code or ""
+            user.company_iban = self.iban or ""
+            user.company_address = self.address or ""
+            user.company_country_iso = self.country_iso
+            user.save(update_fields=[
+                "company_name", "company_code", "vat_code",
+                "company_iban", "company_address", "company_country_iso",
+            ])
+
+    def get_bank_chart_account(self, iban: str, bank_name: str = "", currency: str = "EUR") -> dict:
+        """
+        Grąžina banko sąskaitos info:
+        - jei yra tikras IBAN → ieško pagal IBAN
+        - jei IBAN nėra → ieško pagal bank_currency, pvz. revolut_USD
+        - jei nėra mapping → sukuria naują 271x sąskaitą
+        """
+        mapping = self.bank_accounts_mapping or {}
+
+        iban_clean = (iban or "").replace(" ", "").upper()
+        bank = (bank_name or "").strip().lower()
+        cur = (currency or "EUR").strip().upper()
+
+        key = self._bank_mapping_key(iban_clean, bank, cur)
+
+        # 1. Exact key match: IBAN arba bank_currency
+        if key and key in mapping:
+            entry = dict(mapping[key])
+            changed = False
+
+            if bank and not entry.get("bank"):
+                entry["bank"] = bank
+                changed = True
+
+            if cur and not entry.get("currency"):
+                entry["currency"] = cur
+                changed = True
+
+            if not entry.get("label"):
+                entry["label"] = self._bank_label(bank, cur)
+                changed = True
+
+            if changed:
+                mapping[key] = entry
+                self.bank_accounts_mapping = mapping
+                self.save(update_fields=["bank_accounts_mapping"])
+
+            return entry
+
+        # 2. Jei IBAN nėra, galima ieškoti pagal bank + currency
+        # Pvz. Revolut USD be IBAN turi rasti revolut_USD, bet ne revolut_EUR
+        if not self._is_iban(iban_clean) and bank:
+            candidates = [
+                (k, v) for k, v in mapping.items()
+                if (v.get("bank", "") or "").lower() == bank
+                and (v.get("currency", "EUR") or "EUR").upper() == cur
+            ]
+
+            if len(candidates) == 1:
+                found_key, entry = candidates[0]
+                logger.info(
+                    "[CompanyProfile] Bank mapping found by bank+currency: %s → %s",
+                    found_key,
+                    entry.get("account"),
+                )
+                return entry
+
+            if len(candidates) > 1:
+                logger.warning(
+                    "[CompanyProfile] Ambiguous bank mapping: bank=%s currency=%s candidates=%s",
+                    bank,
+                    cur,
+                    [k for k, _ in candidates],
+                )
+
+        # 3. Sukurti naują mapping
+        existing_accounts = {
+            v.get("account", "") for v in mapping.values()
+        }
+
+        next_account = "2711"
+        for i in range(1, 20):
+            candidate = f"271{i}"
+            if candidate not in existing_accounts:
+                next_account = candidate
+                break
+
+        label = self._bank_label(bank, cur)
+
+        entry = {
+            "account": next_account,
+            "bank": bank,
+            "label": label,
+            "currency": cur,
+        }
+
+        if key:
+            mapping[key] = entry
+            self.bank_accounts_mapping = mapping
+            self.save(update_fields=["bank_accounts_mapping"])
+
+            logger.info(
+                "[CompanyProfile] Auto-created bank mapping: %s → %s (%s, %s)",
+                key,
+                next_account,
+                bank,
+                cur,
+            )
+
+        return entry
+
+    def set_bank_chart_account(self, iban: str, account: str, bank: str = "",
+                            label: str = "", currency: str = "EUR"):
+        """Nustato buhalterinę sąskaitą IBAN arba bank_currency raktui."""
+        mapping = self.bank_accounts_mapping or {}
+
+        bank = (bank or "").strip().lower()
+        currency = (currency or "EUR").strip().upper()
+        key = self._bank_mapping_key(iban, bank, currency)
+
+        if not key:
+            return
+
+        mapping[key] = {
+            "account": account,
+            "bank": bank,
+            "label": label or self._bank_label(bank, currency),
+            "currency": currency,
+        }
+
+        self.bank_accounts_mapping = mapping
+        self.save(update_fields=["bank_accounts_mapping"])
+
+    @staticmethod
+    def _is_iban(value: str) -> bool:
+        value = (value or "").replace(" ", "").upper()
+        return bool(re.match(r"^[A-Z]{2}\d{2}[A-Z0-9]{11,30}$", value))
+    
+    @staticmethod
+    def _bank_label(bank_name: str = "", currency: str = "EUR") -> str:
+        bank = (bank_name or "").strip().lower()
+        cur = (currency or "EUR").strip().upper()
+
+        bank_labels = {
+            "swedbank": "Swedbank",
+            "seb": "SEB",
+            "luminor": "Luminor",
+            "siauliu": "Šiaulių bankas",
+            "revolut": "Revolut",
+        }
+
+        label = bank_labels.get(bank, bank_name or "Bankas")
+
+        if bank == "revolut":
+            return f"{label} {cur}"
+
+        return label
+
+
+    @staticmethod
+    def _bank_mapping_key(iban: str, bank_name: str = "", currency: str = "EUR") -> str:
+        """
+        Mapping raktas:
+        - jei yra tikras IBAN → IBAN
+        - jei IBAN nėra → bank_currency, pvz. revolut_USD
+        """
+        iban_clean = (iban or "").replace(" ", "").upper()
+
+        if CompanyProfile._is_iban(iban_clean):
+            return iban_clean
+
+        bank = (bank_name or "").strip().lower()
+        cur = (currency or "EUR").strip().upper()
+
+        if bank:
+            return f"{bank}_{cur}"
+
+        return ""
+
+    def get_all_bank_accounts(self) -> list:
+        """Grąžina visų banko sąskaitų sąrašą."""
+        mapping = self.bank_accounts_mapping or {}
+        result = []
+
+        for key, entry in mapping.items():
+            is_iban = self._is_iban(key)
+
+            result.append({
+                "key": key,
+                "iban": key if is_iban else "",
+                "account": entry.get("account", "2711"),
+                "bank": entry.get("bank", ""),
+                "label": entry.get("label", ""),
+                "currency": entry.get("currency", "EUR"),
+            })
+
+        return result
+
     
 ### Integracii s buhalterskimi programami:
 
@@ -794,6 +1190,8 @@ class ProductAutocomplete(models.Model):
     prekes_pavadinimas = models.CharField("Prekės pavadinimas", max_length=255, blank=True, null=True)
     prekes_tipas = models.CharField("Prekės tipas", max_length=128, blank=True, null=True)
     preke_paslauga = models.CharField("Preke_paslauga", max_length=12, blank=True, null=True)
+
+    unit = models.CharField("Mato vienetas", max_length=50, blank=True, null=True)
 
     sandelio_kodas = models.CharField("Sandėlio kodas", max_length=128, blank=True, null=True)
     sandelio_pavadinimas = models.CharField("Sandėlio pavadinimas", max_length=255, blank=True, null=True)
@@ -2079,6 +2477,79 @@ class Invoice(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
+    # ── Связь со скайтменизавимас ───────────────────────
+    scanned_document = models.ForeignKey(
+        "ScannedDocument",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="invoices_from_scan",
+        help_text="Jei sukurta iš skaitmenizavimo",
+    )
+    company_profile = models.ForeignKey(
+        "CompanyProfile",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="sale_documents",
+    )
+
+    # ── Korespondencijos (document level) ───────────────
+    period = models.DateField(
+        "Apskaitos periodas",
+        null=True,
+        blank=True,
+    )
+    debeto_saskaita = models.CharField(
+        "Debeto sąskaita",
+        max_length=20,
+        blank=True,
+        null=True,
+        help_text="Pvz. 2410 (pirkėjų skolos)",
+    )
+    kredito_saskaita = models.CharField(
+        "Kredito sąskaita",
+        max_length=20,
+        blank=True,
+        null=True,
+        help_text="Pvz. 5001 (pardavimo pajamos)",
+    )
+    pvm_saskaita = models.CharField(
+        "PVM sąskaita",
+        max_length=20,
+        blank=True,
+        null=True,
+        help_text="Pvz. 449 (pardavimo PVM)",
+    )
+    pirkimo_saskaita = models.CharField(
+        "Pirkimo sąskaita (AI)",
+        max_length=20,
+        blank=True,
+        null=True,
+        help_text="AI pasiūlytas pirkimo debeto sąskaitos kodas",
+    )
+    # ── Apskaitos validacija ─────────────────────────────
+    ready_for_export = models.BooleanField(
+        "Paruošta registravimui",
+        null=True,
+        blank=True,
+        default=None,
+    )
+
+    math_validation_passed = models.BooleanField(
+        "Sumos sutampa",
+        null=True,
+        blank=True,
+        default=None,
+    )
+
+    kor_balanced = models.BooleanField(
+        "Korespondencija subalansuota",
+        null=True,
+        blank=True,
+        default=None,
+    )
+
 
     class Meta:
         ordering = ["-created_at"]
@@ -2166,6 +2637,28 @@ class Invoice(models.Model):
         )
 
     @property
+    def can_create_credit(self):
+        """Можно создать kreditinę из этой SF."""
+        return (
+            self.invoice_type in ("pvm_saskaita", "saskaita")
+            and self.status in ("issued", "sent", "partially_paid", "paid")
+        )
+
+    @property
+    def is_from_scan(self):
+        """True jei sąskaita sukurta iš skaitmenizavimo."""
+        return self.scanned_document_id is not None
+
+    @property
+    def can_delete(self):
+        """Galima ištrinti juodraščius ir iš skaitmenizavimo perkeltas sąskaitas."""
+        if self.status == "draft":
+            return True
+        if self.is_from_scan and self.status != "cancelled":
+            return True
+        return False
+
+    @property
     def public_url(self):
         """URL для просмотра покупателем без логина."""
         if self.public_link_enabled:
@@ -2174,8 +2667,9 @@ class Invoice(models.Model):
     
     # ---- PVM auto-assign ----
     def assign_pvm_codes(self):
+        from decimal import Decimal, ROUND_HALF_UP
         from .validators.vat_klas import auto_select_pvm_code
-        
+
         user = self.user
         seller_country_iso = getattr(user, "company_country_iso", None) or "LT"
         seller_has_vat_code = bool(getattr(user, "vat_code", None))
@@ -2184,6 +2678,8 @@ class Invoice(models.Model):
 
         line_items = list(self.line_items.all())
         pvm_codes = set()
+
+        vat_taikoma = self.pvm_tipas != "netaikoma"
 
         for li in line_items:
             code = auto_select_pvm_code(
@@ -2204,8 +2700,35 @@ class Invoice(models.Model):
             li.pvm_kodas = code or ""
             pvm_codes.add(code)
 
+            # ── Pajamų sąskaita (kreditas): prekė → 5000, paslauga → 5001 ──
+            if not li.kredito_saskaita:
+                raw = (li.preke_paslauga or self.preke_paslauga or "")
+                kind = str(raw).strip().lower()
+                # Palaikomos ir tekstinės ("preke"/"paslauga"), ir skaitinės (1-4) reikšmės
+                if kind in ("preke", "prekes", "1", "3"):
+                    li.kredito_saskaita = "5000"
+                elif kind in ("paslauga", "paslaugos", "2", "4"):
+                    li.kredito_saskaita = "5001"
+                else:
+                    li.kredito_saskaita = "5001"  # numatytoji, kai tipas nežinomas
+
+            # ── PVM sąskaita ──
+            if not li.pvm_saskaita:
+                li.pvm_saskaita = "4492"
+
+            # ── PVM suma eilutėje, jei nepaskaičiuota ──
+            if (li.vat is None or li.vat == 0) and vat_taikoma:
+                subtotal = li.subtotal or Decimal("0")
+                pct = li.vat_percent if li.vat_percent is not None else (self.vat_percent or Decimal("0"))
+                li.vat = (Decimal(str(subtotal)) * Decimal(str(pct)) / Decimal("100")).quantize(
+                    Decimal("0.01"), rounding=ROUND_HALF_UP
+                )
+
         if line_items:
-            InvoiceLineItem.objects.bulk_update(line_items, ["pvm_kodas"])
+            InvoiceLineItem.objects.bulk_update(
+                line_items,
+                ["pvm_kodas", "kredito_saskaita", "pvm_saskaita", "vat"],
+            )
 
         pvm_codes.discard(None)
         pvm_codes.discard("")
@@ -2215,6 +2738,14 @@ class Invoice(models.Model):
             self.pvm_kodas = "Keli skirtingi PVM"
         else:
             self.pvm_kodas = ""
+
+        # Perskaičiuoti antraštės sumas iš eilučių, kad neatsirastų centų skirtumo
+        if line_items:
+            total_wo_vat = sum((Decimal(str(li.subtotal or 0)) for li in line_items), Decimal("0"))
+            total_vat = sum((Decimal(str(li.vat or 0)) for li in line_items), Decimal("0"))
+            self.amount_wo_vat = total_wo_vat
+            self.vat_amount = total_vat
+            self.amount_with_vat = total_wo_vat + total_vat
 
 
 # ────────────────────────────────────────────────────────────
@@ -2253,6 +2784,28 @@ class InvoiceLineItem(models.Model):
     discount_wo_vat = models.DecimalField(max_digits=12, decimal_places=4, null=True, blank=True)
 
     pvm_kodas = models.CharField("PVM kodas", max_length=128, blank=True, default="")
+
+    pirkimo_saskaita = models.CharField(
+        "Pirkimo sąskaita (AI)",
+        max_length=20,
+        blank=True,
+        null=True,
+    )
+    kredito_saskaita = models.CharField(
+        "Pardavimo pajamų sąskaita",
+        max_length=20,
+        blank=True,
+        null=True,
+        help_text="Pvz. 5000 / 5001",
+    )
+
+    pvm_saskaita = models.CharField(
+        "PVM sąskaita",
+        max_length=20,
+        blank=True,
+        null=True,
+        help_text="Pvz. 4492",
+    )
 
     # ---- Порядок ----
     sort_order = models.PositiveIntegerField(default=0)
@@ -3062,6 +3615,7 @@ class BankStatement(models.Model):
     credit_entries = models.PositiveIntegerField("Įplaukos", default=0)
     debit_entries = models.PositiveIntegerField("Išlaidos", default=0)
     duplicates_skipped = models.PositiveIntegerField("Praleisti dublikatai", default=0)
+    duplicate_details = models.JSONField("Dublikatų detalės", default=list, blank=True)
     auto_matched_count = models.PositiveIntegerField("Automatiškai susieta", default=0)
     likely_matched_count = models.PositiveIntegerField("Galimi atitikimai", default=0)
     unmatched_count = models.PositiveIntegerField("Nesusieta", default=0)
@@ -3087,15 +3641,23 @@ class BankStatement(models.Model):
         self.credit_entries = inc.count()
         self.debit_entries = out.count()
         self.total_entries = self.credit_entries + self.debit_entries
-        self.auto_matched_count = inc.filter(match_status="auto_matched").count()
-        self.likely_matched_count = inc.filter(match_status="likely_matched").count()
-        self.unmatched_count = inc.filter(match_status="unmatched").count()
+        self.auto_matched_count = (
+            inc.filter(match_status="auto_matched").count()
+            + out.filter(match_status="auto_matched").count()
+        )
+        self.likely_matched_count = (
+            inc.filter(match_status="likely_matched").count()
+            + out.filter(match_status="likely_matched").count()
+        )
+        self.unmatched_count = (
+            inc.filter(match_status="unmatched").count()
+            + out.filter(match_status="unmatched").count()
+        )
         self.save(update_fields=[
             "total_entries", "credit_entries", "debit_entries",
             "auto_matched_count", "likely_matched_count", "unmatched_count",
             "updated_at",
         ])
-
 
 # ────────────────────────────────────────────────────────────
 # 2. BaseTransaction → IncomingTransaction / OutgoingTransaction
@@ -3119,6 +3681,7 @@ class BaseTransaction(models.Model):
         ("confirmed", "Patvirtinta vartotojo"),
         ("manually_matched", "Susieta rankiniu būdu"),
         ("ignored", "Ignoruota"),
+        ("classified", "Kategorizuota"),
     ]
 
     uuid = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
@@ -3129,8 +3692,11 @@ class BaseTransaction(models.Model):
     value_date = models.DateField("Valiutos data", null=True, blank=True)
     doc_number = models.CharField("Dok. nr.", max_length=100, blank=True, default="")
     bank_operation_code = models.CharField(
-        "Banko žyma", max_length=20, blank=True, default="",
-        help_text="K=korespondentinis, MK=memorialinis, TT=tarptautinis, M=mokestis",
+        "Banko žyma / transakcijos tipas",
+        max_length=255,
+        blank=True,
+        default="",
+        help_text="Swedbank: K/MK/TT/M. SEB: TRANSAKCIJOS TIPAS. Luminor: operacijos tipas.",
     )
 
     counterparty_name = models.CharField(
@@ -3145,7 +3711,7 @@ class BaseTransaction(models.Model):
     )
 
     payment_purpose = models.TextField("Mokėjimo paskirtis", blank=True, default="")
-    reference_number = models.CharField("Nuorodos nr.", max_length=100, blank=True, default="")
+    reference_number = models.CharField("Nuorodos nr.", max_length=255, blank=True, default="")
 
     amount = models.DecimalField("Suma", max_digits=12, decimal_places=2)
     currency = models.CharField(max_length=10, default="EUR")
@@ -3167,8 +3733,103 @@ class BaseTransaction(models.Model):
     )
     match_confidence = models.DecimalField(max_digits=3, decimal_places=2, default=0)
     match_details = models.JSONField(default=dict, blank=True)
+
+    own_account_key = models.CharField(
+        max_length=100,
+        blank=True,
+        default="",
+        db_index=True,
+    )
+
+    # ---- Категория транзакции ----
+    TRANSACTION_CATEGORY_CHOICES = [
+        ("", "Nekategorizuota"),
+        # ── Auto (per matching) ──
+        ("supplier_payment", "Mokėjimas tiekėjui"),
+        ("customer_receipt", "Įplauka iš pirkėjo"),
+        # ── Auto (per classifier) ──
+        ("bank_fee", "Banko mokestis"),
+        ("tax_vmi", "VMI mokestis"),
+        ("tax_sodra", "Sodra / VSDFV"),
+        ("salary", "Darbo užmokestis"),
+        ("provider_payout", "Tarpininko išmoka"),
+        # ── Rankinis ──
+        ("owner_withdrawal", "Savininko lėšų paėmimas"),
+        ("owner_deposit", "Savininko įnašas"),
+        ("loan_payment", "Paskolos grąžinimas"),
+        ("loan_received", "Gauta paskola"),
+        ("refund_received", "Gautas grąžinimas"),
+        ("other_expense", "Kitos sąnaudos"),
+        ("other_income", "Kitos pajamos"),
+    ]
+
+    transaction_category = models.CharField(
+        "Kategorija",
+        max_length=30,
+        choices=TRANSACTION_CATEGORY_CHOICES,
+        blank=True,
+        default="",
+    )
+    category_account_debit = models.CharField(
+        "Debeto sąskaita",
+        max_length=20,
+        blank=True,
+        default="",
+        help_text="Sąskaitų plano sąskaita, pvz. 6880 (banko mokesčiai)",
+    )
+    category_account_credit = models.CharField(
+        "Kredito sąskaita",
+        max_length=20,
+        blank=True,
+        default="",
+        help_text="Jei tuščia, naudojama banko sąskaita iš IBAN mapping",
+    )
+    category_rule = models.ForeignKey(
+        "BankTransactionRule",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="+",
+        help_text="Taisyklė, kuri priskyrė kategoriją automatiškai",
+    )
+    matched_document_number = models.CharField(
+        "Susieto dokumento numeris",
+        max_length=100,
+        blank=True,
+        default="",
+        help_text="Užpildoma automatiškai per matching",
+    )
+    journal_entry = models.ForeignKey(
+        "JournalEntry",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="+",
+        help_text="Sukurtas DK įrašas",
+    )
+
     allocated_amount = models.DecimalField(
         "Paskirstyta suma", max_digits=12, decimal_places=2, default=0,
+    )
+
+    # ---- Валюта → EUR конвертация ----
+    amount_eur = models.DecimalField(
+        "Suma eurais", max_digits=12, decimal_places=2,
+        null=True, blank=True,
+        help_text="Konvertuota suma EUR. Jei currency=EUR, lygi amount.",
+    )
+    exchange_rate = models.DecimalField(
+        "Valiutos kursas", max_digits=12, decimal_places=6,
+        null=True, blank=True,
+        help_text="1 EUR = X valiutos vienetų, pvz. 1.1000 (USD)",
+    )
+    exchange_rate_date = models.DateField(
+        "Valiutos kurso data", null=True, blank=True,
+    )
+    exchange_fee = models.DecimalField(
+        "Valiutos keitimo mokestis", max_digits=12, decimal_places=2,
+        default=0,
+        help_text="Banko konvertavimo komisinis, EUR",
     )
 
     created_at = models.DateTimeField(auto_now_add=True)
@@ -3186,15 +3847,20 @@ class BaseTransaction(models.Model):
         return self.allocated_amount >= self.amount
 
     def compute_hash(self):
+        purpose = (self.payment_purpose or "")[:200].strip().lower()
+        purpose = " ".join(purpose.split())
+
         raw = (
             f"{self.user_id}|"
+            f"{self.currency}|"
             f"{self.transaction_date.isoformat()}|"
             f"{self.amount}|"
-            f"{self.source}|"
+            f"{(self.own_account_key or '').strip().upper()}|"
             f"{(self.doc_number or '').strip()}|"
+            f"{(self.reference_number or '').strip()}|"
             f"{self.counterparty_code.strip()}|"
-            f"{self.counterparty_account.strip()}|"
-            f"{(self.payment_purpose or '')[:200].strip()}"
+            f"{self.counterparty_account.strip().upper()}|"  # IBAN всегда uppercase
+            f"{purpose}"
         )
         return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
@@ -3267,17 +3933,20 @@ class OutgoingTransaction(BaseTransaction):
 
 class PaymentAllocation(models.Model):
     """
-    Единый источник правды про оплаты Invoice.
+    Единый источник правды про оплаты Invoice и Purchase.
 
-    Три режима:
-      1. bank_import:   incoming_transaction != null, source="bank_import"
-      2. manual:        incoming_transaction = null,  source="manual"
-      3. payment_link:  incoming_transaction != null, source="payment_link"
+    Режимы:
+      1. bank_import + incoming_transaction → invoice    (клиент заплатил нам)
+      2. bank_import + outgoing_transaction → purchase   (мы заплатили поставщику)
+      3. manual → invoice или purchase                   (ручная пометка)
+      4. payment_link + incoming_transaction → invoice   (webhook Montonio/Paysera)
+      5. provider_payout + incoming_transaction           (агрегированная выплата Stripe/Shopify)
     """
 
     SOURCE_CHOICES = [
         ("bank_import", "Banko išrašas"),
         ("payment_link", "Mokėjimo nuoroda"),
+        ("provider_payout", "Tarpininko išmoka"),
         ("manual", "Rankinis"),
         ("api", "API"),
     ]
@@ -3289,14 +3958,30 @@ class PaymentAllocation(models.Model):
         ("manual", "Rankinis"),
     ]
 
+    # ── Транзакция (одна из двух или null при manual) ───
     incoming_transaction = models.ForeignKey(
         IncomingTransaction,
         null=True, blank=True,
         on_delete=models.CASCADE,
         related_name="allocations",
     )
+    outgoing_transaction = models.ForeignKey(
+        OutgoingTransaction,
+        null=True, blank=True,
+        on_delete=models.CASCADE,
+        related_name="allocations",
+    )
+
+    # ── Документ (один из двух) ─────────────────────────
     invoice = models.ForeignKey(
-        Invoice,
+        "Invoice",
+        null=True, blank=True,
+        on_delete=models.CASCADE,
+        related_name="payment_allocations",
+    )
+    purchase = models.ForeignKey(
+        "Purchase",
+        null=True, blank=True,
         on_delete=models.CASCADE,
         related_name="payment_allocations",
     )
@@ -3322,34 +4007,271 @@ class PaymentAllocation(models.Model):
         related_name="+",
     )
 
+    journal_entry = models.ForeignKey(
+        "JournalEntry",
+        null=True, blank=True,
+        on_delete=models.SET_NULL,
+        related_name="payment_allocations",
+        help_text="DK įrašas sukurtas patvirtinus susiejimą",
+    )
+
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         ordering = ["-created_at"]
         indexes = [
             models.Index(fields=["invoice"], name="idx_pa_invoice"),
-            models.Index(fields=["incoming_transaction"], name="idx_pa_txn"),
+            models.Index(fields=["purchase"], name="idx_pa_purchase"),
+            models.Index(fields=["incoming_transaction"], name="idx_pa_inc_txn"),
+            models.Index(fields=["outgoing_transaction"], name="idx_pa_out_txn"),
             models.Index(fields=["status"], name="idx_pa_status"),
         ]
         constraints = [
+            # Одна incoming транзакция → одна invoice (не дублировать)
             models.UniqueConstraint(
                 fields=["incoming_transaction", "invoice"],
-                condition=models.Q(incoming_transaction__isnull=False),
-                name="uq_allocation_txn_inv",
+                condition=models.Q(
+                    incoming_transaction__isnull=False,
+                    invoice__isnull=False,
+                ),
+                name="uq_allocation_inc_inv",
+            ),
+            # Одна outgoing транзакция → одна purchase
+            models.UniqueConstraint(
+                fields=["outgoing_transaction", "purchase"],
+                condition=models.Q(
+                    outgoing_transaction__isnull=False,
+                    purchase__isnull=False,
+                ),
+                name="uq_allocation_out_purch",
+            ),
+            # Хотя бы один документ должен быть привязан
+            models.CheckConstraint(
+                condition=~models.Q(invoice__isnull=True, purchase__isnull=True),
+                name="chk_allocation_has_document",
             ),
         ]
 
     def __str__(self):
-        src = f"Txn#{self.incoming_transaction_id}" if self.incoming_transaction_id else "Manual"
-        return f"{src} → Inv#{self.invoice_id} = {self.amount}"
+        if self.incoming_transaction_id:
+            src = f"Inc#{self.incoming_transaction_id}"
+        elif self.outgoing_transaction_id:
+            src = f"Out#{self.outgoing_transaction_id}"
+        else:
+            src = "Manual"
+
+        if self.invoice_id:
+            doc = f"Inv#{self.invoice_id}"
+        elif self.purchase_id:
+            doc = f"Purch#{self.purchase_id}"
+        else:
+            doc = "?"
+
+        return f"{src} → {doc} = {self.amount}"
+
+    @property
+    def direction(self):
+        """incoming / outgoing / manual."""
+        if self.incoming_transaction_id:
+            return "incoming"
+        if self.outgoing_transaction_id:
+            return "outgoing"
+        return "manual"
+
+    @property
+    def document(self):
+        """Возвращает привязанный документ (Invoice или Purchase)."""
+        return self.invoice or self.purchase
+
+    @property
+    def transaction(self):
+        """Возвращает привязанную транзакцию."""
+        return self.incoming_transaction or self.outgoing_transaction
 
     @property
     def effective_payment_date(self):
         if self.payment_date:
             return self.payment_date
-        if self.incoming_transaction:
-            return self.incoming_transaction.transaction_date
+        txn = self.transaction
+        if txn:
+            return txn.transaction_date
         return self.created_at.date() if self.created_at else None
+    
+
+class BankTransactionRule(models.Model):
+    """
+    Пользовательское правило автоматической классификации банковских транзакций.
+
+    Когда юзер вручную классифицирует транзакцию, система предлагает
+    создать правило. При следующем импорте правило срабатывает автоматически.
+    """
+
+    MATCH_FIELD_CHOICES = [
+        ("counterparty_name", "Mokėtojo/gavėjo pavadinimas"),
+        ("counterparty_code", "Įmonės kodas"),
+        ("tx_type", "Transakcijos tipas"),
+        ("purpose_contains", "Mokėjimo paskirtis (ieško teksto)"),
+    ]
+
+    MATCH_OPERATOR_CHOICES = [
+        ("contains", "Turi tekstą"),
+        ("exact", "Tiksliai sutampa"),
+        ("starts_with", "Prasideda"),
+        ("regex", "Regex"),
+    ]
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="bank_transaction_rules",
+    )
+    company_profile = models.ForeignKey(
+        "CompanyProfile",
+        on_delete=models.CASCADE,
+        related_name="bank_transaction_rules",
+    )
+
+    name = models.CharField(
+        "Pavadinimas",
+        max_length=255,
+        help_text="Pvz. 'Caffeine kavos pirkimai', 'SEB mėnesio mokestis'",
+    )
+
+    # ── Matching kriterijai ─────────────────────────────
+    match_field = models.CharField(
+        "Palyginimo laukas",
+        max_length=30,
+        choices=MATCH_FIELD_CHOICES,
+    )
+    match_operator = models.CharField(
+        "Palyginimo tipas",
+        max_length=20,
+        choices=MATCH_OPERATOR_CHOICES,
+        default="contains",
+    )
+    match_value = models.CharField(
+        "Palyginimo reikšmė",
+        max_length=500,
+        help_text="Pvz. 'CAFFEINE', 'SEB bankas', 'ACMTMDOPFEES'",
+    )
+
+    # Opsionaliai можно ограничить по направлению
+    direction = models.CharField(
+        "Kryptis",
+        max_length=10,
+        choices=[("", "Visos"), ("debit", "Tik išlaidos"), ("credit", "Tik įplaukos")],
+        blank=True,
+        default="",
+    )
+
+    # ── Результат классификации ─────────────────────────
+    category = models.CharField(
+        "Kategorija",
+        max_length=30,
+        choices=BaseTransaction.TRANSACTION_CATEGORY_CHOICES,
+    )
+    debit_account = models.CharField(
+        "Debeto sąskaita",
+        max_length=20,
+        blank=True,
+        default="",
+        help_text="Pvz. 6880, 6803, 4481",
+    )
+    credit_account = models.CharField(
+        "Kredito sąskaita",
+        max_length=20,
+        blank=True,
+        default="",
+        help_text="Jei tuščia – naudojama banko sąskaita",
+    )
+    description_template = models.CharField(
+        "Aprašymo šablonas",
+        max_length=500,
+        blank=True,
+        default="",
+        help_text="Pvz. 'Kava – {counterparty_name}'. Galimi kintamieji: "
+                  "{counterparty_name}, {amount}, {date}, {purpose}",
+    )
+
+    # ── Prioritetas и статус ────────────────────────────
+    priority = models.PositiveIntegerField(
+        "Prioritetas",
+        default=10,
+        help_text="Didesnis = svarbiau. Kai kelios taisyklės tinka – laimi didesnė.",
+    )
+    is_active = models.BooleanField("Aktyvi", default=True)
+    auto_create_je = models.BooleanField(
+        "Automatiškai kurti DK įrašą",
+        default=True,
+        help_text="Jei True – DK įrašas kuriamas automatiškai be patvirtinimo",
+    )
+
+    # ── Статистика ──────────────────────────────────────
+    times_applied = models.PositiveIntegerField("Panaudota kartų", default=0)
+    last_applied_at = models.DateTimeField("Paskutinį kartą", null=True, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-priority", "name"]
+        verbose_name = "Banko operacijos taisyklė"
+        verbose_name_plural = "Banko operacijų taisyklės"
+        indexes = [
+            models.Index(
+                fields=["user", "company_profile", "is_active"],
+                name="idx_btr_user_cp_active",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.name} ({self.get_match_field_display()} {self.match_operator} '{self.match_value}')"
+
+    def matches(self, transaction) -> bool:
+        """Проверить, подходит ли транзакция под это правило."""
+        # Направление
+        if self.direction:
+            is_incoming = isinstance(transaction, IncomingTransaction)
+            if self.direction == "debit" and is_incoming:
+                return False
+            if self.direction == "credit" and not is_incoming:
+                return False
+
+        # Получаем значение поля
+        field_map = {
+            "counterparty_name": (transaction.counterparty_name or "").lower(),
+            "counterparty_code": (transaction.counterparty_code or "").strip(),
+            "tx_type": (transaction.bank_operation_code or ""),
+            "purpose_contains": (transaction.payment_purpose or "").lower(),
+            "bank_operation_code": (transaction.bank_operation_code or ""),
+        }
+        field_value = field_map.get(self.match_field, "")
+        match_val = self.match_value
+
+        # Сравнение
+        if self.match_operator == "contains":
+            return match_val.lower() in field_value
+        elif self.match_operator == "exact":
+            return field_value.lower() == match_val.lower()
+        elif self.match_operator == "starts_with":
+            return field_value.lower().startswith(match_val.lower())
+        elif self.match_operator == "regex":
+            try:
+                return bool(re.search(match_val, field_value, re.IGNORECASE))
+            except re.error:
+                return False
+        return False
+
+    def render_description(self, transaction) -> str:
+        """Сгенерировать описание по шаблону."""
+        if not self.description_template:
+            return ""
+        return self.description_template.format(
+            counterparty_name=transaction.counterparty_name or "",
+            amount=transaction.amount,
+            date=transaction.transaction_date,
+            purpose=(transaction.payment_purpose or "")[:100],
+        )
 
 
 
@@ -4208,3 +5130,652 @@ class NewsletterRecipient(models.Model):
     def __str__(self):
         return f"{self.email} — {self.status}"
 # END ─── Newsletter Campaign ──────────────────────────────
+
+
+# ========================================================
+# Pirkimai
+# ========================================================
+
+class Purchase(models.Model):
+    """
+    Pirkimo dokumentas — įeinanti SF iš tiekėjo.
+    Sukuriamas perkėlus dokumentą iš skaitmenizavimo į apskaitą.
+    """
+
+    STATUS_CHOICES = [
+        ("new", "Naujas"),
+        ("accounted", "Užpajamuotas"),
+    ]
+
+    PAYMENT_STATUS_CHOICES = [
+        ("unpaid", "Neapmokėta"),
+        ("partially_paid", "Dalinai apmokėta"),
+        ("paid", "Apmokėta"),
+    ]
+
+    # ── Связи ───────────────────────────────────────────
+    user = models.ForeignKey(
+        "CustomUser",
+        on_delete=models.CASCADE,
+        related_name="purchases",
+    )
+    company_profile = models.ForeignKey(
+        "CompanyProfile",
+        on_delete=models.CASCADE,
+        related_name="purchases",
+    )
+    scanned_document = models.ForeignKey(
+        "ScannedDocument",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="purchases_from_scan",
+        help_text="Negalima ištrinti skaitmenizuoto dok. kol jis priskirtas pirkimams",
+    )
+
+    # ── Statusas ────────────────────────────────────────
+    status = models.CharField(
+        "Dokumento statusas",
+        max_length=16,
+        choices=STATUS_CHOICES,
+        default="new",
+    )
+    exported = models.BooleanField("Eksportuota", default=False)
+    exported_at = models.DateTimeField("Eksportavimo data", null=True, blank=True)
+
+    # ── Mokėjimo statusas ───────────────────────────────
+    payment_status = models.CharField(
+        "Mokėjimo statusas",
+        max_length=16,
+        choices=PAYMENT_STATUS_CHOICES,
+        default="unpaid",
+    )
+    paid_amount = models.DecimalField(
+        "Apmokėta suma",
+        max_digits=12,
+        decimal_places=4,
+        default=0,
+        null=True,
+        blank=True,
+    )
+    last_payment_date = models.DateField(
+        "Paskutinio mokėjimo data",
+        null=True,
+        blank=True,
+    )
+
+    # ── Periodas ir korespondencijos ────────────────────
+    period = models.DateField(
+        "Apskaitos periodas",
+        null=True,
+        blank=True,
+        help_text="Mėnesio pirma diena, pvz. 2026-01-01",
+    )
+    debeto_saskaita = models.CharField(
+        "Debeto sąskaita",
+        max_length=20,
+        blank=True,
+        null=True,
+        help_text="Pvz. 2014 (prekės), 6001 (sąnaudos)",
+    )
+    kredito_saskaita = models.CharField(
+        "Kredito sąskaita",
+        max_length=20,
+        blank=True,
+        null=True,
+        help_text="Pvz. 443 (tiekėjų skolos)",
+    )
+    pvm_saskaita = models.CharField(
+        "PVM sąskaita",
+        max_length=20,
+        blank=True,
+        null=True,
+        help_text="Pvz. 2492 (pirkimo PVM)",
+    )
+    kor_balanced = models.BooleanField(null=True, blank=True, default=None)
+
+
+    # ── Dokumento duomenys (kopija iš ScannedDocument) ──
+    document_type = models.CharField(max_length=100, blank=True, null=True)
+    is_credit_invoice = models.BooleanField(null=True, blank=True, default=None)
+    is_debit_invoice = models.BooleanField(null=True, blank=True, default=None)
+
+    document_series = models.CharField(max_length=50, blank=True, null=True)
+    document_number = models.CharField(max_length=100, blank=True, null=True)
+    invoice_date = models.DateField(null=True, blank=True)
+    due_date = models.DateField(null=True, blank=True)
+    operation_date = models.DateField(null=True, blank=True)
+
+    # ── Seller (tiekėjas) ───────────────────────────────
+    seller_name = models.CharField(max_length=255, blank=True, null=True)
+    seller_name_normalized = models.CharField(max_length=255, blank=True, default="")
+    seller_id = models.CharField("Įmonės kodas", max_length=100, blank=True, null=True)
+    seller_vat_code = models.CharField(max_length=50, blank=True, null=True)
+    seller_address = models.CharField(max_length=255, blank=True, null=True)
+    seller_country = models.CharField(max_length=50, blank=True, null=True)
+    seller_country_iso = models.CharField(max_length=10, blank=True, null=True)
+    seller_iban = models.CharField(max_length=255, blank=True, null=True)
+    seller_is_person = models.BooleanField(null=True, blank=True)
+    seller_vat_val = models.CharField(max_length=20, blank=True, null=True)
+
+    # ── Buyer (mes / mūsų įmonė) ───────────────────────
+    buyer_name = models.CharField(max_length=255, blank=True, null=True)
+    buyer_name_normalized = models.CharField(max_length=255, blank=True, default="")
+    buyer_id = models.CharField("Įmonės kodas", max_length=100, blank=True, null=True)
+    buyer_vat_code = models.CharField(max_length=50, blank=True, null=True)
+    buyer_address = models.CharField(max_length=255, blank=True, null=True)
+    buyer_country = models.CharField(max_length=50, blank=True, null=True)
+    buyer_country_iso = models.CharField(max_length=10, blank=True, null=True)
+    buyer_iban = models.CharField(max_length=255, blank=True, null=True)
+    buyer_is_person = models.BooleanField(null=True, blank=True)
+
+    # ── Sumos ───────────────────────────────────────────
+    currency = models.CharField(max_length=20, blank=True, null=True)
+    amount_wo_vat = models.DecimalField(max_digits=12, decimal_places=4, null=True, blank=True)
+    vat_amount = models.DecimalField(max_digits=12, decimal_places=4, null=True, blank=True)
+    vat_percent = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+    amount_with_vat = models.DecimalField(max_digits=12, decimal_places=4, null=True, blank=True)
+    invoice_discount_with_vat = models.DecimalField(max_digits=12, decimal_places=4, null=True, blank=True)
+    invoice_discount_wo_vat = models.DecimalField(max_digits=12, decimal_places=4, null=True, blank=True)
+    separate_vat = models.BooleanField(null=True, blank=True)
+    doc_96_str = models.BooleanField(null=True, blank=True)
+    scan_type = models.CharField(max_length=32, blank=True, null=True)
+    order_number = models.CharField(max_length=100, blank=True, null=True)
+    paid_by_cash = models.BooleanField(blank=True, null=True)
+    is_long_term_asset_candidate = models.BooleanField(default=False)
+    suggested_asset_type = models.CharField(max_length=50, blank=True, default="")
+
+    # ── iSAF ────────────────────────────────────────────
+    pirkimas_pardavimas = models.CharField(max_length=20, default="pirkimas")
+    report_to_isaf = models.BooleanField(null=True, blank=True)
+    document_type_code = models.CharField(max_length=50, blank=True, null=True)
+    ready_for_export = models.BooleanField(null=True, blank=True, default=None)
+    math_validation_passed = models.BooleanField(null=True, blank=True, default=None)
+
+    # ── Autocomplete / eksporto laukai ──────────────────
+    prekes_kodas = models.CharField(max_length=128, blank=True, null=True)
+    prekes_pavadinimas = models.CharField(max_length=255, blank=True, null=True)
+    preke_paslauga = models.CharField(max_length=12, blank=True, null=True)
+
+    pvm_kodas = models.CharField(max_length=128, blank=True, null=True)
+
+    # ── Pastabos ────────────────────────────────────────
+    notes = models.TextField(blank=True, null=True)
+
+    # ── Laikai ──────────────────────────────────────────
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        verbose_name = "Pirkimo dokumentas"
+        verbose_name_plural = "Pirkimo dokumentai"
+        indexes = [
+            models.Index(
+                fields=["company_profile", "-created_at"],
+                name="idx_purchase_profile",
+            ),
+            models.Index(
+                fields=["user", "-created_at"],
+                name="idx_purchase_user",
+            ),
+            models.Index(
+                fields=["scanned_document"],
+                name="idx_purchase_scan",
+            ),
+            models.Index(
+                fields=["user", "seller_name_normalized"],
+                name="idx_purchase_seller_norm",
+            ),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["scanned_document", "company_profile"],
+                name="unique_purchase_scan_per_company",
+            ),
+        ]
+
+    def __str__(self):
+        return (
+            f"Pirkimas {self.document_series or ''}"
+            f"{self.document_number or ''}"
+            f" — {self.seller_name or '?'}"
+        )
+
+    def save(self, *args, **kwargs):
+        if self.seller_name:
+            self.seller_name_normalized = self.seller_name.strip().upper()
+        if self.buyer_name:
+            self.buyer_name_normalized = self.buyer_name.strip().upper()
+        super().save(*args, **kwargs)
+
+    def recalc_payment_status(self):
+        from decimal import Decimal
+
+        total = self.amount_with_vat or Decimal("0")
+        paid = self.paid_amount or Decimal("0")
+        tolerance = Decimal("0.009")
+
+        if total > 0 and paid >= total - tolerance:
+            self.payment_status = "paid"
+        elif paid > Decimal("0"):
+            self.payment_status = "partially_paid"
+        else:
+            self.payment_status = "unpaid"
+
+        self.save(update_fields=[
+            "payment_status", "paid_amount",
+            "last_payment_date", "updated_at",
+        ])
+
+    def recalc_from_allocations(self):
+        """Perskaičiuoti paid_amount iš PaymentAllocation."""
+        from decimal import Decimal
+        from django.db.models import Sum
+
+        total_paid = self.payment_allocations.filter(
+            status__in=("auto", "confirmed", "manual"),
+        ).aggregate(
+            total=Sum("amount"),
+        )["total"] or Decimal("0")
+
+        self.paid_amount = total_paid
+
+        last_alloc = self.payment_allocations.filter(
+            status__in=("auto", "confirmed", "manual"),
+        ).order_by("-payment_date").first()
+        if last_alloc:
+            self.last_payment_date = last_alloc.effective_payment_date
+
+        self.recalc_payment_status()
+
+
+class PurchaseLine(models.Model):
+    """
+    Pirkimo eilutė — kopiruojama iš LineItem perkėlimo metu.
+    Papildomai turi korespondencijos laukus.
+    """
+
+    purchase = models.ForeignKey(
+        Purchase,
+        on_delete=models.CASCADE,
+        related_name="line_items",
+    )
+    source_line_item = models.ForeignKey(
+        "LineItem",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="purchase_lines",
+    )
+
+    # ── Prekės duomenys ─────────────────────────────────
+    prekes_kodas = models.CharField(max_length=128, blank=True, null=True)
+    prekes_barkodas = models.CharField(max_length=128, blank=True, null=True)
+    prekes_pavadinimas = models.CharField(max_length=255, blank=True, null=True)
+    preke_paslauga = models.CharField(max_length=12, blank=True, null=True)
+
+    unit = models.CharField(max_length=50, blank=True, null=True)
+    quantity = models.DecimalField(max_digits=15, decimal_places=5, null=True, blank=True)
+    price = models.DecimalField(max_digits=12, decimal_places=4, null=True, blank=True)
+    subtotal = models.DecimalField(max_digits=12, decimal_places=4, null=True, blank=True)
+    vat = models.DecimalField(max_digits=12, decimal_places=4, null=True, blank=True)
+    vat_percent = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+    total = models.DecimalField(max_digits=12, decimal_places=4, null=True, blank=True)
+
+    discount_with_vat = models.DecimalField(max_digits=12, decimal_places=4, null=True, blank=True)
+    discount_wo_vat = models.DecimalField(max_digits=12, decimal_places=4, null=True, blank=True)
+
+    is_long_term_asset_candidate = models.BooleanField(default=False)
+    suggested_asset_type = models.CharField(max_length=50, blank=True, default="")
+
+    pvm_kodas = models.CharField(max_length=128, blank=True, null=True)
+
+    # ── Per-line korespondencija ────────────────────────
+    debeto_saskaita = models.CharField(
+        "Debeto sąskaita",
+        max_length=20,
+        blank=True,
+        null=True,
+    )
+    kredito_saskaita = models.CharField(
+        "Kredito sąskaita",
+        max_length=20,
+        blank=True,
+        null=True,
+    )
+    pvm_saskaita = models.CharField(
+        "PVM sąskaita",
+        max_length=20,
+        blank=True,
+        null=True,
+    )
+
+    sort_order = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        ordering = ["sort_order", "id"]
+        verbose_name = "Pirkimo eilutė"
+        verbose_name_plural = "Pirkimo eilutės"
+
+    def __str__(self):
+        return f"{self.prekes_pavadinimas or ''} x{self.quantity or ''}"
+
+    @property
+    def effective_debeto(self):
+        return self.debeto_saskaita or self.purchase.debeto_saskaita
+
+    @property
+    def effective_kredito(self):
+        return self.kredito_saskaita or self.purchase.kredito_saskaita
+
+    @property
+    def effective_pvm(self):
+        return self.pvm_saskaita or self.purchase.pvm_saskaita
+
+# ========================================================
+# END - Pirkimai
+# ========================================================
+
+# ========================================================
+# DK
+# ========================================================
+
+class JournalEntry(models.Model):
+    SOURCE_PURCHASE = "purchase"
+    SOURCE_SALE = "sale"
+    SOURCE_BANK = "bank"
+    SOURCE_MANUAL = "manual"
+    SOURCE_OPENING = "opening"
+    SOURCE_CHOICES = [
+        (SOURCE_PURCHASE, "Pirkimas"),
+        (SOURCE_SALE, "Pardavimas"),
+        (SOURCE_BANK, "Bankas"),
+        (SOURCE_MANUAL, "Rankinis"),
+        (SOURCE_OPENING, "Pradiniai likučiai"),
+    ]
+
+    STATUS_DRAFT = "draft"
+    STATUS_POSTED = "posted"
+    STATUS_NEEDS_REVIEW = "needs_review"
+    STATUS_UNBALANCED = "unbalanced"
+    STATUS_VOID = "void"
+    STATUS_CHOICES = [
+        (STATUS_DRAFT, "Juodraštis"),
+        (STATUS_POSTED, "Užregistruotas"),
+        (STATUS_NEEDS_REVIEW, "Reikia peržiūros"),
+        (STATUS_UNBALANCED, "Nesubalansuotas"),
+        (STATUS_VOID, "Anuliuotas"),
+    ]
+
+    # ── Связи ───────────────────────────────────────────
+    user = models.ForeignKey(
+        "CustomUser",
+        on_delete=models.CASCADE,
+        related_name="journal_entries",
+    )
+    company_profile = models.ForeignKey(
+        "CompanyProfile",
+        on_delete=models.CASCADE,
+        related_name="journal_entries",
+    )
+
+    # ── Источник ────────────────────────────────────────
+    source_type = models.CharField(
+        "Šaltinio tipas",
+        max_length=12,
+        choices=SOURCE_CHOICES,
+    )
+    purchase = models.ForeignKey(
+        "Purchase",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="journal_entries",
+    )
+    invoice = models.ForeignKey(
+        "Invoice",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="journal_entries",
+    )
+    # BankTransaction FK добавим позже
+
+    # ── Даты ────────────────────────────────────────────
+    entry_date = models.DateField(
+        "Įrašo data",
+        help_text="Operacijos data (pvz. SF data arba mokėjimo data)",
+    )
+    period = models.DateField(
+        "Periodas",
+        help_text="Mėnesio pirma diena, pvz. 2026-01-01",
+    )
+
+    # ── Dokumento info (denormalizuota, greitesnei paieškai) ──
+    document_number = models.CharField(
+        "Dokumento nr.",
+        max_length=100,
+        blank=True,
+        null=True,
+    )
+    counterparty_name = models.CharField(
+        "Kontrahentas",
+        max_length=255,
+        blank=True,
+        null=True,
+    )
+    counterparty_code = models.CharField(
+        "Kontrahento kodas",
+        max_length=50,
+        blank=True,
+        null=True,
+    )
+    counterparty_vat_code = models.CharField(
+        "Kontrahento PVM kodas",
+        max_length=32,
+        blank=True,
+        default="",
+    )
+    description = models.CharField(
+        "Aprašymas",
+        max_length=255,
+        blank=True,
+        null=True,
+    )
+
+    # ── Statusas ir sumos ──────────────────────────────
+    status = models.CharField(
+        "Statusas",
+        max_length=16,
+        choices=STATUS_CHOICES,
+        default=STATUS_DRAFT,
+    )
+    total_debit = models.DecimalField(
+        "Debeto suma",
+        max_digits=14,
+        decimal_places=4,
+        default=0,
+    )
+    total_credit = models.DecimalField(
+        "Kredito suma",
+        max_digits=14,
+        decimal_places=4,
+        default=0,
+    )
+    difference = models.DecimalField(
+        "Skirtumas (D − K)",
+        max_digits=14,
+        decimal_places=4,
+        default=0,
+    )
+    currency = models.CharField(
+        "Valiuta",
+        max_length=10,
+        default="EUR",
+    )
+
+    original_amount = models.DecimalField(
+        "Originali suma", max_digits=12, decimal_places=2,
+        null=True, blank=True,
+    )
+    original_currency = models.CharField(
+        "Originali valiuta", max_length=10, blank=True, default="",
+    )
+    exchange_rate = models.DecimalField(
+        "Valiutos kursas", max_digits=12, decimal_places=6,
+        null=True, blank=True,
+    )
+    exchange_rate_date = models.DateField(
+        "Valiutos kurso data", null=True, blank=True,
+    )
+
+    # ── Meta ────────────────────────────────────────────
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-entry_date", "-id"]
+        verbose_name = "DK įrašas"
+        verbose_name_plural = "DK įrašai"
+        indexes = [
+            models.Index(
+                fields=["company_profile", "-entry_date"],
+                name="idx_je_profile_date",
+            ),
+            models.Index(
+                fields=["company_profile", "period"],
+                name="idx_je_profile_period",
+            ),
+            models.Index(
+                fields=["company_profile", "source_type", "-entry_date"],
+                name="idx_je_profile_source",
+            ),
+            models.Index(
+                fields=["purchase"],
+                name="idx_je_purchase",
+            ),
+            models.Index(
+                fields=["invoice"],
+                name="idx_je_invoice",
+            ),
+            models.Index(
+                fields=["company_profile", "counterparty_code"],
+                name="idx_je_counterparty",
+            ),
+        ]
+
+    def __str__(self):
+        return f"DK #{self.id} {self.get_source_type_display()} {self.document_number or ''}"
+
+    def recalc_totals(self):
+        """Пересчитывает total_debit, total_credit, difference и status."""
+        from decimal import Decimal
+
+        debit = Decimal("0")
+        credit = Decimal("0")
+        for line in self.lines.all():
+            if line.side == "D":
+                debit += line.amount or Decimal("0")
+            elif line.side == "K":
+                credit += line.amount or Decimal("0")
+
+        self.total_debit = debit
+        self.total_credit = credit
+        self.difference = debit - credit
+
+        # Auto-update status if draft/unbalanced
+        if self.status in (self.STATUS_DRAFT, self.STATUS_UNBALANCED):
+            tolerance = Decimal("0.009")
+            if abs(self.difference) <= tolerance:
+                self.status = self.STATUS_DRAFT
+            else:
+                self.status = self.STATUS_UNBALANCED
+
+        self.save(update_fields=[
+            "total_debit", "total_credit", "difference",
+            "status", "updated_at",
+        ])
+
+
+class JournalEntryLine(models.Model):
+    SIDE_DEBIT = "D"
+    SIDE_CREDIT = "K"
+    SIDE_CHOICES = [
+        (SIDE_DEBIT, "Debetas"),
+        (SIDE_CREDIT, "Kreditas"),
+    ]
+
+    entry = models.ForeignKey(
+        JournalEntry,
+        on_delete=models.CASCADE,
+        related_name="lines",
+    )
+
+    side = models.CharField(
+        "Pusė",
+        max_length=1,
+        choices=SIDE_CHOICES,
+    )
+    account_code = models.CharField(
+        "Sąskaitos kodas",
+        max_length=20,
+    )
+    account_name = models.CharField(
+        "Sąskaitos pavadinimas",
+        max_length=255,
+        blank=True,
+        null=True,
+    )
+    amount = models.DecimalField(
+        "Suma",
+        max_digits=14,
+        decimal_places=4,
+    )
+    description = models.CharField(
+        "Aprašymas",
+        max_length=255,
+        blank=True,
+        null=True,
+    )
+    is_user_modified = models.BooleanField(default=False)
+
+    # ── Ryšys su source line (opcionalu) ────────────────
+    purchase_line = models.ForeignKey(
+        "PurchaseLine",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="journal_lines",
+    )
+    invoice_line = models.ForeignKey(
+        "InvoiceLineItem",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="journal_lines",
+    )
+
+    sort_order = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        ordering = ["sort_order", "id"]
+        verbose_name = "DK įrašo eilutė"
+        verbose_name_plural = "DK įrašo eilutės"
+        indexes = [
+            models.Index(
+                fields=["entry", "side"],
+                name="idx_jel_entry_side",
+            ),
+            models.Index(
+                fields=["account_code"],
+                name="idx_jel_account",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.side} {self.account_code} {self.amount}"
+    
+# ========================================================
+# END - DK
+# ========================================================
