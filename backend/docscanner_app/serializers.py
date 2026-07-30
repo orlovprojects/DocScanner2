@@ -4335,6 +4335,7 @@ class PurchaseSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
             "seller_vat_val",
+            "company_profile",
         ]
 
     def get_preview_url(self, obj):

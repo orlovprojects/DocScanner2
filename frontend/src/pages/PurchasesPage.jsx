@@ -162,7 +162,6 @@ export default function PurchasesPage() {
   const [previewOpen, setPreviewOpen] = useState(false);
   const [selectedPurchaseId, setSelectedPurchaseId] = useState(null);
 
-  const searchTimerRef = useRef(null);
   const scrollSentinelRef = useRef(null);
 
   const periodOptions = useMemo(() => buildPeriodOptions(), []);
@@ -226,28 +225,30 @@ export default function PurchasesPage() {
     [activeProfileId, buildParams],
   );
 
-  // Initial load + filter change
   useEffect(() => {
-    if (activeProfileId) {
-      setSelectedIds(new Set());
-      setSelectAllMatching(false);
-      setExcludeIds(new Set());
-      fetchPurchases(0, false);
-    }
-  }, [activeProfileId, statusFilter, paymentFilter, periodFilter]);
+    if (!initialized || !activeProfileId) return;
 
-  // Debounced search
-  useEffect(() => {
-    if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
-    searchTimerRef.current = setTimeout(() => {
-      if (activeProfileId) {
+    const timer = setTimeout(
+      () => {
         setSelectedIds(new Set());
         setSelectAllMatching(false);
+        setExcludeIds(new Set());
+
         fetchPurchases(0, false);
-      }
-    }, 400);
-    return () => clearTimeout(searchTimerRef.current);
-  }, [search]);
+      },
+      search.trim() ? 400 : 0,
+    );
+
+    return () => clearTimeout(timer);
+  }, [
+    initialized,
+    activeProfileId,
+    search,
+    statusFilter,
+    paymentFilter,
+    periodFilter,
+    fetchPurchases,
+  ]);
 
   // Infinite scroll
   useEffect(() => {
