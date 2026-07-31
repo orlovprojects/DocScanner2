@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useCompanyProfiles } from '../contexts/useCompanyProfiles';
 import {
   Box, Paper, Typography, Button, TextField, IconButton, Chip,
   Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
@@ -39,6 +40,7 @@ const CounterpartiesPage = () => {
   const navigate = useNavigate();
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
+  const { activeId } = useCompanyProfiles();
 
   const [loading, setLoading] = useState(true);
   const [items, setItems] = useState([]);
@@ -85,7 +87,7 @@ const CounterpartiesPage = () => {
     } finally {
       setLoading(false);
     }
-  }, [search, roleFilter]);
+  }, [search, roleFilter, activeId]);
 
   useEffect(() => { loadItems(); }, [loadItems]);
 

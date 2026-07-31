@@ -4086,8 +4086,7 @@ def register(request):
 
             user.ensure_inbox_token(save=True)
 
-            from .models import MeasurementUnit, InvoiceSeries
-            MeasurementUnit.create_defaults_for_user(user)
+            from .models import InvoiceSeries
             InvoiceSeries.create_defaults_for_user(user)
             InvSubscription.objects.create(user=user)
 
@@ -6499,9 +6498,12 @@ def counterparty_list_create(request):
     POST — создать нового контрагента
     """
     user = request.user
+    active_id = getattr(user, "active_company_profile_id", None)
 
     if request.method == "GET":
         qs = Counterparty.objects.filter(user=user)
+        if active_id:
+            qs = qs.filter(company_profile_id=active_id)
 
         q = request.GET.get("q", "").strip()
         if q:
@@ -6534,7 +6536,7 @@ def counterparty_list_create(request):
     # POST
     serializer = InvoiceCounterpartySerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
-    serializer.save(user=user)
+    serializer.save(user=user, company_profile_id=active_id)
     return Response(serializer.data, status=status.HTTP_201_CREATED)
 
 
@@ -6610,6 +6612,15 @@ def invoice_list(request):
         )
     )
 
+
+    # ── Company profile filter ──
+    company_id = request.GET.get("company_profile")
+    if company_id:
+        qs = qs.filter(company_profile_id=company_id)
+    else:
+        active_id = getattr(user, "active_company_profile_id", None)
+        if active_id:
+            qs = qs.filter(company_profile_id=active_id)
 
     category = (request.GET.get("category") or "").strip().lower()
     status_param = (request.GET.get("status") or "").strip().lower()
@@ -7438,6 +7449,14 @@ def invoice_summary(request):
 
     base_qs = Invoice.objects.filter(user=user).exclude(source_invoice__isnull=False)
 
+    company_id = request.query_params.get("company_profile")
+    if company_id:
+        base_qs = base_qs.filter(company_profile_id=company_id)
+    else:
+        active_id = getattr(user, "active_company_profile_id", None)
+        if active_id:
+            base_qs = base_qs.filter(company_profile_id=active_id)
+
     if date_from:
         base_qs = base_qs.filter(invoice_date__gte=date_from)
     if date_to:
@@ -7604,7 +7623,11 @@ def invoice_search_companies(request):
     seen_codes = set()
 
     # ── 1. Сохранённые клиенты (Counterparty) — приоритет ──
-    cp_qs = Counterparty.objects.filter(user=request.user).filter(
+    cp_qs = Counterparty.objects.filter(user=request.user)
+    _active_id = getattr(request.user, "active_company_profile_id", None)
+    if _active_id:
+        cp_qs = cp_qs.filter(company_profile_id=_active_id)
+    cp_qs = cp_qs.filter(
         Q(name__icontains=q)
         | Q(company_code__icontains=q)
         | Q(vat_code__icontains=q)
@@ -7686,12 +7709,15 @@ def measurement_unit_list(request):
     POST — создать новую единицу
     """
     user = request.user
+    active_id = getattr(user, "active_company_profile_id", None)
 
-    # Авто-создание дефолтных при первом обращении
-    MeasurementUnit.create_defaults_for_user(user)
+    # Авто-создание дефолтных при первом обращении (в разрезе активной фирмы)
+    MeasurementUnit.create_defaults_for_user(user, active_id)
 
     if request.method == "GET":
         qs = MeasurementUnit.objects.filter(user=user, is_active=True)
+        if active_id:
+            qs = qs.filter(company_profile_id=active_id)
         return Response(MeasurementUnitSerializer(qs, many=True).data)
 
     # POST
@@ -7699,8 +7725,10 @@ def measurement_unit_list(request):
     ser.is_valid(raise_exception=True)
 
     code = ser.validated_data["code"]
-    # Проверка на дубликат (re-activate если был удалён)
-    existing = MeasurementUnit.objects.filter(user=user, code=code).first()
+    # Проверка на дубликат (re-activate если был удалён) — в разрезе фирмы
+    existing = MeasurementUnit.objects.filter(
+        user=user, company_profile_id=active_id, code=code
+    ).first()
     if existing:
         if not existing.is_active:
             existing.is_active = True
@@ -7712,8 +7740,10 @@ def measurement_unit_list(request):
             status=status.HTTP_400_BAD_REQUEST,
         )
 
-    max_order = MeasurementUnit.objects.filter(user=user).count()
-    ser.save(user=user, sort_order=max_order)
+    max_order = MeasurementUnit.objects.filter(
+        user=user, company_profile_id=active_id
+    ).count()
+    ser.save(user=user, company_profile_id=active_id, sort_order=max_order)
     return Response(ser.data, status=status.HTTP_201_CREATED)
 
 
@@ -7737,7 +7767,9 @@ def measurement_unit_detail(request, pk):
 
     new_code = ser.validated_data.get("code", unit.code)
     if new_code != unit.code:
-        if MeasurementUnit.objects.filter(user=request.user, code=new_code).exclude(pk=pk).exists():
+        if MeasurementUnit.objects.filter(
+            user=request.user, company_profile_id=unit.company_profile_id, code=new_code
+        ).exclude(pk=pk).exists():
             return Response(
                 {"detail": f"Matavimo vienetas '{new_code}' jau egzistuoja."},
                 status=status.HTTP_400_BAD_REQUEST,
@@ -7966,7 +7998,11 @@ def invoice_search_products(request):
     if len(q) < 2:
         return Response([])
 
-    qs = Product.objects.filter(user=request.user).filter(
+    qs = Product.objects.filter(user=request.user)
+    _active_id = getattr(request.user, "active_company_profile_id", None)
+    if _active_id:
+        qs = qs.filter(company_profile_id=_active_id)
+    qs = qs.filter(
         Q(pavadinimas__icontains=q) |
         Q(kodas__icontains=q) |
         Q(barkodas__icontains=q)
@@ -8059,9 +8095,12 @@ def product_list_create(request):
     POST — создать
     """
     user = request.user
+    active_id = getattr(user, "active_company_profile_id", None)
 
     if request.method == "GET":
         qs = Product.objects.filter(user=user).select_related("measurement_unit")
+        if active_id:
+            qs = qs.filter(company_profile_id=active_id)
 
         q = request.GET.get("q", "").strip()
         if q:
@@ -8094,7 +8133,7 @@ def product_list_create(request):
     # POST
     serializer = ProductSerializer(data=request.data, context={"request": request})
     serializer.is_valid(raise_exception=True)
-    serializer.save(user=user)
+    serializer.save(user=user, company_profile_id=active_id)
     return Response(serializer.data, status=status.HTTP_201_CREATED)
 
 
@@ -8176,11 +8215,19 @@ class RecurringInvoiceViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
-        if self.request.user.is_superuser:
-            return RecurringInvoice.objects.all().prefetch_related("line_items")
-        return RecurringInvoice.objects.filter(
-            user=self.request.user
-        ).prefetch_related("line_items")
+        qs = RecurringInvoice.objects.prefetch_related("line_items")
+        if not self.request.user.is_superuser:
+            qs = qs.filter(user=self.request.user)
+
+        company_id = self.request.query_params.get("company_profile")
+        if company_id:
+            qs = qs.filter(company_profile_id=company_id)
+        else:
+            active_id = getattr(self.request.user, "active_company_profile_id", None)
+            if active_id:
+                qs = qs.filter(company_profile_id=active_id)
+
+        return qs
 
     def get_serializer_class(self):
         if self.action == "list":
@@ -8368,6 +8415,7 @@ def counterparty_import_xlsx(request):
         return Response({"detail": "Failas tuščias."}, status=status.HTTP_400_BAD_REQUEST)
 
     user = request.user
+    active_id = getattr(user, "active_company_profile_id", None)
     created = 0
     updated = 0
     errors = []
@@ -8430,6 +8478,7 @@ def counterparty_import_xlsx(request):
         try:
             cp, is_new = Counterparty.objects.update_or_create(
                 user=user,
+                company_profile_id=active_id,
                 company_code=company_code,
                 defaults={
                     "name": name,
@@ -8503,6 +8552,7 @@ def product_import_xlsx(request):
         return Response({"detail": "Failas tuščias."}, status=status.HTTP_400_BAD_REQUEST)
 
     user = request.user
+    active_id = getattr(user, "active_company_profile_id", None)
     created = 0
     updated = 0
     errors = []
@@ -8516,7 +8566,10 @@ def product_import_xlsx(request):
     # Загрузить measurement units для маппинга по коду
     from .models import MeasurementUnit
     unit_map = {}
-    for u in MeasurementUnit.objects.filter(user=user):
+    _unit_qs = MeasurementUnit.objects.filter(user=user)
+    if active_id:
+        _unit_qs = _unit_qs.filter(company_profile_id=active_id)
+    for u in _unit_qs:
         unit_map[u.code.lower()] = u
         if u.name:
             unit_map[u.name.lower()] = u
@@ -8591,6 +8644,7 @@ def product_import_xlsx(request):
         try:
             obj, is_new = Product.objects.update_or_create(
                 user=user,
+                company_profile_id=active_id,
                 kodas=kodas,
                 defaults={
                     "pavadinimas": pavadinimas,
@@ -18023,14 +18077,15 @@ def patch_dk_line(request, pk):
                 {"detail": "Nerasta."},
                 status=404,
             )
-    if line.entry.source_type == JournalEntry.SOURCE_MANUAL:
-        return Response(
-            {
-                "detail":
-                "Rankinis DK įrašas redaguojamas visas dialogo lange."
-            },
-            status=400,
-        )
+
+        if line.entry.source_type == JournalEntry.SOURCE_MANUAL:
+            return Response(
+                {
+                    "detail":
+                    "Rankinis DK įrašas redaguojamas visas dialogo lange."
+                },
+                status=400,
+            )
 
         old_code = (
             line.account_code or ""

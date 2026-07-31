@@ -34,6 +34,10 @@ def generate_invoice_from_recurring(recurring: RecurringInvoice) -> Invoice:
             # 3. Создаём Invoice
             invoice = Invoice.objects.create(
                 user=recurring.user,
+                company_profile_id=(
+                    recurring.company_profile_id
+                    or getattr(recurring.user, "active_company_profile_id", None)
+                ),
                 invoice_type=recurring.invoice_type,
                 document_series=recurring.document_series,
                 status="draft",

@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useCompanyProfiles } from '../contexts/useCompanyProfiles';
 import {
   Box, Paper, Typography, Button, TextField, IconButton, Chip,
   Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
@@ -19,6 +20,7 @@ const MeasurementUnitsPage = () => {
   const navigate = useNavigate();
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
+  const { activeId } = useCompanyProfiles();
 
   const [loading, setLoading] = useState(true);
   const [units, setUnits] = useState([]);
@@ -40,7 +42,7 @@ const MeasurementUnitsPage = () => {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [activeId]);
 
   useEffect(() => { loadUnits(); }, [loadUnits]);
 

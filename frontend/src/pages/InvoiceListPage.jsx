@@ -63,6 +63,7 @@ import { MdOutlinePaid } from 'react-icons/md';
 import { useNavigate } from 'react-router-dom';
 import { invoicingApi } from '../api/invoicingApi';
 import { api } from '../api/endpoints';
+import { useCompanyProfiles } from '../contexts/useCompanyProfiles';
 import { ACCOUNTING_PROGRAMS } from '../page_elements/AccountingPrograms';
 import DateField from '../components/DateField';
 import { InvoicePreviewDialog, useInvoicePdf, InvoiceKorAccordion } from '../components/InvoicePreview';
@@ -459,6 +460,7 @@ const InvoiceListPage = () => {
   const navigate = useNavigate();
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
+  const { activeId } = useCompanyProfiles();
 
   const [invoices, setInvoices] = useState([]);
   const [total, setTotal] = useState(0);
@@ -697,9 +699,9 @@ const InvoiceListPage = () => {
   useEffect(() => {
     if (activeCategory === 'periodines') loadRecurringInvoices();
     else loadInvoices();
-  }, [activeCategory, loadInvoices, loadRecurringInvoices]);
+  }, [activeCategory, loadInvoices, loadRecurringInvoices, activeId]);
 
-  useEffect(() => { loadSummary(); }, [filters.date_from, filters.date_to]);
+  useEffect(() => { loadSummary(); }, [filters.date_from, filters.date_to, activeId]);
 
   // ── Fetch full invoice for scan preview korespondencija ──
   useEffect(() => {

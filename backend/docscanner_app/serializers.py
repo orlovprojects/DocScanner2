@@ -1181,6 +1181,10 @@ class CompanyProfileSerializer(serializers.ModelSerializer):
                 "onboarding_completed",
             ])
 
+        # Засеваем дефолтные единицы измерения новому профилю (units per-company)
+        from .models import MeasurementUnit
+        MeasurementUnit.create_defaults_for_user(user, profile.id)
+
         return profile
 
 
@@ -3062,11 +3066,20 @@ class ProductSerializer(serializers.ModelSerializer):
 
     def validate_kodas(self, value):
         user = self.context["request"].user
-        qs = Product.objects.filter(user=user, kodas=value)
+        if self.instance:
+            profile_id = self.instance.company_profile_id
+        else:
+            profile_id = getattr(user, "active_company_profile_id", None)
+        qs = Product.objects.filter(user=user, company_profile_id=profile_id, kodas=value)
         if self.instance:
             qs = qs.exclude(pk=self.instance.pk)
         if qs.exists():
             raise serializers.ValidationError("Toks kodas jau egzistuoja.")
+        return value
+
+    def validate_measurement_unit(self, value):
+        if value and value.user != self.context["request"].user:
+            raise serializers.ValidationError("Matavimo vienetas nerastas.")
         return value
     
 
@@ -3353,6 +3366,12 @@ class RecurringInvoiceWriteSerializer(serializers.ModelSerializer):
             )
 
         validated_data["status"] = "active"
+
+        if not validated_data.get("company_profile_id") and not validated_data.get("company_profile"):
+            active_id = getattr(user, "active_company_profile_id", None)
+            if active_id:
+                validated_data["company_profile_id"] = active_id
+
         instance = RecurringInvoice.objects.create(user=user, **validated_data)
 
         # Line items

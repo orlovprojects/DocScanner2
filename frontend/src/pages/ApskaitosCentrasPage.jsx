@@ -63,6 +63,7 @@ import DeleteOutlineIcon from "@mui/icons-material/DeleteOutline";
 import ContentCopyIcon from "@mui/icons-material/ContentCopy";
 
 import { api } from "../api/endpoints";
+import { useCompanyProfiles } from "../contexts/useCompanyProfiles";
 import { DatePicker, LocalizationProvider } from '@mui/x-date-pickers';
 import { AdapterDayjs } from '@mui/x-date-pickers/AdapterDayjs';
 import dayjs from 'dayjs';
@@ -3827,7 +3828,7 @@ export default function ApskaitosCentrasPage() {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down("md"));
 
-  const [user, setUser] = useState(null);
+  const { activeId, profiles, loading, initialized } = useCompanyProfiles();
   const [view, setView] = useState(VIEW.OVERVIEW);
   const [period, setPeriod] = useState(currentPeriod());
   const [dateFrom, setDateFrom] = useState(null);
@@ -3844,15 +3845,8 @@ export default function ApskaitosCentrasPage() {
     : null;
   const customDatesReady = period !== "custom" || (resolvedDateFrom && resolvedDateTo);
 
-  useEffect(() => {
-    api
-      .get("/me/", { withCredentials: true })
-      .then(({ data }) => setUser(data))
-      .catch(() => setUser(false));
-  }, []);
-
-  const activeProfileId = user?.active_company_profile_id;
-  const activeProfile = user?.company_profiles?.find((p) => p.id === activeProfileId);
+  const activeProfileId = activeId;
+  const activeProfile = profiles.find((p) => p.id === activeProfileId);
 
   useEffect(() => {
     if (!activeProfileId || !customDatesReady) return;
@@ -3871,7 +3865,7 @@ export default function ApskaitosCentrasPage() {
       .finally(() => setSummaryLoading(false));
   }, [activeProfileId, period, resolvedDateFrom, resolvedDateTo, accountingRefreshKey]);
 
-  if (user === null) {
+  if (!initialized || loading) {
     return (
       <Box sx={{ p: isMobile ? 2 : 4, display: "flex", justifyContent: "center" }}>
         <CircularProgress size={28} />

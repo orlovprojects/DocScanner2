@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useCompanyProfiles } from '../contexts/useCompanyProfiles';
 import {
   Box, Paper, Typography, Button, TextField, IconButton, Chip,
   Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
@@ -54,6 +55,7 @@ const ProductsPage = () => {
   const navigate = useNavigate();
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
+  const { activeId } = useCompanyProfiles();
 
   const [loading, setLoading] = useState(true);
   const [items, setItems] = useState([]);
@@ -89,7 +91,7 @@ const ProductsPage = () => {
     invoicingApi.getUnits()
       .then(({ data }) => setUnits(data || []))
       .catch(() => {});
-  }, []);
+  }, [activeId]);
 
   // ── Load products (initial / reset) ───────────────────
   const loadItems = useCallback(async () => {
@@ -110,7 +112,7 @@ const ProductsPage = () => {
     } finally {
       setLoading(false);
     }
-  }, [search, typeFilter]);
+  }, [search, typeFilter, activeId]);
 
   useEffect(() => { loadItems(); }, [loadItems]);
 

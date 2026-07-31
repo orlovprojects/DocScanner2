@@ -2096,6 +2096,13 @@ class Counterparty(models.Model):
         on_delete=models.CASCADE,
         related_name="counterparties",
     )
+    company_profile = models.ForeignKey(
+        "CompanyProfile",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="counterparties",
+    )
 
     # Основные реквизиты
     name = models.CharField("Pavadinimas", max_length=255)
@@ -2135,7 +2142,7 @@ class Counterparty(models.Model):
         ]
         constraints = [
             models.UniqueConstraint(
-                fields=["user", "company_code"],
+                fields=["user", "company_profile", "company_code"],
                 condition=~models.Q(company_code=""),
                 name="unique_user_company_code",
             ),
@@ -2862,6 +2869,13 @@ class MeasurementUnit(models.Model):
         on_delete=models.CASCADE,
         related_name="measurement_units",
     )
+    company_profile = models.ForeignKey(
+        "CompanyProfile",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="measurement_units",
+    )
     code = models.CharField(max_length=20, help_text="Короткий код: vnt, kg, val...")
     name = models.CharField(max_length=100, blank=True, help_text="Полное название")
     sort_order = models.IntegerField(default=0)
@@ -2872,17 +2886,22 @@ class MeasurementUnit(models.Model):
 
     class Meta:
         ordering = ["sort_order", "code"]
-        unique_together = [("user", "code")]
+        unique_together = [("user", "company_profile", "code")]
 
     def __str__(self):
         return f"{self.code} ({self.name})"
 
     @classmethod
-    def create_defaults_for_user(cls, user):
-        if cls.objects.filter(user=user).exists():
+    def create_defaults_for_user(cls, user, company_profile_id=None):
+        if company_profile_id is None:
+            company_profile_id = getattr(user, "active_company_profile_id", None)
+        if company_profile_id is None:
+            return  # нет активной фирмы — сеять некуда
+        if cls.objects.filter(user=user, company_profile_id=company_profile_id).exists():
             return
         objs = [
-            cls(user=user, code=code, name=name, sort_order=i, is_default=is_def)
+            cls(user=user, company_profile_id=company_profile_id,
+                code=code, name=name, sort_order=i, is_default=is_def)
             for i, (code, name, is_def) in enumerate(DEFAULT_UNITS)
         ]
         cls.objects.bulk_create(objs, ignore_conflicts=True)
@@ -3005,6 +3024,13 @@ class Product(models.Model):
         on_delete=models.CASCADE,
         related_name="products",
     )
+    company_profile = models.ForeignKey(
+        "CompanyProfile",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="products",
+    )
 
     # ── Основные (совпадают с ScannedDocument) ──────────
     preke_paslauga = models.CharField(
@@ -3054,7 +3080,7 @@ class Product(models.Model):
         ]
         constraints = [
             models.UniqueConstraint(
-                fields=["user", "kodas"],
+                fields=["user", "company_profile", "kodas"],
                 name="unique_user_product_kodas",
             ),
         ]
@@ -3106,6 +3132,12 @@ class RecurringInvoice(models.Model):
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
         related_name="recurring_invoices",
+    )
+    company_profile = models.ForeignKey(
+        "CompanyProfile",
+        on_delete=models.CASCADE,
+        null=True,
+        related_name="recurring_invoices_cp",
     )
     uuid = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
 
