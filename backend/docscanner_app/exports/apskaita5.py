@@ -49,6 +49,30 @@ def _s(v) -> str:
     return str(v).strip() if v is not None else ""
 
 
+def _use_matched_catalog(item) -> bool:
+    """Есть ли валидный каталог-матч на строке (и юзер его не отключил)."""
+    if getattr(item, "catalog_match_user_override", False):
+        return False
+
+    matched_code = _s(getattr(item, "matched_prekes_kodas", ""))
+    return bool(matched_code) and matched_code.upper() != "UKN0"
+
+
+def _resolved_field(item, field_name: str) -> str:
+    """
+    Если есть валидный каталог-матч — берём matched_ поле.
+    Если matched_ поле пустое — fallback на оригинальное.
+    """
+    if _use_matched_catalog(item):
+        matched_value = _s(
+            getattr(item, f"matched_{field_name}", "")
+        )
+        if matched_value:
+            return matched_value
+
+    return _s(getattr(item, field_name, ""))
+
+
 def _infer_direction(document, direction_hint: Optional[str]) -> str:
     """
     Возвращает 'pirkimas' или 'pardavimas' на основе:
@@ -358,11 +382,13 @@ def _finalize_line_items_for_apskaita5(doc) -> list:
             "vat": float(vat),
             "vat_percent": float(vat_percent),
             "total": float(total),
-            # Остальные поля без изменений
-            "prekes_kodas": getattr(li, "prekes_kodas", "") or "",
-            "prekes_barkodas": getattr(li, "prekes_barkodas", "") or "",
-            "prekes_pavadinimas": getattr(li, "prekes_pavadinimas", "") or "",
-            "unit": getattr(li, "unit", "") or "vnt",
+            # Товарные поля — с учётом catalog matching
+            "prekes_kodas": _resolved_field(li, "prekes_kodas"),
+            "prekes_barkodas": _resolved_field(li, "prekes_barkodas"),
+            "prekes_pavadinimas": _resolved_field(li, "prekes_pavadinimas"),
+            "unit": _resolved_field(li, "unit") or "vnt",
+
+            # Финансовые и учётные поля остаются оригинальными
             "pvm_kodas": getattr(li, "pvm_kodas", None),
             "sandelio_kodas": getattr(li, "sandelio_kodas", "") or "",
         })
@@ -938,6 +964,8 @@ def export_documents_group_to_apskaita5(
 
 
 
+
+
 # from __future__ import annotations 
 
 # import re
@@ -956,7 +984,7 @@ def export_documents_group_to_apskaita5(
 # from .formatters import format_date_iso, get_price_or_zero, expand_empty_tags
 # from ..models import CurrencyRate
 
-# logger = logging.getLogger(__name__)
+# logger = logging.getLogger("docscanner_app")
 
 # FNS = {"xsi": "http://www.w3.org/2001/XMLSchema-instance"}
 
@@ -1141,6 +1169,39 @@ def export_documents_group_to_apskaita5(
 #     if el is None:
 #         el = ET.SubElement(parent, tag)
 #     el.text = smart_str(text or "")
+
+
+# # =========================
+# # Код товара с fallback-цепочкой
+# # =========================
+
+# def _item_code_for_line(li: dict, doc) -> str:
+#     """
+#     Код товара для строки (detaliai режим).
+#     Цепочка: item.prekes_kodas → item.prekes_barkodas →
+#              doc.prekes_kodas → doc.prekes_barkodas →
+#              fallback neraPrekesKodo + 4 случайные цифры.
+#     """
+#     return smart_str(
+#         li["prekes_kodas"]
+#         or li["prekes_barkodas"]
+#         or getattr(doc, "prekes_kodas", "")
+#         or getattr(doc, "prekes_barkodas", "")
+#         or f"neraPrekesKodo{random.randint(0, 9999):04d}"
+#     )
+
+
+# def _item_code_for_sumiskai(doc) -> str:
+#     """
+#     Код товара для документа (sumiskai режим).
+#     Цепочка: doc.prekes_kodas → doc.prekes_barkodas →
+#              fallback neraPrekesKodo + 4 случайные цифры.
+#     """
+#     return smart_str(
+#         getattr(doc, "prekes_kodas", "")
+#         or getattr(doc, "prekes_barkodas", "")
+#         or f"neraPrekesKodo{random.randint(0, 9999):04d}"
+#     )
 
 
 # # =========================
@@ -1381,10 +1442,11 @@ def export_documents_group_to_apskaita5(
 #     # Логирование (если были изменения)
 #     if delta_wo > Decimal("0.001") or delta_vat > Decimal("0.001") or delta_with > Decimal("0.001"):
 #         logger.debug(
-#             f"[Apskaita5] Документ скорректирован под строки: "
-#             f"wo {doc_wo:.2f}→{sum_subtotal:.2f} (Δ{delta_wo:.4f}), "
-#             f"vat {doc_vat:.2f}→{sum_vat:.2f} (Δ{delta_vat:.4f}), "
-#             f"with {doc_with:.2f}→{sum_total:.2f} (Δ{delta_with:.4f})"
+#             "[Apskaita5] Документ скорректирован под строки: "
+#             "wo %s→%s (Δ%s), vat %s→%s (Δ%s), with %s→%s (Δ%s)",
+#             doc_wo, sum_subtotal, delta_wo,
+#             doc_vat, sum_vat, delta_vat,
+#             doc_with, sum_total, delta_with,
 #         )
 
 
@@ -1397,6 +1459,7 @@ def export_documents_group_to_apskaita5(
 #     site_url: str,
 #     company_code: Optional[str],
 #     direction_hint: Optional[str],
+#     merge_vat: bool = False,
 # ) -> bytes:
 #     """
 #     Собирает один XML <documents> из переданных документов, выставляя:
@@ -1404,7 +1467,7 @@ def export_documents_group_to_apskaita5(
 #     - buyercode/sellercode = код нашей компании (если company_code не задан — из *_id с fallback NERAKODO####)
 #     - docser/docnum/id по заданным правилам
 #     - <currencyrate>
-#     - <nuolaida> / <nuolaidapvm> (скидки документа)
+#     - merge_vat: если True — цена включает PVM, vatpercent/vatclass пустые, vat=0
     
 #     ВАЖНО: Все суммы финализируются для идеального совпадения (tolerance 0.00).
 #     """
@@ -1513,6 +1576,11 @@ def export_documents_group_to_apskaita5(
 #             vat = float(vat_dec)
 #             with_vat = float(with_vat_dec)
 
+#         # ===== merge_vat: сливаем PVM в цену =====
+#         if merge_vat:
+#             wo = with_vat  # subtotal = total (брутто)
+#             vat = 0.0      # PVM = 0
+
 #         _set_child_text(doc_el, "subtotal", get_price_or_zero(wo))
 #         _set_child_text(doc_el, "vat", get_price_or_zero(vat))
 #         _set_child_text(doc_el, "total", get_price_or_zero(with_vat))
@@ -1532,7 +1600,13 @@ def export_documents_group_to_apskaita5(
 
 #         # --- флаги ---
 #         report2isaf = True if getattr(doc, "report_to_isaf", None) is None else bool(getattr(doc, "report_to_isaf"))
-#         separatevat = True if getattr(doc, "separate_vat", None) is None else bool(getattr(doc, "separate_vat"))
+        
+#         # merge_vat принудительно выключает separatevat
+#         if merge_vat:
+#             separatevat = False
+#         else:
+#             separatevat = True if getattr(doc, "separate_vat", None) is None else bool(getattr(doc, "separate_vat"))
+        
 #         _set_child_text(doc_el, "report2isaf", "true" if report2isaf else "false")
 #         _set_child_text(doc_el, "separatevat", "true" if separatevat else "false")
 
@@ -1587,59 +1661,97 @@ def export_documents_group_to_apskaita5(
 #                 line_el = ET.SubElement(doc_el, "line")
 #                 _set_child_text(line_el, "lineid", str(idx))
 
-#                 _set_child_text(line_el, "price", get_price_or_zero(li["price"]))
-#                 _set_child_text(line_el, "subtotal", get_price_or_zero(li["subtotal"]))
-#                 _set_child_text(line_el, "vat", get_price_or_zero(li["vat"]))
-#                 _set_child_text(line_el, "vatpercent", get_price_or_zero(li["vat_percent"]))
-#                 _set_child_text(line_el, "total", get_price_or_zero(li["total"]))
+#                 if merge_vat:
+#                     # ===== merge_vat: цена включает PVM =====
+#                     line_sub = Decimal(str(li["subtotal"]))  # уже post-discount
+#                     line_vat = Decimal(str(li["vat"]))
+#                     gross = round(line_sub + line_vat, 2)
+#                     qty_dec = Decimal(str(li["quantity"])) or Decimal("1")
+#                     price_gross = round(gross / qty_dec, 4)
 
-#                 code_val = smart_str(li["prekes_kodas"] or li["prekes_barkodas"] or "neraPrekesKodo")
+#                     _set_child_text(line_el, "price", get_price_or_zero(float(price_gross)))
+#                     _set_child_text(line_el, "subtotal", get_price_or_zero(float(gross)))
+#                     _set_child_text(line_el, "vat", "0")
+#                     _set_child_text(line_el, "vatpercent", "0")
+#                     _set_child_text(line_el, "total", get_price_or_zero(float(gross)))
+#                 else:
+#                     # ===== Обычный режим =====
+#                     _set_child_text(line_el, "price", get_price_or_zero(li["price"]))
+#                     _set_child_text(line_el, "subtotal", get_price_or_zero(li["subtotal"]))
+#                     _set_child_text(line_el, "vat", get_price_or_zero(li["vat"]))
+#                     _set_child_text(line_el, "vatpercent", get_price_or_zero(li["vat_percent"]))
+#                     _set_child_text(line_el, "total", get_price_or_zero(li["total"]))
+
+#                 # ====== FIX: Код товара с fallback-цепочкой ======
+#                 code_val = _item_code_for_line(li, doc)
 #                 _set_child_text(line_el, "code", code_val)
 
 #                 _set_child_text(line_el, "name", smart_str(li["prekes_pavadinimas"] or ""))
 #                 _set_child_text(line_el, "unit", smart_str(li["unit"] or "vnt"))
 #                 _set_child_text(line_el, "quantity", get_price_or_zero(li["quantity"]))
 
-#                 # ====== ИСПРАВЛЕНИЕ: vatclass с фильтрацией "Keli skirtingi PVM" ======
-#                 if line_map is not None:  # multi
-#                     vatclass = (line_map or {}).get(li["id"])
-#                 else:  # single
-#                     vatclass = li["pvm_kodas"]
-                
-#                 # Фильтруем маркер "Keli skirtingi PVM" - это не реальный код
-#                 if vatclass == "Keli skirtingi PVM":
-#                     vatclass = ""
-                
-#                 _set_child_text(line_el, "vatclass", smart_str(vatclass or ""))
+#                 # ====== vatclass ======
+#                 if merge_vat:
+#                     # merge_vat: vatclass всегда пустой
+#                     _set_child_text(line_el, "vatclass", "")
+#                 else:
+#                     # Обычный режим с фильтрацией "Keli skirtingi PVM"
+#                     if line_map is not None:  # multi
+#                         vatclass = (line_map or {}).get(li["id"])
+#                     else:  # single
+#                         vatclass = li["pvm_kodas"]
+                    
+#                     # Фильтруем маркер "Keli skirtingi PVM" - это не реальный код
+#                     if vatclass == "Keli skirtingi PVM":
+#                         vatclass = ""
+                    
+#                     _set_child_text(line_el, "vatclass", smart_str(vatclass or ""))
 
 #                 _set_child_text(line_el, "warehouse", smart_str(li["sandelio_kodas"] or ""))
 #                 _set_child_text(line_el, "object", "")
 #         else:
-#             # Документ без строк (sumiškai) - используем финальные значения
+#             # ===== Документ без строк (sumiškai) =====
 #             line_el = ET.SubElement(doc_el, "line")
 #             _set_child_text(line_el, "lineid", "0")
-#             _set_child_text(line_el, "price", get_price_or_zero(wo))
-#             _set_child_text(line_el, "subtotal", get_price_or_zero(wo))
-#             _set_child_text(line_el, "vat", get_price_or_zero(vat))
 
-#             # ====== ИСПРАВЛЕНИЕ: vat_percent пустой при separate_vat=True ======
-#             if vat_percent_for_line is not None:
-#                 _set_child_text(line_el, "vatpercent", get_price_or_zero(vat_percent_for_line))
+#             if merge_vat:
+#                 # ===== merge_vat sumiskai: всё = with_vat, PVM = 0 =====
+#                 _set_child_text(line_el, "price", get_price_or_zero(with_vat))
+#                 _set_child_text(line_el, "subtotal", get_price_or_zero(with_vat))
+#                 _set_child_text(line_el, "vat", "0")
+#                 _set_child_text(line_el, "vatpercent", "0")
+#                 _set_child_text(line_el, "total", get_price_or_zero(with_vat))
 #             else:
-#                 _set_child_text(line_el, "vatpercent", "")  # Пустой при separate_vat=True
+#                 # ===== Обычный режим sumiskai =====
+#                 _set_child_text(line_el, "price", get_price_or_zero(wo))
+#                 _set_child_text(line_el, "subtotal", get_price_or_zero(wo))
+#                 _set_child_text(line_el, "vat", get_price_or_zero(vat))
 
-#             _set_child_text(line_el, "total", get_price_or_zero(with_vat))
-#             _set_child_text(line_el, "code", "neraPrekesKodo")
+#                 # vat_percent пустой при separate_vat=True
+#                 if vat_percent_for_line is not None:
+#                     _set_child_text(line_el, "vatpercent", get_price_or_zero(vat_percent_for_line))
+#                 else:
+#                     _set_child_text(line_el, "vatpercent", "0")  # Пустой при separate_vat=True
+
+#                 _set_child_text(line_el, "total", get_price_or_zero(with_vat))
+
+#             # ====== FIX: Код товара с fallback-цепочкой ======
+#             _set_child_text(line_el, "code", _item_code_for_sumiskai(doc))
+
 #             _set_child_text(line_el, "name", smart_str(getattr(doc, "prekes_pavadinimas", "") or ""))
 #             _set_child_text(line_el, "unit", "vnt")
 #             _set_child_text(line_el, "quantity", "1")
             
-#             # ====== ИСПРАВЛЕНИЕ: vatclass пустой при separate_vat=True ======
-#             pvm_kodas = _s(getattr(doc, "pvm_kodas", ""))
-#             # При separate_vat=True или если маркер - пустой vatclass
-#             if separate_vat or pvm_kodas == "Keli skirtingi PVM":
-#                 pvm_kodas = ""
-#             _set_child_text(line_el, "vatclass", smart_str(pvm_kodas))
+#             # vatclass
+#             if merge_vat:
+#                 # merge_vat: vatclass всегда пустой
+#                 _set_child_text(line_el, "vatclass", "")
+#             else:
+#                 pvm_kodas = _s(getattr(doc, "pvm_kodas", ""))
+#                 # При separate_vat=True или если маркер - пустой vatclass
+#                 if separate_vat or pvm_kodas == "Keli skirtingi PVM":
+#                     pvm_kodas = ""
+#                 _set_child_text(line_el, "vatclass", smart_str(pvm_kodas))
             
 #             _set_child_text(line_el, "warehouse", smart_str(getattr(doc, "sandelio_kodas", "") or ""))
 #             _set_child_text(line_el, "object", "")
@@ -1698,7 +1810,8 @@ def export_documents_group_to_apskaita5(
 #     documents: Iterable,
 #     site_url: str,
 #     company_code: Optional[str] = None,
-#     direction: Optional[str] = None,  # если указать, все документы сначала классифицируются, потом фильтруются
+#     direction: Optional[str] = None,
+#     apskaita5_extra_fields: Optional[dict] = None,
 # ) -> Tuple[bytes, str, str]:
 #     """
 #     Возвращает (content_bytes, filename, content_type).
@@ -1710,7 +1823,19 @@ def export_documents_group_to_apskaita5(
 
 #     company_code:
 #       - если None, вычисляется из документа (теперь только buyer_id/seller_id с fallback NERAKODO####)
+    
+#     apskaita5_extra_fields:
+#       - dict с ключом "user" → dict с ключом "extra_settings" → {"merge_vat": "1"/"0"}
 #     """
+#     # === Извлекаем merge_vat из extra_fields ===
+#     extra = apskaita5_extra_fields or {}
+#     user = extra.get("user") if isinstance(extra.get("user"), dict) else {}
+#     extra_settings = user.get("extra_settings") if isinstance(user.get("extra_settings"), dict) else {}
+#     merge_vat = str(extra_settings.get("merge_vat", "0")).strip() == "1"
+
+#     if merge_vat:
+#         logger.debug("[Apskaita5] merge_vat=True — PVM будет слит в цену")
+
 #     docs = list(documents)  # чтобы можно было итерироваться несколько раз
 #     pirkimai = []
 #     pardavimai = []
@@ -1723,21 +1848,29 @@ def export_documents_group_to_apskaita5(
 #     today = _today_str_iso()
 
 #     if pirkimai and not pardavimai:
-#         xml_bytes = _build_apskaita5_xml_for_documents(pirkimai, site_url, company_code, 'pirkimas')
+#         xml_bytes = _build_apskaita5_xml_for_documents(
+#             pirkimai, site_url, company_code, 'pirkimas', merge_vat=merge_vat,
+#         )
 #         return xml_bytes, f"{today}_pirkimai_apskaita5.xml", "application/xml"
 
 #     if pardavimai and not pirkimai:
-#         xml_bytes = _build_apskaita5_xml_for_documents(pardavimai, site_url, company_code, 'pardavimas')
+#         xml_bytes = _build_apskaita5_xml_for_documents(
+#             pardavimai, site_url, company_code, 'pardavimas', merge_vat=merge_vat,
+#         )
 #         return xml_bytes, f"{today}_pardavimai_apskaita5.xml", "application/xml"
 
 #     # оба типа → ZIP
 #     zip_buf = BytesIO()
 #     with zipfile.ZipFile(zip_buf, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
 #         if pirkimai:
-#             p_bytes = _build_apskaita5_xml_for_documents(pirkimai, site_url, company_code, 'pirkimas')
+#             p_bytes = _build_apskaita5_xml_for_documents(
+#                 pirkimai, site_url, company_code, 'pirkimas', merge_vat=merge_vat,
+#             )
 #             zf.writestr(f"{today}_pirkimai_apskaita5.xml", p_bytes)
 #         if pardavimai:
-#             s_bytes = _build_apskaita5_xml_for_documents(pardavimai, site_url, company_code, 'pardavimas')
+#             s_bytes = _build_apskaita5_xml_for_documents(
+#                 pardavimai, site_url, company_code, 'pardavimas', merge_vat=merge_vat,
+#             )
 #             zf.writestr(f"{today}_pardavimai_apskaita5.xml", s_bytes)
 
 #     return zip_buf.getvalue(), f"{today}_apskaita5.zip", "application/zip"
@@ -1750,12 +1883,14 @@ def export_documents_group_to_apskaita5(
 #     site_url: str,
 #     company_code: Optional[str] = None,
 #     direction: Optional[str] = None,
+#     apskaita5_extra_fields: Optional[dict] = None,
 # ) -> bytes:
 #     content, _filename, _ctype = export_documents_group_to_apskaita5_files(
 #         documents=documents,
 #         site_url=site_url,
 #         company_code=company_code,
 #         direction=direction,
+#         apskaita5_extra_fields=apskaita5_extra_fields,
 #     )
 #     return content
 

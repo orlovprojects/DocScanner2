@@ -14,6 +14,7 @@ import {
 } from '@mui/icons-material';
 import { invoicingApi } from '../api/invoicingApi';
 import { api } from '../api/endpoints';
+import { useCompanyProfiles } from '../contexts/useCompanyProfiles';
 
 // ═══════════════════════════════════════════════════════════
 // Constants
@@ -51,6 +52,7 @@ const InvoiceSeriesPage = () => {
   const navigate = useNavigate();
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
+  const { activeId } = useCompanyProfiles();
 
   const [loading, setLoading] = useState(true);
   const [series, setSeries] = useState([]);
@@ -80,7 +82,7 @@ const InvoiceSeriesPage = () => {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [activeId]);
 
   useEffect(() => { loadSeries(); }, [loadSeries]);
 

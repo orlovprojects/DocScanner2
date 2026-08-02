@@ -136,6 +136,7 @@ def generate_invoice_from_recurring(recurring: RecurringInvoice) -> Invoice:
             if recurring.auto_issue:
                 series_obj = InvoiceSeries.objects.select_for_update().filter(
                     user=recurring.user,
+                    company_profile_id=invoice.company_profile_id,
                     prefix=recurring.document_series,
                     invoice_type=recurring.invoice_type,
                     is_active=True,

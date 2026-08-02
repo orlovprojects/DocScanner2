@@ -240,50 +240,56 @@ def ask_kie(
 
     return result
 
-
 CATALOG_MATCHING_PROMPT = """
 You match invoice line items to products from the user's product catalog.
+
+Short field names used in this request:
+- id = line item database ID
+- pav = product name (prekes_pavadinimas)
+- kod = product code (prekes_kodas)
+- bar = product barcode (prekes_barkodas)
+- unit = unit of measurement
 
 The input contains:
 
 1. "catalog":
    Products available for matching.
    Each product contains:
-   - prekes_kodas
-   - prekes_pavadinimas
-   - optional prekes_barkodas
+   - kod
+   - pav
+   - optional bar
    - optional unit
 
 2. "line_items":
    Invoice line items that must be matched.
    Each line contains:
-   - line_item_id
-   - prekes_pavadinimas
-   - prekes_kodas
-   - optional prekes_barkodas
+   - id
+   - pav
+   - kod
+   - optional bar
    - unit
 
 Rules:
 
-1. Return exactly one result for every line_item_id from line_items.
+1. Return exactly one result for every id from line_items.
 
-2. prekes_kodas in the response must be:
-   - an exact prekes_kodas value from catalog
+2. kod in the response must be:
+   - an exact kod value from catalog
    - or the exact string "UKN0" when absolutely no match exists
 
-3. Never invent, modify, translate, shorten or normalize a catalog code.
+3. Never invent, modify, translate, shorten or normalize a catalog kod.
 
 4. Preserve leading zeroes in codes.
    Example: return "000409", never 409 or "409".
 
 5. Matching priority:
-   a) exact barcode match
-   b) exact or clearly corresponding product code
-   c) semantic product-name match (see rule 9)
+   a) exact barcode match using bar
+   b) exact or clearly corresponding product code using kod
+   c) semantic product-name match using pav (see rule 9)
    d) compatible unit (see rule 7)
 
-6. The product code on an invoice can be the supplier's internal code,
-   so it may be different from the user's catalog code.
+6. The product kod on an invoice can be the supplier's internal code,
+   so it may be different from the user's catalog kod.
 
 7. Unit differences alone are NOT a reason to skip a match.
    Invoice units (vnt, pak, dėž) often differ from catalog units (kg, l).
@@ -294,14 +300,14 @@ Rules:
    purchased food, materials or ingredients.
 
 9. ALWAYS pick the closest matching catalog product. Be aggressive:
-   - Partial name overlap is enough. "Ridikėlių (Daikon) daigai" matches
+   - Partial pav overlap is enough. "Ridikėlių (Daikon) daigai" matches
      "Ridikėliai" because the root product is the same.
    - Variants, sizes, flavors, and packaging differences are NOT reasons
      to return UKN0. Match to the base product.
    - Synonyms and related forms count: "Ridikas baltas" and "Ridikėliai"
      are the same vegetable family.
-   - When multiple catalog products are plausible, pick the one whose name
-     shares the most words or the closest semantic meaning with the invoice
+   - When multiple catalog products are plausible, pick the one whose pav
+     shares the most words or has the closest semantic meaning to the invoice
      line item. Do NOT return UKN0 just because there are several options.
 
 10. Return "UKN0" ONLY when there is genuinely no catalog product that
@@ -316,16 +322,103 @@ Return only valid JSON in this exact structure:
 {
   "matches": [
     {
-      "line_item_id": 123,
-      "prekes_kodas": "000409"
+      "id": 123,
+      "kod": "000409"
     },
     {
-      "line_item_id": 124,
-      "prekes_kodas": "UKN0"
+      "id": 124,
+      "kod": "UKN0"
     }
   ]
 }
 """.strip()
+
+
+# CATALOG_MATCHING_PROMPT = """
+# You match invoice line items to products from the user's product catalog.
+
+# The input contains:
+
+# 1. "catalog":
+#    Products available for matching.
+#    Each product contains:
+#    - prekes_kodas
+#    - prekes_pavadinimas
+#    - optional prekes_barkodas
+#    - optional unit
+
+# 2. "line_items":
+#    Invoice line items that must be matched.
+#    Each line contains:
+#    - line_item_id
+#    - prekes_pavadinimas
+#    - prekes_kodas
+#    - optional prekes_barkodas
+#    - unit
+
+# Rules:
+
+# 1. Return exactly one result for every line_item_id from line_items.
+
+# 2. prekes_kodas in the response must be:
+#    - an exact prekes_kodas value from catalog
+#    - or the exact string "UKN0" when absolutely no match exists
+
+# 3. Never invent, modify, translate, shorten or normalize a catalog code.
+
+# 4. Preserve leading zeroes in codes.
+#    Example: return "000409", never 409 or "409".
+
+# 5. Matching priority:
+#    a) exact barcode match
+#    b) exact or clearly corresponding product code
+#    c) semantic product-name match (see rule 9)
+#    d) compatible unit (see rule 7)
+
+# 6. The product code on an invoice can be the supplier's internal code,
+#    so it may be different from the user's catalog code.
+
+# 7. Unit differences alone are NOT a reason to skip a match.
+#    Invoice units (vnt, pak, dėž) often differ from catalog units (kg, l).
+#    A package of 50 g sold as "vnt" can match a catalog product stored in "kg".
+#    Only reject on unit mismatch when the product categories are clearly different.
+
+# 8. Prefer the actual raw product category when the invoice describes
+#    purchased food, materials or ingredients.
+
+# 9. ALWAYS pick the closest matching catalog product. Be aggressive:
+#    - Partial name overlap is enough. "Ridikėlių (Daikon) daigai" matches
+#      "Ridikėliai" because the root product is the same.
+#    - Variants, sizes, flavors, and packaging differences are NOT reasons
+#      to return UKN0. Match to the base product.
+#    - Synonyms and related forms count: "Ridikas baltas" and "Ridikėliai"
+#      are the same vegetable family.
+#    - When multiple catalog products are plausible, pick the one whose name
+#      shares the most words or the closest semantic meaning with the invoice
+#      line item. Do NOT return UKN0 just because there are several options.
+
+# 10. Return "UKN0" ONLY when there is genuinely no catalog product that
+#     could reasonably correspond to the invoice line item — not even
+#     partially or by category. UKN0 is a last resort, not a safe default.
+
+# 11. Do not return explanations, confidence scores, product names,
+#     markdown or any additional text.
+
+# Return only valid JSON in this exact structure:
+
+# {
+#   "matches": [
+#     {
+#       "line_item_id": 123,
+#       "prekes_kodas": "000409"
+#     },
+#     {
+#       "line_item_id": 124,
+#       "prekes_kodas": "UKN0"
+#     }
+#   ]
+# }
+# """.strip()
 
 
 def ask_catalog_matching_kie(

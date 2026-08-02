@@ -39,6 +39,45 @@ def _s(v) -> str:
     """Строка без None, с trim."""
     return str(v).strip() if v is not None else ""
 
+
+def _use_matched_catalog(item) -> bool:
+    """Есть ли валидный каталог-матч на строке (и юзер его не отключил)."""
+    if getattr(item, "catalog_match_user_override", False):
+        return False
+
+    matched_code = _s(getattr(item, "matched_prekes_kodas", ""))
+    return bool(matched_code) and matched_code.upper() != "UKN0"
+
+
+def _resolved_field(item, field_name: str) -> str:
+    """
+    Если есть валидный каталог-матч — берём matched_ поле.
+    Если matched_ поле пустое — fallback на оригинальное.
+    """
+    if _use_matched_catalog(item):
+        matched_value = _s(
+            getattr(item, f"matched_{field_name}", "")
+        )
+        if matched_value:
+            return matched_value
+
+    return _s(getattr(item, field_name, ""))
+
+
+def _resolved_or_persist_kodas(item) -> str:
+    """
+    Для валидного матча возвращает matched-код.
+    Без матча сохраняет прежнюю Finvalda-логику генерации/persist кода.
+    """
+    if _use_matched_catalog(item):
+        return (
+            _resolved_field(item, "prekes_kodas")
+            or _resolved_field(item, "prekes_barkodas")
+        ).upper()
+
+    return _get_or_persist_kodas_from_obj(item)
+
+
 def _upper(v) -> str:
     return _s(v).upper()
 
@@ -384,10 +423,17 @@ def _ensure_catalog_entry_from_item(root: ET.Element, *, item, currency: str):
     """Обеспечивает запись в реестры: если товар — в <prekes>, если услуга — в <paslaugos>.
     Код: сохраняем один раз в item.prekes_kodas при его отсутствии и отсутствии barkodas.
     """
-    tipas = normalize_tip_lineitem(getattr(item, "preke_paslauga", None))
-    kodas = _get_or_persist_kodas_from_obj(item)
-    bar = _upper(getattr(item, "prekes_barkodas", None)) if _s(getattr(item, "prekes_barkodas", None)) else ""
-    name = _s(getattr(item, "prekes_pavadinimas", None)) or kodas
+    tipas = normalize_tip_lineitem(
+        _resolved_field(item, "preke_paslauga")
+    )
+    kodas = _resolved_or_persist_kodas(item)
+    bar = _upper(
+        _resolved_field(item, "prekes_barkodas")
+    )
+    name = (
+        _resolved_field(item, "prekes_pavadinimas")
+        or kodas
+    )
 
     qty = _d(getattr(item, "quantity", None), Decimal("1"))
     subtotal = _d(getattr(item, "subtotal", None))
@@ -400,7 +446,15 @@ def _ensure_catalog_entry_from_item(root: ET.Element, *, item, currency: str):
         except Exception:
             pass
 
-    mat_kodas = _upper(getattr(item, "mat_kodas", None) or "VNT")
+    mat_kodas = _upper(
+        (
+            _resolved_field(item, "unit")
+            if _use_matched_catalog(item)
+            else ""
+        )
+        or getattr(item, "mat_kodas", None)
+        or "VNT"
+    )
     sandelis = _upper(getattr(item, "sandelio_kodas", None) or "")
 
     if tipas == "2":
@@ -558,14 +612,16 @@ def _fill_line(
 
     # tipas (1/2 товар/услуга) - УРОВЕНЬ СТРОКИ
     if line_obj is not None:
-        tipas_val = normalize_tip_lineitem(getattr(line_obj, "preke_paslauga", None))
+        tipas_val = normalize_tip_lineitem(
+            _resolved_field(line_obj, "preke_paslauga")
+        )
     else:
         tipas_val = normalize_tip_doc(fallback_tip_doc)
     ET.SubElement(eilute, "tipas").text = tipas_val
 
     # kodas (persist once into obj.prekes_kodas if both empty)
     if line_obj is not None:
-        kodas_val = _get_or_persist_kodas_from_obj(line_obj)
+        kodas_val = _resolved_or_persist_kodas(line_obj)
     else:
         # суммарный режим: код берём/сохраняем на уровне doc и сюда передаём
         kodas_val = _s(summary_kodas) or _gen_random_kodas()
@@ -584,7 +640,11 @@ def _fill_line(
             ET.SubElement(eilute, "sandelis").text = _upper(sandelio_kodas)
 
     # pavadinimas
-    name = getattr(line_obj, "prekes_pavadinimas", None) if line_obj is not None else None
+    name = (
+        _resolved_field(line_obj, "prekes_pavadinimas")
+        if line_obj is not None
+        else None
+    )
     ET.SubElement(eilute, "pavadinimas").text = smart_str(_s(name) or _s(fallback_name))
 
     # суммы (ИСПОЛЬЗУЕМ ЗНАЧЕНИЯ ПОСЛЕ СКИДКИ, если есть)
@@ -982,6 +1042,7 @@ def export_pardavimai_group_to_finvalda(documents, user=None, own_company_code=N
 
 
 
+
 # from __future__ import annotations
 
 # import xml.etree.ElementTree as ET
@@ -992,8 +1053,28 @@ def export_pardavimai_group_to_finvalda(documents, user=None, own_company_code=N
 # from decimal import Decimal, InvalidOperation
 
 # from .formatters import format_date, get_price_or_zero, expand_empty_tags
+# from ..utils.extra_fields import get_extra_for_export
 
 # FNS = {"xsi": "http://www.w3.org/2001/XMLSchema-instance"}
+
+
+# # =========================
+# # Helpers: per-company extra_fields
+# # =========================
+# def _parse_cp_key(cp_key):
+#     """Парсит cp_key: 'id:304401940' → '304401940', '304401940' → '304401940'"""
+#     if not cp_key:
+#         return ""
+#     cp = str(cp_key).strip()
+#     if cp.lower().startswith("id:"):
+#         return cp.split(":", 1)[1].strip()
+#     return cp
+
+
+# def _get_extra_fields(user, program_key, own_company_code=None):
+#     """Получает extra_fields с учётом per-company профилей."""
+#     imones_kodas = _parse_cp_key(own_company_code)
+#     return get_extra_for_export(user, program_key, imones_kodas)
 
 
 # # =========================
@@ -1128,24 +1209,78 @@ def export_pardavimai_group_to_finvalda(documents, user=None, own_company_code=N
 #     return s, n
 
 
-# def _get_extra_field_value(doc, user_extra_fields: dict, field_key: str) -> str:
+# def _get_extra_field_value(finvalda_fields: dict, field_key: str) -> str:
 #     """
-#     Извлекает значение extra field из user.finvalda_extra_fields.
+#     Извлекает значение extra field из finvalda_fields.
     
 #     Args:
-#         doc: Document instance
-#         user_extra_fields: dict из user.finvalda_extra_fields
+#         finvalda_fields: dict из get_extra_for_export()
 #         field_key: ключ типа "pirkimas_tipas", "pardavimas_zurnalas" и т.д.
     
 #     Returns:
 #         UPPERCASE значение или пустая строка
 #     """
-#     if not user_extra_fields or not isinstance(user_extra_fields, dict):
+#     if not finvalda_fields or not isinstance(finvalda_fields, dict):
 #         return ""
     
 #     # Получаем значение из extra_fields
-#     value = user_extra_fields.get(field_key, "")
+#     value = finvalda_fields.get(field_key, "")
 #     return _upper(value)
+
+
+# # =========================
+# # PVM Kodas helpers
+# # =========================
+
+# def _get_pvm_kodas_for_item(doc, item, line_map=None, default="") -> str:
+#     """
+#     Получает PVM kodas для строки с учётом резолвера и separate_vat.
+    
+#     Приоритет:
+#     1. line_map[item.id] — от резолвера (если есть)
+#     2. item.pvm_kodas — из БД
+#     3. default — fallback
+    
+#     ВАЖНО: "Keli skirtingi PVM" — это маркер, не реальный код -> возвращаем default
+#     """
+#     item_id = getattr(item, "id", None)
+    
+#     # Пробуем взять из line_map (от резолвера)
+#     if line_map is not None and item_id is not None and item_id in line_map:
+#         pvm = _s(line_map.get(item_id, ""))
+#         if pvm and pvm != "Keli skirtingi PVM":
+#             return pvm
+    
+#     # Fallback на item.pvm_kodas
+#     pvm = _s(getattr(item, "pvm_kodas", ""))
+#     if pvm and pvm != "Keli skirtingi PVM":
+#         return pvm
+    
+#     return default
+
+
+# def _get_pvm_kodas_for_doc(doc, default="") -> str:
+#     """
+#     Получает PVM kodas для документа (sumiskai режим).
+    
+#     ВАЖНО: 
+#     - При separate_vat=True -> пустой (смешанные ставки)
+#     - "Keli skirtingi PVM" -> пустой (это маркер, не код)
+#     """
+#     separate_vat = bool(getattr(doc, "separate_vat", False))
+#     scan_type = _s(getattr(doc, "scan_type", "")).lower()
+    
+#     # sumiskai + separate_vat=True -> пустой
+#     if separate_vat and scan_type in ("sumiskai", "summary", "suminis"):
+#         return default
+    
+#     pvm = _s(getattr(doc, "pvm_kodas", ""))
+    
+#     # Фильтруем маркер
+#     if pvm == "Keli skirtingi PVM":
+#         return default
+    
+#     return pvm or default
 
 
 # # =========================
@@ -1553,10 +1688,12 @@ def export_pardavimai_group_to_finvalda(documents, user=None, own_company_code=N
 #             pvm_proc_text = "0.00"
 #     ET.SubElement(eilute, "pvm_proc").text = pvm_proc_text
 
-#     # pvm_kodas
-#     if pvm_kodas_value is None:
-#         pvm_kodas_value = getattr(line_obj, "pvm_kodas", None) if line_obj is not None else ""
-#     ET.SubElement(eilute, "pvm_kodas").text = smart_str(_s(pvm_kodas_value))
+#     # ====== ИСПРАВЛЕНИЕ: pvm_kodas с фильтрацией маркера ======
+#     # Фильтруем "Keli skirtingi PVM" - это маркер, не реальный код
+#     pvm_kodas_final = _s(pvm_kodas_value) if pvm_kodas_value else ""
+#     if pvm_kodas_final == "Keli skirtingi PVM":
+#         pvm_kodas_final = ""
+#     ET.SubElement(eilute, "pvm_kodas").text = smart_str(pvm_kodas_final)
 
 #     # НОВОЕ: Цена за единицу (suma_vntv/suma_vntl) - опционально, но полезно для Finvalda
 #     # Это явно указывает себестоимость за единицу
@@ -1576,12 +1713,15 @@ def export_pardavimai_group_to_finvalda(documents, user=None, own_company_code=N
 # # Pirkimai
 # # =========================================================
 
-# def export_pirkimai_group_to_finvalda(documents):
+# def export_pirkimai_group_to_finvalda(documents, user=None, own_company_code=None):
 #     """Экспорт ПРИОБРЕТЕНИЙ (pirkimas) в формат Finvalda. Возвращает bytes.
 #     Формат: <fvsdata><klientai/><prekes/><paslaugos/><operacijos>...</operacijos></fvsdata>"""
 #     root = _root()
 #     operacijos = root.find("operacijos")
 #     assert operacijos is not None
+
+#     # Получаем extra_fields один раз для всего экспорта
+#     finvalda_fields = _get_extra_fields(user, "finvalda", own_company_code)
 
 #     for doc in documents:
 #         currency = _s(getattr(doc, "currency", "EUR") or "EUR").upper()
@@ -1614,19 +1754,13 @@ def export_pardavimai_group_to_finvalda(documents, user=None, own_company_code=N
 #             country_iso=seller_country,
 #         )
 
-#         # Получаем extra fields из user
-#         user = getattr(doc, "user", None)
-#         user_extra_fields = {}
-#         if user:
-#             user_extra_fields = getattr(user, "finvalda_extra_fields", None) or {}
-
 #         # ПРАВИЛЬНЫЙ ПОРЯДОК ПОЛЕЙ согласно XSD схеме
 #         pirkimas = ET.SubElement(operacijos, "pirkimas")
 
 #         # 1. Поля из operacijaType (базовый тип)
 #         # tipas (УРОВЕНЬ ДОКУМЕНТА - тип операции, не путать с tipas строки!)
 #         tipas_value = (
-#             _get_extra_field_value(doc, user_extra_fields, "pirkimas_tipas")
+#             _get_extra_field_value(finvalda_fields, "pirkimas_tipas")
 #             or _upper(getattr(doc, "tipo_kodas", None))
 #         )
 #         if tipas_value:
@@ -1634,7 +1768,7 @@ def export_pardavimai_group_to_finvalda(documents, user=None, own_company_code=N
 
 #         # zurnalas
 #         zurnalas_value = (
-#             _get_extra_field_value(doc, user_extra_fields, "pirkimas_zurnalas")
+#             _get_extra_field_value(finvalda_fields, "pirkimas_zurnalas")
 #             or _upper(getattr(doc, "zurnalo_kodas", None))
 #         )
 #         if zurnalas_value:
@@ -1642,7 +1776,7 @@ def export_pardavimai_group_to_finvalda(documents, user=None, own_company_code=N
 
 #         # padalinys
 #         padalinys_value = (
-#             _get_extra_field_value(doc, user_extra_fields, "pirkimas_padalinys")
+#             _get_extra_field_value(finvalda_fields, "pirkimas_padalinys")
 #             or _upper(getattr(doc, "padalinio_kodas", None))
 #             or "PP"  # fallback
 #         )
@@ -1658,7 +1792,7 @@ def export_pardavimai_group_to_finvalda(documents, user=None, own_company_code=N
 
 #         # darbuotojas
 #         darbuotojas_value = (
-#             _get_extra_field_value(doc, user_extra_fields, "pirkimas_darbuotojas")
+#             _get_extra_field_value(finvalda_fields, "pirkimas_darbuotojas")
 #             or _upper(getattr(doc, "atsakingo_asmens_kodas", None))
 #         )
 #         if darbuotojas_value:
@@ -1680,7 +1814,7 @@ def export_pardavimai_group_to_finvalda(documents, user=None, own_company_code=N
 
 #         # Получаем sandelis из extra_fields или doc
 #         default_sandelis = (
-#             _get_extra_field_value(doc, user_extra_fields, "pirkimas_sandelis")
+#             _get_extra_field_value(finvalda_fields, "pirkimas_sandelis")
 #             or _s(getattr(doc, "sandelio_kodas", ""))
 #         )
 
@@ -1699,7 +1833,8 @@ def export_pardavimai_group_to_finvalda(documents, user=None, own_company_code=N
 #                 # Реестр prekes/paslaugos
 #                 _ensure_catalog_entry_from_item(root, item=item, currency=currency)
 
-#                 code = (line_map or {}).get(getattr(item, "id", None)) if line_map is not None else getattr(item, "pvm_kodas", None)
+#                 # ====== ИСПРАВЛЕНИЕ: Используем helper для PVM кода ======
+#                 code = _get_pvm_kodas_for_item(doc, item, line_map, default="")
 
 #                 _fill_line(
 #                     det,
@@ -1711,6 +1846,9 @@ def export_pardavimai_group_to_finvalda(documents, user=None, own_company_code=N
 #                 )
 #         else:
 #             # синтетическая строка
+#             # ====== ИСПРАВЛЕНИЕ: Используем helper для PVM кода документа ======
+#             pvm_kodas_doc = _get_pvm_kodas_for_doc(doc, default="")
+            
 #             _fill_line(
 #                 det,
 #                 is_purchase=False,
@@ -1719,7 +1857,7 @@ def export_pardavimai_group_to_finvalda(documents, user=None, own_company_code=N
 #                 fallback_amount_wo_vat=getattr(doc, "amount_wo_vat", None),
 #                 fallback_vat_amount=getattr(doc, "vat_amount", None),
 #                 fallback_name=_s(getattr(doc, "prekes_pavadinimas", "")),
-#                 pvm_kodas_value=getattr(doc, "pvm_kodas", None),
+#                 pvm_kodas_value=pvm_kodas_doc,
 #                 fallback_tip_doc=getattr(doc, "preke_paslauga", None),
 #                 sandelio_kodas_value=default_sandelis,
 #                 summary_kodas=_get_or_persist_kodas_from_obj(doc),
@@ -1734,12 +1872,15 @@ def export_pardavimai_group_to_finvalda(documents, user=None, own_company_code=N
 # # Pardavimai
 # # =========================================================
 
-# def export_pardavimai_group_to_finvalda(documents):
+# def export_pardavimai_group_to_finvalda(documents, user=None, own_company_code=None):
 #     """Экспорт ПРОДАЖ (pardavimas) в формат Finvalda. Возвращает bytes.
 #     Формат: <fvsdata><klientai/><prekes/><paslaugos/><operacijos>...</operacijos></fvsdata>"""
 #     root = _root()
 #     operacijos = root.find("operacijos")
 #     assert operacijos is not None
+
+#     # Получаем extra_fields один раз для всего экспорта
+#     finvalda_fields = _get_extra_fields(user, "finvalda", own_company_code)
 
 #     for doc in documents:
 #         currency = _s(getattr(doc, "currency", "EUR") or "EUR").upper()
@@ -1772,19 +1913,13 @@ def export_pardavimai_group_to_finvalda(documents, user=None, own_company_code=N
 #             country_iso=buyer_country,
 #         )
 
-#         # Получаем extra fields из user
-#         user = getattr(doc, "user", None)
-#         user_extra_fields = {}
-#         if user:
-#             user_extra_fields = getattr(user, "finvalda_extra_fields", None) or {}
-
 #         # ПРАВИЛЬНЫЙ ПОРЯДОК ПОЛЕЙ согласно XSD схеме
 #         pard = ET.SubElement(operacijos, "pardavimas")
 
 #         # 1. Поля из operacijaType (базовый тип)
 #         # tipas (УРОВЕНЬ ДОКУМЕНТА - тип операции)
 #         tipas_value = (
-#             _get_extra_field_value(doc, user_extra_fields, "pardavimas_tipas")
+#             _get_extra_field_value(finvalda_fields, "pardavimas_tipas")
 #             or _upper(getattr(doc, "tipo_kodas", None))
 #         )
 #         if tipas_value:
@@ -1792,7 +1927,7 @@ def export_pardavimai_group_to_finvalda(documents, user=None, own_company_code=N
 
 #         # zurnalas
 #         zurnalas_value = (
-#             _get_extra_field_value(doc, user_extra_fields, "pardavimas_zurnalas")
+#             _get_extra_field_value(finvalda_fields, "pardavimas_zurnalas")
 #             or _upper(getattr(doc, "zurnalo_kodas", None))
 #         )
 #         if zurnalas_value:
@@ -1800,7 +1935,7 @@ def export_pardavimai_group_to_finvalda(documents, user=None, own_company_code=N
 
 #         # padalinys
 #         padalinys_value = (
-#             _get_extra_field_value(doc, user_extra_fields, "pardavimas_padalinys")
+#             _get_extra_field_value(finvalda_fields, "pardavimas_padalinys")
 #             or _upper(getattr(doc, "padalinio_kodas", None))
 #             or "PP"  # fallback
 #         )
@@ -1816,7 +1951,7 @@ def export_pardavimai_group_to_finvalda(documents, user=None, own_company_code=N
 
 #         # darbuotojas
 #         darbuotojas_value = (
-#             _get_extra_field_value(doc, user_extra_fields, "pardavimas_darbuotojas")
+#             _get_extra_field_value(finvalda_fields, "pardavimas_darbuotojas")
 #             or _upper(getattr(doc, "atsakingo_asmens_kodas", None))
 #         )
 #         if darbuotojas_value:
@@ -1836,7 +1971,7 @@ def export_pardavimai_group_to_finvalda(documents, user=None, own_company_code=N
 
 #         # Получаем sandelis из extra_fields или doc
 #         default_sandelis = (
-#             _get_extra_field_value(doc, user_extra_fields, "pardavimas_sandelis")
+#             _get_extra_field_value(finvalda_fields, "pardavimas_sandelis")
 #             or _s(getattr(doc, "sandelio_kodas", ""))
 #         )
 
@@ -1855,7 +1990,8 @@ def export_pardavimai_group_to_finvalda(documents, user=None, own_company_code=N
 #                 # Реестр prekes/paslaugos
 #                 _ensure_catalog_entry_from_item(root, item=item, currency=currency)
 
-#                 code = (line_map or {}).get(getattr(item, "id", None)) if line_map is not None else getattr(item, "pvm_kodas", None)
+#                 # ====== ИСПРАВЛЕНИЕ: Используем helper для PVM кода ======
+#                 code = _get_pvm_kodas_for_item(doc, item, line_map, default="")
 
 #                 _fill_line(
 #                     det,
@@ -1866,6 +2002,9 @@ def export_pardavimai_group_to_finvalda(documents, user=None, own_company_code=N
 #                     sandelio_kodas_value=default_sandelis,
 #                 )
 #         else:
+#             # ====== ИСПРАВЛЕНИЕ: Используем helper для PVM кода документа ======
+#             pvm_kodas_doc = _get_pvm_kodas_for_doc(doc, default="")
+            
 #             _fill_line(
 #                 det,
 #                 is_purchase=False,
@@ -1874,7 +2013,7 @@ def export_pardavimai_group_to_finvalda(documents, user=None, own_company_code=N
 #                 fallback_amount_wo_vat=getattr(doc, "amount_wo_vat", None),
 #                 fallback_vat_amount=getattr(doc, "vat_amount", None),
 #                 fallback_name=_s(getattr(doc, "prekes_pavadinimas", "")),
-#                 pvm_kodas_value=getattr(doc, "pvm_kodas", None),
+#                 pvm_kodas_value=pvm_kodas_doc,
 #                 fallback_tip_doc=getattr(doc, "preke_paslauga", None),
 #                 sandelio_kodas_value=default_sandelis,
 #                 summary_kodas=_get_or_persist_kodas_from_obj(doc),
@@ -1883,3 +2022,6 @@ def export_pardavimai_group_to_finvalda(documents, user=None, own_company_code=N
 
 #     xml_bytes = _pretty_bytes(root)
 #     return expand_empty_tags(xml_bytes)
+
+
+

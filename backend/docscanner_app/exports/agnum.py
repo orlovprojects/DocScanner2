@@ -73,6 +73,30 @@ def _s(v):
     return str(v).strip() if v is not None else ""
 
 
+def _use_matched_catalog(item) -> bool:
+    """Есть ли валидный каталог-матч на строке (и юзер его не отключил)."""
+    if getattr(item, "catalog_match_user_override", False):
+        return False
+
+    matched_code = _s(getattr(item, "matched_prekes_kodas", ""))
+    return bool(matched_code) and matched_code.upper() != "UKN0"
+
+
+def _resolved_field(item, field_name: str) -> str:
+    """
+    Если есть валидный каталог-матч — берём matched_ поле.
+    Если matched_ поле пустое — fallback на оригинальное.
+    """
+    if _use_matched_catalog(item):
+        matched_value = _s(
+            getattr(item, f"matched_{field_name}", "")
+        )
+        if matched_value:
+            return matched_value
+
+    return _s(getattr(item, field_name, ""))
+
+
 def _agnum_empty_varchar():
     return ""
 
@@ -523,9 +547,9 @@ def _build_agnum_good_from_item(doc, item, user_defaults=None, line_map=None, di
     user_defaults = user_defaults or {}
 
     kod = (
-        _s(getattr(item, "prekes_kodas", "")) or
-        _s(getattr(item, "prekes_barkodas", "")) or
-        "PREKE001"
+        _resolved_field(item, "prekes_kodas")
+        or _resolved_field(item, "prekes_barkodas")
+        or "PREKE001"
     )
 
     doc_snd = _s(getattr(doc, "agnum_snd_kod", ""))
@@ -539,13 +563,20 @@ def _build_agnum_good_from_item(doc, item, user_defaults=None, line_map=None, di
     doc_okod = _s(getattr(doc, "okod", ""))
     okod = user_defaults.get("objektas") or item_okod or doc_okod or ""
 
-    name = _s(getattr(item, "prekes_pavadinimas", "")) or "Prekė"
+    name = (
+        _resolved_field(item, "prekes_pavadinimas")
+        or "Prekė"
+    )
     tipas_str = normalize_preke_paslauga_tipas(
-        getattr(item, "preke_paslauga", None) or getattr(doc, "preke_paslauga", None)
+        _resolved_field(item, "preke_paslauga")
+        or getattr(doc, "preke_paslauga", None)
     )
     cls = "1" if tipas_str == "2" else "0"
 
-    unit = _s(getattr(item, "unit", "")) or "vnt."
+    unit = (
+        _resolved_field(item, "unit")
+        or "vnt."
+    )
     curr = _s(getattr(doc, "currency", "EUR")).upper() or "EUR"
     vat_pct = getattr(item, "vat_percent", None)
     pvm_kod = _get_pvm_kodas_for_item(doc, item, line_map, default="PVM1")
@@ -616,9 +647,9 @@ def _build_agnum_rows_for_pirkimas(doc, line_items, user_defaults=None, line_map
 
         row = {
             "KOD": (
-                _s(getattr(item, "prekes_kodas", "")) or
-                _s(getattr(item, "prekes_barkodas", "")) or
-                "PREKE001"
+                _resolved_field(item, "prekes_kodas")
+                or _resolved_field(item, "prekes_barkodas")
+                or "PREKE001"
             ),
             "KIEKIS": _format_quantity_agnum(qty),
             "PRKKN": _format_numeric_4_agnum(adj_price),
@@ -713,7 +744,10 @@ def export_pirkimai_group_to_agnum(documents, user, own_company_code=None):
             if g_kod not in goods_by_kod:
                 goods_by_kod[g_kod] = g_attrs
 
-            barkodas = _s(getattr(item, "prekes_barkodas", "")) or _s(getattr(doc, "prekes_barkodas", ""))
+            barkodas = (
+                _resolved_field(item, "prekes_barkodas")
+                or _s(getattr(doc, "prekes_barkodas", ""))
+            )
             if barkodas:
                 qty = getattr(item, "quantity", None)
                 qtyD = _safe_D(qty if qty is not None else 1)
@@ -850,16 +884,16 @@ def _build_agnum_rows_for_pardavimas(doc, line_items, user_defaults=None, line_m
 
         row = {
             "KOD": (
-                _s(getattr(item, "prekes_kodas", "")) or
-                _s(getattr(item, "prekes_barkodas", "")) or
-                "PREKE002"
+                _resolved_field(item, "prekes_kodas")
+                or _resolved_field(item, "prekes_barkodas")
+                or "PREKE002"
             ),
-            "BKOD": _s(getattr(item, "prekes_barkodas", "")),
+            "BKOD": _resolved_field(item, "prekes_barkodas"),
             "KIEKIS": _format_quantity_agnum(qty),
             "PVM": _format_price_agnum(adj_vat),
             "PVM_PROC": _format_vat_rate_agnum(vat_pct),
             "MOK0_PROC": "0", "MOK0_LT": "0",
-            "VNT": _s(getattr(item, "unit", "")) or "vnt",
+            "VNT": _resolved_field(item, "unit") or "vnt",
             "PARKN": _format_numeric_4_agnum(adj_price),
             "ORIGPARKN": _format_numeric_4_agnum(adj_price),
             "NUOL": _format_numeric_4_agnum(0),
@@ -968,7 +1002,10 @@ def export_pardavimai_group_to_agnum(documents, user, own_company_code=None):
             if g_kod not in goods_by_kod:
                 goods_by_kod[g_kod] = g_attrs
 
-            barkodas = _s(getattr(item, "prekes_barkodas", "")) or _s(getattr(doc, "prekes_barkodas", ""))
+            barkodas = (
+                _resolved_field(item, "prekes_barkodas")
+                or _s(getattr(doc, "prekes_barkodas", ""))
+            )
             if barkodas:
                 qty = getattr(item, "quantity", None)
                 qtyD = _safe_D(qty if qty is not None else 1)
@@ -1089,15 +1126,16 @@ def export_pardavimai_group_to_agnum(documents, user, own_company_code=None):
 
 
 
-
 # import logging
 # import xml.etree.ElementTree as ET
 # from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 # from datetime import date
 
 # from django.utils.encoding import smart_str
+
 # from .formatters import format_date_agnum, expand_empty_tags, COUNTRY_NAME_LT
 # from ..models import CurrencyRate
+# from ..utils.extra_fields import get_extra_for_export
 
 
 # logger = logging.getLogger(__name__)
@@ -1115,30 +1153,30 @@ def export_pardavimai_group_to_agnum(documents, user, own_company_code=None):
 #     try:
 #         d = _safe_D(value)
 #         if precision > 0:
-#             quantizer = Decimal('0.1') ** precision
+#             quantizer = Decimal("0.1") ** precision
 #             d = d.quantize(quantizer, rounding=ROUND_HALF_UP)
-#         return str(d).replace('.', ',')
+#         return str(d).replace(".", ",")
 #     except Exception:
 #         return "0"
 
 
 # def _format_quantity_agnum(value):
-#     """NUMERIC(14,4) — 4 знака после запятой."""
+#     """NUMERIC(14,4) - 4 знака после запятой."""
 #     return _format_decimal_agnum(value, precision=4)
 
 
 # def _format_price_agnum(value):
-#     """DOUBLE — 2 знака после запятой."""
+#     """DOUBLE - 2 знака после запятой."""
 #     return _format_decimal_agnum(value, precision=2)
 
 
 # def _format_numeric_4_agnum(value):
-#     """NUMERIC(14,4) — 4 знака после запятой. Для PRKKN, PARKN, ORIGPARKN, NUOL, NUOL2."""
+#     """NUMERIC(14,4) - 4 знака после запятой. Для PRKKN, PARKN, ORIGPARKN, NUOL, NUOL2."""
 #     return _format_decimal_agnum(value, precision=4)
 
 
 # def _format_vat_rate_agnum(value):
-#     """Ставка НДС — целое число: 21 (не 21.00)"""
+#     """Ставка НДС - целое число: 21 (не 21.00)"""
 #     try:
 #         if value is None:
 #             return "0"
@@ -1209,7 +1247,7 @@ def export_pardavimai_group_to_agnum(documents, user, own_company_code=None):
 #     if obj:
 #         logger.info("[AGNUM:RATE] currency=%s date=%s -> exact=%s", currency_code, date_obj, obj.rate)
 #         return obj.rate
-#     obj = CurrencyRate.objects.filter(currency=currency_code.upper(), date__lt=date_obj).order_by('-date').first()
+#     obj = CurrencyRate.objects.filter(currency=currency_code.upper(), date__lt=date_obj).order_by("-date").first()
 #     logger.info("[AGNUM:RATE] currency=%s date=%s -> prev=%s", currency_code, date_obj, (obj.rate if obj else None))
 #     return obj.rate if obj else None
 
@@ -1263,16 +1301,127 @@ def export_pardavimai_group_to_agnum(documents, user, own_company_code=None):
 #     return "1"
 
 
+# def _ensure_credit_sign(value, doc):
+#     if getattr(doc, 'is_credit_invoice', None) is not True:
+#         return value
+#     if value is None:
+#         return value
+#     try:
+#         d = Decimal(str(value))
+#         return -abs(d) if d > 0 else d
+#     except Exception:
+#         return value
+
+
+# # =========================
+# # Per-company extra fields helper
+# # =========================
+
+# def _parse_cp_key(cp_key):
+#     if not cp_key:
+#         return ""
+
+#     cp = str(cp_key).strip()
+#     if cp.lower().startswith("id:"):
+#         return cp.split(":", 1)[1].strip()
+#     return cp
+
+
+# def _get_own_company_code_from_doc(doc, direction):
+#     """
+#     Определяет код своей фирмы из документа.
+
+#     - pirkimas -> своя фирма buyer
+#     - pardavimas -> своя фирма seller
+#     """
+#     if direction == "pirkimas":
+#         candidates = [
+#             getattr(doc, "buyer_id", ""),
+#             getattr(doc, "buyer_vat_code", ""),
+#             getattr(doc, "buyer_id_programoje", ""),
+#         ]
+#     else:
+#         candidates = [
+#             getattr(doc, "seller_id", ""),
+#             getattr(doc, "seller_vat_code", ""),
+#             getattr(doc, "seller_id_programoje", ""),
+#         ]
+
+#     for value in candidates:
+#         code = _s(value)
+#         if code:
+#             return code
+#     return ""
+
+
+# def _get_user_defaults_for_doc(user, doc, own_company_code=None, direction="pirkimas"):
+#     """
+#     Получить AGNUM extra fields для конкретного документа.
+
+#     Приоритет:
+#     1. Профиль конкретной фирмы по own_company_code
+#     2. Профиль фирмы, определённой из документа
+#     3. Глобальный профиль (__all__)
+#     4. Пустой dict
+#     """
+#     requested_code = _parse_cp_key(own_company_code)
+#     doc_company_code = _get_own_company_code_from_doc(doc, direction)
+
+#     extra = {}
+#     resolved_by = ""
+
+#     if user and requested_code:
+#         extra = get_extra_for_export(user, "agnum", requested_code)
+#         if extra:
+#             resolved_by = requested_code
+
+#     if user and not extra and doc_company_code and doc_company_code != requested_code:
+#         extra = get_extra_for_export(user, "agnum", doc_company_code)
+#         if extra:
+#             resolved_by = doc_company_code
+
+#     if user and not extra:
+#         extra = get_extra_for_export(user, "agnum", None)
+#         if extra:
+#             resolved_by = "__all__/legacy"
+
+#     if direction == "pirkimas":
+#         defaults = {
+#             "sandelis": _s(extra.get("pirkimas_sandelis") or ""),
+#             "grupe": _s(extra.get("pirkimas_grupe") or ""),
+#             "objektas": _s(extra.get("pirkimas_objektas") or ""),
+#         }
+#     else:
+#         defaults = {
+#             "sandelis": _s(extra.get("pardavimas_sandelis") or ""),
+#             "grupe": _s(extra.get("pardavimas_grupe") or ""),
+#             "objektas": _s(extra.get("pardavimas_objektas") or ""),
+#         }
+
+#     logger.info(
+#         "[AGNUM:EXTRA] doc=%s direction=%s own_company_code=%r requested_code=%r doc_company_code=%r resolved_by=%r defaults=%s",
+#         getattr(doc, "pk", None),
+#         direction,
+#         own_company_code,
+#         requested_code,
+#         doc_company_code,
+#         resolved_by,
+#         defaults,
+#     )
+
+#     return defaults
+
+
 # # =========================
 # # Документная скидка: пропорциональное распределение на строки
-# # (аналогично Rivile ERP — пересчитываем цены и PVM,
+# # (аналогично Rivile ERP - пересчитываем цены и PVM,
 # #  нативные поля скидок AGNUM NUOLPROC/NUOL/NUOL1/NUOL2 остаются нулевыми)
 # # =========================
 
 # def _compute_discount_factor(doc):
 #     """
 #     factor = 1 - (invoice_discount_wo_vat / base_total_before_discount)
-#     Если скидки нет → (None, D("0"))
+#     Если скидки нет -> (None, D("0"))
 #     """
 #     disc = _safe_D(getattr(doc, "invoice_discount_wo_vat", 0) or 0)
 #     if disc <= 0:
@@ -1399,13 +1548,18 @@ def export_pardavimai_group_to_agnum(documents, user, own_company_code=None):
 # def _build_agnum_customer_from_doc(doc) -> tuple[str, dict]:
 #     """Customers/Item из seller_* полей (для pirkimai)."""
 #     kod = get_party_code(
-#         doc, role="seller",
-#         id_field="seller_id", vat_field="seller_vat_code",
+#         doc,
+#         role="seller",
+#         id_field="seller_id",
+#         vat_field="seller_vat_code",
 #         id_programoje_field="seller_id_programoje",
 #     )
 #     if not kod:
-#         kod = (_s(getattr(doc, "seller_vat_code", "")) or
-#                _s(getattr(doc, "seller_id", "")) or "UNKNOWN_SELLER")
+#         kod = (
+#             _s(getattr(doc, "seller_vat_code", "")) or
+#             _s(getattr(doc, "seller_id", "")) or
+#             "UNKNOWN_SELLER"
+#         )
 
 #     name = _s(getattr(doc, "seller_name", "")) or kod
 #     adr = _s(getattr(doc, "seller_address", ""))
@@ -1441,13 +1595,18 @@ def export_pardavimai_group_to_agnum(documents, user, own_company_code=None):
 # def _build_agnum_customer_from_buyer(doc) -> tuple[str, dict]:
 #     """Customers/Item из buyer_* полей (для pardavimai)."""
 #     kod = get_party_code(
-#         doc, role="buyer",
-#         id_field="buyer_id", vat_field="buyer_vat_code",
+#         doc,
+#         role="buyer",
+#         id_field="buyer_id",
+#         vat_field="buyer_vat_code",
 #         id_programoje_field="buyer_id_programoje",
 #     )
 #     if not kod:
-#         kod = (_s(getattr(doc, "buyer_vat_code", "")) or
-#                _s(getattr(doc, "buyer_id", "")) or "UNKNOWN_BUYER")
+#         kod = (
+#             _s(getattr(doc, "buyer_vat_code", "")) or
+#             _s(getattr(doc, "buyer_id", "")) or
+#             "UNKNOWN_BUYER"
+#         )
 
 #     name = _s(getattr(doc, "buyer_name", "")) or kod
 #     adr = _s(getattr(doc, "buyer_address", ""))
@@ -1491,8 +1650,11 @@ def export_pardavimai_group_to_agnum(documents, user, own_company_code=None):
 #     """
 #     user_defaults = user_defaults or {}
 
-#     kod = (_s(getattr(item, "prekes_kodas", "")) or
-#            _s(getattr(item, "prekes_barkodas", "")) or "PREKE001")
+#     kod = (
+#         _s(getattr(item, "prekes_kodas", "")) or
+#         _s(getattr(item, "prekes_barkodas", "")) or
+#         "PREKE001"
+#     )
 
 #     doc_snd = _s(getattr(doc, "agnum_snd_kod", ""))
 #     snd_kod = user_defaults.get("sandelis") or doc_snd or "S1"
@@ -1516,12 +1678,12 @@ def export_pardavimai_group_to_agnum(documents, user, own_company_code=None):
 #     vat_pct = getattr(item, "vat_percent", None)
 #     pvm_kod = _get_pvm_kodas_for_item(doc, item, line_map, default="PVM1")
 
-#     # KN0: пересчитываем с учётом документной скидки
 #     raw_price = _safe_D(getattr(item, "price", None) or 0)
 #     if discount_factor is not None:
 #         kn0 = (raw_price * discount_factor).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 #     else:
 #         kn0 = raw_price
+#     kn0 = _ensure_credit_sign(kn0, doc)
 
 #     attrs = {
 #         "KOD": kod, "SND_KOD": snd_kod, "PAVAD": name,
@@ -1531,7 +1693,7 @@ def export_pardavimai_group_to_agnum(documents, user, own_company_code=None):
 #         "VNT": unit, "VNT2": "",
 #         "SVORIS": "0", "SVORIS1": "0", "TURIS": "0",
 #         "VIETA": "", "METOD": "0", "IPAK": "0",
-#         "KN0": _format_price_agnum(kn0),                           # DOUBLE, 2 зн.
+#         "KN0": _format_price_agnum(kn0),
 #         "KN1": "0", "KN2": "0", "KN3": "0", "KN4": "0", "KN5": "0",
 #         "KNB": "0", "KNBVAL": curr,
 #         "REZ": "0", "UZS": "0", "APMOKPVM": "Y",
@@ -1571,6 +1733,8 @@ def export_pardavimai_group_to_agnum(documents, user, own_company_code=None):
 #         vat_pct = getattr(item, "vat_percent", None)
 
 #         adj_price, adj_vat = _apply_line_discount(price, qty, vat, vat_pct, discount_factor)
+#         adj_price = _ensure_credit_sign(adj_price, doc)
+#         adj_vat = _ensure_credit_sign(adj_vat, doc)
 
 #         item_okod = _s(getattr(item, "okod", "") or getattr(item, "objekto_kodas", ""))
 #         doc_okod = _s(getattr(doc, "okod", ""))
@@ -1579,13 +1743,16 @@ def export_pardavimai_group_to_agnum(documents, user, own_company_code=None):
 #         pvm_kod = _get_pvm_kodas_for_item(doc, item, line_map, default="PVM1")
 
 #         row = {
-#             "KOD": (_s(getattr(item, "prekes_kodas", "")) or
-#                     _s(getattr(item, "prekes_barkodas", "")) or "PREKE001"),
-#             "KIEKIS": _format_quantity_agnum(qty),              # NUMERIC(14,4)
-#             "PRKKN": _format_numeric_4_agnum(adj_price),        # NUMERIC(14,4)
+#             "KOD": (
+#                 _s(getattr(item, "prekes_kodas", "")) or
+#                 _s(getattr(item, "prekes_barkodas", "")) or
+#                 "PREKE001"
+#             ),
+#             "KIEKIS": _format_quantity_agnum(qty),
+#             "PRKKN": _format_numeric_4_agnum(adj_price),
 #             "MT": "0",
 #             "AKC": "0",
-#             "PVM": _format_price_agnum(adj_vat),                # DOUBLE
+#             "PVM": _format_price_agnum(adj_vat),
 #             "PVM_PROC": _format_vat_rate_agnum(vat_pct),
 #             "F1": "", "F2": "", "F3": "", "F4": "", "F5": "",
 #             "D1": format_date_agnum(getattr(doc, "invoice_date", None)) or _agnum_empty_date(),
@@ -1601,16 +1768,20 @@ def export_pardavimai_group_to_agnum(documents, user, own_company_code=None):
 #     return rows
 
 
-# def export_pirkimai_group_to_agnum(documents, user):
-#     """Экспорт pirkimai → AGNUM XML (Documents Type="2")."""
-#     logger.info("[AGNUM:PIRKIMAI] start, docs=%d", len(documents) if documents else 0)
+# def export_pirkimai_group_to_agnum(documents, user, own_company_code=None):
+#     """
+#     Экспорт pirkimai -> AGNUM XML (Documents Type="2").
 
-#     extra = getattr(user, "agnum_extra_fields", None) or {}
-#     user_defaults = {
-#         "sandelis": _s(extra.get("pirkimas_sandelis") or ""),
-#         "grupe": _s(extra.get("pirkimas_grupe") or ""),
-#         "objektas": _s(extra.get("pirkimas_objektas") or ""),
-#     }
+#     Args:
+#         documents: список документов
+#         user: объект пользователя
+#         own_company_code: код своей фирмы для поиска профиля extra_fields
+#     """
+#     logger.info(
+#         "[AGNUM:PIRKIMAI] start, docs=%d, own_company_code=%s",
+#         len(documents) if documents else 0,
+#         own_company_code,
+#     )
 
 #     agnum = ET.Element("AgnumData", {
 #         "Version": "25",
@@ -1627,14 +1798,19 @@ def export_pardavimai_group_to_agnum(documents, user, own_company_code=None):
 #     for doc in (documents or []):
 #         logger.info("[AGNUM:PIRKIMAI] doc=%s", getattr(doc, "pk", None))
 
+#         user_defaults = _get_user_defaults_for_doc(
+#             user=user,
+#             doc=doc,
+#             own_company_code=own_company_code,
+#             direction="pirkimas",
+#         )
+
 #         line_map = getattr(doc, "_pvm_line_map", None)
 
-#         # 1) клиент (seller)
 #         cust_kod, cust_attrs = _build_agnum_customer_from_doc(doc)
 #         if cust_kod not in customers_by_kod:
 #             customers_by_kod[cust_kod] = cust_attrs
 
-#         # 2) строки
 #         line_items = getattr(doc, "line_items", None)
 #         if line_items and hasattr(line_items, "all") and line_items.exists():
 #             items = list(line_items.all())
@@ -1656,12 +1832,10 @@ def export_pardavimai_group_to_agnum(documents, user, own_company_code=None):
 #             setattr(fake_item, "pvm_kodas", _get_pvm_kodas_for_doc(doc, default="PVM1"))
 #             items = [fake_item]
 
-#         # Документная скидка
 #         discount_factor, _ = _compute_discount_factor(doc)
 
 #         rows = _build_agnum_rows_for_pirkimas(doc, items, user_defaults, line_map, discount_factor)
 
-#         # 3) товары / штрихкоды
 #         for item in items:
 #             g_kod, g_attrs, okod = _build_agnum_good_from_item(doc, item, user_defaults, line_map, discount_factor)
 #             if g_kod not in goods_by_kod:
@@ -1675,7 +1849,6 @@ def export_pardavimai_group_to_agnum(documents, user, own_company_code=None):
 #                     qtyD = Decimal("1")
 #                 barcodes_qty[(g_kod, barkodas)] = barcodes_qty.get((g_kod, barkodas), Decimal("0")) + qtyD
 
-#         # 4) документ
 #         currency = _s(getattr(doc, "currency", "EUR")).upper() or "EUR"
 #         op_date = getattr(doc, "operation_date", None) or getattr(doc, "invoice_date", None) or date.today()
 #         rate = get_currency_rate(currency, op_date) if currency != "EUR" else 1
@@ -1711,16 +1884,16 @@ def export_pardavimai_group_to_agnum(documents, user, own_company_code=None):
 #             "VAL": currency,
 #             "KURS": _format_decimal_agnum(rate if rate else 1, precision=6),
 #             "TR_TIP": "0",
-#             "NUOL1": "0",                  # скидка уже в ценах строк
-#             "NUOL2": "0",                  # скидка уже в ценах строк
-#             "SUMA": _format_price_agnum(amount_wo),
+#             "NUOL1": "0",
+#             "NUOL2": "0",
+#             "SUMA": _format_price_agnum(_ensure_credit_sign(amount_wo, doc)),
 #             "MT": "0", "AKC": "0",
-#             "PVM": _format_price_agnum(vat_amount),
+#             "PVM": _format_price_agnum(_ensure_credit_sign(vat_amount, doc)),
 #             "PVM_KL": "0", "KT": "0", "PR": "0",
 #             "SUMAP": "0", "TRANSP": "0",
-#             "SUMVISO": _format_price_agnum(amount_wo),
+#             "SUMVISO": _format_price_agnum(_ensure_credit_sign(amount_wo, doc)),
 #             "DRB": "",
-#             "SKOLA": _format_price_agnum(skola),
+#             "SKOLA": _format_price_agnum(_ensure_credit_sign(skola, doc)),
 #             "TERM": "0", "APMSUM": "0",
 #             "SANDORIS": "", "PRISTSAL": "", "TRANSPORTAS": "",
 #             "SALISSIUNT": _s(getattr(doc, "seller_country_iso", "")).upper(),
@@ -1733,7 +1906,7 @@ def export_pardavimai_group_to_agnum(documents, user, own_company_code=None):
 #             "SPEC_TAX": "N",
 #             "REF_DOK_DATA": _agnum_empty_date(),
 #             "REF_DOK_NR": "",
-#             "SF_TIP": "SF",
+#             "SF_TIP": "KS" if getattr(doc, 'is_credit_invoice', None) is True else "DS" if getattr(doc, 'is_debit_invoice', None) is True else "SF",
 #             "MEMO": _s(getattr(doc, "comment", "")),
 #             "NUM1": "0", "NUM2": "0", "NUM3": "0", "NUM4": "0", "NUM5": "0",
 #             "TXT1": "", "TXT2": "", "TXT3": "", "TXT4": "", "TXT5": "",
@@ -1743,7 +1916,6 @@ def export_pardavimai_group_to_agnum(documents, user, own_company_code=None):
 
 #         docs_data.append({"attrs": doc_attrs, "rows": rows})
 
-#     # === XML ===
 #     cust_el = ET.SubElement(agnum, "Customers", {"Count": str(len(customers_by_kod))})
 #     for attrs in customers_by_kod.values():
 #         ET.SubElement(cust_el, "Item", attrs)
@@ -1763,8 +1935,9 @@ def export_pardavimai_group_to_agnum(documents, user, own_company_code=None):
 #     bc_el = ET.SubElement(agnum, "Barcodes", {"Count": str(len(barcodes_qty))})
 #     for (kod, bkod), kiekis in barcodes_qty.items():
 #         ET.SubElement(bc_el, "Item", {
-#             "KOD": kod, "BKOD": bkod,
-#             "KIEKIS": _format_decimal_agnum(kiekis, precision=2),   # NUMERIC(12,2)
+#             "KOD": kod,
+#             "BKOD": bkod,
+#             "KIEKIS": _format_decimal_agnum(kiekis, precision=2),
 #         })
 
 #     _indent(agnum)
@@ -1794,6 +1967,8 @@ def export_pardavimai_group_to_agnum(documents, user, own_company_code=None):
 #         vat_pct = getattr(item, "vat_percent", None)
 
 #         adj_price, adj_vat = _apply_line_discount(price, qty, vat, vat_pct, discount_factor)
+#         adj_price = _ensure_credit_sign(adj_price, doc)
+#         adj_vat = _ensure_credit_sign(adj_vat, doc)
 
 #         item_okod = _s(getattr(item, "okod", "") or getattr(item, "objekto_kodas", ""))
 #         doc_okod = _s(getattr(doc, "okod", ""))
@@ -1802,18 +1977,21 @@ def export_pardavimai_group_to_agnum(documents, user, own_company_code=None):
 #         pvm_kod = _get_pvm_kodas_for_item(doc, item, line_map, default="PVM1")
 
 #         row = {
-#             "KOD": (_s(getattr(item, "prekes_kodas", "")) or
-#                     _s(getattr(item, "prekes_barkodas", "")) or "PREKE002"),
+#             "KOD": (
+#                 _s(getattr(item, "prekes_kodas", "")) or
+#                 _s(getattr(item, "prekes_barkodas", "")) or
+#                 "PREKE002"
+#             ),
 #             "BKOD": _s(getattr(item, "prekes_barkodas", "")),
-#             "KIEKIS": _format_quantity_agnum(qty),              # NUMERIC(14,4)
-#             "PVM": _format_price_agnum(adj_vat),                # DOUBLE
+#             "KIEKIS": _format_quantity_agnum(qty),
+#             "PVM": _format_price_agnum(adj_vat),
 #             "PVM_PROC": _format_vat_rate_agnum(vat_pct),
 #             "MOK0_PROC": "0", "MOK0_LT": "0",
 #             "VNT": _s(getattr(item, "unit", "")) or "vnt",
-#             "PARKN": _format_numeric_4_agnum(adj_price),        # NUMERIC(14,4) — пересчитанная
-#             "ORIGPARKN": _format_numeric_4_agnum(adj_price),    # NUMERIC(14,4) — = PARKN
-#             "NUOL": _format_numeric_4_agnum(0),                 # NUMERIC(14,4) — 0
-#             "NUOL2": "0",                                       # 0
+#             "PARKN": _format_numeric_4_agnum(adj_price),
+#             "ORIGPARKN": _format_numeric_4_agnum(adj_price),
+#             "NUOL": _format_numeric_4_agnum(0),
+#             "NUOL2": "0",
 #             "UZS_SHOPNR": "", "UZS_UZSNR": "",
 #             "UZS_PRKKOD": _s(getattr(item, "uzsakovo_preke_kodas", "")),
 #             "ZYME": "",
@@ -1836,16 +2014,20 @@ def export_pardavimai_group_to_agnum(documents, user, own_company_code=None):
 #     return {"SASK": "LT000000000000000000", "KOD": "00000", "PAVAD": "BANKAS", "ADR": "", "TLF": "", "SWIFT": ""}
 
 
-# def export_pardavimai_group_to_agnum(documents, user):
-#     """Экспорт pardavimai → AGNUM XML (Documents Type="4")."""
-#     logger.info("[AGNUM:PARDAVIMAI] start, docs=%d", len(documents) if documents else 0)
+# def export_pardavimai_group_to_agnum(documents, user, own_company_code=None):
+#     """
+#     Экспорт pardavimai -> AGNUM XML (Documents Type="4").
 
-#     extra = getattr(user, "agnum_extra_fields", None) or {}
-#     user_defaults = {
-#         "sandelis": _s(extra.get("pardavimas_sandelis") or ""),
-#         "grupe": _s(extra.get("pardavimas_grupe") or ""),
-#         "objektas": _s(extra.get("pardavimas_objektas") or ""),
-#     }
+#     Args:
+#         documents: список документов
+#         user: объект пользователя
+#         own_company_code: код своей фирмы для поиска профиля extra_fields
+#     """
+#     logger.info(
+#         "[AGNUM:PARDAVIMAI] start, docs=%d, own_company_code=%s",
+#         len(documents) if documents else 0,
+#         own_company_code,
+#     )
 
 #     agnum = ET.Element("AgnumData", {
 #         "Version": "25",
@@ -1865,14 +2047,19 @@ def export_pardavimai_group_to_agnum(documents, user, own_company_code=None):
 #     for doc in (documents or []):
 #         logger.info("[AGNUM:PARDAVIMAI] doc=%s", getattr(doc, "pk", None))
 
+#         user_defaults = _get_user_defaults_for_doc(
+#             user=user,
+#             doc=doc,
+#             own_company_code=own_company_code,
+#             direction="pardavimas",
+#         )
+
 #         line_map = getattr(doc, "_pvm_line_map", None)
 
-#         # 1) клиент (buyer)
 #         cust_kod, cust_attrs = _build_agnum_customer_from_buyer(doc)
 #         if cust_kod not in customers_by_kod:
 #             customers_by_kod[cust_kod] = cust_attrs
 
-#         # 2) строки
 #         line_items = getattr(doc, "line_items", None)
 #         if line_items and hasattr(line_items, "all") and line_items.exists():
 #             items = list(line_items.all())
@@ -1900,12 +2087,10 @@ def export_pardavimai_group_to_agnum(documents, user, own_company_code=None):
 #             setattr(fake_item, "original_price", getattr(doc, "amount_wo_vat", None) or 0)
 #             items = [fake_item]
 
-#         # Документная скидка
 #         discount_factor, _ = _compute_discount_factor(doc)
 
 #         rows = _build_agnum_rows_for_pardavimas(doc, items, user_defaults, line_map, discount_factor)
 
-#         # 3) товары / штрихкоды
 #         for item in items:
 #             g_kod, g_attrs, okod = _build_agnum_good_from_item(doc, item, user_defaults, line_map, discount_factor)
 #             if g_kod not in goods_by_kod:
@@ -1919,7 +2104,6 @@ def export_pardavimai_group_to_agnum(documents, user, own_company_code=None):
 #                     qtyD = Decimal("1")
 #                 barcodes_qty[(g_kod, barkodas)] = barcodes_qty.get((g_kod, barkodas), Decimal("0")) + qtyD
 
-#         # 4) документ
 #         currency = _s(getattr(doc, "currency", "EUR")).upper() or "EUR"
 #         op_date = getattr(doc, "operation_date", None) or getattr(doc, "invoice_date", None) or date.today()
 #         rate = get_currency_rate(currency, op_date) if currency != "EUR" else 1
@@ -1951,15 +2135,15 @@ def export_pardavimai_group_to_agnum(documents, user, own_company_code=None):
 #             "SND_KOD": snd_kod,
 #             "VAL": currency,
 #             "KURS": _format_decimal_agnum(rate if rate else 1, precision=6),
-#             "NUOLPROC": "0",               # скидка уже в ценах строк
-#             "NUOL": "0",                   # скидка уже в ценах строк
-#             "SUMA": _format_price_agnum(amount_wo),
+#             "NUOLPROC": "0",
+#             "NUOL": "0",
+#             "SUMA": _format_price_agnum(_ensure_credit_sign(amount_wo, doc)),
 #             "SUMAP": "0",
 #             "PVMPROC": "0",
-#             "PVM": _format_price_agnum(vat_amount),
+#             "PVM": _format_price_agnum(_ensure_credit_sign(vat_amount, doc)),
 #             "MOK0": "0",
-#             "SUMVISO": _format_price_agnum(amount_wo),
-#             "SKOLA": _format_price_agnum(skola),
+#             "SUMVISO": _format_price_agnum(_ensure_credit_sign(amount_wo, doc)),
+#             "SKOLA": _format_price_agnum(_ensure_credit_sign(skola, doc)),
 #             "APMSUM": "0",
 #             "APM_SAL": apm_sal,
 #             "TERM": term,
@@ -1987,7 +2171,7 @@ def export_pardavimai_group_to_agnum(documents, user, own_company_code=None):
 #             "SPEC_TAX": "N",
 #             "REF_DOK_DATA": _agnum_empty_date(),
 #             "REF_DOK_NR": "",
-#             "SF_TIP": "SF",
+#             "SF_TIP": "KS" if getattr(doc, 'is_credit_invoice', None) is True else "DS" if getattr(doc, 'is_debit_invoice', None) is True else "SF",
 #             "POINTS_USED": "0", "POINTS_ADDED": "0",
 #             "DOK_USER": _s(getattr(doc, "db_user", "")) or "1",
 #             "DOK_USER0": _s(getattr(doc, "db_user_created", "")) or "1",
@@ -1997,7 +2181,6 @@ def export_pardavimai_group_to_agnum(documents, user, own_company_code=None):
 
 #         docs_data.append({"attrs": doc_attrs, "rows": rows})
 
-#     # === XML ===
 #     cust_el = ET.SubElement(agnum, "Customers", {"Count": str(len(customers_by_kod))})
 #     for attrs in customers_by_kod.values():
 #         ET.SubElement(cust_el, "Item", attrs)
@@ -2020,16 +2203,13 @@ def export_pardavimai_group_to_agnum(documents, user, own_company_code=None):
 #     bc_el = ET.SubElement(agnum, "Barcodes", {"Count": str(len(barcodes_qty))})
 #     for (kod, bkod), kiekis in barcodes_qty.items():
 #         ET.SubElement(bc_el, "Item", {
-#             "KOD": kod, "BKOD": bkod,
-#             "KIEKIS": _format_decimal_agnum(kiekis, precision=2),   # NUMERIC(12,2)
+#             "KOD": kod,
+#             "BKOD": bkod,
+#             "KIEKIS": _format_decimal_agnum(kiekis, precision=2),
 #         })
 
 #     _indent(agnum)
 #     body = ET.tostring(agnum, encoding="utf-8", xml_declaration=False)
 #     xml = b'<?xml version="1.0" encoding="UTF-8"?>\n' + body + b"\n"
 #     return expand_empty_tags(xml)
-
-
-
-
 

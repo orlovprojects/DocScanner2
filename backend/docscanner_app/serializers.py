@@ -1181,9 +1181,10 @@ class CompanyProfileSerializer(serializers.ModelSerializer):
                 "onboarding_completed",
             ])
 
-        # Засеваем дефолтные единицы измерения новому профилю (units per-company)
-        from .models import MeasurementUnit
+        # Засеваем дефолтные единицы и серии новому профилю (per-company)
+        from .models import MeasurementUnit, InvoiceSeries
         MeasurementUnit.create_defaults_for_user(user, profile.id)
+        InvoiceSeries.create_defaults_for_user(user, profile.id)
 
         return profile
 

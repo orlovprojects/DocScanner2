@@ -37,6 +37,7 @@ from docscanner_app.exports.optimum import (
     _get_party_code,
     _get_product_code,
     _get_barcode,
+    _resolved_field,
     _resolve_type_group_product,
     _compute_line_discounts,
     _get_amount_with_vat,
@@ -623,12 +624,12 @@ def _build_stock_items(doc, doc_type: str) -> list[dict]:
 
             barcode = _get_barcode(item=item, doc=doc)
             name = (
-                _s(_get_attr(item, "prekes_pavadinimas", ""))
+                _resolved_field(item, "prekes_pavadinimas")
                 or _s(_get_attr(doc, "prekes_pavadinimas", ""))
                 or _build_stock_name_fallback(doc)
             )
             unit = (
-                _s(_get_attr(item, "unit", ""))
+                _resolved_field(item, "unit")
                 or _s(_get_attr(doc, "unit", ""))
                 or "vnt."
             )
@@ -708,7 +709,7 @@ def _build_stock_lines(
             code    = _get_product_code(item=item, doc=doc)
             barcode = _get_barcode(item=item, doc=doc)
             name = (
-                _s(_get_attr(item, "prekes_pavadinimas", ""))
+                _resolved_field(item, "prekes_pavadinimas")
                 or _s(_get_attr(doc, "prekes_pavadinimas", ""))
                 or _build_stock_name_fallback(doc)
             )
@@ -1242,19 +1243,33 @@ def dineta_hello(
 
 
 
+
+
+
+# """
+# Dineta.web API — REST/JSON клиент.
+
+# Поток на один документ:
+#   1. Partner  (v1/partner/)       — создание/обновление контрагента
+#   2. Stock    (v1/stock/) × chunks — товары/услуги (max 50 per request)
+#   3. setOperation (v1/setOperation/) — операция purchase/sale
+
+# Авторизация: Basic Auth (base64 encoded username:password).
+# URL:  https://<SERVER>.dineta.eu/<CLIENT>/ws/dineta_api/v1/<METHOD>/
+# """
 # from __future__ import annotations
 
 # import base64
 # import json
 # import logging
 # import random
+# import re
 # import time
 # from dataclasses import dataclass, field
 # from datetime import date, datetime
 # from decimal import Decimal, ROUND_HALF_UP
 # from typing import Optional
 # from urllib.parse import urlparse
-# import re
 
 # import requests
 # from django.utils import timezone
@@ -1488,6 +1503,51 @@ def dineta_hello(
 #     return "Dineta API grąžino klaidą HTML atsakyme"
 
 
+# def _check_inner_json_error(body: str) -> str:
+#     """
+#     Dineta иногда возвращает HTTP 200 но body содержит JSON с ошибкой:
+#       {"status": 400, "message": "Neužpildyti privalomi laukai: 'partner'"}
+#     или обычный текст ошибки типа "Failas config.php neegzistuoja."
+
+#     Также проверяет per-item ответы вида:
+#       {"ITEM_ID": {"status": 400, "message": "value too long..."}}
+#     """
+#     if not body or not body.strip():
+#         return ""
+
+#     try:
+#         data = json.loads(body)
+#     except (json.JSONDecodeError, ValueError):
+#         # Не JSON — проверяем известные текстовые ошибки
+#         stripped = body.strip().strip('"')
+#         if "neegzistuoja" in stripped.lower() or "config.php" in stripped.lower():
+#             return stripped[:500]
+#         return ""
+
+#     if not isinstance(data, dict):
+#         return ""
+
+#     # Формат {"status": 400, "message": "..."}
+#     if "status" in data and "message" in data:
+#         status = data.get("status")
+#         if isinstance(status, int) and status >= 400:
+#             return _s(data.get("message", ""))[:500] or f"Dineta klaida (status {status})"
+
+#     # Формат {"ITEM_ID": {"status": 400, "message": "..."}}
+#     errors = []
+#     for item_id, info in data.items():
+#         if isinstance(info, dict):
+#             item_status = info.get("status")
+#             if isinstance(item_status, int) and item_status >= 400:
+#                 msg = info.get("message", "")
+#                 errors.append(f"{item_id}: {msg}")
+
+#     if errors:
+#         return "; ".join(errors)[:500]
+
+#     return ""
+
+
 # def _send_dineta_request_once(
 #     url: str,
 #     payload: dict,
@@ -1515,6 +1575,7 @@ def dineta_hello(
 #     body = resp.text[:2000]
 
 #     if resp.status_code in (200, 201):
+#         # Dineta возвращает 200 с <script>alert('PG error')</script>
 #         if "<script>" in body and "alert(" in body:
 #             error_msg = _extract_script_error(body)
 #             logger.warning(
@@ -1527,6 +1588,21 @@ def dineta_hello(
 #                 response_body=body,
 #                 error=error_msg,
 #             )
+
+#         # Dineta возвращает 200 с {"status":400,"message":"..."}
+#         inner_error = _check_inner_json_error(body)
+#         if inner_error:
+#             logger.warning(
+#                 "[DINETA] HTTP %s но внутренняя ошибка: %s url=%s",
+#                 resp.status_code, inner_error, url,
+#             )
+#             return DinetaRequestResult(
+#                 success=False,
+#                 status_code=resp.status_code,
+#                 response_body=body,
+#                 error=inner_error,
+#             )
+
 #         return DinetaRequestResult(
 #             success=True,
 #             status_code=resp.status_code,
@@ -1548,6 +1624,7 @@ def dineta_hello(
 #     401: "Autorizacijos klaida. Pasitikrinkite API duomenis/raktus DokSkeno nustatymuose.",
 #     403: "Autorizacijos klaida. Pasitikrinkite API duomenis/raktus DokSkeno nustatymuose.",
 #     404: "Netinkamas serveris arba API adresas. Pasitikrinkite API nustatymus DokSkene.",
+#     405: "Operacija jau patvirtinta Dineta sistemoje. Ištrynimas/pakeitimas negalimas.",
 # }
 
 
@@ -1603,18 +1680,6 @@ def dineta_hello(
 #             )
 
 #     return last_result
-
-
-# def _parse_set_operation_response(response_body: str) -> str:
-#     """
-#     setOperation возвращает строку — внутренний ID операции Dineta.
-#     Например: "00012077984"
-#     """
-#     if not response_body:
-#         return ""
-#     if "<script>" in response_body:
-#         return ""
-#     return response_body.strip().strip('"')
 
 
 # def _build_error_message(resp, body: str) -> str:
@@ -1680,7 +1745,35 @@ def dineta_hello(
 #     setOperation возвращает строку — внутренний ID операции Dineta.
 #     Например: "00012077984"
 #     """
-#     return response_body.strip().strip('"') if response_body else ""
+#     if not response_body:
+#         return ""
+#     if "<script>" in response_body:
+#         return ""
+#     return response_body.strip().strip('"')
+
+
+# # =========================================================
+# # Stock name fallback
+# # =========================================================
+# def _build_stock_name_fallback(doc) -> str:
+#     """
+#     Fallback для названия товара/услуги когда prekes_pavadinimas пуст.
+#     Иерархия:
+#       1. Preke_is_{series}_{number}
+#       2. Preke_is_{number}
+#       3. NEATPAZINTA_XXXX
+#     """
+#     series = _s(_get_attr(doc, "document_series", "")).strip()
+#     number = _s(_get_attr(doc, "document_number", "")).strip()
+
+#     if series and number:
+#         name = f"Preke_is_{series}_{number}"
+#     elif number:
+#         name = f"Preke_is_{number}"
+#     else:
+#         name = f"NEATPAZINTA_{random.randint(1000, 9999)}"
+
+#     return name[:100]
 
 
 # # =========================================================
@@ -1718,18 +1811,33 @@ def dineta_hello(
 #         address    = _s(_get_attr(doc, "buyer_address", ""))
 #         is_person  = bool(_get_attr(doc, "buyer_is_person", False))
 
+#     # Обрезка partner ID до 20 символов (лимит Dineta API)
+#     if pid and len(pid) > 20:
+#         logger.warning(
+#             "[DINETA] Partner ID '%s' ilgesnis nei 20 simbolių, trumpiname",
+#             pid,
+#         )
+#         pid = pid[:20]
+
+#     # Fallback для пустого name
+#     if not name or not name.strip():
+#         name = f"NERAPAVADINIMO_{random.randint(1000, 9999)}"
+#         logger.warning(
+#             "[DINETA] Partner name tuščias, naudojamas fallback: %s", name,
+#         )
+
 #     partner: dict = {
-#         "id":      pid,
-#         "name":    name,
-#         "type":    "1" if is_person else "2",
-#         "country": country,
+#         "id":      pid[:20] if pid else pid,
+#         "name":    name[:100],
+#         "type":    1 if is_person else 2,
+#         "country": country[:2],
 #     }
 #     if code:
-#         partner["code"] = code
+#         partner["code"] = code[:20]
 #     if vat_code:
-#         partner["vat_code"] = vat_code
+#         partner["vat_code"] = vat_code[:20]
 #     if address:
-#         partner["address"] = address
+#         partner["address"] = address[:100]
 
 #     return partner
 
@@ -1765,7 +1873,7 @@ def dineta_hello(
 #             name = (
 #                 _s(_get_attr(item, "prekes_pavadinimas", ""))
 #                 or _s(_get_attr(doc, "prekes_pavadinimas", ""))
-#                 or "Prekė"
+#                 or _build_stock_name_fallback(doc)
 #             )
 #             unit = (
 #                 _s(_get_attr(item, "unit", ""))
@@ -1781,35 +1889,35 @@ def dineta_hello(
 #             stock_type = 2 if type_str == "PASLAUGA" else 1
 
 #             stock_item: dict = {
-#                 "id":       code,
+#                 "id":       code[:20],
 #                 "type":     stock_type,
-#                 "name":     name,
-#                 "unitid":   _normalize_unit_dineta(unit),
+#                 "name":     name[:100],
+#                 "unitid":   _normalize_unit_dineta(unit)[:20],
 #                 "vat_perc": float(vat_pct),
 #             }
 #             if barcode:
-#                 stock_item["barcodes"] = [{"barcode": barcode, "default": 1}]
+#                 stock_item["barcodes"] = [{"barcode": barcode[:20], "default": 1}]
 
 #             items.append(stock_item)
 #     else:
 #         # ---- SUMIŠKAI ----
 #         code    = _get_product_code(item=None, doc=doc)
 #         barcode = _get_barcode(item=None, doc=doc)
-#         name    = _s(_get_attr(doc, "prekes_pavadinimas", "")) or "Prekė"
+#         name    = _s(_get_attr(doc, "prekes_pavadinimas", "")) or _build_stock_name_fallback(doc)
 #         unit    = _s(_get_attr(doc, "unit", "")) or "vnt."
 #         vat_pct = _safe_D(_get_attr(doc, "vat_percent", 0) or 0)
 #         type_str, _, _ = _resolve_type_group_product(item=None, doc=doc)
 #         stock_type = 2 if type_str == "PASLAUGA" else 1
 
 #         stock_item = {
-#             "id":       code,
+#             "id":       code[:20],
 #             "type":     stock_type,
-#             "name":     name,
-#             "unitid":   _normalize_unit_dineta(unit),
+#             "name":     name[:100],
+#             "unitid":   _normalize_unit_dineta(unit)[:20],
 #             "vat_perc": float(vat_pct),
 #         }
 #         if barcode:
-#             stock_item["barcodes"] = [{"barcode": barcode, "default": 1}]
+#             stock_item["barcodes"] = [{"barcode": barcode[:20], "default": 1}]
 
 #         items.append(stock_item)
 
@@ -1850,7 +1958,7 @@ def dineta_hello(
 #             name = (
 #                 _s(_get_attr(item, "prekes_pavadinimas", ""))
 #                 or _s(_get_attr(doc, "prekes_pavadinimas", ""))
-#                 or "Prekė"
+#                 or _build_stock_name_fallback(doc)
 #             )
 #             qty     = _safe_D(_get_attr(item, "quantity", 1) or 1)
 #             price   = _safe_D(_get_attr(item, "price", 0) or 0)
@@ -1870,24 +1978,24 @@ def dineta_hello(
 #             vat_code = _resolve_vat_code(doc, item, line_map)
 
 #             line: dict = {
-#                 "stockId":     code,
-#                 "name":        name,
+#                 "stockId":     code[:20],
+#                 "name":        name[:100],
 #                 "quant":       float(qty),
 #                 "vatPerc":     float(vat_pct),
-#                 "vatCode":     vat_code,
+#                 "vatCode":     vat_code[:20],
 #                 "price":       float(new_price),
 #                 "priceDisc":   0,
 #                 "dateCreated": now_ms,
 #             }
 #             if barcode:
-#                 line["barcode"] = barcode
+#                 line["barcode"] = barcode[:20]
 
 #             lines.append(line)
 #     else:
 #         # ---- SUMIŠKAI ----
 #         code    = _get_product_code(item=None, doc=doc)
 #         barcode = _get_barcode(item=None, doc=doc)
-#         name    = _s(_get_attr(doc, "prekes_pavadinimas", "")) or "Prekė"
+#         name    = _s(_get_attr(doc, "prekes_pavadinimas", "")) or _build_stock_name_fallback(doc)
 #         qty     = _safe_D(_get_attr(doc, "quantity", 1) or 1)
 #         amount_wo = _safe_D(_get_attr(doc, "amount_wo_vat", 0) or 0)
 #         discount  = _safe_D(_get_attr(doc, "invoice_discount_wo_vat", 0) or 0)
@@ -1908,17 +2016,17 @@ def dineta_hello(
 #             )
 
 #         line = {
-#             "stockId":     code,
-#             "name":        name,
+#             "stockId":     code[:20],
+#             "name":        name[:100],
 #             "quant":       float(qty),
 #             "vatPerc":     float(vat_pct),
-#             "vatCode":     vat_code,
+#             "vatCode":     vat_code[:20],
 #             "price":       float(new_price),
 #             "priceDisc":   0,
 #             "dateCreated": now_ms,
 #         }
 #         if barcode:
-#             line["barcode"] = barcode
+#             line["barcode"] = barcode[:20]
 
 #         lines.append(line)
 
@@ -1976,15 +2084,19 @@ def dineta_hello(
 
 #     op = "purchase" if doc_type == "pirkimas" else "sale"
 
-#     # Дата
+#     # Дата (с санитизацией)
 #     inv_date = (
 #         _get_attr(doc, "invoice_date", None)
 #         or _get_attr(doc, "operation_date", None)
 #     )
 #     if isinstance(inv_date, (date, datetime)):
 #         date_str = inv_date.strftime("%Y-%m-%d")
+#     elif isinstance(inv_date, str):
+#         # Извлекаем дату из строки (может содержать мусор типа "ATOSTOGOS2026-01-31")
+#         match = re.search(r"\d{4}-\d{2}-\d{2}", inv_date)
+#         date_str = match.group(0) if match else datetime.now().strftime("%Y-%m-%d")
 #     else:
-#         date_str = _s(inv_date) or datetime.now().strftime("%Y-%m-%d")
+#         date_str = datetime.now().strftime("%Y-%m-%d")
 
 #     # blankNo (max 20)
 #     blank_no = _build_ref_id(
@@ -2007,10 +2119,10 @@ def dineta_hello(
 #         "docdate":       date_str,
 #         "aDate":         date_str,
 #         "blankNo":       blank_no,
-#         "partnerId":     partner_id,
-#         "partnerId2":    partner_id,
-#         "storeFromId":   store_id,
-#         "storeToId":     store_id,
+#         "partnerId":     partner_id[:20],
+#         "partnerId2":    partner_id[:20],
+#         "storeFromId":   store_id[:20],
+#         "storeToId":     store_id[:20],
 #         "totalSum":      round(total_sum, 2),
 #         "vatSum":        round(vat_sum, 2),
 #         "externalDocId": operation_id,
@@ -2056,6 +2168,14 @@ def dineta_hello(
 #         if not partner_id:
 #             result.partner_result = DinetaRequestResult(
 #                 success=False, error="Partner ID yra tuščias",
+#             )
+#             result.overall_status = "error"
+#             return result
+
+#         if not partner_payload.get("name") or not partner_payload["name"].strip():
+#             result.partner_result = DinetaRequestResult(
+#                 success=False,
+#                 error="Partnerio pavadinimas tuščias. Patikrinkite dokumento duomenis.",
 #             )
 #             result.overall_status = "error"
 #             return result

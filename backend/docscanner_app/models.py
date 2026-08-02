@@ -2939,6 +2939,13 @@ class InvoiceSeries(models.Model):
         on_delete=models.CASCADE,
         related_name="invoice_series",
     )
+    company_profile = models.ForeignKey(
+        "CompanyProfile",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="invoice_series",
+    )
     invoice_type = models.CharField(max_length=20, choices=INVOICE_TYPE_CHOICES)
     prefix = models.CharField(max_length=20)
     next_number = models.PositiveIntegerField(default=1)
@@ -2949,7 +2956,7 @@ class InvoiceSeries(models.Model):
 
     class Meta:
         ordering = ["invoice_type", "-is_default", "prefix"]
-        unique_together = [("user", "prefix")]
+        unique_together = [("user", "company_profile", "prefix")]
         verbose_name_plural = "Invoice series"
 
     def __str__(self):
@@ -2969,29 +2976,41 @@ class InvoiceSeries(models.Model):
         return self.prefix, self.format_number(n), n
 
     @classmethod
-    def get_default_for_type(cls, user, invoice_type):
-        s = cls.objects.filter(
-            user=user, invoice_type=invoice_type, is_active=True, is_default=True
-        ).first()
+    def get_default_for_type(cls, user, invoice_type, company_profile_id=None):
+        if company_profile_id is None:
+            company_profile_id = getattr(user, "active_company_profile_id", None)
+        base = cls.objects.filter(user=user, invoice_type=invoice_type, is_active=True)
+        if company_profile_id is not None:
+            base = base.filter(company_profile_id=company_profile_id)
+        s = base.filter(is_default=True).first()
         if not s:
-            s = cls.objects.filter(
-                user=user, invoice_type=invoice_type, is_active=True
-            ).first()
+            s = base.first()
         return s
 
     @classmethod
-    def ensure_only_one_default(cls, user, invoice_type, default_id):
-        cls.objects.filter(
+    def ensure_only_one_default(cls, user, invoice_type, default_id, company_profile_id=None):
+        if company_profile_id is None:
+            obj = cls.objects.filter(id=default_id).first()
+            company_profile_id = obj.company_profile_id if obj else None
+        qs = cls.objects.filter(
             user=user, invoice_type=invoice_type, is_default=True
-        ).exclude(id=default_id).update(is_default=False)
+        )
+        if company_profile_id is not None:
+            qs = qs.filter(company_profile_id=company_profile_id)
+        qs.exclude(id=default_id).update(is_default=False)
 
     @classmethod
-    def create_defaults_for_user(cls, user):
-        if cls.objects.filter(user=user).exists():
+    def create_defaults_for_user(cls, user, company_profile_id=None):
+        if company_profile_id is None:
+            company_profile_id = getattr(user, "active_company_profile_id", None)
+        if company_profile_id is None:
+            return  # нет активной фирмы — серии не сеем (как с units)
+        if cls.objects.filter(user=user, company_profile_id=company_profile_id).exists():
             return
         objs = [
             cls(
                 user=user,
+                company_profile_id=company_profile_id,
                 invoice_type=inv_type,
                 prefix=prefix,
                 next_number=1,

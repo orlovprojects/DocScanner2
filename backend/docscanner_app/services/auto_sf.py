@@ -65,25 +65,33 @@ def create_sf_from_isankstine(source, user, series_prefix=None):
     if source.sent_at:
         new_data["sent_at"] = source.sent_at
 
+    # Серия и номер — из профиля исходной išankstinės, не из активной фирмы.
+    sf_profile_id = source.company_profile_id or getattr(
+        user, "active_company_profile_id", None
+    )
+    # гарантируем, что у этой фирмы есть серии нужного типа
+    if sf_profile_id:
+        InvoiceSeries.create_defaults_for_user(user, sf_profile_id)
+
     with transaction.atomic():
         # ── Series ──────────────────────────────────────────
+        def _sf_series_qs():
+            qs = InvoiceSeries.objects.select_for_update().filter(
+                user=user, invoice_type=target_type, is_active=True,
+            )
+            if sf_profile_id is not None:
+                qs = qs.filter(company_profile_id=sf_profile_id)
+            return qs
+
         series_obj = None
         if series_prefix:
-            series_obj = InvoiceSeries.objects.select_for_update().filter(
-                user=user, prefix=series_prefix,
-                invoice_type=target_type, is_active=True,
-            ).first()
+            series_obj = _sf_series_qs().filter(prefix=series_prefix).first()
 
         if not series_obj:
-            series_obj = InvoiceSeries.objects.select_for_update().filter(
-                user=user, invoice_type=target_type,
-                is_active=True, is_default=True,
-            ).first()
+            series_obj = _sf_series_qs().filter(is_default=True).first()
 
         if not series_obj:
-            series_obj = InvoiceSeries.objects.select_for_update().filter(
-                user=user, invoice_type=target_type, is_active=True,
-            ).first()
+            series_obj = _sf_series_qs().first()
 
         if not series_obj:
             raise ValueError(f"Nėra sukurtos serijos tipui '{target_type}'.")

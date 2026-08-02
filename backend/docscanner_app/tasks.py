@@ -639,17 +639,13 @@ def _match_document_line_items_with_catalog(
         catalog_by_code[product_code] = product
 
         catalog_row = {
-            "prekes_pavadinimas": clean(
-                product.prekes_pavadinimas
-            ),
-            "prekes_kodas": product_code,
+            "pav": clean(product.prekes_pavadinimas),
+            "kod": product_code,
         }
 
-        product_barcode = clean(
-            product.prekes_barkodas
-        )
+        product_barcode = clean(product.prekes_barkodas)
         if product_barcode:
-            catalog_row["prekes_barkodas"] = product_barcode
+            catalog_row["bar"] = product_barcode
 
         product_unit = clean(product.unit)
         if product_unit:
@@ -685,21 +681,15 @@ def _match_document_line_items_with_catalog(
         line_items_by_id[line_item_id] = line_item
 
         line_row = {
-            "line_item_id": line_item.pk,
-            "prekes_pavadinimas": clean(
-                line_item.prekes_pavadinimas
-            ),
-            "prekes_kodas": clean(
-                line_item.prekes_kodas
-            ),
+            "id": line_item.pk,
+            "pav": clean(line_item.prekes_pavadinimas),
+            "kod": clean(line_item.prekes_kodas),
             "unit": clean(line_item.unit),
         }
 
-        line_barcode = clean(
-            line_item.prekes_barkodas
-        )
+        line_barcode = clean(line_item.prekes_barkodas)
         if line_barcode:
-            line_row["prekes_barkodas"] = line_barcode
+            line_row["bar"] = line_barcode
 
         line_items_payload.append(line_row)
 
@@ -766,7 +756,9 @@ def _match_document_line_items_with_catalog(
             continue
 
         returned_line_item_id = clean(
-            result.get("line_item_id")
+            result.get("id")
+            if "id" in result
+            else result.get("line_item_id")
         )
 
         if not returned_line_item_id:
@@ -789,7 +781,9 @@ def _match_document_line_items_with_catalog(
             continue
 
         returned_code = clean(
-            result.get("prekes_kodas")
+            result.get("kod")
+            if "kod" in result
+            else result.get("prekes_kodas")
         )
 
         if not returned_code:

@@ -4086,8 +4086,6 @@ def register(request):
 
             user.ensure_inbox_token(save=True)
 
-            from .models import InvoiceSeries
-            InvoiceSeries.create_defaults_for_user(user)
             InvSubscription.objects.create(user=user)
 
             # Создаём триал-подписку для нового пользователя
@@ -6949,40 +6947,34 @@ def invoice_issue(request, pk):
 
     with transaction.atomic():
         series_obj = None
+        series_profile_id = invoice.company_profile_id or getattr(
+            request.user, "active_company_profile_id", None
+        )
+
+        def _series_qs():
+            qs = InvoiceSeries.objects.select_for_update().filter(
+                user=request.user,
+                invoice_type=invoice.invoice_type,
+                is_active=True,
+            )
+            if series_profile_id is not None:
+                qs = qs.filter(company_profile_id=series_profile_id)
+            return qs
 
         if invoice.document_series:
-            series_obj = InvoiceSeries.objects.select_for_update().filter(
-                user=request.user,
-                prefix=invoice.document_series,
-                invoice_type=invoice.invoice_type,
-                is_active=True,
-            ).first()
+            series_obj = _series_qs().filter(prefix=invoice.document_series).first()
 
         if not series_obj:
-            series_obj = InvoiceSeries.objects.select_for_update().filter(
-                user=request.user,
-                invoice_type=invoice.invoice_type,
-                is_active=True,
-                is_default=True,
-            ).first()
+            series_obj = _series_qs().filter(is_default=True).first()
 
         if not series_obj:
-            series_obj = InvoiceSeries.objects.select_for_update().filter(
-                user=request.user,
-                invoice_type=invoice.invoice_type,
-                is_active=True,
-            ).first()
-
-        if not series_obj:
-            return Response(
-                {"detail": "Nėra sukurtos serijos šiam dokumento tipui."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+            series_obj = _series_qs().first()
 
         # Если юзер уже задал номер вручную — проверяем уникальность
         if invoice.document_number:
             exists = Invoice.objects.filter(
                 user=request.user,
+                company_profile_id=series_profile_id,
                 document_series=series_obj.prefix,
                 document_number=invoice.document_number,
                 invoice_type=invoice.invoice_type,
@@ -7376,8 +7368,17 @@ class CreateCreditInvoiceView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # ── Получить серию для kreditinė ───────────────────
-        series = InvoiceSeries.get_default_for_type(request.user, "kreditine")
+        # Кредитка принадлежит той же фирме, что и оригинал — профиль и серию
+        # берём из оригинала, а не из активной фирмы.
+        credit_profile_id = original.company_profile_id or getattr(
+            request.user, "active_company_profile_id", None
+        )
+        # гарантируем, что у этой фирмы есть серии (в т.ч. кредитная)
+        if credit_profile_id:
+            InvoiceSeries.create_defaults_for_user(request.user, credit_profile_id)
+        series = InvoiceSeries.get_default_for_type(
+            request.user, "kreditine", credit_profile_id
+        )
         series_prefix = series.prefix if series else "KS"
 
         # ── Копировать invoice ─────────────────────────────
@@ -7795,9 +7796,16 @@ def invoice_series_list(request):
     POST — создать серию
     """
     user = request.user
+    active_id = getattr(user, "active_company_profile_id", None)
 
     if request.method == "GET":
+        # Ленивый досев: если у активной фирмы нет серий — создать дефолтные
+        if active_id:
+            InvoiceSeries.create_defaults_for_user(user, active_id)
+
         qs = InvoiceSeries.objects.filter(user=user, is_active=True)
+        if active_id:
+            qs = qs.filter(company_profile_id=active_id)
         invoice_type = request.query_params.get("invoice_type")
         if invoice_type:
             qs = qs.filter(invoice_type=invoice_type)
@@ -7810,23 +7818,28 @@ def invoice_series_list(request):
     prefix = ser.validated_data["prefix"].strip().upper()
     invoice_type = ser.validated_data["invoice_type"]
 
-    # Уникальность prefix в пределах user
-    if InvoiceSeries.objects.filter(user=user, prefix=prefix).exists():
+    # Уникальность prefix в пределах user + фирмы
+    if InvoiceSeries.objects.filter(
+        user=user, company_profile_id=active_id, prefix=prefix
+    ).exists():
         return Response(
             {"detail": f"Serija '{prefix}' jau egzistuoja."},
             status=status.HTTP_400_BAD_REQUEST,
         )
 
     is_default = ser.validated_data.get("is_default", False)
-    # Если это первая серия для типа — сделать default
-    if not InvoiceSeries.objects.filter(user=user, invoice_type=invoice_type, is_active=True).exists():
+    # Если это первая серия для типа в этой фирме — сделать default
+    if not InvoiceSeries.objects.filter(
+        user=user, company_profile_id=active_id,
+        invoice_type=invoice_type, is_active=True,
+    ).exists():
         is_default = True
 
-    obj = ser.save(user=user, prefix=prefix, is_default=is_default)
+    obj = ser.save(user=user, company_profile_id=active_id, prefix=prefix, is_default=is_default)
 
     # Ensure only one default
     if is_default:
-        InvoiceSeries.ensure_only_one_default(user, invoice_type, obj.id)
+        InvoiceSeries.ensure_only_one_default(user, invoice_type, obj.id, active_id)
 
     return Response(InvoiceSeriesSerializer(obj).data, status=status.HTTP_201_CREATED)
 
@@ -7857,10 +7870,14 @@ def invoice_series_detail(request, pk):
     ser = InvoiceSeriesSerializer(series, data=data, partial=True)
     ser.is_valid(raise_exception=True)
 
-    # Проверка уникальности prefix
+    # Проверка уникальности prefix (в разрезе фирмы записи)
     new_prefix = ser.validated_data.get("prefix", series.prefix)
     if new_prefix != series.prefix:
-        if InvoiceSeries.objects.filter(user=request.user, prefix=new_prefix).exclude(pk=pk).exists():
+        if InvoiceSeries.objects.filter(
+            user=request.user,
+            company_profile_id=series.company_profile_id,
+            prefix=new_prefix,
+        ).exclude(pk=pk).exists():
             return Response(
                 {"detail": f"Serija '{new_prefix}' jau egzistuoja."},
                 status=status.HTTP_400_BAD_REQUEST,
@@ -7870,7 +7887,9 @@ def invoice_series_detail(request, pk):
 
     # Ensure only one default
     if ser.validated_data.get("is_default"):
-        InvoiceSeries.ensure_only_one_default(request.user, obj.invoice_type, obj.id)
+        InvoiceSeries.ensure_only_one_default(
+            request.user, obj.invoice_type, obj.id, obj.company_profile_id
+        )
 
     return Response(InvoiceSeriesSerializer(obj).data)
 
@@ -7890,11 +7909,15 @@ def invoice_series_check_number(request):
     if not prefix or not number:
         return Response({"exists": False, "invoice_id": None})
 
-    invoice = Invoice.objects.filter(
+    qs = Invoice.objects.filter(
         user=request.user,
         document_series=prefix,
         document_number=number,
-    ).first()
+    )
+    _active_id = getattr(request.user, "active_company_profile_id", None)
+    if _active_id:
+        qs = qs.filter(company_profile_id=_active_id)
+    invoice = qs.first()
 
     return Response({
         "exists": invoice is not None,
@@ -7923,15 +7946,20 @@ def invoice_next_number(request):
     series_prefix = request.query_params.get("series", "").strip()
     invoice_type = request.query_params.get("invoice_type", "pvm_saskaita").strip()
 
+    active_id = getattr(request.user, "active_company_profile_id", None)
+
     # Найти серию
     if series_prefix:
-        series = InvoiceSeries.objects.filter(
+        qs = InvoiceSeries.objects.filter(
             user=request.user,
             prefix=series_prefix,
             is_active=True,
-        ).first()
+        )
+        if active_id:
+            qs = qs.filter(company_profile_id=active_id)
+        series = qs.first()
     else:
-        series = InvoiceSeries.get_default_for_type(request.user, invoice_type)
+        series = InvoiceSeries.get_default_for_type(request.user, invoice_type, active_id)
 
     if not series:
         return Response({"next_number": "", "preview": "", "prefix": "", "padding": 3})
@@ -7973,6 +8001,9 @@ def invoice_check_number(request):
     ).exclude(
         status="cancelled",
     )
+    _active_id = getattr(request.user, "active_company_profile_id", None)
+    if _active_id:
+        qs = qs.filter(company_profile_id=_active_id)
 
     # Опционально фильтр по типу
     if invoice_type:
@@ -15701,6 +15732,39 @@ def compute_kor_balanced(document):
     return abs(d_total - k_total) <= tolerance
 
 
+def _next_free_number_int(user, company_profile_id, invoice_type, prefix, start_from):
+    """
+    Возвращает первое свободное числовое значение номера для серии
+    (prefix + invoice_type) в пределах профиля, начиная со start_from.
+    Сравнение числовое (padding-agnostic): document_number хранится строкой
+    с ведущими нулями, поэтому парсим в int.
+    """
+    from .models import Invoice
+
+    taken_raw = (
+        Invoice.objects
+        .filter(
+            user=user,
+            company_profile_id=company_profile_id,
+            document_series=prefix,
+            invoice_type=invoice_type,
+        )
+        .exclude(status="cancelled")
+        .values_list("document_number", flat=True)
+    )
+
+    taken = set()
+    for val in taken_raw:
+        try:
+            taken.add(int(str(val).strip()))
+        except (ValueError, TypeError):
+            continue  # нечисловые номера игнорируем
+
+    n = max(int(start_from), 1)
+    while n in taken:
+        n += 1
+    return n
+
 
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
@@ -16500,6 +16564,7 @@ def transfer_to_accounting(request):
             Invoice.objects
             .filter(
                 user=user,
+                company_profile=profile,
                 document_series=doc.document_series or "",
                 document_number=doc.document_number,
             )
@@ -16507,17 +16572,33 @@ def transfer_to_accounting(request):
         )
 
         if dup_qs.exists():
+            _hint_type = "kreditine" if bool(doc.is_credit_invoice) else (
+                "pvm_saskaita"
+                if (_has_amount(doc.vat_amount) or doc.separate_vat)
+                else "saskaita"
+            )
+            try:
+                _start = int(str(doc.document_number).strip())
+            except (ValueError, TypeError):
+                _start = 1
+
+            _free_int = _next_free_number_int(
+                user, profile.id, _hint_type,
+                doc.document_series or "", _start,
+            )
+
             skipped.append({
                 "id": doc.id,
                 "filename": doc.original_filename,
                 "reason": (
-                    f"Dokumentas "
-                    f"{doc.document_series or ''}-{doc.document_number} "
-                    f"jau yra apskaitoje"
+                    f"Dokumentas {doc.document_series or ''}-{doc.document_number} "
+                    f"jau yra apskaitoje. Laisvas numeris šioje serijoje: "
+                    f"{doc.document_series or ''}-{_free_int}"
                 ),
             })
             continue
 
+        with transaction.atomic():
         is_credit = bool(doc.is_credit_invoice)
 
         if is_credit:
@@ -16825,6 +16906,25 @@ def transfer_to_accounting(request):
                 "[Transfer] match_invoice_on_transfer failed: %s",
                 e,
             )
+
+        # ── Вариант 1: подтянуть счётчик серии за перенесённым номером ──
+        try:
+            transferred_int = int(str(invoice.document_number).strip())
+        except (ValueError, TypeError):
+            transferred_int = None
+
+        if transferred_int is not None:
+            series_to_bump = InvoiceSeries.objects.select_for_update().filter(
+                user=user,
+                company_profile=profile,
+                prefix=invoice.document_series,
+                invoice_type=inv_type,
+                is_active=True,
+            ).first()
+
+            if series_to_bump and transferred_int >= series_to_bump.next_number:
+                series_to_bump.next_number = transferred_int + 1
+                series_to_bump.save(update_fields=["next_number"])
 
         created_sales.append(invoice.id)
         _mark_doc_transferred(doc)
