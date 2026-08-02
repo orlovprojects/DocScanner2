@@ -16599,335 +16599,335 @@ def transfer_to_accounting(request):
             continue
 
         with transaction.atomic():
-        is_credit = bool(doc.is_credit_invoice)
+            is_credit = bool(doc.is_credit_invoice)
 
-        if is_credit:
-            inv_type = "kreditine"
-        elif _has_amount(doc.vat_amount):
-            inv_type = "pvm_saskaita"
-        elif doc.separate_vat:
-            inv_type = "pvm_saskaita"
-        else:
-            inv_type = "saskaita"
+            if is_credit:
+                inv_type = "kreditine"
+            elif _has_amount(doc.vat_amount):
+                inv_type = "pvm_saskaita"
+            elif doc.separate_vat:
+                inv_type = "pvm_saskaita"
+            else:
+                inv_type = "saskaita"
 
-        doc_pvm_kodas = auto_select_pvm_code(
-            pirkimas_pardavimas="pardavimas",
-            buyer_country_iso=doc.buyer_country_iso,
-            seller_country_iso=doc.seller_country_iso,
-            preke_paslauga=doc.preke_paslauga,
-            vat_percent=(
-                float(doc.vat_percent)
-                if doc.vat_percent is not None
-                else None
-            ),
-            separate_vat=bool(doc.separate_vat),
-            buyer_has_vat_code=bool(doc.buyer_vat_code),
-            seller_has_vat_code=bool(doc.seller_vat_code),
-            doc_96_str=bool(getattr(doc, "doc_96_str", False)),
-        )
+            doc_pvm_kodas = auto_select_pvm_code(
+                pirkimas_pardavimas="pardavimas",
+                buyer_country_iso=doc.buyer_country_iso,
+                seller_country_iso=doc.seller_country_iso,
+                preke_paslauga=doc.preke_paslauga,
+                vat_percent=(
+                    float(doc.vat_percent)
+                    if doc.vat_percent is not None
+                    else None
+                ),
+                separate_vat=bool(doc.separate_vat),
+                buyer_has_vat_code=bool(doc.buyer_vat_code),
+                seller_has_vat_code=bool(doc.seller_vat_code),
+                doc_96_str=bool(getattr(doc, "doc_96_str", False)),
+            )
 
-        # Pardavimo korespondencijos
-        debit_account = "2410"  # Pirkėjų skolos
+            # Pardavimo korespondencijos
+            debit_account = "2410"  # Pirkėjų skolos
 
-        credit_account = (
-            getattr(doc, "pardavimo_saskaita", None)
-            or "5001"
-        )
+            credit_account = (
+                getattr(doc, "pardavimo_saskaita", None)
+                or "5001"
+            )
 
-        pvm_account = "4492" if _has_amount(doc.vat_amount) else None
+            pvm_account = "4492" if _has_amount(doc.vat_amount) else None
 
-        entry_date = doc.invoice_date
-        period = entry_date.replace(day=1) if entry_date else None
+            entry_date = doc.invoice_date
+            period = entry_date.replace(day=1) if entry_date else None
 
-        invoice = Invoice.objects.create(
-            user=user,
-            company_profile=profile,
-            scanned_document=doc,
-            invoice_type=inv_type,
-            status="issued",
+            invoice = Invoice.objects.create(
+                user=user,
+                company_profile=profile,
+                scanned_document=doc,
+                invoice_type=inv_type,
+                status="issued",
 
-            # Numeracija
-            document_series=doc.document_series or "",
-            document_number=doc.document_number or "",
+                # Numeracija
+                document_series=doc.document_series or "",
+                document_number=doc.document_number or "",
 
-            # Datos
-            invoice_date=doc.invoice_date,
-            due_date=doc.due_date,
-            operation_date=doc.operation_date,
+                # Datos
+                invoice_date=doc.invoice_date,
+                due_date=doc.due_date,
+                operation_date=doc.operation_date,
 
-            # Korespondencijos
-            debeto_saskaita=debit_account,
-            kredito_saskaita=credit_account,
-            pvm_saskaita=pvm_account,
-            period=period,
+                # Korespondencijos
+                debeto_saskaita=debit_account,
+                kredito_saskaita=credit_account,
+                pvm_saskaita=pvm_account,
+                period=period,
 
-            # Seller / mes
-            seller_name=doc.seller_name or "",
-            seller_name_normalized=(doc.seller_name or "").strip().upper(),
-            seller_id=doc.seller_id or "",
-            seller_vat_code=doc.seller_vat_code or "",
-            seller_address=doc.seller_address or "",
-            seller_country=doc.seller_country or "",
-            seller_country_iso=doc.seller_country_iso or "",
-            seller_iban=doc.seller_iban or "",
-            seller_is_person=doc.seller_is_person,
+                # Seller / mes
+                seller_name=doc.seller_name or "",
+                seller_name_normalized=(doc.seller_name or "").strip().upper(),
+                seller_id=doc.seller_id or "",
+                seller_vat_code=doc.seller_vat_code or "",
+                seller_address=doc.seller_address or "",
+                seller_country=doc.seller_country or "",
+                seller_country_iso=doc.seller_country_iso or "",
+                seller_iban=doc.seller_iban or "",
+                seller_is_person=doc.seller_is_person,
 
-            # Buyer / pirkėjas
-            buyer_name=doc.buyer_name or "",
-            buyer_name_normalized=(doc.buyer_name or "").strip().upper(),
-            buyer_id=doc.buyer_id or "",
-            buyer_vat_code=doc.buyer_vat_code or "",
-            buyer_address=doc.buyer_address or "",
-            buyer_country=doc.buyer_country or "",
-            buyer_country_iso=doc.buyer_country_iso or "",
-            buyer_iban=doc.buyer_iban or "",
-            buyer_is_person=doc.buyer_is_person,
+                # Buyer / pirkėjas
+                buyer_name=doc.buyer_name or "",
+                buyer_name_normalized=(doc.buyer_name or "").strip().upper(),
+                buyer_id=doc.buyer_id or "",
+                buyer_vat_code=doc.buyer_vat_code or "",
+                buyer_address=doc.buyer_address or "",
+                buyer_country=doc.buyer_country or "",
+                buyer_country_iso=doc.buyer_country_iso or "",
+                buyer_iban=doc.buyer_iban or "",
+                buyer_is_person=doc.buyer_is_person,
 
-            # Sumos
-            currency=doc.currency or "EUR",
-            pvm_tipas=(
-                "taikoma"
-                if inv_type in ("pvm_saskaita", "kreditine")
-                else "netaikoma"
-            ),
-            vat_percent=doc.vat_percent,
+                # Sumos
+                currency=doc.currency or "EUR",
+                pvm_tipas=(
+                    "taikoma"
+                    if inv_type in ("pvm_saskaita", "kreditine")
+                    else "netaikoma"
+                ),
+                vat_percent=doc.vat_percent,
 
-            amount_wo_vat=_signed_amount(doc.amount_wo_vat, is_credit),
-            vat_amount=_signed_amount(doc.vat_amount, is_credit),
-            amount_with_vat=_signed_amount(doc.amount_with_vat, is_credit),
+                amount_wo_vat=_signed_amount(doc.amount_wo_vat, is_credit),
+                vat_amount=_signed_amount(doc.vat_amount, is_credit),
+                amount_with_vat=_signed_amount(doc.amount_with_vat, is_credit),
 
-            invoice_discount_with_vat=_signed_amount(
-                doc.invoice_discount_with_vat,
-                is_credit,
-            ),
-            invoice_discount_wo_vat=_signed_amount(
-                doc.invoice_discount_wo_vat,
-                is_credit,
-            ),
+                invoice_discount_with_vat=_signed_amount(
+                    doc.invoice_discount_with_vat,
+                    is_credit,
+                ),
+                invoice_discount_wo_vat=_signed_amount(
+                    doc.invoice_discount_wo_vat,
+                    is_credit,
+                ),
 
-            separate_vat=doc.separate_vat,
-            doc_96_str=doc.doc_96_str,
+                separate_vat=doc.separate_vat,
+                doc_96_str=doc.doc_96_str,
 
-            # iSAF
-            pirkimas_pardavimas="pardavimas",
-            report_to_isaf=doc.report_to_isaf,
-            document_type_code=doc.document_type_code or "",
-            document_type=doc.document_type or "",
-            pvm_kodas=doc_pvm_kodas or "",
+                # iSAF
+                pirkimas_pardavimas="pardavimas",
+                report_to_isaf=doc.report_to_isaf,
+                document_type_code=doc.document_type_code or "",
+                document_type=doc.document_type or "",
+                pvm_kodas=doc_pvm_kodas or "",
 
-            # Prekė / sumiškai
-            prekes_kodas=doc.prekes_kodas or "",
-            prekes_pavadinimas=doc.prekes_pavadinimas or "",
-            preke_paslauga=doc.preke_paslauga or "",
+                # Prekė / sumiškai
+                prekes_kodas=doc.prekes_kodas or "",
+                prekes_pavadinimas=doc.prekes_pavadinimas or "",
+                preke_paslauga=doc.preke_paslauga or "",
 
-            # Meta
-            public_link_enabled=False,
-        )
+                # Meta
+                public_link_enabled=False,
+            )
 
-        invoice_lines = []
-        source_lines = list(doc.line_items.all())
+            invoice_lines = []
+            source_lines = list(doc.line_items.all())
 
-        if source_lines:
-            for i, li in enumerate(source_lines):
-                li_vat_pct = (
-                    float(li.vat_percent)
-                    if li.vat_percent is not None
-                    else (
-                        float(doc.vat_percent)
-                        if doc.vat_percent is not None
-                        else None
+            if source_lines:
+                for i, li in enumerate(source_lines):
+                    li_vat_pct = (
+                        float(li.vat_percent)
+                        if li.vat_percent is not None
+                        else (
+                            float(doc.vat_percent)
+                            if doc.vat_percent is not None
+                            else None
+                        )
                     )
+
+                    li_preke_paslauga = (
+                        li.preke_paslauga
+                        or doc.preke_paslauga
+                    )
+
+                    li_pvm_kodas = auto_select_pvm_code(
+                        pirkimas_pardavimas="pardavimas",
+                        buyer_country_iso=doc.buyer_country_iso,
+                        seller_country_iso=doc.seller_country_iso,
+                        preke_paslauga=li_preke_paslauga,
+                        vat_percent=li_vat_pct,
+                        separate_vat=False,
+                        buyer_has_vat_code=bool(doc.buyer_vat_code),
+                        seller_has_vat_code=bool(doc.seller_vat_code),
+                        doc_96_str=bool(getattr(doc, "doc_96_str", False)),
+                    )
+
+                    raw_quantity = (
+                        li.quantity
+                        if li.quantity is not None
+                        else 1
+                    )
+
+                    invoice_lines.append(
+                        InvoiceLineItem(
+                            invoice=invoice,
+
+                            prekes_kodas=li.prekes_kodas or doc.prekes_kodas or "",
+                            prekes_barkodas=li.prekes_barkodas or "",
+                            prekes_pavadinimas=(
+                                li.prekes_pavadinimas
+                                or doc.prekes_pavadinimas
+                                or "Prekės / paslaugos"
+                            ),
+                            preke_paslauga=li_preke_paslauga or "",
+
+                            unit=li.unit or "vnt.",
+
+                            # Kreditinei kiekis neigiamas, kaina teigiama
+                            quantity=_signed_quantity(raw_quantity, is_credit),
+                            price=_line_price(
+                                li.price,
+                                li.subtotal,
+                                raw_quantity,
+                            ),
+
+                            subtotal=_signed_amount(li.subtotal, is_credit),
+                            vat=_signed_amount(li.vat, is_credit),
+                            vat_percent=(
+                                li.vat_percent
+                                if li.vat_percent is not None
+                                else doc.vat_percent
+                            ),
+                            total=_signed_amount(li.total, is_credit),
+
+                            discount_with_vat=_signed_amount(
+                                li.discount_with_vat,
+                                is_credit,
+                            ),
+                            discount_wo_vat=_signed_amount(
+                                li.discount_wo_vat,
+                                is_credit,
+                            ),
+
+                            pvm_kodas=li_pvm_kodas or "",
+
+                            # Korespondencijos line-level
+                            kredito_saskaita=credit_account,
+                            pvm_saskaita=pvm_account,
+
+                            sort_order=i,
+                        )
+                    )
+
+            else:
+                fallback_name = (
+                    doc.prekes_pavadinimas
+                    or doc.original_filename
+                    or "Prekės / paslaugos"
                 )
 
-                li_preke_paslauga = (
-                    li.preke_paslauga
-                    or doc.preke_paslauga
-                )
-
-                li_pvm_kodas = auto_select_pvm_code(
-                    pirkimas_pardavimas="pardavimas",
-                    buyer_country_iso=doc.buyer_country_iso,
-                    seller_country_iso=doc.seller_country_iso,
-                    preke_paslauga=li_preke_paslauga,
-                    vat_percent=li_vat_pct,
-                    separate_vat=False,
-                    buyer_has_vat_code=bool(doc.buyer_vat_code),
-                    seller_has_vat_code=bool(doc.seller_vat_code),
-                    doc_96_str=bool(getattr(doc, "doc_96_str", False)),
-                )
-
-                raw_quantity = (
-                    li.quantity
-                    if li.quantity is not None
-                    else 1
-                )
+                fallback_subtotal = _signed_amount(doc.amount_wo_vat, is_credit)
+                fallback_vat = _signed_amount(doc.vat_amount, is_credit)
+                fallback_total = _signed_amount(doc.amount_with_vat, is_credit)
 
                 invoice_lines.append(
                     InvoiceLineItem(
                         invoice=invoice,
 
-                        prekes_kodas=li.prekes_kodas or doc.prekes_kodas or "",
-                        prekes_barkodas=li.prekes_barkodas or "",
-                        prekes_pavadinimas=(
-                            li.prekes_pavadinimas
-                            or doc.prekes_pavadinimas
-                            or "Prekės / paslaugos"
-                        ),
-                        preke_paslauga=li_preke_paslauga or "",
+                        prekes_kodas=doc.prekes_kodas or "",
+                        prekes_barkodas="",
+                        prekes_pavadinimas=fallback_name,
+                        preke_paslauga=doc.preke_paslauga or "",
 
-                        unit=li.unit or "vnt.",
+                        unit="vnt.",
 
-                        # Kreditinei kiekis neigiamas, kaina teigiama
-                        quantity=_signed_quantity(raw_quantity, is_credit),
-                        price=_line_price(
-                            li.price,
-                            li.subtotal,
-                            raw_quantity,
-                        ),
+                        # Sumiškai:
+                        # įprasta SF:  1 x 100 = 100
+                        # kreditinė:  -1 x 100 = -100
+                        quantity=_signed_quantity(1, is_credit),
+                        price=_positive_amount(doc.amount_wo_vat),
 
-                        subtotal=_signed_amount(li.subtotal, is_credit),
-                        vat=_signed_amount(li.vat, is_credit),
-                        vat_percent=(
-                            li.vat_percent
-                            if li.vat_percent is not None
-                            else doc.vat_percent
-                        ),
-                        total=_signed_amount(li.total, is_credit),
+                        subtotal=fallback_subtotal,
+                        vat=fallback_vat,
+                        vat_percent=doc.vat_percent,
+                        total=fallback_total,
 
                         discount_with_vat=_signed_amount(
-                            li.discount_with_vat,
+                            doc.invoice_discount_with_vat,
                             is_credit,
                         ),
                         discount_wo_vat=_signed_amount(
-                            li.discount_wo_vat,
+                            doc.invoice_discount_wo_vat,
                             is_credit,
                         ),
 
-                        pvm_kodas=li_pvm_kodas or "",
+                        pvm_kodas=doc_pvm_kodas or "",
 
-                        # Korespondencijos line-level
                         kredito_saskaita=credit_account,
                         pvm_saskaita=pvm_account,
 
-                        sort_order=i,
+                        sort_order=0,
                     )
                 )
 
-        else:
-            fallback_name = (
-                doc.prekes_pavadinimas
-                or doc.original_filename
-                or "Prekės / paslaugos"
-            )
+            if invoice_lines:
+                InvoiceLineItem.objects.bulk_create(invoice_lines)
 
-            fallback_subtotal = _signed_amount(doc.amount_wo_vat, is_credit)
-            fallback_vat = _signed_amount(doc.vat_amount, is_credit)
-            fallback_total = _signed_amount(doc.amount_with_vat, is_credit)
+            invoice.ready_for_export = check_required_fields_for_export(invoice)
 
-            invoice_lines.append(
-                InvoiceLineItem(
-                    invoice=invoice,
+            is_math_valid, _ = validate_document_math_for_export(invoice)
+            invoice.math_validation_passed = is_math_valid
 
-                    prekes_kodas=doc.prekes_kodas or "",
-                    prekes_barkodas="",
-                    prekes_pavadinimas=fallback_name,
-                    preke_paslauga=doc.preke_paslauga or "",
+            invoice.kor_balanced = compute_kor_balanced(invoice)
 
-                    unit="vnt.",
+            invoice.save(update_fields=[
+                "ready_for_export",
+                "math_validation_passed",
+                "kor_balanced",
+            ])
 
-                    # Sumiškai:
-                    # įprasta SF:  1 x 100 = 100
-                    # kreditinė:  -1 x 100 = -100
-                    quantity=_signed_quantity(1, is_credit),
-                    price=_positive_amount(doc.amount_wo_vat),
+            try:
+                from .utils.journal_generators import sync_invoice_journal_entry
 
-                    subtotal=fallback_subtotal,
-                    vat=fallback_vat,
-                    vat_percent=doc.vat_percent,
-                    total=fallback_total,
-
-                    discount_with_vat=_signed_amount(
-                        doc.invoice_discount_with_vat,
-                        is_credit,
-                    ),
-                    discount_wo_vat=_signed_amount(
-                        doc.invoice_discount_wo_vat,
-                        is_credit,
-                    ),
-
-                    pvm_kodas=doc_pvm_kodas or "",
-
-                    kredito_saskaita=credit_account,
-                    pvm_saskaita=pvm_account,
-
-                    sort_order=0,
-                )
-            )
-
-        if invoice_lines:
-            InvoiceLineItem.objects.bulk_create(invoice_lines)
-
-        invoice.ready_for_export = check_required_fields_for_export(invoice)
-
-        is_math_valid, _ = validate_document_math_for_export(invoice)
-        invoice.math_validation_passed = is_math_valid
-
-        invoice.kor_balanced = compute_kor_balanced(invoice)
-
-        invoice.save(update_fields=[
-            "ready_for_export",
-            "math_validation_passed",
-            "kor_balanced",
-        ])
-
-        try:
-            from .utils.journal_generators import sync_invoice_journal_entry
-
-            sync_invoice_journal_entry(invoice)
-        except Exception as e:
-            logger.warning(
-                "[Transfer] sync_invoice_journal_entry failed for %s: %s",
-                invoice.id,
-                e,
-            )
-        try:
-            from .utils.payment_invoice_matching import match_invoice_on_transfer
-
-            alloc = match_invoice_on_transfer(invoice)
-
-            if alloc:
-                logger.info(
-                    "[Transfer] Invoice %s auto-matched to bank txn, amount=%s",
+                sync_invoice_journal_entry(invoice)
+            except Exception as e:
+                logger.warning(
+                    "[Transfer] sync_invoice_journal_entry failed for %s: %s",
                     invoice.id,
-                    alloc.amount,
+                    e,
                 )
-        except Exception as e:
-            logger.warning(
-                "[Transfer] match_invoice_on_transfer failed: %s",
-                e,
-            )
+            try:
+                from .utils.payment_invoice_matching import match_invoice_on_transfer
 
-        # ── Вариант 1: подтянуть счётчик серии за перенесённым номером ──
-        try:
-            transferred_int = int(str(invoice.document_number).strip())
-        except (ValueError, TypeError):
-            transferred_int = None
+                alloc = match_invoice_on_transfer(invoice)
 
-        if transferred_int is not None:
-            series_to_bump = InvoiceSeries.objects.select_for_update().filter(
-                user=user,
-                company_profile=profile,
-                prefix=invoice.document_series,
-                invoice_type=inv_type,
-                is_active=True,
-            ).first()
+                if alloc:
+                    logger.info(
+                        "[Transfer] Invoice %s auto-matched to bank txn, amount=%s",
+                        invoice.id,
+                        alloc.amount,
+                    )
+            except Exception as e:
+                logger.warning(
+                    "[Transfer] match_invoice_on_transfer failed: %s",
+                    e,
+                )
 
-            if series_to_bump and transferred_int >= series_to_bump.next_number:
-                series_to_bump.next_number = transferred_int + 1
-                series_to_bump.save(update_fields=["next_number"])
+            # ── Вариант 1: подтянуть счётчик серии за перенесённым номером ──
+            try:
+                transferred_int = int(str(invoice.document_number).strip())
+            except (ValueError, TypeError):
+                transferred_int = None
 
-        created_sales.append(invoice.id)
-        _mark_doc_transferred(doc)
+            if transferred_int is not None:
+                series_to_bump = InvoiceSeries.objects.select_for_update().filter(
+                    user=user,
+                    company_profile=profile,
+                    prefix=invoice.document_series,
+                    invoice_type=inv_type,
+                    is_active=True,
+                ).first()
+
+                if series_to_bump and transferred_int >= series_to_bump.next_number:
+                    series_to_bump.next_number = transferred_int + 1
+                    series_to_bump.save(update_fields=["next_number"])
+
+            created_sales.append(invoice.id)
+            _mark_doc_transferred(doc)
 
     return Response({
         "created_purchases": created_purchases,
