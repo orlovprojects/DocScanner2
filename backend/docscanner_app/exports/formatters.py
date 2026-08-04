@@ -1,4 +1,5 @@
 import re
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
 def format_date_agnum(d):
     """
@@ -53,6 +54,40 @@ def get_price_or_zero(val):
         return f"{val_f:.2f}"
     except Exception:
         return "0.00"
+    
+def get_price_2_or_4(val, default="0.00"):
+    """
+    Минимум 2 знака, максимум 4.
+    10       -> 10.00
+    10.5     -> 10.50
+    10.123   -> 10.123
+    10.1234  -> 10.1234
+    10.12346 -> 10.1235
+    """
+    try:
+        if val is None or str(val).strip() == "":
+            return default
+
+        decimal_value = Decimal(str(val)).quantize(
+            Decimal("0.0001"),
+            rounding=ROUND_HALF_UP,
+        )
+
+        if decimal_value == 0:
+            return "0.00"
+
+        formatted = f"{decimal_value:.4f}"
+        integer_part, decimal_part = formatted.split(".")
+
+        decimal_part = decimal_part.rstrip("0")
+
+        if len(decimal_part) < 2:
+            decimal_part = decimal_part.ljust(2, "0")
+
+        return f"{integer_part}.{decimal_part}"
+
+    except (InvalidOperation, ValueError, TypeError):
+        return default
     
 
 def expand_empty_tags(xml_bytes: bytes) -> bytes:

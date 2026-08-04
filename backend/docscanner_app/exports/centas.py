@@ -10,7 +10,13 @@ from django.utils.encoding import smart_str
 
 from ..models import ScannedDocument
 from ..utils.extra_fields import get_extra_for_export
-from .formatters import format_date, vat_to_int_str, get_price_or_zero, expand_empty_tags
+from .formatters import (
+    format_date,
+    vat_to_int_str,
+    get_price_or_zero,
+    get_price_2_or_4,
+    expand_empty_tags,
+)
 
 
 # =========================
@@ -194,13 +200,10 @@ def _fallback_doc_num(series: str, number: str) -> str:
 
 def _fmt_qty(q) -> str:
     """
-    Количество как число с двумя знаками после запятой.
+    Количество: минимум 2, максимум 4 знака.
     Пусто/нечисло -> 1.00
     """
-    try:
-        return f"{float(q):.2f}"
-    except Exception:
-        return "1.00"
+    return get_price_2_or_4(q, default="1.00")
 
 
 def _distribute_discount_to_centas_lines(document: ScannedDocument, items_list: list) -> None:
@@ -265,7 +268,7 @@ def _distribute_discount_to_centas_lines(document: ScannedDocument, items_list: 
 
         if qty > 0:
             price_after = (subtotal_after / qty).quantize(
-                Decimal("0.01"), rounding=ROUND_HALF_UP
+                Decimal("0.0001"), rounding=ROUND_HALF_UP
             )
         else:
             price_after = Decimal("0")
@@ -485,7 +488,9 @@ def export_document_to_centras_xml(
             price_to_use = getattr(item, "_centas_price_after_discount", None)
             if price_to_use is None:
                 price_to_use = getattr(item, "price", None)
-            ET.SubElement(eilute, "kaina").text = get_price_or_zero(_ensure_credit_abs_price(price_to_use, document))
+            ET.SubElement(eilute, "kaina").text = get_price_2_or_4(
+                _ensure_credit_abs_price(price_to_use, document)
+            )
 
             ET.SubElement(eilute, "pvmtar").text = vat_to_int_str(getattr(item, "vat_percent", None))
 
