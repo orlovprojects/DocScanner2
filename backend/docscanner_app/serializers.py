@@ -17,6 +17,28 @@ from .models import Payments, MeasurementUnit, InvoiceSeries, Product, Recurring
 
 from .utils.lineitem_rules import normalize_lineitem_rules
 
+def _seller_from_profile(profile):
+    """Seller-реквизиты из CompanyProfile (ветвление ИВ / юр.лицо)."""
+    if profile is None:
+        return {}
+    is_iv = getattr(profile, "entity_type", None) == "iv"
+    if is_iv:
+        name = profile.owner_name or profile.name or ""
+        code = profile.iv_certificate_nr or ""
+    else:
+        name = profile.name or ""
+        code = profile.company_code or ""
+    return {
+        "seller_name": name,
+        "seller_id": code,
+        "seller_vat_code": profile.vat_code or "",
+        "seller_address": profile.address or "",
+        "seller_email": profile.email or "",
+        "seller_phone": profile.phone or "",
+        "seller_bank_name": profile.bank_name or "",
+        "seller_iban": profile.iban or "",
+        "seller_swift": profile.swift or "",
+    }
 
 def normalize_company_replace_rules(raw):
     """Нормализует входящий список company_replace_rules."""
@@ -1079,6 +1101,10 @@ class CompanyProfileSerializer(serializers.ModelSerializer):
             "company_code",
             "vat_code",
             "iban",
+            "bank_name",
+            "swift",
+            "phone",
+            "email",
             "address",
             "country_iso",
             "owner_name",
@@ -1185,6 +1211,9 @@ class CompanyProfileSerializer(serializers.ModelSerializer):
         from .models import MeasurementUnit, InvoiceSeries
         MeasurementUnit.create_defaults_for_user(user, profile.id)
         InvoiceSeries.create_defaults_for_user(user, profile.id)
+
+        # Настройки инвойсов для новой фирмы (дефолты из модели)
+        InvoiceSettings.objects.get_or_create(user=user, company_profile=profile)
 
         return profile
 
@@ -2163,9 +2192,6 @@ class InvoiceSettingsSerializer(serializers.ModelSerializer):
     class Meta:
         model = InvoiceSettings
         fields = [
-            "seller_name", "seller_company_code", "seller_vat_code",
-            "seller_address", "seller_phone", "seller_email",
-            "seller_bank_name", "seller_iban", "seller_swift",
             "logo", "logo_url",
             "default_currency", "default_vat_percent", "default_payment_days",
             "email_subject_template", "email_body_template",
@@ -2779,19 +2805,14 @@ class InvoiceWriteSerializer(serializers.ModelSerializer):
         line_items_data = validated_data.pop("line_items", [])
         user = self.context["request"].user
 
-        # Автозаполнение seller из settings (если не передан)
+        # Автозаполнение seller из активного профиля (если не передан)
         if not validated_data.get("seller_name"):
-            settings_obj = InvoiceSettings.objects.filter(user=user).first()
-            if settings_obj:
-                validated_data.setdefault("seller_name", settings_obj.seller_name)
-                validated_data.setdefault("seller_id", settings_obj.seller_company_code)
-                validated_data.setdefault("seller_vat_code", settings_obj.seller_vat_code)
-                validated_data.setdefault("seller_address", settings_obj.seller_address)
-                validated_data.setdefault("seller_phone", settings_obj.seller_phone)
-                validated_data.setdefault("seller_email", settings_obj.seller_email)
-                validated_data.setdefault("seller_bank_name", settings_obj.seller_bank_name)
-                validated_data.setdefault("seller_iban", settings_obj.seller_iban)
-                validated_data.setdefault("seller_swift", settings_obj.seller_swift)
+            active_profile = None
+            active_id = getattr(user, "active_company_profile_id", None)
+            if active_id:
+                active_profile = CompanyProfile.objects.filter(id=active_id).first()
+            for _k, _v in _seller_from_profile(active_profile).items():
+                validated_data.setdefault(_k, _v)
 
         # Country defaults
         validated_data.setdefault("seller_country", "Lietuva")
@@ -3346,20 +3367,14 @@ class RecurringInvoiceWriteSerializer(serializers.ModelSerializer):
         validated_data.setdefault("buyer_country", "Lietuva")
         validated_data.setdefault("buyer_country_iso", "LT")
 
-        # Seller из settings если не передан
+        # Автозаполнение seller из активного профиля (если не передан)
         if not validated_data.get("seller_name"):
-            from .models import InvoiceSettings
-            settings_obj = InvoiceSettings.objects.filter(user=user).first()
-            if settings_obj:
-                validated_data.setdefault("seller_name", settings_obj.seller_name)
-                validated_data.setdefault("seller_id", settings_obj.seller_company_code)
-                validated_data.setdefault("seller_vat_code", settings_obj.seller_vat_code)
-                validated_data.setdefault("seller_address", settings_obj.seller_address)
-                validated_data.setdefault("seller_phone", settings_obj.seller_phone)
-                validated_data.setdefault("seller_email", settings_obj.seller_email)
-                validated_data.setdefault("seller_bank_name", settings_obj.seller_bank_name)
-                validated_data.setdefault("seller_iban", settings_obj.seller_iban)
-                validated_data.setdefault("seller_swift", settings_obj.seller_swift)
+            active_profile = None
+            active_id = getattr(user, "active_company_profile_id", None)
+            if active_id:
+                active_profile = CompanyProfile.objects.filter(id=active_id).first()
+            for _k, _v in _seller_from_profile(active_profile).items():
+                validated_data.setdefault(_k, _v)
 
         if not validated_data.get("seller_name"):
             raise serializers.ValidationError(

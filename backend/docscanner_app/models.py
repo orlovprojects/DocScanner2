@@ -946,6 +946,11 @@ class CompanyProfile(models.Model):
             '{"LT19...": {"account": "2711", "bank": "seb", "label": "SEB pagrindinė"}}'
         ),
     )
+    # Kontaktai / bankas (pardavėjo rekvizitai sąskaitoms)
+    phone = models.CharField("Telefonas", max_length=50, blank=True, null=True)
+    email = models.EmailField("El. paštas", blank=True, null=True)
+    bank_name = models.CharField("Banko pavadinimas", max_length=255, blank=True, null=True)
+    swift = models.CharField("SWIFT/BIC", max_length=50, blank=True, null=True)
 
     # ── Meta ────────────────────────────────────────────
     is_active = models.BooleanField(default=True)
@@ -2167,22 +2172,18 @@ class InvoiceSettings(models.Model):
     Один объект на пользователя.
     """
 
-    user = models.OneToOneField(
+    user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
         related_name="invoice_settings",
     )
-
-    # Данные продавца (по умолчанию подставляются в каждый новый счёт)
-    seller_name = models.CharField("Pardavėjo pavadinimas", max_length=255, blank=True, default="")
-    seller_company_code = models.CharField("Įmonės kodas", max_length=100, blank=True, default="")
-    seller_vat_code = models.CharField("PVM kodas", max_length=50, blank=True, default="")
-    seller_address = models.CharField("Adresas", max_length=255, blank=True, default="")
-    seller_phone = models.CharField("Telefonas", max_length=50, blank=True, default="")
-    seller_email = models.EmailField("El. paštas", blank=True, default="")
-    seller_bank_name = models.CharField("Banko pavadinimas", max_length=255, blank=True, default="")
-    seller_iban = models.CharField("IBAN", max_length=255, blank=True, default="")
-    seller_swift = models.CharField("SWIFT/BIC", max_length=50, blank=True, default="")
+    company_profile = models.ForeignKey(
+        "docscanner_app.CompanyProfile",
+        on_delete=models.CASCADE,
+        related_name="invoice_settings",
+        null=True,
+        blank=True,
+    )
 
     # Логотип
     logo = models.FileField("Logotipas", upload_to=invoice_logo_path, blank=True, null=True)
@@ -2227,6 +2228,7 @@ class InvoiceSettings(models.Model):
     class Meta:
         verbose_name = "Invoice Settings"
         verbose_name_plural = "Invoice Settings"
+        unique_together = ("user", "company_profile")  # включим после бэкфилла
 
     def __str__(self):
         return f"Invoice settings for {self.user}"

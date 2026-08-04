@@ -6562,14 +6562,59 @@ def counterparty_detail(request, pk):
 # InvoiceSettings
 # ════════════════════════════════════════════════════════════
 
+def _build_seller_from_profile(profile):
+    """Реквизиты продавца из CompanyProfile. Ветвление ИВ / юр.лицо."""
+    if profile is None:
+        return {
+            "id": None, "entity_type": None,
+            "name": "", "company_code": "", "vat_code": "", "address": "",
+            "email": "", "phone": "", "bank_name": "", "bank_swift": "",
+            "bank_account": "", "country_iso": "",
+        }
+
+    is_iv = getattr(profile, "entity_type", None) == "iv"
+
+    if is_iv:
+        name = (profile.owner_name or profile.name or "")
+        company_code = (profile.iv_certificate_nr or "")
+    else:
+        name = (profile.name or "")
+        company_code = (profile.company_code or "")
+
+    return {
+        "id": profile.id,
+        "entity_type": getattr(profile, "entity_type", None),
+        "name": name,
+        "company_code": company_code,
+        "vat_code": profile.vat_code or "",
+        "address": profile.address or "",
+        "email": profile.email or "",
+        "phone": profile.phone or "",
+        "bank_name": profile.bank_name or "",
+        "bank_swift": profile.swift or "",
+        "bank_account": profile.iban or "",
+        "country_iso": profile.country_iso or "",
+    }
+
+
 @api_view(["GET", "PUT"])
 @permission_classes([IsAuthenticated])
 def invoice_settings(request):
-    obj, _ = InvoiceSettings.objects.get_or_create(user=request.user)
+    active_profile = None
+    active_id = getattr(request.user, "active_company_profile_id", None)
+    if active_id:
+        from .models import CompanyProfile
+        active_profile = CompanyProfile.objects.filter(id=active_id).first()
+
+    obj, _ = InvoiceSettings.objects.get_or_create(
+        user=request.user,
+        company_profile=active_profile,
+    )
 
     if request.method == "GET":
         data = InvoiceSettingsSerializer(obj, context={"request": request}).data
         data["payment_providers"] = request.user.payment_providers or {}
+        data["seller"] = _build_seller_from_profile(active_profile)
         return Response(data)
 
     serializer = InvoiceSettingsSerializer(
@@ -6580,6 +6625,7 @@ def invoice_settings(request):
 
     resp_data = serializer.data
     resp_data["payment_providers"] = request.user.payment_providers or {}
+    resp_data["seller"] = _build_seller_from_profile(active_profile)
     return Response(resp_data)
 
 
