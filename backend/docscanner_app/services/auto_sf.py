@@ -101,14 +101,14 @@ def create_sf_from_isankstine(source, user, series_prefix=None):
         new_data["document_number"] = number_str
 
         # ── Due date ────────────────────────────────────────
-        try:
-            settings_obj = InvoiceSettings.objects.get(user=user)
-            if settings_obj.default_payment_days:
-                new_data["due_date"] = new_data["invoice_date"] + timedelta(
-                    days=settings_obj.default_payment_days
-                )
-        except InvoiceSettings.DoesNotExist:
-            pass
+        settings_qs = InvoiceSettings.objects.filter(user=user)
+        if sf_profile_id is not None:
+            settings_qs = settings_qs.filter(company_profile_id=sf_profile_id)
+        settings_obj = settings_qs.first()
+        if settings_obj and settings_obj.default_payment_days:
+            new_data["due_date"] = new_data["invoice_date"] + timedelta(
+                days=settings_obj.default_payment_days
+            )
 
         # ── Create invoice ──────────────────────────────────
         new_invoice = Invoice.objects.create(**new_data)

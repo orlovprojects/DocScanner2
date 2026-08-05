@@ -95,6 +95,12 @@ def get_debetas_template_path() -> Path:
 # Helpers
 # =========================
 
+def _is_credit_doc(doc) -> bool:
+    return (
+        getattr(doc, "is_credit_invoice", False) is True
+        or str(getattr(doc, "invoice_type", "") or "").strip().lower() == "kreditine"
+    )
+
 def _safe_D(x) -> Decimal:
     """Безопасное преобразование в Decimal."""
     try:
@@ -105,7 +111,7 @@ def _safe_D(x) -> Decimal:
 
 def _ensure_credit_sign(value, doc):
     """Для кредитных SF: если сумма положительная — делаем отрицательной."""
-    if getattr(doc, 'is_credit_invoice', None) is not True:
+    if not _is_credit_doc(doc):
         return value
     if value is None:
         return value
@@ -117,7 +123,7 @@ def _ensure_credit_sign(value, doc):
 
 def _get_doc_type_credit(doc) -> str:
     """L064: K/D/пусто."""
-    if getattr(doc, 'is_credit_invoice', None) is True:
+    if _is_credit_doc(doc):
         return "K"
     if getattr(doc, 'is_debit_invoice', None) is True:
         return "D"
@@ -869,7 +875,7 @@ def _generate_debetas_csv(documents: List, doc_type: str, user=None, own_company
                 discount = _safe_D(getattr(doc, "invoice_discount_wo_vat", 0) or 0)
 
                 gross_after_discount = amount_wo + vat_amount - discount
-                if gross_after_discount < 0 and getattr(doc, 'is_credit_invoice', None) is not True:
+                if gross_after_discount < 0 and not _is_credit_doc(doc):
                     gross_after_discount = Decimal("0")
                 gross_after_discount = _ensure_credit_sign(gross_after_discount, doc)
 

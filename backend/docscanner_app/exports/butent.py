@@ -41,6 +41,13 @@ def _s(v):
     """Безопасная строка с strip()."""
     return str(v).strip() if v is not None else ""
 
+def _is_credit_doc(doc) -> bool:
+    """Кредитная: is_credit_invoice=True или invoice_type='kreditine'."""
+    return (
+        getattr(doc, "is_credit_invoice", False) is True
+        or str(getattr(doc, "invoice_type", "") or "").strip().lower() == "kreditine"
+    )
+
 
 def _use_matched_catalog(item) -> bool:
     """Есть ли валидный каталог-матч на строке (и юзер его не отключил)."""
@@ -313,32 +320,38 @@ def _format_date_for_butent(dt) -> str:
 
 def _get_operacija(doc, extra_fields=None) -> str:
     """
-    Определяет операцию для колонки H:
-      - pirkimas -> "Pajamavimas" (или из extra_fields['pirkimas_operacija'])
-      - pardavimas -> "Pardavimas" (или из extra_fields['pardavimas_operacija'])
+    Операция для колонки H (справочник операций Būtent).
+    Тип документа Būtent определяет ПО ОПЕРАЦИИ, а не по знаку сумм,
+    поэтому для кредиток нужна отдельная операция возврата.
+
+      pirkimas обычный  -> Pajamavimas       (extra: pirkimas_operacija)
+      pirkimas kreditas -> Grąžinta tiekėjui  (extra: pirkimas_kreditas_operacija)
+      pardavimas обычный  -> Pardavimas        (extra: pardavimas_operacija)
+      pardavimas kreditas -> Grąžino pirkėjas   (extra: pardavimas_kreditas_operacija)
     """
     doc_type = _s(getattr(doc, "pirkimas_pardavimas", "")).lower()
     extra_fields = extra_fields or {}
+    is_credit = _is_credit_doc(doc)
 
     if doc_type == "pirkimas":
-        custom_op = _s(extra_fields.get("pirkimas_operacija", ""))
-        if custom_op:
-            logger.info(
-                "[BUTENT:OPERACIJA] doc=%s using custom pirkimas_operacija=%r",
-                getattr(doc, "pk", None), custom_op
-            )
-            return custom_op
-        return "Pajamavimas"
+        if is_credit:
+            custom = _s(extra_fields.get("pirkimas_kreditas_operacija", ""))
+            return custom or "Grąžinta tiekėjui"
+        custom = _s(extra_fields.get("pirkimas_operacija", ""))
+        if custom:
+            logger.info("[BUTENT:OPERACIJA] doc=%s custom pirkimas_operacija=%r",
+                        getattr(doc, "pk", None), custom)
+        return custom or "Pajamavimas"
 
     if doc_type == "pardavimas":
-        custom_op = _s(extra_fields.get("pardavimas_operacija", ""))
-        if custom_op:
-            logger.info(
-                "[BUTENT:OPERACIJA] doc=%s using custom pardavimas_operacija=%r",
-                getattr(doc, "pk", None), custom_op
-            )
-            return custom_op
-        return "Pardavimas"
+        if is_credit:
+            custom = _s(extra_fields.get("pardavimas_kreditas_operacija", ""))
+            return custom or "Grąžino pirkėjas"
+        custom = _s(extra_fields.get("pardavimas_operacija", ""))
+        if custom:
+            logger.info("[BUTENT:OPERACIJA] doc=%s custom pardavimas_operacija=%r",
+                        getattr(doc, "pk", None), custom)
+        return custom or "Pardavimas"
 
     logger.warning("[BUTENT] Unknown pirkimas_pardavimas=%r, defaulting to Pajamavimas", doc_type)
     return "Pajamavimas"
@@ -389,6 +402,19 @@ def _format_decimal(value, decimals=2) -> float:
         return float(rounded)
     except Exception:
         return 0.0
+    
+
+def _format_decimal_abs(value, decimals=2) -> float:
+    """Būtent суммы всегда положительные; знак кредитки несёт операция (колонка H)."""
+    return abs(_format_decimal(value, decimals))
+
+
+def _abs_qty(value):
+    """Kiekis всегда положительный."""
+    try:
+        return abs(float(value))
+    except Exception:
+        return value
 
 
 def _distribute_discount_to_butent_lines(doc, items_list: list) -> None:
@@ -696,9 +722,9 @@ def _generate_butent_file(documents: List, mode: str, user=None, own_company_cod
             row = doc_common + [
                 preke_kodas,
                 1,
-                _format_decimal(getattr(doc, "amount_wo_vat", 0)),
+                _format_decimal_abs(getattr(doc, "amount_wo_vat", 0)),
                 _s(getattr(doc, "currency", "EUR") or "EUR"),
-                _format_decimal(getattr(doc, "vat_amount", 0)),
+                _format_decimal_abs(getattr(doc, "vat_amount", 0)),
                 0,
                 pvm_kodas,
                 _s(getattr(doc, "prekes_barkodas", "")),
@@ -740,10 +766,10 @@ def _generate_butent_file(documents: List, mode: str, user=None, own_company_cod
 
                 row = doc_common + [
                     preke_kodas,
-                    getattr(item, "quantity", 1),
-                    _format_decimal(price_to_use),
+                    _abs_qty(getattr(item, "quantity", 1)),
+                    _format_decimal_abs(price_to_use),
                     _s(getattr(doc, "currency", "EUR") or "EUR"),
-                    _format_decimal(vat_to_use),
+                    _format_decimal_abs(vat_to_use),
                     0,
                     pvm_kodas,
                     _resolved_field(item, "prekes_barkodas"),

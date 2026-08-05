@@ -648,7 +648,7 @@ def export_documents(request):
             return Response({"error": "No invoices found"}, status=404)
 
         # --- Block isankstine ---
-        blocked = invoices.filter(invoice_type__in=["isankstine"])
+        blocked = invoices.filter(invoice_type="isankstine")
         if blocked.exists():
             return Response({
                 "error": "Išankstinės sąskaitos negali būti eksportuojamos. "
@@ -1104,12 +1104,18 @@ def export_documents(request):
 
         if pirkimai_docs:
             logger.info("[EXP] FINVALDA exporting pirkimai: %d docs", len(pirkimai_docs))
-            xml_bytes = export_pirkimai_group_to_finvalda(pirkimai_docs, user=request.user, own_company_code=cp_key)
-            files_to_export.append((f"{today_str}_pirkimai_finvalda.xml", xml_bytes))
+            pirk_files = export_pirkimai_group_to_finvalda(pirkimai_docs, user=request.user, own_company_code=cp_key)
+            if pirk_files.get("pirkimai"):
+                files_to_export.append((f"{today_str}_pirkimai_finvalda.xml", pirk_files["pirkimai"]))
+            if pirk_files.get("pirkimu_grazinimai"):
+                files_to_export.append((f"{today_str}_pirkimu_grazinimai_finvalda.xml", pirk_files["pirkimu_grazinimai"]))
         if pardavimai_docs:
             logger.info("[EXP] FINVALDA exporting pardavimai: %d docs", len(pardavimai_docs))
-            xml_bytes = export_pardavimai_group_to_finvalda(pardavimai_docs, user=request.user, own_company_code=cp_key)
-            files_to_export.append((f"{today_str}_pardavimai_finvalda.xml", xml_bytes))
+            pard_files = export_pardavimai_group_to_finvalda(pardavimai_docs, user=request.user, own_company_code=cp_key)
+            if pard_files.get("pardavimai"):
+                files_to_export.append((f"{today_str}_pardavimai_finvalda.xml", pard_files["pardavimai"]))
+            if pard_files.get("pardavimo_grazinimai"):
+                files_to_export.append((f"{today_str}_pardavimo_grazinimai_finvalda.xml", pard_files["pardavimo_grazinimai"]))
 
         logger.info("[EXP] FINVALDA files_to_export=%s", [n for n, _ in files_to_export])
 
@@ -7431,6 +7437,7 @@ class CreateCreditInvoiceView(APIView):
         credit = Invoice(
             user=request.user,
             invoice_type="kreditine",
+            is_credit_invoice=True,
             source_invoice=original,
             status="draft",
             document_series=series_prefix,

@@ -633,7 +633,7 @@ const InvoiceEditorPage = () => {
         prekes_kodas: product.prekes_kodas || product.code || '',
         prekes_barkodas: product.prekes_barkodas || product.barcode || '',
         price: String(product.price ?? li.price),
-        unit: product.unit || li.unit,
+        unit: (product.unit || '').split(' ')[0] || li.unit,
         vat_percent: product.vat_percent != null ? String(product.vat_percent) : li.vat_percent,
         preke_paslauga: product.preke_paslauga || li.preke_paslauga || 'preke',
       };
@@ -2243,6 +2243,8 @@ const InvoiceEditorPage = () => {
             onChange={(_, v) => { if (v && typeof v !== 'string') selectProduct(i, v); setSearchActiveLine(null); }}
             onClose={(_, reason) => { if (searchBtnRef.current) { searchBtnRef.current = false; return; } if (reason === 'escape') setSearchActiveLine(null); }}
             loading={productSearchLoading[key] || false}
+            loadingText="Ieškoma..."
+            noOptionsText={(li.prekes_pavadinimas || '').length < 2 ? 'Įveskite bent 2 simbolius' : 'Nerasta'}
             filterOptions={(x) => x}
             disableClearable
             componentsProps={{ popper: { disablePortal: false, sx: { zIndex: 1500 } } }}

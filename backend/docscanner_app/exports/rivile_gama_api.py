@@ -42,6 +42,7 @@ from .rivile import (
     _pick_isaf_for_purchase,
     _scale_qty,
     _abs_if_credit,
+    _abs_qty_if_credit,
     _resolved_field,
 )
 
@@ -972,7 +973,7 @@ def _build_i07(doc, item, currency, direction, user, extras, prefix,
         i07["I07_KODAS_KL"] = code
 
     # Количество
-    qty_raw = getattr(item, "quantity", None) or "1"
+    qty_raw = _abs_qty_if_credit(getattr(item, "quantity", None) or "1", doc)
     if use_frac:
         i07["I07_KIEKIS"] = _scale_qty(qty_raw, frac)
         i07["I07_FRAKCIJA"] = str(frac)

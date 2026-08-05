@@ -2375,6 +2375,7 @@ class Invoice(models.Model):
     # ---- Прочие поля (совместимые с ScannedDocument для экспортеров) ----
     document_type = models.CharField(max_length=100, blank=True, default="")
     document_type_code = models.CharField(max_length=50, blank=True, default="")
+    is_credit_invoice = models.BooleanField(null=True, blank=True, default=None)
     order_number = models.CharField(max_length=100, blank=True, default="")
     pirkimas_pardavimas = models.CharField(
         max_length=20,

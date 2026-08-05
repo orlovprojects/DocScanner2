@@ -9,6 +9,7 @@ import FindReplaceIcon from "@mui/icons-material/FindReplace";
 import WeekendIcon from "@mui/icons-material/Weekend";
 import { KorespondencijaSummary, PirkimoSaskaitaField } from '../components/KorespondencijaComponents';
 import HelpOutlineIcon from "@mui/icons-material/HelpOutline";
+import CalculateOutlinedIcon from "@mui/icons-material/CalculateOutlined";
 
 
 import {
@@ -379,6 +380,50 @@ const LineItemCard = React.memo(({
     (item.matched_unit || "").trim()
   );
 
+  const [isRecalculatingPrice, setIsRecalculatingPrice] = useState(false);
+
+  const parseLineNumber = (value) => {
+    if (value === null || value === undefined || value === "") {
+      return null;
+    }
+
+    const normalized =
+      typeof value === "string"
+        ? value.trim().replace(",", ".")
+        : value;
+
+    const number = Number(normalized);
+
+    return Number.isFinite(number) ? number : null;
+  };
+
+  const quantityForPrice = parseLineNumber(item.quantity);
+  const subtotalForPrice = parseLineNumber(item.subtotal);
+
+  const canRecalculatePrice =
+    quantityForPrice !== null &&
+    quantityForPrice !== 0 &&
+    subtotalForPrice !== null;
+
+  const handleRecalculatePrice = async () => {
+    if (!canRecalculatePrice || isRecalculatingPrice) return;
+
+    const recalculatedPrice = Number(
+      (subtotalForPrice / quantityForPrice).toFixed(4)
+    );
+
+    setIsRecalculatingPrice(true);
+
+    try {
+      // Меняем только price. Остальные суммы остаются прежними.
+      await onSaveFields(item.id, "price", recalculatedPrice);
+    } catch (error) {
+      console.error("Failed to recalculate line item price:", error);
+    } finally {
+      setIsRecalculatingPrice(false);
+    }
+  };
+
   return (
     <Box
       sx={{
@@ -645,7 +690,62 @@ const LineItemCard = React.memo(({
       <Stack spacing={0.5} mt={1} mb={1} sx={{ fontSize: isMobile ? '0.85rem' : 'inherit' }}>
         <Typography>Mato vnt: <EditableCell value={item.unit} onSave={(v) => onSaveFields(item.id, "unit", v)} /></Typography>
         <Typography>Kiekis: <EditableCell value={item.quantity} inputType="number" onSave={(v) => onSaveFields(item.id, "quantity", v)} renderDisplay={(v) => <b>{formatNumberPreview(v)}</b>} sx={getFieldErrorSx('quantity')} /></Typography>
-        <Typography>Kaina: <EditableCell value={item.price} inputType="number" onSave={(v) => onSaveFields(item.id, "price", v)} renderDisplay={(v) => <b>{formatNumberPreview(v)}</b>} sx={getFieldErrorSx('price')} /></Typography>
+        <Box
+          sx={{
+            display: "inline-flex",
+            alignItems: "center",
+            verticalAlign: "middle",
+
+            // Одинаково скрываем обе кнопки
+            "& .MuiIconButton-root": {
+              opacity: isMobile ? 1 : 0,
+              visibility: isMobile ? "visible" : "hidden",
+              color: "action.active",
+              transition: "opacity 0.15s ease",
+            },
+
+            // При hover одновременно показываем карандаш и калькулятор
+            "&:hover .MuiIconButton-root, &:focus-within .MuiIconButton-root": {
+              opacity: 1,
+              visibility: "visible",
+            },
+          }}
+        >
+          <Typography component="span">
+            Kaina:{" "}
+            <EditableCell
+              value={item.price}
+              inputType="number"
+              onSave={(v) => onSaveFields(item.id, "price", v)}
+              renderDisplay={(v) => <b>{formatNumberPreview(v)}</b>}
+              sx={getFieldErrorSx("price")}
+            />
+          </Typography>
+
+          <Tooltip
+            title={
+              canRecalculatePrice
+                ? "Perskaičiuoti kainą pagal naują kiekį"
+                : "Pirmiausia nurodykite kiekį ir sumą be PVM"
+            }
+          >
+            <span style={{ display: "inline-flex" }}>
+              <IconButton
+                size="small"
+                disabled={!canRecalculatePrice || isRecalculatingPrice}
+                onClick={handleRecalculatePrice}
+                aria-label="Perskaičiuoti kainą"
+              >
+                {isRecalculatingPrice ? (
+                  <CircularProgress size={20} color="inherit" />
+                ) : (
+                  <CalculateOutlinedIcon fontSize="small" />
+                )}
+              </IconButton>
+            </span>
+          </Tooltip>
+        </Box>
+        {/* <Typography>Kaina: <EditableCell value={item.price} inputType="number" onSave={(v) => onSaveFields(item.id, "price", v)} renderDisplay={(v) => <b>{formatNumberPreview(v)}</b>} sx={getFieldErrorSx('price')} /></Typography> */}
         <Typography>Suma (be PVM): <EditableCell value={item.subtotal} inputType="number" onSave={(v) => onSaveFields(item.id, "subtotal", v)} renderDisplay={(v) => <b>{formatNumberPreview(v)}</b>} sx={getFieldErrorSx('subtotal')} /></Typography>
         <Typography>PVM: <EditableCell value={item.vat} inputType="number" onSave={(v) => onSaveFields(item.id, "vat", v)} renderDisplay={(v) => <b>{formatNumberPreview(v)}</b>} sx={getFieldErrorSx('vat')} /></Typography>
         <Typography>PVM %: <EditableCell value={item.vat_percent} inputType="number" onSave={(v) => onSaveFields(item.id, "vat_percent", v)} renderDisplay={(v) => <b>{formatNumberPreview(v)}</b>} /></Typography>

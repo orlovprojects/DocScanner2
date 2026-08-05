@@ -178,6 +178,16 @@ def _safe_D(x):
     except Exception:
         return Decimal("0")
 
+def _abs_qty_if_credit(qty, doc):
+    """Kiekis положительный для кредиток; знак несёт I06_OP_TIP."""
+    if getattr(doc, 'is_credit_invoice', None) is not True:
+        return qty
+    try:
+        from decimal import Decimal
+        return abs(Decimal(str(qty if qty not in (None, "") else 1)))
+    except Exception:
+        return qty
+
 def _abs_if_credit(value, doc):
     """Для кредитных SF: суммы положительные (Rivile определяет возврат по OP_TIP)."""
     if getattr(doc, 'is_credit_invoice', None) is not True:
@@ -1184,7 +1194,8 @@ def export_pirkimai_group_to_rivile(documents, user, own_company_code=None):
                     code = _get_pvm_kodas_for_item(doc, item, line_map, default="")
                     ET.SubElement(i07, "I07_KODAS_KL").text = rivile_str(code)
 
-                qty_scaled = _scale_qty(getattr(item, "quantity", None), frac) if use_frac else str(getattr(item, "quantity", None) or "1")
+                _qty_val = _abs_qty_if_credit(getattr(item, "quantity", None), doc)
+                qty_scaled = _scale_qty(_qty_val, frac) if use_frac else str(_qty_val or "1")
                 ET.SubElement(i07, "T_KIEKIS").text = rivile_str(qty_scaled)
                 if use_frac:
                     ET.SubElement(i07, "I07_FRAKCIJA").text = rivile_str(str(frac))
@@ -1388,7 +1399,8 @@ def export_pardavimai_group_to_rivile(documents, user, own_company_code=None):
                     code = _get_pvm_kodas_for_item(doc, item, line_map, default="")
                     ET.SubElement(i07, "I07_KODAS_KL").text = rivile_str(code)
 
-                qty_scaled = _scale_qty(getattr(item, "quantity", None), frac) if use_frac else str(getattr(item, "quantity", None) or "1")
+                _qty_val = _abs_qty_if_credit(getattr(item, "quantity", None), doc)
+                qty_scaled = _scale_qty(_qty_val, frac) if use_frac else str(_qty_val or "1")
                 ET.SubElement(i07, "T_KIEKIS").text = rivile_str(qty_scaled)
                 if use_frac:
                     ET.SubElement(i07, "I07_FRAKCIJA").text = rivile_str(str(frac))

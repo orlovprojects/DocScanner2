@@ -528,7 +528,9 @@ def _build_sum_group(invoice_el, doc, items_list=None):
         inv_sum = Decimal("0")
         for i, it in enumerate(items_list):
             qty = _D(getattr(it, "quantity", 1) or 1)
-            price = _D(_ensure_credit_sign(getattr(it, "price", 0) or 0, doc))
+            if getattr(doc, 'is_credit_invoice', None) is True:
+                qty = -abs(qty) if qty > 0 else qty
+            price = abs(_D(getattr(it, "price", 0) or 0))
             inv_sum += (price * qty) - discounts.get(i, Decimal("0"))
         ET.SubElement(sg, "InvoiceSum").text = _fmt(inv_sum)
         vat_rate = _most_common_vat(items_list)

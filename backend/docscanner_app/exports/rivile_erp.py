@@ -145,6 +145,14 @@ def _abs_if_credit(value, doc):
     except Exception:
         return value
 
+def _abs_qty_if_credit(qty, doc):
+    """Kiekis положительный для кредиток; знак несёт TYPE_ID шапки."""
+    if not bool(getattr(doc, "is_credit_invoice", False)):
+        return qty
+    try:
+        return abs(Decimal(str(qty if qty not in (None, "") else 1)))
+    except Exception:
+        return qty
 
 def safe_excel_text(value: Optional[str]) -> str:
     s = _s(value)
@@ -1096,7 +1104,7 @@ def export_documents_to_rivile_erp_xlsx(
                     value=safe_excel_text(padalinio_kodas),
                 )
 
-                qty_val = getattr(item, "quantity", None) or 1
+                qty_val = _abs_qty_if_credit(getattr(item, "quantity", None) or 1, doc)
                 set_cell_qty(ws_lines, line_idx, LineCols.QTY, qty_val)
 
                 if merge_vat:
@@ -1166,7 +1174,7 @@ def export_documents_to_rivile_erp_xlsx(
                 value=safe_excel_text(padalinio_kodas),
             )
 
-            set_cell_qty(ws_lines, line_idx, LineCols.QTY, getattr(doc, "quantity", None) or 1)
+            set_cell_qty(ws_lines, line_idx, LineCols.QTY, _abs_qty_if_credit(getattr(doc, "quantity", None) or 1, doc))
 
             amount_wo = _safe_D(_abs_if_credit(getattr(doc, "amount_wo_vat", None) or 0, doc))
             vat_amount = _safe_D(_abs_if_credit(getattr(doc, "vat_amount", None) or 0, doc))

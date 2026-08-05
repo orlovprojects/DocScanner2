@@ -956,12 +956,32 @@ def update_scanned_document(
 
         _save_line_items(db_doc, doc_struct, scan_type, user)
 
+        _matching_on = False
+        _es = getattr(user, "extra_settings", None)
+        if isinstance(_es, dict):
+            _v = _es.get("match_catalog_items_on_detailed_scan")
+            if isinstance(_v, bool):
+                _matching_on = _v
+            elif isinstance(_v, (int, float)):
+                _matching_on = _v == 1
+            elif isinstance(_v, str):
+                _matching_on = _v.strip().lower() in {"1", "true", "yes", "on"}
+
         try:
-            if scan_type == "detaliai":
+            if scan_type == "detaliai" and not _matching_on:
                 changed = apply_lineitem_rules_for_detaliai(db_doc, user)
                 logger.info("apply_lineitem_rules_for_detaliai changed %d line(s)", changed)
+            elif scan_type == "detaliai":
+                logger.info("Skip detaliai lineitem rules: catalog matching enabled")
         except Exception as e:
             logger.warning("Failed to apply lineitem_rules: %s", e)
+
+        # try:
+        #     if scan_type == "detaliai":
+        #         changed = apply_lineitem_rules_for_detaliai(db_doc, user)
+        #         logger.info("apply_lineitem_rules_for_detaliai changed %d line(s)", changed)
+        # except Exception as e:
+        #     logger.warning("Failed to apply lineitem_rules: %s", e)
 
         if scan_type == "detaliai" and (structured or {}).get("ar_sutapo") is not None:
             db_doc.val_ar_sutapo = structured.get("ar_sutapo")

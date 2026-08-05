@@ -39,6 +39,12 @@ def _s(v) -> str:
     """Строка без None, с trim."""
     return str(v).strip() if v is not None else ""
 
+def _is_credit_doc(doc) -> bool:
+    """Кредитная: is_credit_invoice=True или invoice_type='kreditine'."""
+    return (
+        getattr(doc, "is_credit_invoice", False) is True
+        or str(getattr(doc, "invoice_type", "") or "").strip().lower() == "kreditine"
+    )
 
 def _use_matched_catalog(item) -> bool:
     """Есть ли валидный каталог-матч на строке (и юзер его не отключил)."""
@@ -593,6 +599,7 @@ def _fill_line(
     sandelio_kodas_value: str = "",
     summary_kodas: str = "",
     fallback_vat_percent=None,
+    is_credit: bool = False,
 ):
     """
     Добавляет <eilute> в <operacijaDet>.
@@ -627,11 +634,12 @@ def _fill_line(
         kodas_val = _s(summary_kodas) or _gen_random_kodas()
     ET.SubElement(eilute, "kodas").text = smart_str(kodas_val.upper())
 
-    # kiekis
+    # kiekis (положительный для кредиток; знак несёт класс операции Grazinimas)
     qty = getattr(line_obj, "quantity", None) if line_obj is not None else None
     if qty is None or qty == "":
         qty = 1
-    ET.SubElement(eilute, "kiekis", {"pirmas_mat": "true"}).text = f"{float(qty):.2f}"
+    qty_f = abs(float(qty)) if is_credit else float(qty)
+    ET.SubElement(eilute, "kiekis", {"pirmas_mat": "true"}).text = f"{qty_f:.2f}"
 
     # sandelis (ТОЛЬКО для товаров tipas=1, НЕ для услуг tipas=2)
     if tipas_val == "1":
@@ -671,6 +679,12 @@ def _fill_line(
         subtotal = fallback_amount_wo_vat
         vat_amount = fallback_vat_amount
         unit_price = Decimal("0")
+
+    # Кредитки: суммы положительные, знак несёт класс операции (grąžinimas)
+    if is_credit:
+        subtotal = abs(_d(subtotal))
+        vat_amount = abs(_d(vat_amount))
+        unit_price = abs(_d(unit_price))
 
     cur = (_s(currency) or "EUR").upper()
     if cur == "EUR":
@@ -712,7 +726,7 @@ def _fill_line(
 
     # НОВОЕ: Цена за единицу (suma_vntv/suma_vntl) - опционально, но полезно для Finvalda
     # Это явно указывает себестоимость за единицу
-    if line_obj is not None and tipas_val == "1":  # Только для товаров
+    if line_obj is not None and tipas_val == "1" and not is_credit:  # товары, но не для возвратов — Finvalda сам считает себестоимость
         cur = (_s(currency) or "EUR").upper()
         if cur == "EUR":
             # EUR: заполняем и *_v, и *_l
@@ -728,9 +742,9 @@ def _fill_line(
 # Pirkimai
 # =========================================================
 
-def export_pirkimai_group_to_finvalda(documents, user=None, own_company_code=None):
-    """Экспорт ПРИОБРЕТЕНИЙ (pirkimas) в формат Finvalda. Возвращает bytes.
-    Формат: <fvsdata><klientai/><prekes/><paslaugos/><operacijos>...</operacijos></fvsdata>"""
+def _build_pirkimai_finvalda_xml(documents, user=None, own_company_code=None, is_credit_batch=False):
+    """Строит один Finvalda XML для ОДНОГО класса: pirkimas ИЛИ pirkimoGrazinimas.
+    is_credit_batch=True -> элемент pirkimoGrazinimas, суммы/kiekis abs."""
     root = _root()
     operacijos = root.find("operacijos")
     assert operacijos is not None
@@ -769,8 +783,9 @@ def export_pirkimai_group_to_finvalda(documents, user=None, own_company_code=Non
             country_iso=seller_country,
         )
 
-        # ПРАВИЛЬНЫЙ ПОРЯДОК ПОЛЕЙ согласно XSD схеме
-        pirkimas = ET.SubElement(operacijos, "pirkimas")
+        # Класс операции: обычная -> pirkimas, кредитная -> pirkimoGrazinimas
+        el_name = "pirkimoGrazinimas" if is_credit_batch else "pirkimas"
+        pirkimas = ET.SubElement(operacijos, el_name)
 
         # 1. Поля из operacijaType (базовый тип)
         # tipas (УРОВЕНЬ ДОКУМЕНТА - тип операции, не путать с tipas строки!)
@@ -858,6 +873,7 @@ def export_pirkimai_group_to_finvalda(documents, user=None, own_company_code=Non
                     currency=currency,
                     pvm_kodas_value=code,
                     sandelio_kodas_value=default_sandelis,
+                    is_credit=is_credit_batch,
                 )
         else:
             # синтетическая строка
@@ -877,19 +893,36 @@ def export_pirkimai_group_to_finvalda(documents, user=None, own_company_code=Non
                 sandelio_kodas_value=default_sandelis,
                 summary_kodas=_get_or_persist_kodas_from_obj(doc),
                 fallback_vat_percent=getattr(doc, "vat_percent", None),
+                is_credit=is_credit_batch,
             )
 
     xml_bytes = _pretty_bytes(root)
     return expand_empty_tags(xml_bytes)
+
+def export_pirkimai_group_to_finvalda(documents, user=None, own_company_code=None):
+    """Делит pirkimai на обычные и кредитные (pirkimoGrazinimas) — по классу на файл.
+    Возвращает dict: {"pirkimai": bytes?, "pirkimu_grazinimai": bytes?}"""
+    normal = [d for d in (documents or []) if not _is_credit_doc(d)]
+    credit = [d for d in (documents or []) if _is_credit_doc(d)]
+
+    out = {}
+    if normal:
+        out["pirkimai"] = _build_pirkimai_finvalda_xml(
+            normal, user=user, own_company_code=own_company_code, is_credit_batch=False
+        )
+    if credit:
+        out["pirkimu_grazinimai"] = _build_pirkimai_finvalda_xml(
+            credit, user=user, own_company_code=own_company_code, is_credit_batch=True
+        )
+    return out
 
 
 # =========================================================
 # Pardavimai
 # =========================================================
 
-def export_pardavimai_group_to_finvalda(documents, user=None, own_company_code=None):
-    """Экспорт ПРОДАЖ (pardavimas) в формат Finvalda. Возвращает bytes.
-    Формат: <fvsdata><klientai/><prekes/><paslaugos/><operacijos>...</operacijos></fvsdata>"""
+def _build_pardavimai_finvalda_xml(documents, user=None, own_company_code=None, is_credit_batch=False):
+    """Строит один Finvalda XML для ОДНОГО класса: pardavimas ИЛИ pardavimoGrazinimas."""
     root = _root()
     operacijos = root.find("operacijos")
     assert operacijos is not None
@@ -928,8 +961,9 @@ def export_pardavimai_group_to_finvalda(documents, user=None, own_company_code=N
             country_iso=buyer_country,
         )
 
-        # ПРАВИЛЬНЫЙ ПОРЯДОК ПОЛЕЙ согласно XSD схеме
-        pard = ET.SubElement(operacijos, "pardavimas")
+        # Класс операции: обычная -> pardavimas, кредитная -> pardavimoGrazinimas
+        el_name = "pardavimoGrazinimas" if is_credit_batch else "pardavimas"
+        pard = ET.SubElement(operacijos, el_name)
 
         # 1. Поля из operacijaType (базовый тип)
         # tipas (УРОВЕНЬ ДОКУМЕНТА - тип операции)
@@ -1015,6 +1049,7 @@ def export_pardavimai_group_to_finvalda(documents, user=None, own_company_code=N
                     currency=currency,
                     pvm_kodas_value=code,
                     sandelio_kodas_value=default_sandelis,
+                    is_credit=is_credit_batch,
                 )
         else:
             # ====== ИСПРАВЛЕНИЕ: Используем helper для PVM кода документа ======
@@ -1033,10 +1068,28 @@ def export_pardavimai_group_to_finvalda(documents, user=None, own_company_code=N
                 sandelio_kodas_value=default_sandelis,
                 summary_kodas=_get_or_persist_kodas_from_obj(doc),
                 fallback_vat_percent=getattr(doc, "vat_percent", None),
+                is_credit=is_credit_batch,
             )
 
     xml_bytes = _pretty_bytes(root)
     return expand_empty_tags(xml_bytes)
+
+def export_pardavimai_group_to_finvalda(documents, user=None, own_company_code=None):
+    """Делит pardavimai на обычные и кредитные (pardavimoGrazinimas) — по классу на файл.
+    Возвращает dict: {"pardavimai": bytes?, "pardavimo_grazinimai": bytes?}"""
+    normal = [d for d in (documents or []) if not _is_credit_doc(d)]
+    credit = [d for d in (documents or []) if _is_credit_doc(d)]
+
+    out = {}
+    if normal:
+        out["pardavimai"] = _build_pardavimai_finvalda_xml(
+            normal, user=user, own_company_code=own_company_code, is_credit_batch=False
+        )
+    if credit:
+        out["pardavimo_grazinimai"] = _build_pardavimai_finvalda_xml(
+            credit, user=user, own_company_code=own_company_code, is_credit_batch=True
+        )
+    return out
 
 
 

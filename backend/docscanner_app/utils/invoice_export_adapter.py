@@ -87,12 +87,14 @@ class InvoiceLineItemAdapter:
             adj = self._doc._adjusted_lines.get(self._li.pk)
             if adj:
                 return adj["price"]
-            # Нет документной скидки — проверяем строковую
+            # Нет документной скидки — проверяем строковую.
+            # abs() на discount, т.к. у кредитной он отрицательный (-0.56).
+            # qty != 0 (а не > 0), т.к. у кредитной qty отрицательный (-1).
             discount = self._li.discount_wo_vat
-            if discount and Decimal(str(discount or 0)) > 0:
+            if discount and abs(Decimal(str(discount or 0))) > 0:
                 subtotal = Decimal(str(self._li.subtotal or 0))
                 qty = Decimal(str(self._li.quantity or 1))
-                if qty > 0:
+                if qty != 0:
                     return (subtotal / qty).quantize(
                         Decimal("0.0001"), rounding=ROUND_HALF_UP
                     )
@@ -261,11 +263,11 @@ class InvoiceExportAdapter:
         self._adjusted_lines = {}  # {li.pk: {"price": Decimal, "subtotal": Decimal}}
 
         doc_discount = Decimal(str(invoice.invoice_discount_wo_vat or 0))
-        if doc_discount > 0 and line_items_raw:
+        if abs(doc_discount) > 0 and line_items_raw:
             sum_subtotals = sum(
                 Decimal(str(li.subtotal or 0)) for li in line_items_raw
             )
-            if sum_subtotals > 0:
+            if abs(sum_subtotals) > 0:
                 distributed = Decimal("0")
                 for i, li in enumerate(line_items_raw):
                     li_subtotal = Decimal(str(li.subtotal or 0))
@@ -287,7 +289,7 @@ class InvoiceExportAdapter:
                         (new_subtotal / li_qty).quantize(
                             Decimal("0.0001"), rounding=ROUND_HALF_UP
                         )
-                        if li_qty > 0 else Decimal("0")
+                        if li_qty != 0 else Decimal("0")
                     )
 
                     self._adjusted_lines[li.pk] = {
@@ -327,17 +329,33 @@ class InvoiceExportAdapter:
     def document_type(self):
         return self._invoice.get_invoice_type_display()
 
+
+    @property
+    def invoice_type(self):
+        return (
+            str(getattr(self._invoice, "invoice_type", "") or "")
+            .strip()
+            .lower()
+        )
+
+
+    @property
+    def is_credit_invoice(self):
+        return (
+            getattr(self._invoice, "is_credit_invoice", False) is True
+            or self.invoice_type == "kreditine"
+        )
+
+
     @property
     def document_type_code(self):
-        mapping = {
-            "pvm_saskaita": "SF",
-            "saskaita": "SF",
-            "isankstine": "ISF",
-            "kreditine": "KSF",
-        }
-        return self._invoice.document_type_code or mapping.get(
-            self._invoice.invoice_type, "SF"
-        )
+        if self.is_credit_invoice:
+            return "KSF"
+
+        if self.invoice_type == "isankstine":
+            return "ISF"
+
+        return "SF"
 
     # --- Даты ---
 

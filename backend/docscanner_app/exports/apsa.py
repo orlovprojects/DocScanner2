@@ -160,10 +160,15 @@ def _format_datetime(dt=None) -> str:
         dt = datetime.now()
     return dt.strftime("%Y-%m-%dT%H:%M:%S")
 
+def _is_credit_doc(doc) -> bool:
+    return (
+        getattr(doc, "is_credit_invoice", False) is True
+        or str(getattr(doc, "invoice_type", "") or "").strip().lower() == "kreditine"
+    )
 
 def _get_invoice_type(doc) -> str:
     """SF/KS/DS по типу документа."""
-    if getattr(doc, 'is_credit_invoice', None) is True:
+    if _is_credit_doc(doc):
         return "KS"
     if getattr(doc, 'is_debit_invoice', None) is True:
         return "DS"
@@ -523,7 +528,7 @@ def _build_document_totals(parent: ET.Element, doc, is_sales: bool, pvm_resolver
     
     # TaxableValue = doc.amount_wo_vat
     amount_wo = getattr(doc, "amount_wo_vat", 0)
-    if getattr(doc, 'is_credit_invoice', None) is True and amount_wo is not None:
+    if _is_credit_doc(doc) and amount_wo is not None:
         try:
             amount_wo = abs(_safe_decimal(amount_wo))
         except Exception:
@@ -545,7 +550,7 @@ def _build_document_totals(parent: ET.Element, doc, is_sales: bool, pvm_resolver
     
     # Amount = doc.vat_amount
     vat_amt = getattr(doc, "vat_amount", 0)
-    if getattr(doc, 'is_credit_invoice', None) is True and vat_amt is not None:
+    if _is_credit_doc(doc) and vat_amt is not None:
         try:
             vat_amt = abs(_safe_decimal(vat_amt))
         except Exception:

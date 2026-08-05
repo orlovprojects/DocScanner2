@@ -299,7 +299,19 @@ def _settle_and_finish_if_session(doc: ScannedDocument):
     finally:
         maybe_finish_session_async(doc.upload_session_id)
 
-
+def _archive_math_failed_file(doc, data: bytes):
+    try:
+        doc.refresh_from_db(fields=["math_validation_passed"])
+        if doc.math_validation_passed is True:
+            return
+        base_dir = os.path.join(settings.MEDIA_ROOT, "math_failed")
+        os.makedirs(base_dir, exist_ok=True)
+        prefix = timezone.now().strftime("%Y_%m_%d")
+        fname = f"{prefix}_{doc.pk}_{os.path.basename(doc.file.name)}"
+        with open(os.path.join(base_dir, fname), "wb") as f:
+            f.write(data)
+    except Exception as e:
+        logger.warning("[MATH-ARCHIVE] Failed doc_id=%s: %s", doc.pk, e)
 
 def _count_line_items(structured: dict) -> int:
     try:
@@ -2059,6 +2071,8 @@ def process_uploaded_file_task(self, user_id, doc_id, scan_type, split_depth=0, 
             glued_raw_text=glued_text_for_db
         )
         _log_t("update_scanned_document()", t0)
+
+        _archive_math_failed_file(doc, data)
 
         # 14.1) Automatinis LineItem susiejimas su vartotojo katalogu
         #

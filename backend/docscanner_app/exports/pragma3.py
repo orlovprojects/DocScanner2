@@ -822,8 +822,8 @@ def _export_document_items(documents, doc_type_filter, user, product_id_map, own
                 product_code = _get_product_code(item, doc)
                 product_numeric_id = product_id_map.get(product_code, "")
                 
-                quantity = _format_decimal(getattr(item, 'quantity', 1))
-                price = _format_decimal(_ensure_credit_sign(getattr(item, 'price', 0), doc))
+                quantity = _format_decimal(_ensure_credit_sign(getattr(item, 'quantity', 1), doc))
+                price = _format_decimal(abs(_safe_D(getattr(item, 'price', 0))))
                 vat_percent = _s(getattr(item, 'vat_percent', 0)).replace('%', '').strip()
                 vat_sum = _format_decimal(_ensure_credit_sign(getattr(item, 'vat', 0), doc))
                 
@@ -865,8 +865,8 @@ def _export_document_items(documents, doc_type_filter, user, product_id_map, own
             product_code = _get_product_code(None, doc)
             product_numeric_id = product_id_map.get(product_code, "")
             
-            quantity = "1.00"
-            price = _format_decimal(_ensure_credit_sign(getattr(doc, 'amount_wo_vat', 0), doc))
+            quantity = _format_decimal(_ensure_credit_sign(Decimal("1"), doc))
+            price = _format_decimal(abs(_safe_D(getattr(doc, 'amount_wo_vat', 0))))
             
             if separate_vat:
                 vat_percent = ""

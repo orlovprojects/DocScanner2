@@ -23,6 +23,12 @@ from .formatters import (
 # Helpers
 # =========================
 
+def _is_credit_doc(document) -> bool:
+    return (
+        getattr(document, "is_credit_invoice", False) is True
+        or str(getattr(document, "invoice_type", "") or "").strip().lower() == "kreditine"
+    )
+
 def prettify_with_header(elem: ET.Element, encoding: str = "utf-8") -> bytes:
     """
     Возвращает красивый XML (bytes) с XML-декларацией в заданной кодировке.
@@ -277,7 +283,7 @@ def _distribute_discount_to_centas_lines(document: ScannedDocument, items_list: 
 
 def _ensure_credit_sign(value, document):
     """Для кредитных SF: если сумма положительная — делаем отрицательной."""
-    if getattr(document, 'is_credit_invoice', None) is not True:
+    if not _is_credit_doc(document):
         return value
     if value is None:
         return value
@@ -290,7 +296,7 @@ def _ensure_credit_sign(value, document):
 
 def _ensure_credit_abs_price(value, document):
     """Для кредитных SF: цена всегда положительная (abs)."""
-    if getattr(document, 'is_credit_invoice', None) is not True:
+    if not _is_credit_doc(document):
         return value
     if value is None:
         return value

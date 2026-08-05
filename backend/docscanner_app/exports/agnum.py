@@ -10,7 +10,36 @@ from ..models import CurrencyRate
 from ..utils.extra_fields import get_extra_for_export
 
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("docscanner_app")
+
+# ============================================================
+# AGNUM CREDIT NOTE / SIGN CONVENTION
+# ============================================================
+#
+# Обычная sąskaita (SF):
+#   KIEKIS                         positive
+#   PRKKN / PARKN / ORIGPARKN     positive
+#   Row PVM                        positive
+#   Header SUMA / PVM / SKOLA     positive
+#
+# Кредитная sąskaita (KS):
+#   SF_TIP                         "KS"
+#   KIEKIS                         always positive
+#   PRKKN / PARKN / ORIGPARKN     always negative
+#   Row PVM                        always negative
+#   Header SUMA / PVM / SKOLA     always negative
+#
+# Справочные поля:
+#   Goods.KN0                      negative for KS, non-negative otherwise
+#   Barcodes.KIEKIS                always non-negative
+#
+# Знаки, полученные из OCR, могут быть любыми. Для кредитной
+# они нормализуются непосредственно перед созданием AGNUM XML.
+#
+# Скидки строки уже включены в итоговую цену до AGNUM-экспорта.
+# Документная скидка также включается в цену строки.
+# Нативные поля AGNUM NUOL / NUOL1 / NUOL2 / NUOLPROC остаются 0.
+# ============================================================
 
 
 # =========================
@@ -197,16 +226,70 @@ def normalize_preke_paslauga_tipas(value: object) -> str:
     return "1"
 
 
+def _is_credit_doc(doc) -> bool:
+    """
+    Кредитная, если выполняется хотя бы одно условие:
+
+    - is_credit_invoice is True
+    - invoice_type == "kreditine"
+
+    document_series и document_type_code не используются.
+    """
+    explicit_flag = getattr(doc, "is_credit_invoice", False)
+
+    invoice_type = (
+        str(getattr(doc, "invoice_type", "") or "")
+        .strip()
+        .lower()
+    )
+
+    return (
+        explicit_flag is True
+        or invoice_type == "kreditine"
+    )
+
+
 def _ensure_credit_sign(value, doc):
-    if getattr(doc, 'is_credit_invoice', None) is not True:
+    """
+    Для кредитной любую сумму делает отрицательной,
+    независимо от исходного знака.
+    """
+    if not _is_credit_doc(doc):
         return value
+
     if value is None:
         return value
+
     try:
-        d = Decimal(str(value))
-        return -abs(d) if d > 0 else d
+        return -abs(Decimal(str(value)))
     except Exception:
         return value
+
+
+def _normalize_credit_line(qty, price, vat, doc):
+    """
+    Для кредитной AGNUM всегда получает:
+
+    KIEKIS = положительный
+    PRICE  = отрицательная
+    PVM    = отрицательный
+
+    Корректно обрабатывает все OCR-комбинации:
+    qty=1,  price=100
+    qty=-1, price=100
+    qty=1,  price=-100
+    qty=-1, price=-100
+    """
+    qty_d = _safe_D(qty)
+    price_d = _safe_D(price)
+    vat_d = _safe_D(vat)
+
+    if _is_credit_doc(doc):
+        qty_d = abs(qty_d)
+        price_d = -abs(price_d)
+        vat_d = -abs(vat_d)
+
+    return qty_d, price_d, vat_d
 
 
 # =========================
@@ -316,36 +399,80 @@ def _get_user_defaults_for_doc(user, doc, own_company_code=None, direction="pirk
 
 def _compute_discount_factor(doc):
     """
-    factor = 1 - (invoice_discount_wo_vat / base_total_before_discount)
-    Если скидки нет -> (None, D("0"))
+    Документная скидка распределяется через коэффициент цены.
+
+    Важно:
+    - знак скидки от OCR не имеет значения;
+    - знаки quantity и price от OCR не имеют значения;
+    - скидка строки уже учтена до AGNUM-экспорта;
+    - для sumiškai amount_wo_vat уже является конечной суммой,
+      поэтому скидка повторно не применяется;
+    - для išrašymas адаптер уже распределил документную скидку
+      и возвращает invoice_discount_wo_vat = 0.
     """
-    disc = _safe_D(getattr(doc, "invoice_discount_wo_vat", 0) or 0)
-    if disc <= 0:
+    disc = abs(
+        _safe_D(
+            getattr(doc, "invoice_discount_wo_vat", 0) or 0
+        )
+    )
+
+    if disc == 0:
         return None, Decimal("0")
 
     line_items = getattr(doc, "line_items", None)
-    if line_items and hasattr(line_items, "all") and line_items.exists():
-        base_total = Decimal("0")
-        for it in line_items.all():
-            qty = _safe_D(getattr(it, "quantity", 1) or 1)
-            price = _safe_D(getattr(it, "price", 0) or 0)
-            base_total += (price * qty)
-    else:
-        base_total = _safe_D(getattr(doc, "amount_wo_vat", 0) or 0) + disc
+
+    has_real_lines = (
+        line_items
+        and hasattr(line_items, "all")
+        and hasattr(line_items, "exists")
+        and line_items.exists()
+    )
+
+    # Sumiškai: fake item создаётся из окончательного amount_wo_vat.
+    # Повторно применять документную скидку нельзя.
+    if not has_real_lines:
+        logger.info(
+            "[AGNUM:DISCOUNT] doc=%s summary/no-lines "
+            "discount=%s already included in amount_wo_vat",
+            getattr(doc, "pk", None),
+            disc,
+        )
+        return None, disc
+
+    base_total = Decimal("0")
+
+    for item in line_items.all():
+        raw_qty = getattr(item, "quantity", None)
+        qty = _safe_D(
+            raw_qty if raw_qty is not None else 1
+        )
+
+        raw_price = getattr(item, "price", None)
+        price = _safe_D(
+            raw_price if raw_price is not None else 0
+        )
+
+        base_total += abs(price * qty)
 
     if base_total <= 0:
-        return None, Decimal("0")
+        return None, disc
 
-    factor = Decimal("1") - disc / base_total
+    factor = Decimal("1") - (disc / base_total)
+
     if factor < Decimal("0"):
         factor = Decimal("0")
-    if factor > Decimal("1"):
+    elif factor > Decimal("1"):
         factor = Decimal("1")
 
     logger.info(
-        "[AGNUM:DISCOUNT] doc=%s discount=%.2f base_total=%.2f factor=%.6f",
-        getattr(doc, "pk", None), disc, base_total, factor,
+        "[AGNUM:DISCOUNT] doc=%s discount=%s "
+        "base_total=%s factor=%s",
+        getattr(doc, "pk", None),
+        disc,
+        base_total,
+        factor,
     )
+
     return factor, disc
 
 
@@ -581,11 +708,22 @@ def _build_agnum_good_from_item(doc, item, user_defaults=None, line_map=None, di
     vat_pct = getattr(item, "vat_percent", None)
     pvm_kod = _get_pvm_kodas_for_item(doc, item, line_map, default="PVM1")
 
-    raw_price = _safe_D(getattr(item, "price", None) or 0)
+    raw_price_value = getattr(item, "price", None)
+
+    raw_price = abs(
+        _safe_D(
+            raw_price_value if raw_price_value is not None else 0
+        )
+    )
+
     if discount_factor is not None:
-        kn0 = (raw_price * discount_factor).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        kn0 = (raw_price * discount_factor).quantize(
+            Decimal("0.01"),
+            rounding=ROUND_HALF_UP,
+        )
     else:
         kn0 = raw_price
+
     kn0 = _ensure_credit_sign(kn0, doc)
 
     attrs = {
@@ -630,14 +768,37 @@ def _build_agnum_rows_for_pirkimas(doc, line_items, user_defaults=None, line_map
     rows = []
 
     for item in line_items:
-        qty = getattr(item, "quantity", None) or 1
-        price = getattr(item, "price", None) or 0
-        vat = getattr(item, "vat", None) or 0
+        raw_qty = getattr(item, "quantity", None)
+        qty = _safe_D(
+            raw_qty if raw_qty is not None else 1
+        )
+
+        raw_price = getattr(item, "price", None)
+        price = _safe_D(
+            raw_price if raw_price is not None else 0
+        )
+
+        raw_vat = getattr(item, "vat", None)
+        vat = _safe_D(
+            raw_vat if raw_vat is not None else 0
+        )
+
         vat_pct = getattr(item, "vat_percent", None)
 
-        adj_price, adj_vat = _apply_line_discount(price, qty, vat, vat_pct, discount_factor)
-        adj_price = _ensure_credit_sign(adj_price, doc)
-        adj_vat = _ensure_credit_sign(adj_vat, doc)
+        adj_price, adj_vat = _apply_line_discount(
+            price=price,
+            qty=qty,
+            vat=vat,
+            vat_pct=vat_pct,
+            factor=discount_factor,
+        )
+
+        qty, adj_price, adj_vat = _normalize_credit_line(
+            qty=qty,
+            price=adj_price,
+            vat=adj_vat,
+            doc=doc,
+        )
 
         item_okod = _s(getattr(item, "okod", "") or getattr(item, "objekto_kodas", ""))
         doc_okod = _s(getattr(doc, "okod", ""))
@@ -750,8 +911,12 @@ def export_pirkimai_group_to_agnum(documents, user, own_company_code=None):
             )
             if barkodas:
                 qty = getattr(item, "quantity", None)
-                qtyD = _safe_D(qty if qty is not None else 1)
-                if qtyD <= 0:
+
+                qtyD = abs(
+                    _safe_D(qty if qty is not None else 1)
+                )
+
+                if qtyD == 0:
                     qtyD = Decimal("1")
                 barcodes_qty[(g_kod, barkodas)] = barcodes_qty.get((g_kod, barkodas), Decimal("0")) + qtyD
 
@@ -763,8 +928,16 @@ def export_pirkimai_group_to_agnum(documents, user, own_company_code=None):
         number = smart_str(getattr(doc, "document_number", "") or "")
         doknr = build_dok_nr(series, number)
 
-        amount_wo = _safe_D(getattr(doc, "amount_wo_vat", 0) or 0)
-        vat_amount = _safe_D(getattr(doc, "vat_amount", 0) or 0)
+        amount_wo = _ensure_credit_sign(
+            _safe_D(getattr(doc, "amount_wo_vat", 0) or 0),
+            doc,
+        )
+
+        vat_amount = _ensure_credit_sign(
+            _safe_D(getattr(doc, "vat_amount", 0) or 0),
+            doc,
+        )
+
         skola = amount_wo + vat_amount
 
         _isaf = getattr(doc, "report_to_isaf", None)
@@ -792,14 +965,14 @@ def export_pirkimai_group_to_agnum(documents, user, own_company_code=None):
             "TR_TIP": "0",
             "NUOL1": "0",
             "NUOL2": "0",
-            "SUMA": _format_price_agnum(_ensure_credit_sign(amount_wo, doc)),
+            "SUMA": _format_price_agnum(amount_wo),
             "MT": "0", "AKC": "0",
-            "PVM": _format_price_agnum(_ensure_credit_sign(vat_amount, doc)),
+            "PVM": _format_price_agnum(vat_amount),
             "PVM_KL": "0", "KT": "0", "PR": "0",
             "SUMAP": "0", "TRANSP": "0",
-            "SUMVISO": _format_price_agnum(_ensure_credit_sign(amount_wo, doc)),
+            "SUMVISO": _format_price_agnum(amount_wo),
             "DRB": "",
-            "SKOLA": _format_price_agnum(_ensure_credit_sign(skola, doc)),
+            "SKOLA": _format_price_agnum(skola),
             "TERM": "0", "APMSUM": "0",
             "SANDORIS": "", "PRISTSAL": "", "TRANSPORTAS": "",
             "SALISSIUNT": _s(getattr(doc, "seller_country_iso", "")).upper(),
@@ -812,7 +985,13 @@ def export_pirkimai_group_to_agnum(documents, user, own_company_code=None):
             "SPEC_TAX": "N",
             "REF_DOK_DATA": _agnum_empty_date(),
             "REF_DOK_NR": "",
-            "SF_TIP": "KS" if getattr(doc, 'is_credit_invoice', None) is True else "DS" if getattr(doc, 'is_debit_invoice', None) is True else "SF",
+            "SF_TIP": (
+                "KS"
+                if _is_credit_doc(doc)
+                else "DS"
+                if getattr(doc, "is_debit_invoice", None) is True
+                else "SF"
+            ),
             "MEMO": _s(getattr(doc, "comment", "")),
             "NUM1": "0", "NUM2": "0", "NUM3": "0", "NUM4": "0", "NUM5": "0",
             "TXT1": "", "TXT2": "", "TXT3": "", "TXT4": "", "TXT5": "",
@@ -867,14 +1046,37 @@ def _build_agnum_rows_for_pardavimas(doc, line_items, user_defaults=None, line_m
     rows = []
 
     for item in line_items:
-        qty = getattr(item, "quantity", None) or 1
-        price = getattr(item, "price", None) or 0
-        vat = getattr(item, "vat", None) or 0
+        raw_qty = getattr(item, "quantity", None)
+        qty = _safe_D(
+            raw_qty if raw_qty is not None else 1
+        )
+
+        raw_price = getattr(item, "price", None)
+        price = _safe_D(
+            raw_price if raw_price is not None else 0
+        )
+
+        raw_vat = getattr(item, "vat", None)
+        vat = _safe_D(
+            raw_vat if raw_vat is not None else 0
+        )
+
         vat_pct = getattr(item, "vat_percent", None)
 
-        adj_price, adj_vat = _apply_line_discount(price, qty, vat, vat_pct, discount_factor)
-        adj_price = _ensure_credit_sign(adj_price, doc)
-        adj_vat = _ensure_credit_sign(adj_vat, doc)
+        adj_price, adj_vat = _apply_line_discount(
+            price=price,
+            qty=qty,
+            vat=vat,
+            vat_pct=vat_pct,
+            factor=discount_factor,
+        )
+
+        qty, adj_price, adj_vat = _normalize_credit_line(
+            qty=qty,
+            price=adj_price,
+            vat=adj_vat,
+            doc=doc,
+        )
 
         item_okod = _s(getattr(item, "okod", "") or getattr(item, "objekto_kodas", ""))
         doc_okod = _s(getattr(doc, "okod", ""))
@@ -1008,8 +1210,12 @@ def export_pardavimai_group_to_agnum(documents, user, own_company_code=None):
             )
             if barkodas:
                 qty = getattr(item, "quantity", None)
-                qtyD = _safe_D(qty if qty is not None else 1)
-                if qtyD <= 0:
+
+                qtyD = abs(
+                    _safe_D(qty if qty is not None else 1)
+                )
+
+                if qtyD == 0:
                     qtyD = Decimal("1")
                 barcodes_qty[(g_kod, barkodas)] = barcodes_qty.get((g_kod, barkodas), Decimal("0")) + qtyD
 
@@ -1021,8 +1227,16 @@ def export_pardavimai_group_to_agnum(documents, user, own_company_code=None):
         number = smart_str(getattr(doc, "document_number", "") or "")
         doknr = build_dok_nr(series, number)
 
-        amount_wo = _safe_D(getattr(doc, "amount_wo_vat", 0) or 0)
-        vat_amount = _safe_D(getattr(doc, "vat_amount", 0) or 0)
+        amount_wo = _ensure_credit_sign(
+            _safe_D(getattr(doc, "amount_wo_vat", 0) or 0),
+            doc,
+        )
+
+        vat_amount = _ensure_credit_sign(
+            _safe_D(getattr(doc, "vat_amount", 0) or 0),
+            doc,
+        )
+
         skola = amount_wo + vat_amount
 
         apm_sal = _s(getattr(doc, "payment_type_code", "")) or "1"
@@ -1046,13 +1260,13 @@ def export_pardavimai_group_to_agnum(documents, user, own_company_code=None):
             "KURS": _format_decimal_agnum(rate if rate else 1, precision=6),
             "NUOLPROC": "0",
             "NUOL": "0",
-            "SUMA": _format_price_agnum(_ensure_credit_sign(amount_wo, doc)),
+            "SUMA": _format_price_agnum(amount_wo),
             "SUMAP": "0",
             "PVMPROC": "0",
-            "PVM": _format_price_agnum(_ensure_credit_sign(vat_amount, doc)),
+            "PVM": _format_price_agnum(vat_amount),
             "MOK0": "0",
-            "SUMVISO": _format_price_agnum(_ensure_credit_sign(amount_wo, doc)),
-            "SKOLA": _format_price_agnum(_ensure_credit_sign(skola, doc)),
+            "SUMVISO": _format_price_agnum(amount_wo),
+            "SKOLA": _format_price_agnum(skola),
             "APMSUM": "0",
             "APM_SAL": apm_sal,
             "TERM": term,
@@ -1080,7 +1294,13 @@ def export_pardavimai_group_to_agnum(documents, user, own_company_code=None):
             "SPEC_TAX": "N",
             "REF_DOK_DATA": _agnum_empty_date(),
             "REF_DOK_NR": "",
-            "SF_TIP": "KS" if getattr(doc, 'is_credit_invoice', None) is True else "DS" if getattr(doc, 'is_debit_invoice', None) is True else "SF",
+            "SF_TIP": (
+                "KS"
+                if _is_credit_doc(doc)
+                else "DS"
+                if getattr(doc, "is_debit_invoice", None) is True
+                else "SF"
+            ),
             "POINTS_USED": "0", "POINTS_ADDED": "0",
             "DOK_USER": _s(getattr(doc, "db_user", "")) or "1",
             "DOK_USER0": _s(getattr(doc, "db_user_created", "")) or "1",

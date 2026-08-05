@@ -3217,6 +3217,12 @@ export default function NustatymaiPage() {
           </Tooltip>
         </Box>
 
+        {isCatalogMatchingEnabled && (
+          <Alert severity="warning" sx={{ mb: 3 }}>
+            Kai įjungta prekių susiejimo su katalogu funkcija, automatizacijos, skaitmenizuojant detaliai, ignoruojamos.
+          </Alert>
+        )}
+
         {/* Forma создания правила */}
         <Box
           sx={{

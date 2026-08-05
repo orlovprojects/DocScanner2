@@ -293,7 +293,7 @@ def _finalize_document_for_apskaita5(doc) -> dict:
     discount_with = Decimal(str(getattr(doc, "invoice_discount_with_vat", None) or 0))
     
     # Если есть discount_with, но нет discount_wo - переносим
-    if discount_with > 0 and discount_wo == 0:
+    if discount_with != 0 and discount_wo == 0:
         discount_wo = discount_with
     
     # КЛЮЧЕВОЙ МОМЕНТ: Вычитаем скидку из amount_wo_vat!
@@ -358,18 +358,29 @@ def _finalize_line_items_for_apskaita5(doc) -> list:
         price = round(price, 4)  # price - 4 знака
         qty = round(qty, 4)      # quantity - 4 знака
         vat_percent = round(vat_percent, 2)
+
+        # Кредитка: знак несёт qty (минус), kaina всегда плюс — независимо от источника
+        # (израшимас хранит qty −1, скан может хранить +1 — приводим к единому виду)
+        is_credit = getattr(doc, "is_credit_invoice", None) is True
+        if is_credit:
+            price = abs(price)
+            qty = -abs(qty)
         
         # Идеальный subtotal от price × qty
-        if price > 0 and qty > 0:
+        if price > 0 and qty != 0:
             subtotal = round(price * qty, 2)
         else:
             subtotal = round(Decimal(str(getattr(li, "subtotal", None) or 0)), 2)
+            if is_credit:
+                subtotal = -abs(subtotal)
         
         # Идеальный VAT от subtotal × vat_percent
-        if vat_percent > 0 and subtotal > 0:
+        if vat_percent > 0 and subtotal != 0:
             vat = round(subtotal * vat_percent / Decimal("100"), 2)
         else:
             vat = round(Decimal(str(getattr(li, "vat", None) or 0)), 2)
+            if is_credit:
+                vat = -abs(vat)
         
         # Идеальный total
         total = round(subtotal + vat, 2)
@@ -422,17 +433,17 @@ def _distribute_remainders_to_lines(finalized_lines: list, doc) -> None:
     discount_with = Decimal(str(getattr(doc, "invoice_discount_with_vat", None) or 0))
     
     # Если есть discount_with, но нет discount_wo - переносим
-    if discount_with > 0 and discount_wo == 0:
+    if discount_with != 0 and discount_wo == 0:
         discount_wo = discount_with
     
     discount_wo = round(discount_wo, 2)
     
     # === ШАГ 1: Распределить скидку документа на subtotal строк ===
-    if discount_wo > 0:
+    if discount_wo != 0:
         # Сумма subtotal ДО скидки
         sum_subtotal_before = sum(Decimal(str(li["subtotal"])) for li in finalized_lines)
         
-        if sum_subtotal_before > 0:
+        if sum_subtotal_before != 0:
             discount_distributed = Decimal("0")
             
             for i, li in enumerate(finalized_lines):
@@ -455,7 +466,7 @@ def _distribute_remainders_to_lines(finalized_lines: list, doc) -> None:
                 li["subtotal"] = float(round(new_subtotal, 2))
                 
                 # ПЕРЕСЧИТЫВАЕМ PRICE: price × qty = subtotal
-                if line_quantity > 0:
+                if line_quantity != 0:
                     new_price = round(new_subtotal / line_quantity, 4)  # 4 знака для price
                     li["price"] = float(new_price)
                 
@@ -620,7 +631,7 @@ def _build_apskaita5_xml_for_documents(
                     str(getattr(doc, "vat_percent", None) or 0)
                 ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
-                if with_vat_dec > 0 and vp_dec > 0:
+                if with_vat_dec != 0 and vp_dec > 0:
                     factor = Decimal("1") + (vp_dec / Decimal("100"))
                     wo_dec = (with_vat_dec / factor).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
                     vat_dec = (with_vat_dec - wo_dec).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
@@ -962,10 +973,6 @@ def export_documents_group_to_apskaita5(
 
 
 
-
-
-
-
 # from __future__ import annotations 
 
 # import re
@@ -1015,6 +1022,30 @@ def export_documents_group_to_apskaita5(
 # def _s(v) -> str:
 #     """Безопасная строка с strip()."""
 #     return str(v).strip() if v is not None else ""
+
+
+# def _use_matched_catalog(item) -> bool:
+#     """Есть ли валидный каталог-матч на строке (и юзер его не отключил)."""
+#     if getattr(item, "catalog_match_user_override", False):
+#         return False
+
+#     matched_code = _s(getattr(item, "matched_prekes_kodas", ""))
+#     return bool(matched_code) and matched_code.upper() != "UKN0"
+
+
+# def _resolved_field(item, field_name: str) -> str:
+#     """
+#     Если есть валидный каталог-матч — берём matched_ поле.
+#     Если matched_ поле пустое — fallback на оригинальное.
+#     """
+#     if _use_matched_catalog(item):
+#         matched_value = _s(
+#             getattr(item, f"matched_{field_name}", "")
+#         )
+#         if matched_value:
+#             return matched_value
+
+#     return _s(getattr(item, field_name, ""))
 
 
 # def _infer_direction(document, direction_hint: Optional[str]) -> str:
@@ -1326,11 +1357,13 @@ def export_documents_group_to_apskaita5(
 #             "vat": float(vat),
 #             "vat_percent": float(vat_percent),
 #             "total": float(total),
-#             # Остальные поля без изменений
-#             "prekes_kodas": getattr(li, "prekes_kodas", "") or "",
-#             "prekes_barkodas": getattr(li, "prekes_barkodas", "") or "",
-#             "prekes_pavadinimas": getattr(li, "prekes_pavadinimas", "") or "",
-#             "unit": getattr(li, "unit", "") or "vnt",
+#             # Товарные поля — с учётом catalog matching
+#             "prekes_kodas": _resolved_field(li, "prekes_kodas"),
+#             "prekes_barkodas": _resolved_field(li, "prekes_barkodas"),
+#             "prekes_pavadinimas": _resolved_field(li, "prekes_pavadinimas"),
+#             "unit": _resolved_field(li, "unit") or "vnt",
+
+#             # Финансовые и учётные поля остаются оригинальными
 #             "pvm_kodas": getattr(li, "pvm_kodas", None),
 #             "sandelio_kodas": getattr(li, "sandelio_kodas", "") or "",
 #         })
@@ -1893,6 +1926,3 @@ def export_documents_group_to_apskaita5(
 #         apskaita5_extra_fields=apskaita5_extra_fields,
 #     )
 #     return content
-
-
-
