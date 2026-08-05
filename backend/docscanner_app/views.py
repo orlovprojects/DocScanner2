@@ -6619,7 +6619,7 @@ def invoice_settings(request):
 
     if request.method == "GET":
         data = InvoiceSettingsSerializer(obj, context={"request": request}).data
-        data["payment_providers"] = request.user.payment_providers or {}
+        data["payment_providers"] = (active_profile.payment_providers or {}) if active_profile else {}
         data["seller"] = _build_seller_from_profile(active_profile)
         return Response(data)
 
@@ -6630,7 +6630,7 @@ def invoice_settings(request):
     serializer.save()
 
     resp_data = serializer.data
-    resp_data["payment_providers"] = request.user.payment_providers or {}
+    resp_data["payment_providers"] = (active_profile.payment_providers or {}) if active_profile else {}
     resp_data["seller"] = _build_seller_from_profile(active_profile)
     return Response(resp_data)
 
@@ -10523,7 +10523,11 @@ def generate_payment_link(request, invoice_id):
             status=400,
         )
 
-    service = PaymentLinkService(request.user)
+    active_id = getattr(request.user, "active_company_profile_id", None)
+    active_profile = invoice.company_profile or (
+        CompanyProfile.objects.filter(id=active_id).first() if active_id else None
+    )
+    service = PaymentLinkService(request.user, company_profile=active_profile)
 
     try:
         result = service.create_for_invoice(invoice, provider_name)
@@ -10560,7 +10564,9 @@ def generate_payment_link(request, invoice_id):
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 def available_payment_providers(request):
-    service = PaymentLinkService(request.user)
+    active_id = getattr(request.user, "active_company_profile_id", None)
+    active_profile = CompanyProfile.objects.filter(id=active_id).first() if active_id else None
+    service = PaymentLinkService(request.user, company_profile=active_profile)
     return Response(service.get_available_providers())
 
 
@@ -10581,6 +10587,10 @@ def connect_payment_provider(request):
         return Response({"detail": "Nenurodytas teikėjas"}, status=400)
 
     data = request.data
+    active_id = getattr(request.user, "active_company_profile_id", None)
+    active_profile = CompanyProfile.objects.filter(id=active_id).first() if active_id else None
+    if active_profile is None:
+        return Response({"connected": False, "error": "Nėra aktyvios įmonės"}, status=400)
     error = _validate_provider_fields(provider_name, data)
     if error:
         return Response({"connected": False, "error": error}, status=400)
@@ -10596,9 +10606,9 @@ def connect_payment_provider(request):
     # Save credentials first
     try:
         PaymentLinkService.save_provider_config(
-            user=request.user,
-            provider_name=provider_name,
-            data=save_data,
+            active_profile,
+            provider_name,
+            save_data,
         )
     except ValueError as e:
         return Response({"connected": False, "error": str(e)}, status=400)
@@ -10642,9 +10652,9 @@ def connect_payment_provider(request):
 
     try:
         PaymentLinkService.save_provider_config(
-            user=request.user,
-            provider_name=provider_name,
-            data=final_data,
+            active_profile,
+            provider_name,
+            final_data,
         )
         logger.info("Saved test result to DB for %s", provider_name)
     except Exception as e:
@@ -10668,11 +10678,16 @@ def disconnect_payment_provider(request):
     if not provider_name:
         return Response({"detail": "Nenurodytas teikėjas"}, status=400)
 
+    active_id = getattr(request.user, "active_company_profile_id", None)
+    active_profile = CompanyProfile.objects.filter(id=active_id).first() if active_id else None
+    if active_profile is None:
+        return Response({"detail": "Nėra aktyvios įmonės"}, status=400)
+
     try:
         PaymentLinkService.save_provider_config(
-            user=request.user,
-            provider_name=provider_name,
-            data={"provider": provider_name},  # empty = cleared
+            active_profile,
+            provider_name,
+            {"provider": provider_name},
         )
     except ValueError as e:
         return Response({"detail": str(e)}, status=400)
