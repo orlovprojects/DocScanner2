@@ -250,8 +250,8 @@ function App() {
                   <Route path="/israsymas/matavimo-vienetai" element={<MeasurementUnitsPage />} />
                   <Route path="/israsymas/klientai" element={<CounterpartiesPage />} />
                   <Route path="/israsymas/prekes-paslaugos" element={<ProductsPage />} />
-                  <Route path="/israsymas/banko-israsai" element={<BankStatementsPage />} />
-                  <Route path="/bank" element={<BankOperationsPage />} />
+                  {/* <Route path="/israsymas/banko-israsai" element={<BankStatementsPage />} /> */}
+                  <Route path="/bankas" element={<BankOperationsPage />} />
                   <Route path="/susiejimo-diagnostika" element={<BankMatchingDebugPage />} />
                 </Route>
 

@@ -1399,6 +1399,13 @@ def match_purchase_on_transfer(purchase):
 
     purchase.recalc_from_allocations()
 
+    # DK įrašas už mokėjimą tiekėjui
+    try:
+        from ..services.accounting_transfer import create_je_for_allocation
+        create_je_for_allocation(alloc)
+    except Exception as e:
+        logger.warning("[BidirectionalMatch] Auto JE failed for purchase alloc: %s", e)
+
     logger.info(
         "[BidirectionalMatch] Purchase %s ↔ txn %s (score=%.2f, amount=%s)",
         purchase.id, best_txn.id, best_score, alloc_amount,

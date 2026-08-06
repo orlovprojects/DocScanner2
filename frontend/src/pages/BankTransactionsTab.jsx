@@ -64,7 +64,7 @@ const MANUAL_CATS = [
 
 const BANK_CFG = {
   swedbank: 'Swedbank', seb: 'SEB', luminor: 'Luminor',
-  siauliu: 'Šiaulių b.', revolut: 'Revolut', other: 'Kitas',
+  siauliu: 'Artea', revolut: 'Revolut', other: 'Kitas',
 };
 
 const fmt = (v, c = 'EUR') => v == null ? '—' : `${parseFloat(v).toFixed(2).replace('.', ',')} ${c === 'EUR' ? '€' : c}`;

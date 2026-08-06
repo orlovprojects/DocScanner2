@@ -103,6 +103,17 @@ class SignalPurchaseMatchingEngine:
                     },
                 )
 
+                # DK įrašas už mokėjimą tiekėjui — tik auto (proposed praleis pats create_je)
+                if alloc_status == "auto":
+                    from ..services.accounting_transfer import create_je_for_allocation
+                    try:
+                        create_je_for_allocation(alloc)
+                    except Exception as e:
+                        logger.warning(
+                            "[SignalPurchaseMatch] Auto JE failed for alloc %s: %s",
+                            alloc.id, e,
+                        )
+
                 txn.match_status = r.status
                 txn.match_confidence = r.confidence
                 txn.match_details = {

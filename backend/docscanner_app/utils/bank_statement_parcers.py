@@ -769,8 +769,8 @@ class RevolutCSVParser(BaseBankParser):
         """
         tx_type = self._get(row, "Type")
         product = self._get(row, "Product")
-        started = self._get(row, "Started Date", "Started")
-        completed = self._get(row, "Completed Date", "Completed")
+        started = self._get(row, "Date started (UTC)", "Started Date", "Started")
+        completed = self._get(row, "Date completed (UTC)", "Completed Date", "Completed")
         balance = self._get(row, "Balance", "Balance after")
         state = self._get(row, "State", "Status").upper()
 
@@ -803,8 +803,8 @@ class RevolutCSVParser(BaseBankParser):
                 skipped += 1
                 continue
 
-            completed_date = self._get(row, "Completed Date", "Completed")
-            started_date = self._get(row, "Started Date", "Started")
+            completed_date = self._get(row, "Date completed (UTC)", "Completed Date", "Completed")
+            started_date = self._get(row, "Date started (UTC)", "Started Date", "Started")
             date_str = completed_date or started_date
 
             desc = self._get(
@@ -813,6 +813,9 @@ class RevolutCSVParser(BaseBankParser):
                 "Merchant",
                 "Counterparty",
             )
+
+            reference_text = self._get(row, "Reference")
+            purpose = " ".join(x for x in (desc, reference_text) if x).strip() or desc
 
             state = self._get(row, "State", "Status")
 
@@ -836,7 +839,7 @@ class RevolutCSVParser(BaseBankParser):
                 if x
             )
 
-            currency = self._get(row, "Currency", default="EUR")
+            currency = self._get(row, "Payment currency", "Currency", "Orig currency", default="EUR")
 
             transactions.append({
                 "transaction_date": txn_date,
@@ -846,8 +849,8 @@ class RevolutCSVParser(BaseBankParser):
                 "counterparty_name": desc,
                 "counterparty_code": "",
                 "counterparty_account": "",
-                "payment_purpose": desc,
-                "reference_number": self._revolut_ref(row),
+                "payment_purpose": purpose,
+                "reference_number": self._get(row, "ID", "Transaction ID") or self._revolut_ref(row),
                 "amount": abs(amount),
                 "currency": currency or "EUR",
                 "direction": "credit" if amount > 0 else "debit",
@@ -886,6 +889,54 @@ def get_parser(bank_name: str, file_format: str) -> BaseBankParser:
         raise ValueError(f"No parser for {key}. Supported: {list(PARSER_REGISTRY.keys())}")
     return cls()
 
+def _detect_bank_from_camt(content: bytes) -> Optional[str]:
+    """
+    camt.053 XML: banką nustatome pagal sąskaitos aptarnautojo BIC (<Svcr>),
+    o ne pagal kontrahentų bankus operacijose.
+    """
+    try:
+        root = None
+        for enc in ("utf-8-sig", "utf-8", "windows-1257", "iso-8859-13"):
+            try:
+                root = ET.fromstring(content.decode(enc))
+                break
+            except (UnicodeDecodeError, LookupError):
+                continue
+        if root is None:
+            return None
+    except ET.ParseError:
+        return None
+
+    tag = root.tag
+    ns = tag.split("}")[0].lstrip("{") if "{" in tag else ""
+
+    def q(t):
+        return f"{{{ns}}}{t}" if ns else t
+
+    svcr = root.find(f".//{q('Acct')}/{q('Svcr')}/{q('FinInstnId')}")
+    bic = name = ""
+    if svcr is not None:
+        b = svcr.find(q("BIC"))
+        if b is not None and b.text:
+            bic = b.text.strip().upper()
+        n = svcr.find(q("Nm"))
+        if n is not None and n.text:
+            name = n.text.strip().lower()
+
+    bic_map = {"HABA": "swedbank", "CBVI": "seb", "AGBL": "luminor", "CBSB": "siauliu"}
+    if bic and bic[:4] in bic_map:
+        return bic_map[bic[:4]]
+
+    if "swedbank" in name:
+        return "swedbank"
+    if "seb" in name:
+        return "seb"
+    if "luminor" in name:
+        return "luminor"
+    if "artea" in name or "šiaulių" in name or "siauli" in name:
+        return "siauliu"
+
+    return None
 
 def detect_bank_from_content(content: bytes) -> Optional[str]:
     text = ""
@@ -899,15 +950,27 @@ def detect_bank_from_content(content: bytes) -> Optional[str]:
 
     compact = re.sub(r"\s+", " ", text)
 
+    # ── ISO 20022 camt.053 XML (Swedbank/SEB/Luminor/Šiaulių) ──
+    # Banką nustatome pagal aptarnautojo BIC (<Svcr>), ne pagal kontrahentus.
+    if "camt.05" in compact or "<document" in compact:
+        camt_bank = _detect_bank_from_camt(content)
+        if camt_bank:
+            return camt_bank
+
     # ── Revolut ─────────────────────────────────────────
-    # Revolut CSV turi specifinius stulpelius.
-    if "type,product,started date,completed date" in compact:
+    # Du eksporto formatai: senas ("Started Date"/"Completed Date")
+    # ir Business ("Date started (UTC)"/"Date completed (UTC)").
+    rev_started = "started date" in compact or "date started" in compact
+    rev_completed = "completed date" in compact or "date completed" in compact
+    if rev_started and rev_completed and "balance" in compact:
         return "revolut"
 
-    if "started date" in compact and "completed date" in compact and "balance" in compact:
-        return "revolut"
-
-    if "revolut" in compact and "completed date" in compact:
+    # Business formato specifiniai stulpeliai
+    if (
+        "date completed (utc)" in compact
+        or "spend program" in compact
+        or ("orig currency" in compact and "payment currency" in compact)
+    ):
         return "revolut"
 
     # ── SEB ─────────────────────────────────────────────
@@ -941,8 +1004,8 @@ def detect_bank_from_content(content: bytes) -> Optional[str]:
     if "luminor" in compact or "dnb" in compact:
         return "luminor"
 
-    # ── Šiaulių bankas ─────────────────────────────────
-    if "šiaulių" in compact or "siauliu" in compact:
+    # ── Artea (buvęs Šiaulių bankas) ───────────────────
+    if "artea" in compact or "šiaulių" in compact or "siauliu" in compact:
         return "siauliu"
 
     # ── Swedbank ────────────────────────────────────────

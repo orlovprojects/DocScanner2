@@ -68,6 +68,7 @@ from .utils.duplicates import is_duplicate_by_series_number
 from .utils.parsers import normalize_code_field
 from .utils.file_converter import normalize_any, ArchiveLimitError, MAX_SINGLE_FILE_BYTES
 
+from .validators.required_fields_checker import check_required_fields_for_export
 from .validators.company_matcher import update_seller_buyer_info
 from .validators.verify_lt_company_match import update_seller_buyer_info_from_companies
 from .services.sync_lt_companies import sync_companies_from_vmi, sync_addresses_from_jar
@@ -2164,6 +2165,15 @@ def process_uploaded_file_task(self, user_id, doc_id, scan_type, split_depth=0, 
         except Exception as e:
             logger.warning("Failed to apply company_replace_rules (post-enrich): %s", e)
         _log_t("apply_company_replace_rules (post-enrich)", t0)
+
+        # 15.06) Пересчёт готовности к экспорту после обогащения контрагентов
+        t0 = _t()
+        try:
+            doc.ready_for_export = check_required_fields_for_export(doc)
+            doc.save(update_fields=["ready_for_export"])
+        except Exception as e:
+            logger.warning("Failed to recheck ready_for_export (post-enrich): %s", e)
+        _log_t("recheck ready_for_export (post-enrich)", t0)
 
         # 15.1) Применяем дефолты один раз — теперь, когда контрагенты уточнены
         t0 = _t()

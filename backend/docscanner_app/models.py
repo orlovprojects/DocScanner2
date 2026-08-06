@@ -3632,7 +3632,7 @@ class BankStatement(models.Model):
         ("swedbank", "Swedbank"),
         ("seb", "SEB"),
         ("luminor", "Luminor"),
-        ("siauliu", "Šiaulių bankas"),
+        ("siauliu", "Artea"),
         ("revolut", "Revolut"),
         ("other", "Kitas"),
     ]
@@ -3651,6 +3651,12 @@ class BankStatement(models.Model):
 
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="bank_statements",
+    )
+    company_profile = models.ForeignKey(
+        "CompanyProfile",
+        null=True, blank=True,
         on_delete=models.CASCADE,
         related_name="bank_statements",
     )
@@ -3684,6 +3690,7 @@ class BankStatement(models.Model):
         ordering = ["-created_at"]
         indexes = [
             models.Index(fields=["user", "-created_at"], name="idx_bs_user_created"),
+            models.Index(fields=["company_profile", "-created_at"], name="idx_bs_cp_created"),
         ]
 
     def __str__(self):
@@ -3934,6 +3941,12 @@ class IncomingTransaction(BaseTransaction):
         on_delete=models.CASCADE,
         related_name="incoming_transactions",
     )
+    company_profile = models.ForeignKey(
+        "CompanyProfile",
+        null=True, blank=True,
+        on_delete=models.CASCADE,
+        related_name="incoming_transactions",
+    )
     bank_statement = models.ForeignKey(
         BankStatement,
         null=True, blank=True,
@@ -3948,6 +3961,7 @@ class IncomingTransaction(BaseTransaction):
             models.Index(fields=["user", "match_status"], name="idx_inc_user_match"),
             models.Index(fields=["transaction_hash"], name="idx_inc_hash"),
             models.Index(fields=["counterparty_code"], name="idx_inc_cpty_code"),
+            models.Index(fields=["company_profile", "match_status"], name="idx_inc_cp_match"),
         ]
 
     def __str__(self):
@@ -3959,6 +3973,12 @@ class OutgoingTransaction(BaseTransaction):
 
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="outgoing_transactions",
+    )
+    company_profile = models.ForeignKey(
+        "CompanyProfile",
+        null=True, blank=True,
         on_delete=models.CASCADE,
         related_name="outgoing_transactions",
     )
@@ -3974,6 +3994,7 @@ class OutgoingTransaction(BaseTransaction):
         indexes = [
             models.Index(fields=["user", "-transaction_date"], name="idx_out_user_date"),
             models.Index(fields=["transaction_hash"], name="idx_out_hash"),
+            models.Index(fields=["company_profile", "-transaction_date"], name="idx_out_cp_date"),
         ]
 
     def __str__(self):

@@ -50,10 +50,14 @@ class BankImportService:
         "application/vnd.ms-excel",  # some systems send CSV as this
         "text/plain",  # some CSVs come as text/plain
     }
-    MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB
+    MAX_FILE_SIZE = 20 * 1024 * 1024  # 10 MB
 
-    def __init__(self, user):
+    def __init__(self, user, company_profile=None):
         self.user = user
+        from ..models import CompanyProfile
+        self.company_profile = company_profile or CompanyProfile.objects.filter(
+            user=user, is_active=True,
+        ).first()
 
     def _log_duplicate(self, Model, txn, stmt, raw, direction):
         existing = (
@@ -154,7 +158,21 @@ class BankImportService:
             bank_name = detect_bank_from_content(content) or ""
             logger.info("[BankImport] Auto-detected bank: '%s'", bank_name)
             if not bank_name:
-                logger.warning("[BankImport] FAILED: could not detect bank")
+                # Diagnostika: kodėl neatpažinta — parodom antraštę ir formatą
+                enc_used, preview = None, ""
+                for e in ("utf-8-sig", "utf-8", "windows-1257", "iso-8859-13"):
+                    try:
+                        preview = content[:1000].decode(e)
+                        enc_used = e
+                        break
+                    except UnicodeDecodeError:
+                        continue
+                first_line = (preview.splitlines()[0] if preview else "")[:400]
+                logger.warning(
+                    "[BankImport] FAILED: could not detect bank. "
+                    "format=%s encoding=%s first_line=%r",
+                    detect_format_from_content(content), enc_used, first_line,
+                )
                 raise BankImportError(
                     "Nepavyko automatiškai nustatyti banko. "
                     "Pasirinkite banką rankiniu būdu."
@@ -172,6 +190,7 @@ class BankImportService:
         # ── 7. Create BankStatement record ─────────────────────
         stmt = BankStatement.objects.create(
             user=self.user,
+            company_profile=self.company_profile,
             bank_name=bank_name,
             file=file if hasattr(file, "read") else None,
             file_format=file_format,
@@ -252,6 +271,8 @@ class BankImportService:
                     user=self.user,
                     is_active=True,
                 ).first()
+
+                cp = self.company_profile
 
                 if cp:
                     bank_info = cp.get_bank_chart_account(
@@ -380,7 +401,7 @@ class BankImportService:
                     )
 
                 # ── Create DK for safe bank categories ─────────
-                category_dk = BankCategoryJournalBuilder(self.user)
+                category_dk = BankCategoryJournalBuilder(self.user, self.company_profile)
                 dk_result = category_dk.create_for_statement(stmt)
 
                 logger.info(
@@ -530,7 +551,7 @@ class BankImportService:
                 TransactionClassifier(self.user).classify_and_apply(all_unmatched)
 
             # ── 8. Create / rebuild DK for safe bank categories ─
-            category_dk = BankCategoryJournalBuilder(self.user)
+            category_dk = BankCategoryJournalBuilder(self.user, self.company_profile)
             dk_result = category_dk.rebuild_for_statement(stmt)
 
             logger.info(
@@ -670,6 +691,7 @@ class BankImportService:
 
             txn = Model(
                 user=self.user,
+                company_profile=self.company_profile,
                 bank_statement=stmt,
                 source="bank_import",
                 own_account_key=own_account_key,

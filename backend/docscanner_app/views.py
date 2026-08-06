@@ -8809,6 +8809,9 @@ from .serializers import (
 )
 from .services.payment_service import BankImportService, PaymentService, BankImportError
 
+def _get_active_cp(user):
+    from .models import CompanyProfile
+    return CompanyProfile.objects.filter(user=user, is_active=True).first()
 
 class Pagination50(PageNumberPagination):
     page_size = 50
@@ -8865,7 +8868,11 @@ class StatementListView(generics.ListAPIView):
     pagination_class = Pagination50
 
     def get_queryset(self):
-        return BankStatement.objects.filter(user=self.request.user)
+        qs = BankStatement.objects.filter(user=self.request.user)
+        cp = _get_active_cp(self.request.user)
+        if cp:
+            qs = qs.filter(company_profile=cp)
+        return qs
 
 
 class StatementDetailView(generics.RetrieveDestroyAPIView):
@@ -8873,7 +8880,11 @@ class StatementDetailView(generics.RetrieveDestroyAPIView):
     serializer_class = BankStatementListSerializer
  
     def get_queryset(self):
-        return BankStatement.objects.filter(user=self.request.user)
+        qs = BankStatement.objects.filter(user=self.request.user)
+        cp = _get_active_cp(self.request.user)
+        if cp:
+            qs = qs.filter(company_profile=cp)
+        return qs
  
     def perform_destroy(self, instance):
         from .models import PaymentAllocation, JournalEntry
@@ -9190,6 +9201,7 @@ class TransactionListView(APIView):
 
     def get(self, request):
         user = request.user
+        cp = _get_active_cp(user)
         limit = min(int(request.query_params.get("limit", 50)), 200)
         offset = int(request.query_params.get("offset", 0))
 
@@ -9200,6 +9212,8 @@ class TransactionListView(APIView):
         q = request.query_params.get("q", "").strip()
 
         def apply_filters(qs, include_match_status=True):
+            if cp:
+                qs = qs.filter(company_profile=cp)
             if stmt_id:
                 qs = qs.filter(bank_statement_id=stmt_id)
             if include_match_status and match_status:
@@ -9364,6 +9378,10 @@ class TransactionDetailView(APIView):
                 ).select_related("bank_statement").first()
                 direction_str = "incoming"
 
+        cp = _get_active_cp(request.user)
+        if txn and cp and txn.company_profile_id != cp.id:
+            txn = None
+
         if not txn:
             return Response({"detail": "Nerasta."}, status=status.HTTP_404_NOT_FOUND)
 
@@ -9448,6 +9466,9 @@ class BankMatchingDebugView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):
+        if not request.user.is_superuser:
+            return Response({"detail": "Prieiga negalima."}, status=status.HTTP_403_FORBIDDEN)
+
         statement_id = request.query_params.get("statement_id")
         only_unmatched = str(request.query_params.get("only_unmatched", "true")).lower() == "true"
 
@@ -9773,6 +9794,13 @@ class TransactionClassifyView(APIView):
                     status=status.HTTP_404_NOT_FOUND,
                 )
 
+        cp = _get_active_cp(request.user)
+        if cp and txn.company_profile_id != cp.id:
+            return Response(
+                {"detail": "Operacija nerasta."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
         # Apply classification
         CATEGORY_DEFAULTS = {
             "bank_fee": "6880",
@@ -9920,6 +9948,13 @@ class TransactionManualMatchView(APIView):
                     status=status.HTTP_404_NOT_FOUND,
                 )
 
+        cp = _get_active_cp(request.user)
+        if cp and txn.company_profile_id != cp.id:
+            return Response(
+                {"detail": "Operacija nerasta."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
         # Validate direction
         if is_incoming and purchase_id:
             return Response(
@@ -10009,7 +10044,11 @@ class BankTransactionRuleListView(generics.ListCreateAPIView):
     serializer_class = BankTransactionRuleSerializer
 
     def get_queryset(self):
-        return BankTransactionRule.objects.filter(user=self.request.user)
+        qs = BankTransactionRule.objects.filter(user=self.request.user)
+        cp = _get_active_cp(self.request.user)
+        if cp:
+            qs = qs.filter(company_profile=cp)
+        return qs
 
     def perform_create(self, serializer):
         from .models import CompanyProfile
@@ -10028,7 +10067,11 @@ class BankTransactionRuleDetailView(generics.RetrieveUpdateDestroyAPIView):
     serializer_class = BankTransactionRuleSerializer
 
     def get_queryset(self):
-        return BankTransactionRule.objects.filter(user=self.request.user)
+        qs = BankTransactionRule.objects.filter(user=self.request.user)
+        cp = _get_active_cp(self.request.user)
+        if cp:
+            qs = qs.filter(company_profile=cp)
+        return qs
 
 
 class AllocationPreviewView(APIView):
@@ -10135,6 +10178,8 @@ class TransactionDKTemplatesView(APIView):
             return Response({"detail": "Operacija nerasta."}, status=status.HTTP_404_NOT_FOUND)
 
         cp = CompanyProfile.objects.filter(user=request.user, is_active=True).first()
+        if cp and txn.company_profile_id != cp.id:
+            return Response({"detail": "Operacija nerasta."}, status=status.HTTP_404_NOT_FOUND)
         svc = BankDKRegisterService(request.user, cp)
         data = svc.get_templates_for_transaction(txn, direction)
 
@@ -10173,6 +10218,8 @@ class TransactionRegisterDKView(APIView):
         cp = CompanyProfile.objects.filter(user=request.user, is_active=True).first()
         if not cp:
             return Response({"detail": "Reikia sukurti įmonės profilį."}, status=status.HTTP_400_BAD_REQUEST)
+        if txn.company_profile_id != cp.id:
+            return Response({"detail": "Operacija nerasta."}, status=status.HTTP_404_NOT_FOUND)
 
         svc = BankDKRegisterService(request.user, cp)
 

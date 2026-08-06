@@ -171,6 +171,7 @@ class PaymentLinkService:
         # 4. Создаём IncomingTransaction
         txn = IncomingTransaction(
             user=user,
+            company_profile=invoice.company_profile,
             source="payment_link",
             transaction_date=timezone.now().date(),
             counterparty_name=result.payer_name or getattr(invoice, "buyer_name", "") or "",
@@ -210,20 +211,19 @@ class PaymentLinkService:
             confirmed_at=timezone.now(),
         )
 
-        # 6. Обновляем статус Invoice
-        total_paid = (
-            invoice.payment_allocations
-            .filter(status__in=["confirmed", "auto"])
-            .aggregate(t=Sum("amount"))["t"]
-        ) or Decimal("0")
+        # 5.1 DK įrašas už mokėjimą (D bankas / K pirkėjai)
+        from .accounting_transfer import create_je_for_allocation
+        try:
+            create_je_for_allocation(allocation)
+        except Exception as e:
+            logger.warning("[Webhook] Auto JE failed for alloc %s: %s", allocation.id, e)
 
-        if total_paid >= invoice.amount_with_vat:
-            invoice.status = "paid"
-            invoice.paid_at = timezone.now()
-            invoice.save(update_fields=["status", "paid_at"])
+        # 6. Пересчёт статуса Invoice (единая логика для всех путей оплаты)
+        invoice.recalc_payment_status()
+
+        # Auto-create SF from išankstinė — только когда полностью оплачено
+        if invoice.status == "paid":
             logger.info("Invoice %s marked as paid via %s", invoice_id, provider_name)
-
-            # Auto-create SF from išankstinė
             from .auto_sf import maybe_auto_create_sf
             try:
                 created_sf = maybe_auto_create_sf(invoice)
