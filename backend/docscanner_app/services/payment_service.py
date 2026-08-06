@@ -54,10 +54,7 @@ class BankImportService:
 
     def __init__(self, user, company_profile=None):
         self.user = user
-        from ..models import CompanyProfile
-        self.company_profile = company_profile or CompanyProfile.objects.filter(
-            user=user, is_active=True,
-        ).first()
+        self.company_profile = company_profile or user.active_company_profile
 
     def _log_duplicate(self, Model, txn, stmt, raw, direction):
         existing = (

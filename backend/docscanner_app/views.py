@@ -8811,6 +8811,9 @@ from .services.payment_service import BankImportService, PaymentService, BankImp
 
 def _get_active_cp(user):
     from .models import CompanyProfile
+    cp = user.active_company_profile
+    if cp is not None:
+        return cp
     return CompanyProfile.objects.filter(user=user, is_active=True).first()
 
 class Pagination50(PageNumberPagination):
@@ -10177,7 +10180,7 @@ class TransactionDKTemplatesView(APIView):
         if not txn:
             return Response({"detail": "Operacija nerasta."}, status=status.HTTP_404_NOT_FOUND)
 
-        cp = CompanyProfile.objects.filter(user=request.user, is_active=True).first()
+        cp = request.user.active_company_profile
         if cp and txn.company_profile_id != cp.id:
             return Response({"detail": "Operacija nerasta."}, status=status.HTTP_404_NOT_FOUND)
         svc = BankDKRegisterService(request.user, cp)
@@ -10215,7 +10218,7 @@ class TransactionRegisterDKView(APIView):
         description = request.data.get("description", "")
         category = request.data.get("category", "")
 
-        cp = CompanyProfile.objects.filter(user=request.user, is_active=True).first()
+        cp = request.user.active_company_profile
         if not cp:
             return Response({"detail": "Reikia sukurti įmonės profilį."}, status=status.HTTP_400_BAD_REQUEST)
         if txn.company_profile_id != cp.id:

@@ -91,9 +91,7 @@ def create_je_for_allocation(allocation):
     # Определить company_profile
     cp = getattr(document, "company_profile", None)
     if not cp:
-        cp = CompanyProfile.objects.filter(
-            user=document.user, is_active=True,
-        ).first()
+        cp = document.user.active_company_profile
     if not cp:
         logger.warning("[AccountingTransfer] No CompanyProfile for allocation %s", allocation.id)
         return None

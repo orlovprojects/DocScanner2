@@ -18,6 +18,7 @@ import {
 } from '@mui/icons-material';
 import { invoicingApi } from '../api/invoicingApi';
 import { useInvSubscription } from '../contexts/InvSubscriptionContext';
+import { useCompanyProfiles } from '../contexts/useCompanyProfiles';
 import LockIcon from '@mui/icons-material/Lock';
 import BankTransactionsTab from './BankTransactionsTab';
 
@@ -67,6 +68,7 @@ const DialogHeader = ({ title, onClose }) => (
 );
 
 const BankOperationsPage = () => {
+  const { activeId } = useCompanyProfiles();
   const [tab, setTab] = useState(0);
   const [snack, setSnack] = useState({ open: false, msg: '', sev: 'success' });
   const show = (msg, sev = 'success') => setSnack({ open: true, msg, sev });
@@ -118,7 +120,10 @@ const BankOperationsPage = () => {
     finally { if (reset) setStmtLoad(false); else setStmtMore(false); }
   }, []);
 
-  useEffect(() => { if (tab === 0) loadStmts(true); }, [tab, loadStmts]);
+  useEffect(() => { if (tab === 0) loadStmts(true); }, [tab, loadStmts, activeId]);
+
+  // Смена фирмы в тулбаре → сбросить выбранный išrašas (принадлежит другой фирме)
+  useEffect(() => { setStmtFilter(''); setTab(0); }, [activeId]);
 
   useEffect(() => {
     if (tab !== 0) return;

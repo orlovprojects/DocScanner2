@@ -24,6 +24,7 @@ import {
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import { invoicingApi } from '../api/invoicingApi';
+import { useCompanyProfiles } from '../contexts/useCompanyProfiles';
 import RegisterDKDialog from '../components/RegisterDKDialog';
 
 // ── Config ──
@@ -77,6 +78,7 @@ const isMatchedStatus = (s) => ['auto_matched', 'confirmed', 'manually_matched',
 const BankTransactionsTab = ({ statements = [], initialStatementId = '', onClearStatementFilter, showSnack }) => {
   const navigate = useNavigate();
   const show = showSnack || (() => {});
+  const { activeId } = useCompanyProfiles();
 
   // ── Table state ──
   const [txns, setTxns] = useState([]);
@@ -131,7 +133,7 @@ const BankTransactionsTab = ({ statements = [], initialStatementId = '', onClear
     finally { if (reset) setTxnLoad(false); else setTxnMore(false); }
   }, [txnF]);
 
-  useEffect(() => { loadTxns(true); }, [loadTxns]);
+  useEffect(() => { loadTxns(true); }, [loadTxns, activeId]);
 
   useEffect(() => {
     if (txnObs.current) txnObs.current.disconnect();
