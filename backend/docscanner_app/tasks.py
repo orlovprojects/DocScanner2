@@ -62,6 +62,7 @@ from .utils.novita import ask_novita_with_retry
 
 from .utils.similarity import calculate_max_similarity_percent
 from .utils.save_document import update_scanned_document, _apply_sumiskai_defaults_from_user
+from .utils.company_replace_rules_applier import apply_company_replace_rules
 from .utils.llm_json import parse_llm_json_robust
 from .utils.duplicates import is_duplicate_by_series_number
 from .utils.parsers import normalize_code_field
@@ -2123,13 +2124,46 @@ def process_uploaded_file_task(self, user_id, doc_id, scan_type, split_depth=0, 
 
 
         # 15) Сопоставление продавца/покупателя
-        # t0 = _t()
-        # update_seller_buyer_info(doc)
-        # _log_t("update_seller_buyer_info()", t0)
 
         t0 = _t()
         update_seller_buyer_info_from_companies(doc)
         _log_t("update_seller_buyer_info_from_companies()", t0)
+
+        # 15.05) Правила замены контрагентов — ПОСЛЕ обогащения из справочника,
+        # иначе update_seller_buyer_info_from_companies затирает замену обратно.
+        t0 = _t()
+        try:
+            crr_count = apply_company_replace_rules(doc, user)
+            if crr_count:
+                logger.info("apply_company_replace_rules applied %d replacement(s)", crr_count)
+
+                # Синхронизируем structured_json, чтобы фронт получил заменённых контрагентов
+                sj = doc.structured_json
+                if isinstance(sj, dict):
+                    sj.update({
+                        "buyer_name": doc.buyer_name,
+                        "buyer_id": doc.buyer_id,
+                        "buyer_vat_code": doc.buyer_vat_code,
+                        "buyer_country_iso": doc.buyer_country_iso,
+                        "buyer_is_person": doc.buyer_is_person,
+                        "seller_name": doc.seller_name,
+                        "seller_id": doc.seller_id,
+                        "seller_vat_code": doc.seller_vat_code,
+                        "seller_country_iso": doc.seller_country_iso,
+                        "seller_is_person": doc.seller_is_person,
+                    })
+                    doc.structured_json = sj
+
+                doc.save(update_fields=[
+                    "buyer_name", "buyer_id", "buyer_vat_code", "buyer_country_iso", "buyer_is_person",
+                    "seller_name", "seller_id", "seller_vat_code", "seller_country_iso", "seller_is_person",
+                    "buyer_name_normalized", "seller_name_normalized",
+                    "buyer_replaced_by_rule", "seller_replaced_by_rule",
+                    "structured_json",
+                ])
+        except Exception as e:
+            logger.warning("Failed to apply company_replace_rules (post-enrich): %s", e)
+        _log_t("apply_company_replace_rules (post-enrich)", t0)
 
         # 15.1) Применяем дефолты один раз — теперь, когда контрагенты уточнены
         t0 = _t()

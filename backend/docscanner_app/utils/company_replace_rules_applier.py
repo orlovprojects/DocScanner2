@@ -86,14 +86,61 @@ def _extract_side(db_doc, side: str) -> dict:
     }
 
 
+# def _apply_result_to_side(db_doc, rule, side: str) -> bool:
+#     """
+#     Применяет result-поля правила к указанной стороне документа.
+#     Заменяет ТОЛЬКО непустые result-поля.
+#     Возвращает True если хоть что-то изменилось.
+#     """
+#     prefix = side
+#     changed = False
+
+#     mapping = {
+#         "result_pavadinimas": f"{prefix}_name",
+#         "result_kodas": f"{prefix}_id",
+#         "result_pvm_kodas": f"{prefix}_vat_code",
+#         "result_salies_kodas": f"{prefix}_country_iso",
+#     }
+
+#     for rule_key, doc_field in mapping.items():
+#         val = (rule.get(rule_key) or "").strip()
+#         if val:
+#             old_val = getattr(db_doc, doc_field, None)
+#             setattr(db_doc, doc_field, val)
+#             changed = True
+#             logger.info(
+#                 "company_replace_rule[%s]: %s: %r → %r",
+#                 rule.get("id", "?"), doc_field, old_val, val,
+#             )
+
+#     # Tipas: fizinis/juridinis → is_person
+#     result_tipas = (rule.get("result_tipas") or "").strip().lower()
+#     if result_tipas:
+#         old_val = getattr(db_doc, f"{prefix}_is_person", None)
+#         new_val = True if result_tipas == "fizinis" else False
+#         setattr(db_doc, f"{prefix}_is_person", new_val)
+#         changed = True
+#         logger.info(
+#             "company_replace_rule[%s]: %s_is_person: %r → %r",
+#             rule.get("id", "?"), prefix, old_val, new_val,
+#         )
+
+#     # Обновляем нормализованное имя если менялось имя
+#     if (rule.get("result_pavadinimas") or "").strip():
+#         norm_field = f"{prefix}_name_normalized"
+#         new_name = getattr(db_doc, f"{prefix}_name", "")
+#         setattr(db_doc, norm_field, normalize_company_name_v2(new_name))
+
+#     return changed
+
 def _apply_result_to_side(db_doc, rule, side: str) -> bool:
     """
-    Применяет result-поля правила к указанной стороне документа.
-    Заменяет ТОЛЬКО непустые result-поля.
-    Возвращает True если хоть что-то изменилось.
+    Применяет result-поля правила к buyer или seller.
+    Возвращает True только при реальном изменении значения.
     """
     prefix = side
     changed = False
+    name_changed = False
 
     mapping = {
         "result_pavadinimas": f"{prefix}_name",
@@ -103,36 +150,74 @@ def _apply_result_to_side(db_doc, rule, side: str) -> bool:
     }
 
     for rule_key, doc_field in mapping.items():
-        val = (rule.get(rule_key) or "").strip()
-        if val:
-            old_val = getattr(db_doc, doc_field, None)
-            setattr(db_doc, doc_field, val)
-            changed = True
-            logger.info(
-                "company_replace_rule[%s]: %s: %r → %r",
-                rule.get("id", "?"), doc_field, old_val, val,
-            )
+        raw_value = rule.get(rule_key)
 
-    # Tipas: fizinis/juridinis → is_person
-    result_tipas = (rule.get("result_tipas") or "").strip().lower()
-    if result_tipas:
-        old_val = getattr(db_doc, f"{prefix}_is_person", None)
-        new_val = True if result_tipas == "fizinis" else False
-        setattr(db_doc, f"{prefix}_is_person", new_val)
+        if raw_value is None:
+            continue
+
+        new_value = str(raw_value).strip()
+
+        if not new_value:
+            continue
+
+        old_value = getattr(db_doc, doc_field, None)
+        old_normalized = str(old_value or "").strip()
+
+        # Ничего не изменилось — не считаем заменой
+        if old_normalized == new_value:
+            logger.info(
+                "company_replace_rule[%s]: %s уже содержит %r, пропускаем",
+                rule.get("id", "?"),
+                doc_field,
+                new_value,
+            )
+            continue
+
+        setattr(db_doc, doc_field, new_value)
         changed = True
-        logger.info(
-            "company_replace_rule[%s]: %s_is_person: %r → %r",
-            rule.get("id", "?"), prefix, old_val, new_val,
+
+        if doc_field == f"{prefix}_name":
+            name_changed = True
+
+        logger.warning(
+            "company_replace_rule[%s]: %s: %r → %r",
+            rule.get("id", "?"),
+            doc_field,
+            old_value,
+            new_value,
         )
 
-    # Обновляем нормализованное имя если менялось имя
-    if (rule.get("result_pavadinimas") or "").strip():
-        norm_field = f"{prefix}_name_normalized"
-        new_name = getattr(db_doc, f"{prefix}_name", "")
-        setattr(db_doc, norm_field, normalize_company_name_v2(new_name))
+    # Тип контрагента
+    result_tipas = str(rule.get("result_tipas") or "").strip().lower()
+
+    if result_tipas in ("fizinis", "juridinis"):
+        field_name = f"{prefix}_is_person"
+        old_value = getattr(db_doc, field_name, None)
+        new_value = result_tipas == "fizinis"
+
+        if old_value != new_value:
+            setattr(db_doc, field_name, new_value)
+            changed = True
+
+            logger.warning(
+                "company_replace_rule[%s]: %s: %r → %r",
+                rule.get("id", "?"),
+                field_name,
+                old_value,
+                new_value,
+            )
+
+    # Обновляем нормализованное имя только при реальной замене имени
+    if name_changed:
+        new_name = getattr(db_doc, f"{prefix}_name", "") or ""
+
+        setattr(
+            db_doc,
+            f"{prefix}_name_normalized",
+            normalize_company_name_v2(new_name),
+        )
 
     return changed
-
 
 def apply_company_replace_rules(db_doc, user) -> int:
     """
@@ -148,6 +233,9 @@ def apply_company_replace_rules(db_doc, user) -> int:
     rules = getattr(user, "company_replace_rules", None)
     if not rules or not isinstance(rules, list):
         return 0
+    
+    db_doc.buyer_replaced_by_rule = False
+    db_doc.seller_replaced_by_rule = False
 
     total_applied = 0
 

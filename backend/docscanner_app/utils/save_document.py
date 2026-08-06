@@ -943,15 +943,6 @@ def update_scanned_document(
             glued_raw_text=glued_raw_text,
         )
 
-        # ── Применяем правила замены контрагентов ──
-        try:
-            crr_count = apply_company_replace_rules(db_doc, user)
-            if crr_count:
-                logger.info("apply_company_replace_rules applied %d replacement(s)", crr_count)
-                db_doc.pirkimas_pardavimas = determine_pirkimas_pardavimas(doc_struct, user)
-        except Exception as e:
-            logger.warning("Failed to apply company_replace_rules: %s", e)
-
         db_doc.save()
 
         _save_line_items(db_doc, doc_struct, scan_type, user)
