@@ -1207,6 +1207,16 @@ class CompanyProfileSerializer(serializers.ModelSerializer):
                 "onboarding_completed",
             ])
 
+            # Osiruoti dokumentai (išrašyti be profilio) → priskirti pirmam profiliui
+            from .models import Invoice
+            orphan_qs = Invoice.objects.filter(user=user, company_profile__isnull=True)
+            updated = orphan_qs.update(company_profile=profile)
+            if updated:
+                logger.info(
+                    "[CompanyProfile] Priskirta %d osiruotų sąskaitų user=%s → profile=%s",
+                    updated, user.id, profile.id,
+                )
+
         # Засеваем дефолтные единицы и серии новому профилю (per-company)
         from .models import MeasurementUnit, InvoiceSeries
         MeasurementUnit.create_defaults_for_user(user, profile.id)
