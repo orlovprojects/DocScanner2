@@ -277,7 +277,7 @@ CELERY_TASK_SERIALIZER = "json"
 
 TASKS = {
     "default": {
-        "BACKEND": "django_tasks.backends.dummy.DummyBackend"
+        "BACKEND": "django_tasks.backends.immediate.ImmediateBackend"
     }
 }
 
