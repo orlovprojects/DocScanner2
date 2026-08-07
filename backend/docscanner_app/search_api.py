@@ -32,7 +32,10 @@ class GuidesSmartSearchView(APIView):
 
     def get(self, request):
         q = (request.GET.get("q") or "").strip()
-        limit = max(1, int(request.GET.get("limit", 5)))
+        try:
+            limit = max(1, min(int(request.GET.get("limit", 5)), 20))
+        except (TypeError, ValueError):
+            limit = 5
         if not q:
             return Response({"results": []})
 
@@ -46,17 +49,21 @@ class GuidesSmartSearchView(APIView):
             .values("id", "slug", "title", "description", "sim")
         )
 
+        cats_list = list(cats_qs[:limit * 3])
+        cat_ids = [c["id"] for c in cats_list]
+        cat_img_lookup = {
+            obj.id: getattr(obj, "cat_image", None)
+            for obj in GuideCategoryPage.objects.only("id", "cat_image").filter(id__in=cat_ids)
+        }
+
         cat_results = []
-        # небольшой запас перед сортировкой
-        for c in cats_qs[:limit * 3]:
-            # аккуратно достанем картинку (можно оптимизировать select_related, но у Page FK к images без прямой связи)
-            obj = GuideCategoryPage.objects.only("cat_image").get(id=c["id"])
+        for c in cats_list:
             cat_results.append({
                 "type": "category",
                 "id": c["id"],
                 "title": c["title"],
                 "snippet": (strip_tags(c.get("description") or "")[:180]),
-                "image_url": rendition_url(getattr(obj, "cat_image", None)),
+                "image_url": rendition_url(cat_img_lookup.get(c["id"])),
                 "href": f"/kategorija/{c['slug']}",
                 "score": float(c.get("sim") or 0.0) + 0.05,  # слегка бустим категории
             })
@@ -84,7 +91,7 @@ class GuidesSmartSearchView(APIView):
                 "title": g["title"],
                 "snippet": st[:180],
                 "image_url": rendition_url(img_lookup.get(g["id"])),
-                "href": f"/gidas/{g['slug']}",
+                "href": f"/straipsnis/{g['slug']}",
                 "score": float(g.get("sim") or 0.0),
             })
 
