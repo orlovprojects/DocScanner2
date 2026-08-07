@@ -2393,6 +2393,24 @@ export default function NustatymaiPage() {
     }
   };
 
+  const activeProfile = profiles.find((p) => p.id === activeId);
+  const usesInventory = Boolean(activeProfile?.uses_inventory);
+
+  const toggleUsesInventory = async (e) => {
+    const checked = e.target.checked;
+    if (!activeId) return;
+    try {
+      await api.patch(
+        `/company-profiles/${activeId}/`,
+        { uses_inventory: checked },
+        { withCredentials: true }
+      );
+      await refresh();
+    } catch {
+      alert("Nepavyko išsaugoti sandėlio apskaitos nustatymo.");
+    }
+  };
+
   const combinedProfiles = [
     ...purchaseList.map((x) => ({ ...x, __role: "buyer" })),
     ...salesList.map((x) => ({ ...x, __role: "seller" })),
@@ -2541,6 +2559,22 @@ export default function NustatymaiPage() {
         {profileSwitched && (
           <Alert severity="success" sx={{ mt: 2 }}>Profilis pakeistas!</Alert>
         )}
+
+        {/* Sandėlio apskaita */}
+        <Box sx={{ display: "flex", alignItems: "center", gap: 1, mt: 3 }}>
+          <Switch checked={usesInventory} onChange={toggleUsesInventory} />
+          <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
+            <Typography variant="body2">Vedama sandėlio apskaita</Typography>
+            <Tooltip
+              arrow
+              enterTouchDelay={0}
+              leaveTouchDelay={4000}
+              title="Nevedant sandėlio apskaitos, perkamos prekės keliaus tiesiai į sąnaudas"
+            >
+              <HelpOutlineIcon fontSize="small" sx={{ color: "text.secondary" }} />
+            </Tooltip>
+          </Box>
+        </Box>
 
         {/* Programa aktyviam profiliui */}
         <Typography variant="subtitle2" sx={{ mt: 3, mb: 1, fontWeight: 600 }}>

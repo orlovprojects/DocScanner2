@@ -136,19 +136,45 @@ const PIRKIMO_TO_PARDAVIMO = {
   "2010": "5000",
   "2040": "5000",
   "6000": "5000",
-  "6002": "5000",
   "6003": "5000",
   "6004": "5000",
+  "6001": "5001",
+  "6200": "5001",
+  "6202": "5001",
+  "6208": "5001",
+  "6301": "5001",
+  "6302": "5001",
+  "6303": "5001",
+  "6300": "5401",
+  "6308": "5401",
+  "6401": "5401",
+  "6802": "5810",
+  "6806": "5810",
+  "6810": "5810",
+  "6803": "5803",
+  "6311": "5804",
+  "6804": "5804",
 };
 
-function derivePardavimo(pirkimoCode, doc) {
-  if (pirkimoCode && PIRKIMO_TO_PARDAVIMO[pirkimoCode]) {
-    return PIRKIMO_TO_PARDAVIMO[pirkimoCode];
+const INVENTORY_CODES = new Set(["2040", "2010"]);
+
+function resolveDebetoForInventory(pirkimoCode, usesInventory) {
+  const code = (pirkimoCode || "").trim();
+  if (INVENTORY_CODES.has(code) && !usesInventory) {
+    return "6002";
   }
-  if (doc?.traded_type === "goods" || doc?.preke_paslauga === "1") {
-    return "5000";
+  return code;
+}
+
+function derivePardavimo(pirkimoCode, ctx) {
+  const code = (pirkimoCode || "").trim();
+  if (code && PIRKIMO_TO_PARDAVIMO[code]) {
+    return PIRKIMO_TO_PARDAVIMO[code];
   }
-  return "5001";
+  const isGoods =
+    ctx?.preke_paslauga === "preke" ||
+    ctx?.traded_type === "goods";
+  return isGoods ? "5000" : "5001";
 }
 
 function getEffectivePardavimo(doc) {
@@ -192,7 +218,7 @@ function resolveDirection(doc, selectedCpKey) {
 // KorespondencijaSummary
 // ═══════════════════════════════════════════════════════════
 
-function KorespondencijaSummary({ doc, selectedCpKey, lineItems }) {
+function KorespondencijaSummary({ doc, selectedCpKey, lineItems, usesInventory }) {
   const direction = resolveDirection(doc, selectedCpKey);
 
   const summary = useMemo(() => {
@@ -211,18 +237,23 @@ function KorespondencijaSummary({ doc, selectedCpKey, lineItems }) {
 
     if (isPirkimas) {
       if (isDetaliai && korSummary?.pirkimas?.length > 0) {
+        const korGroups = {};
         for (const g of korSummary.pirkimas) {
-          const code = g.code || "6312";
+          const code = resolveDebetoForInventory(g.code, usesInventory) || "6312";
+          if (!korGroups[code]) korGroups[code] = { suma: 0, count: 0 };
+          korGroups[code].suma += Number(g.subtotal_sum || 0);
+          korGroups[code].count += Number(g.count || 0);
+        }
+        for (const [code, { suma, count }] of Object.entries(korGroups)) {
           mainLines.push({
             side: "D", code, name: getAccountName(code),
-            suma: Number(g.subtotal_sum || 0), count: g.count,
-            editable: false, ids: [],
+            suma, count, editable: false, ids: [],
           });
         }
       } else if (isDetaliai && hasLineItems) {
         const groups = {};
         for (const li of lineItems) {
-          const code = li.pirkimo_saskaita || "6312";
+          const code = resolveDebetoForInventory(li.pirkimo_saskaita, usesInventory) || "6312";
           if (!groups[code]) groups[code] = { suma: 0, count: 0 };
           groups[code].suma += Number(li.subtotal || 0);
           groups[code].count += 1;
@@ -237,7 +268,7 @@ function KorespondencijaSummary({ doc, selectedCpKey, lineItems }) {
           });
         }
       } else {
-        const code = doc.pirkimo_saskaita || "6312";
+        const code = resolveDebetoForInventory(doc.pirkimo_saskaita, usesInventory) || "6312";
         mainLines.push({
           side: "D", code, name: getAccountName(code), suma: amountWoVat, count: null,
           editable: false, ids: [],
@@ -262,11 +293,19 @@ function KorespondencijaSummary({ doc, selectedCpKey, lineItems }) {
       const pvmSide = isKreditine ? "D" : "K";
       const skolaSide = isKreditine ? "K" : "D";
 
-      if (hasLineItems) {
+      if (isDetaliai && korSummary?.pardavimas?.length > 0) {
+        for (const g of korSummary.pardavimas) {
+          const code = g.code || "5001";
+          mainLines.push({
+            side: pajSide, code, name: getAccountName(code),
+            suma: Math.abs(Number(g.subtotal_sum || 0)), count: g.count,
+            editable: true, ids: [],
+          });
+        }
+      } else if (hasLineItems) {
         const groups = {};
         for (const li of lineItems) {
-          const code = li.kredito_saskaita || li.pardavimo_saskaita;
-          if (!code) continue;
+          const code = li.pardavimo_saskaita || derivePardavimo(li.pirkimo_saskaita, li);
           if (!groups[code]) groups[code] = { suma: 0, count: 0, ids: [] };
           groups[code].suma += Math.abs(Number(li.subtotal || 0));
           groups[code].count += 1;
@@ -279,13 +318,11 @@ function KorespondencijaSummary({ doc, selectedCpKey, lineItems }) {
           });
         }
       } else {
-        const code = doc.kredito_saskaita || doc.pardavimo_saskaita;
-        if (code) {
-          mainLines.push({
-            side: pajSide, code, name: getAccountName(code),
-            suma: Math.abs(amountWoVat), count: null, editable: true, ids: [],
-          });
-        }
+        const code = doc.pardavimo_saskaita || derivePardavimo(doc.pirkimo_saskaita, doc);
+        mainLines.push({
+          side: pajSide, code, name: getAccountName(code),
+          suma: Math.abs(amountWoVat), count: null, editable: true, ids: [],
+        });
       }
 
       if (vatAmount !== 0) {
@@ -303,7 +340,7 @@ function KorespondencijaSummary({ doc, selectedCpKey, lineItems }) {
 
     const lines = [...mainLines, ...skolaLines];
     return { direction, lines };
-  }, [doc, selectedCpKey, lineItems, direction]);
+  }, [doc, selectedCpKey, lineItems, direction, usesInventory]);
 
   if (!selectedCpKey) {
     return (
@@ -403,8 +440,7 @@ function KorespondencijaSummary({ doc, selectedCpKey, lineItems }) {
 // ═══════════════════════════════════════════════════════════
 // PirkimoSaskaitaField
 // ═══════════════════════════════════════════════════════════
-function PirkimoSaskaitaField({ value, pardavimoValue, onChange, selectedCpKey, isMobile, doc }) {
-  if (!doc) return null;
+function PirkimoSaskaitaField({ value, pardavimoValue, onChange, selectedCpKey, isMobile, doc, usesInventory }) {  if (!doc) return null;
 
   if (!selectedCpKey) {
     return (
@@ -439,7 +475,8 @@ function PirkimoSaskaitaField({ value, pardavimoValue, onChange, selectedCpKey, 
     );
   }
 
-  const displayValue = value || "6312";
+  const rawValue = value || "6312";
+  const displayValue = resolveDebetoForInventory(rawValue, usesInventory) || "6312";
   const displayLabel = `${displayValue} ${getAccountName(displayValue)}`;
 
   return (

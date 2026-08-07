@@ -9,6 +9,69 @@ from ..models import JournalEntry, JournalEntryLine, Purchase, Invoice
 BALANCE_TOLERANCE = Decimal("0.009")
 
 
+# ═══════════════════════════════════════════════════════════
+# Pirkimo → Pardavimo mapping (единый источник истины)
+# ═══════════════════════════════════════════════════════════
+
+PIRKIMO_TO_PARDAVIMO = {
+    # Prekės / gamyba → prekių pajamos
+    "2010": "5000",
+    "2040": "5000",
+    "6000": "5000",
+    "6003": "5000",
+    "6004": "5000",
+    # Paslaugos (tipas vienareikšmis)
+    "6001": "5001",
+    "6200": "5001",
+    "6202": "5001",
+    "6208": "5001",
+    "6301": "5001",
+    "6302": "5001",
+    "6303": "5001",
+    # Kita veikla
+    "6300": "5401",
+    "6308": "5401",
+    "6401": "5401",
+    # Finansinės pajamos
+    "6802": "5810",
+    "6806": "5810",
+    "6810": "5810",
+    "6803": "5803",
+    # Baudos / delspinigiai
+    "6311": "5804",
+    "6804": "5804",
+}
+
+INVENTORY_CODES = {"2040", "2010"}
+
+
+def derive_pardavimo(pirkimo_code, *, preke_paslauga=None, traded_type=None):
+    """
+    Iš pirkimo (išlaidų) sąskaitos kodo išvedame pardavimo (pajamų) sąskaitą.
+    Kodams, kurių nėra mapping'e (6002, 6312, 6900, nežinomi) — sprendžia
+    preke_paslauga / traded_type: preke → 5000, paslauga → 5001.
+    """
+    code = str(pirkimo_code or "").strip()
+    if code and code in PIRKIMO_TO_PARDAVIMO:
+        return PIRKIMO_TO_PARDAVIMO[code]
+    is_goods = (preke_paslauga == "preke") or (traded_type == "goods")
+    return "5000" if is_goods else "5001"
+
+
+def resolve_debeto_for_inventory(pirkimo_code, *, uses_inventory, user_override=None):
+    """
+    Складская конверсия. Если фирма не ведёт склад, atsargos
+    (2040 prekės perpardavimui, 2010 žaliavos) переносятся сразу
+    в sąnaudas (6002). Ручной выбор пользователя не трогаем.
+    """
+    if user_override:
+        return str(user_override).strip()
+    code = str(pirkimo_code or "").strip()
+    if code in INVENTORY_CODES and not uses_inventory:
+        return "6002"
+    return code
+
+
 def _get_account_name(code):
     """Возвращает название sąskaitos по коду для денормализации."""
     ACCOUNTS = {
@@ -574,11 +637,10 @@ def generate_invoice_journal_entry(invoice):
 
         for il in invoice.line_items.all():
             code = (
-                getattr(il, "kredito_saskaita", None)
-                or (
-                    "5000"
-                    if getattr(il, "preke_paslauga", None) == "preke"
-                    else "5001"
+                il.kredito_saskaita
+                or derive_pardavimo(
+                    getattr(il, "pirkimo_saskaita", None),
+                    preke_paslauga=getattr(il, "preke_paslauga", None),
                 )
             )
 

@@ -17,6 +17,43 @@ from .models import Payments, MeasurementUnit, InvoiceSeries, Product, Recurring
 
 from .utils.lineitem_rules import normalize_lineitem_rules
 
+def _build_pardavimas_summary(obj):
+    from django.db.models import Sum, Count
+    from .utils.journal_generators import derive_pardavimo
+
+    doc_traded = getattr(obj, "traded_type", None)
+
+    raw = (
+        obj.line_items
+        .values("pardavimo_saskaita", "pirkimo_saskaita", "preke_paslauga")
+        .annotate(
+            subtotal_sum=Sum("subtotal"),
+            count=Count("id"),
+        )
+    )
+
+    merged = {}
+    for g in raw:
+        override = (g["pardavimo_saskaita"] or "").strip()
+        code = override or derive_pardavimo(
+            g["pirkimo_saskaita"],
+            preke_paslauga=g["preke_paslauga"],
+            traded_type=doc_traded,
+        )
+        if code not in merged:
+            merged[code] = {"subtotal_sum": 0, "count": 0}
+        merged[code]["subtotal_sum"] += float(g["subtotal_sum"] or 0)
+        merged[code]["count"] += g["count"]
+
+    return [
+        {
+            "code": code,
+            "subtotal_sum": str(round(v["subtotal_sum"], 2)),
+            "count": v["count"],
+        }
+        for code, v in sorted(merged.items())
+    ]
+
 def _seller_from_profile(profile):
     """Seller-реквизиты из CompanyProfile (ветвление ИВ / юр.лицо)."""
     if profile is None:
@@ -264,21 +301,7 @@ class ScannedDocumentSerializer(serializers.ModelSerializer):
                     )
                     .order_by("pirkimo_saskaita")
             ],
-            "pardavimas": [
-                {
-                    "code": g["pardavimo_saskaita"] or "",
-                    "pirkimo_saskaita": g["pirkimo_saskaita"] or "",
-                    "subtotal_sum": str(g["subtotal_sum"] or 0),
-                    "count": g["count"],
-                }
-                for g in obj.line_items
-                    .values("pardavimo_saskaita", "pirkimo_saskaita")
-                    .annotate(
-                        subtotal_sum=Sum("subtotal"),
-                        count=Count("id"),
-                    )
-                    .order_by("pardavimo_saskaita", "pirkimo_saskaita")
-            ],
+            "pardavimas": _build_pardavimas_summary(obj),
         }
 
 
@@ -417,21 +440,7 @@ class ScannedDocumentDetailSerializer(serializers.ModelSerializer):
                     )
                     .order_by("pirkimo_saskaita")
             ],
-            "pardavimas": [
-                {
-                    "code": g["pardavimo_saskaita"] or "",
-                    "pirkimo_saskaita": g["pirkimo_saskaita"] or "",
-                    "subtotal_sum": str(g["subtotal_sum"] or 0),
-                    "count": g["count"],
-                }
-                for g in obj.line_items
-                    .values("pardavimo_saskaita", "pirkimo_saskaita")
-                    .annotate(
-                        subtotal_sum=Sum("subtotal"),
-                        count=Count("id"),
-                    )
-                    .order_by("pardavimo_saskaita", "pirkimo_saskaita")
-            ],
+            "pardavimas": _build_pardavimas_summary(obj),
         }
 
 
@@ -466,25 +475,8 @@ class ScannedDocumentAdminDetailSerializer(serializers.ModelSerializer):
                     )
                     .order_by("pirkimo_saskaita")
             ],
-            "pardavimas": [
-                {
-                    "code": g["pardavimo_saskaita"] or "",
-                    "pirkimo_saskaita": g["pirkimo_saskaita"] or "",
-                    "subtotal_sum": str(g["subtotal_sum"] or 0),
-                    "count": g["count"],
-                }
-                for g in obj.line_items
-                    .values("pardavimo_saskaita", "pirkimo_saskaita")
-                    .annotate(
-                        subtotal_sum=Sum("subtotal"),
-                        count=Count("id"),
-                    )
-                    .order_by("pardavimo_saskaita", "pirkimo_saskaita")
-            ],
+            "pardavimas": _build_pardavimas_summary(obj),
         }
-
-
-
 
 
 
@@ -1110,6 +1102,7 @@ class CompanyProfileSerializer(serializers.ModelSerializer):
             "owner_name",
             "iv_certificate_nr",
             "accounting_program",
+            "uses_inventory",
             "payment_providers",
             "is_active",
             "created_at",

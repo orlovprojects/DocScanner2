@@ -241,7 +241,7 @@ const ScanPreviewDialog = ({
 
   if (!open || !rawUrl) return null;
 
-  const ext = getExt(filename) || getExt(rawUrl);
+  const ext = getExt(rawUrl) || getExt(filename);
   const isImage = IMG_EXTS.has(ext);
   const isPdf = PDF_EXTS.has(ext);
 

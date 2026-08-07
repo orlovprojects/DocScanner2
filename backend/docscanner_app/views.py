@@ -15887,6 +15887,7 @@ def _next_free_number_int(user, company_profile_id, invoice_type, prefix, start_
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
 def transfer_to_accounting(request):
+    from .utils.journal_generators import derive_pardavimo, resolve_debeto_for_inventory
     from decimal import Decimal, InvalidOperation
     from django.utils import timezone
     from .models import (
@@ -15927,7 +15928,8 @@ def transfer_to_accounting(request):
             {"detail": "Įmonės profilis nerastas."},
             status=404,
         )
-
+    
+    uses_inventory = bool(getattr(profile, "uses_inventory", False))
     documents = (
         ScannedDocument.objects
         .filter(id__in=doc_ids, user=user)
@@ -16412,7 +16414,10 @@ def transfer_to_accounting(request):
             status="new",
 
             # Korespondencijos
-            debeto_saskaita=doc.pirkimo_saskaita or "6312",
+            debeto_saskaita=resolve_debeto_for_inventory(
+                doc.pirkimo_saskaita,
+                uses_inventory=uses_inventory,
+            ) or "6312",
             kredito_saskaita="4430",
             pvm_saskaita="2441" if _has_amount(doc.vat_amount) else None,
 
@@ -16565,6 +16570,10 @@ def transfer_to_accounting(request):
                         ),
 
                         pvm_kodas=li_pvm_kodas or "",
+                        debeto_saskaita=resolve_debeto_for_inventory(
+                            li.pirkimo_saskaita,
+                            uses_inventory=uses_inventory,
+                        ) or None,
                         sort_order=i,
                     )
                 )
@@ -16612,6 +16621,10 @@ def transfer_to_accounting(request):
                     ),
 
                     pvm_kodas=doc_pvm_kodas or "",
+                    debeto_saskaita=resolve_debeto_for_inventory(
+                        doc.pirkimo_saskaita,
+                        uses_inventory=uses_inventory,
+                    ) or None,
                     sort_order=0,
                 )
             )
@@ -16749,7 +16762,10 @@ def transfer_to_accounting(request):
 
             credit_account = (
                 getattr(doc, "pardavimo_saskaita", None)
-                or "5001"
+                or derive_pardavimo(
+                    getattr(doc, "pirkimo_saskaita", None),
+                    traded_type=getattr(doc, "traded_type", None),
+                )
             )
 
             pvm_account = "4492" if _has_amount(doc.vat_amount) else None
@@ -16924,7 +16940,15 @@ def transfer_to_accounting(request):
                             pvm_kodas=li_pvm_kodas or "",
 
                             # Korespondencijos line-level
-                            kredito_saskaita=credit_account,
+                            pirkimo_saskaita=li.pirkimo_saskaita or None,
+                            kredito_saskaita=(
+                                li.pardavimo_saskaita
+                                or derive_pardavimo(
+                                    li.pirkimo_saskaita,
+                                    preke_paslauga=li_preke_paslauga,
+                                    traded_type=getattr(doc, "traded_type", None),
+                                )
+                            ),
                             pvm_saskaita=pvm_account,
 
                             sort_order=i,
@@ -16975,6 +16999,7 @@ def transfer_to_accounting(request):
 
                         pvm_kodas=doc_pvm_kodas or "",
 
+                        pirkimo_saskaita=doc.pirkimo_saskaita or None,
                         kredito_saskaita=credit_account,
                         pvm_saskaita=pvm_account,
 

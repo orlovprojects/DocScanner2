@@ -931,6 +931,14 @@ class CompanyProfile(models.Model):
         blank=True,
         null=True,
     )
+    uses_inventory = models.BooleanField(
+        "Naudoja sandėlio apskaitą",
+        default=False,
+        help_text=(
+            "Jei įjungta, prekės perpardavimui keliamos į 2040 (atsargos). "
+            "Jei išjungta, jos keliamos tiesiai į sąnaudas (6002)."
+        ),
+    )
 
     # ── Išrašymas ───────────────────────────────────────
     payment_providers = models.JSONField(

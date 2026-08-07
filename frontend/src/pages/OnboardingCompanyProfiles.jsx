@@ -6,11 +6,14 @@ import {
   Button,
   CircularProgress,
   Divider,
+  FormControlLabel,
   IconButton,
   MenuItem,
   Paper,
   Stack,
+  Switch,
   TextField,
+  Tooltip,
   Typography,
 } from "@mui/material";
 import { alpha } from "@mui/material/styles";
@@ -23,6 +26,7 @@ import DeleteOutlineRoundedIcon from "@mui/icons-material/DeleteOutlineRounded";
 import EditOutlinedIcon from "@mui/icons-material/EditOutlined";
 import PersonRoundedIcon from "@mui/icons-material/PersonRounded";
 import SearchRoundedIcon from "@mui/icons-material/SearchRounded";
+import HelpOutlineIcon from "@mui/icons-material/HelpOutline";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api/endpoints";
 import { useCompanyProfiles } from "../contexts/useCompanyProfiles";
@@ -41,6 +45,7 @@ const EMPTY_FORM = {
   iv_certificate_nr: "",
   country_iso: "LT",
   accounting_program: "rivile",
+  uses_inventory: false,
   address: "",
 };
 
@@ -148,6 +153,7 @@ export default function OnboardingCompanyProfiles() {
       entity_type: keepType ? current.entity_type : EMPTY_FORM.entity_type,
       country_iso: current.country_iso,
       accounting_program: current.accounting_program,
+      uses_inventory: current.uses_inventory,
     }));
     setEditingId(null);
     setCompanyInput("");
@@ -163,6 +169,7 @@ export default function OnboardingCompanyProfiles() {
       entity_type: entityType,
       country_iso: current.country_iso,
       accounting_program: current.accounting_program,
+      uses_inventory: current.uses_inventory,
     }));
     setEditingId(null);
     setCompanyInput("");
@@ -274,6 +281,7 @@ export default function OnboardingCompanyProfiles() {
       name: String(draft.name || "").trim(),
       country_iso: draft.country_iso,
       accounting_program: draft.accounting_program,
+      uses_inventory: !!draft.uses_inventory,
     };
 
     if (draft.entity_type === "imone") {
@@ -723,6 +731,49 @@ export default function OnboardingCompanyProfiles() {
                     </MenuItem>
                   ))}
                 </TextField>
+
+                <Box
+                  sx={{
+                    p: 1.75,
+                    borderRadius: 2.5,
+                    border: "1px solid",
+                    borderColor: "divider",
+                    bgcolor: "grey.50",
+                  }}
+                >
+                  <FormControlLabel
+                    sx={{ m: 0, alignItems: "flex-start", gap: 1 }}
+                    control={
+                      <Switch
+                        checked={!!form.uses_inventory}
+                        onChange={(e) =>
+                          setForm((current) => ({
+                            ...current,
+                            uses_inventory: e.target.checked,
+                          }))
+                        }
+                      />
+                    }
+                    label={
+                      <Box sx={{ mt: 0.25 }}>
+                        <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
+                          <Typography variant="body2" fontWeight={650}>
+                            Vedama sandėlio apskaita
+                          </Typography>
+                          <Tooltip
+                            title="Nevedant sandėlio apskaitos perkamos prekės keliaus tiesiai į sąnaudas"
+                            arrow
+                            placement="top"
+                          >
+                            <HelpOutlineIcon
+                              sx={{ fontSize: 16, color: "text.disabled", cursor: "help" }}
+                            />
+                          </Tooltip>
+                        </Box>
+                      </Box>
+                    }
+                  />
+                </Box>
               </Stack>
             </Box>
 

@@ -185,6 +185,12 @@ and set for suggested_asset_type, otherwise omit the field. If matching items be
 ---Purchase account classification---
 For each valid purchase document, set "pirkimo_saskaita" to ONE numeric account code as string.
 
+Inventory vs expense — decide by what the buyer does with the item, not by storage:
+- Physical goods the buyer will RESELL → "2040".
+- Raw materials/components used to PRODUCE something → "2010".
+- Goods the buyer consumes for its OWN use (office supplies, small tools) → "6312", NOT 2040.
+- Services → matching 62xx/63xx code.
+
 Choose from:
 2010 raw materials/components/packaging
 2040 goods for resale/inventory
@@ -413,9 +419,15 @@ For suggested_asset_type, choose only ONE type for that long term asset from cat
 
 Do NOT return these fields on document level — only on matching line items.
 Only include "is_long_term_asset_candidate" and "suggested_asset_type" in line items that match. Do not add these fields to line items that do not qualify.
----
+
 ---Line item purchase account classification---
 Set "pirkimo_saskaita" separately for EACH line item.
+
+Inventory vs expense (per line) — decide by what the buyer does with the item:
+- Physical goods the buyer will RESELL → "2040".
+- Raw materials/components used to PRODUCE something → "2010".
+- Goods the buyer consumes for its OWN use (office supplies, small tools) → "6312", NOT 2040.
+- Services → matching 62xx/63xx code.
 
 Choose from:
 2010 raw materials/components/packaging

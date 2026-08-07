@@ -10,7 +10,7 @@ import WeekendIcon from "@mui/icons-material/Weekend";
 import { KorespondencijaSummary, PirkimoSaskaitaField } from '../components/KorespondencijaComponents';
 import HelpOutlineIcon from "@mui/icons-material/HelpOutline";
 import CalculateOutlinedIcon from "@mui/icons-material/CalculateOutlined";
-
+import { useCompanyProfiles } from "../contexts/useCompanyProfiles";
 
 import {
   Dialog,
@@ -354,6 +354,7 @@ const LineItemCard = React.memo(({
   accountingProgram,
   selectedCpKey,
   parentDoc,
+  usesInventory,
 }) => {
   // Вычисляем missing fields для этой строки
   const missingFields = useMemo(() => {
@@ -761,6 +762,7 @@ const LineItemCard = React.memo(({
               selectedCpKey={selectedCpKey}
               isMobile={isMobile}
               doc={parentDoc}
+              usesInventory={usesInventory}
               onChange={(val, field) => onSaveFields(item.id, field, val)}
             />
           </Box>
@@ -783,6 +785,11 @@ export default function PreviewDialog({
 }) {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
+
+  const { profiles, activeId } = useCompanyProfiles();
+  const usesInventory = Boolean(
+    profiles.find((p) => p.id === activeId)?.uses_inventory
+  );
   
   const prevDocId = useRef();
   const isMulti = user?.view_mode === "multi";
@@ -2085,6 +2092,7 @@ export default function PreviewDialog({
             doc={selected}
             selectedCpKey={selectedCpKey}
             lineItems={lineItemsLoaded}
+            usesInventory={usesInventory}
           />
         </AccordionDetails>
       </Accordion>
@@ -2419,6 +2427,7 @@ export default function PreviewDialog({
                     accountingProgram={user?.default_accounting_program}
                     selectedCpKey={selectedCpKey}
                     parentDoc={selected}
+                    usesInventory={usesInventory}
                   />
                 );
               })}
