@@ -1470,13 +1470,11 @@ from wagtail import blocks
 
 
 class GuideIndexPage(Page):
-    search_auto_update = False
     subpage_types = ["docscanner_app.GuideCategoryPage"]
 
 
 
 class GuideCategoryPage(Page):
-    search_auto_update = False
     description = RichTextField(blank=True)
     cat_image = models.ForeignKey(
         "wagtailimages.Image",
@@ -1520,7 +1518,6 @@ class GuideCategoryPage(Page):
 
 
 class GuidePage(Page):
-    search_auto_update = False
     # 🔹 Основное содержимое статьи
     body = StreamField(
         [
