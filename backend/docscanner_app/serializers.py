@@ -12,7 +12,7 @@ from datetime import date
 from decimal import Decimal
 from django.utils import timezone
 
-from .models import Payments, MeasurementUnit, InvoiceSeries, Product, RecurringInvoice, RecurringInvoiceLineItem, Invoice, InvoiceEmail, InvoiceSettings, RivileGamaAPIKey, NewsletterCampaign, NewsletterRecipient, CompanyProfile, PurchaseLine, Purchase, JournalEntry, JournalEntryLine
+from .models import Payments, MeasurementUnit, InvoiceSeries, Product, RecurringInvoice, RecurringInvoiceLineItem, Invoice, InvoiceEmail, InvoiceSettings, RivileGamaAPIKey, NewsletterCampaign, NewsletterRecipient, CompanyProfile, PurchaseLine, Purchase, JournalEntry, JournalEntryLine, BlogCategoryPage, BlogPostPage
 
 
 from .utils.lineitem_rules import normalize_lineitem_rules
@@ -1502,6 +1502,164 @@ class GuideArticleDetailSerializer(serializers.ModelSerializer):
     def get_category_title(self, obj):
         cat = _get_category_of(obj)
         return cat.title if cat else None
+
+
+# ==========================
+# Wagtails serializers dlia tinklarastis
+# ==========================
+
+def _get_blog_category_of(obj):
+    try:
+        parent = obj.get_parent().specific
+    except Exception:
+        return None
+    return parent if isinstance(parent, BlogCategoryPage) else None
+
+
+def streamfield_to_blocks(val):
+    """StreamField → list[{'type','value'}] (та же логика, что в гиде)."""
+    if hasattr(val, "stream_data"):
+        try:
+            return val.stream_data
+        except Exception:
+            pass
+        try:
+            return [b.get_prep_value() for b in val]
+        except Exception:
+            pass
+    if isinstance(val, list):
+        return val
+    if isinstance(val, dict):
+        stream = val.get("stream")
+        blocks_ = val.get("blocks")
+        if isinstance(stream, list):
+            return stream
+        if isinstance(blocks_, list):
+            return blocks_
+    if hasattr(val, "raw_data"):
+        try:
+            return [dict(item) for item in val.raw_data]
+        except Exception:
+            try:
+                return [b.get_prep_value() for b in val]
+            except Exception:
+                pass
+    if isinstance(val, str) and val.strip():
+        return [{"type": "paragraph", "value": val}]
+    return []
+
+
+class BlogCategoryListSerializer(serializers.ModelSerializer):
+    cat_image_url = serializers.SerializerMethodField()
+    articles_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = BlogCategoryPage
+        fields = (
+            "title",
+            "slug",
+            "description",
+            "order",
+            "cat_image_url",
+            "articles_count",
+        )
+
+    def get_cat_image_url(self, obj):
+        return rendition_url(obj.cat_image, spec="fill-800x450|jpegquality-70")
+
+    def get_articles_count(self, obj):
+        return BlogPostPage.objects.child_of(obj).live().public().count()
+
+
+class BlogArticleListSerializer(serializers.ModelSerializer):
+    main_image_url = serializers.SerializerMethodField()
+    category_slug = serializers.SerializerMethodField()
+    category_title = serializers.SerializerMethodField()
+
+    class Meta:
+        model = BlogPostPage
+        fields = (
+            "id",
+            "title",
+            "slug",
+            "author_name",
+            "first_published_at",
+            "last_published_at",
+            "main_image_url",
+            "category_slug",
+            "category_title",
+        )
+
+    def get_main_image_url(self, obj):
+        return rendition_url(obj.main_image, spec="fill-800x450|jpegquality-70")
+
+    def get_category_slug(self, obj):
+        cat = _get_blog_category_of(obj)
+        return cat.slug if cat else None
+
+    def get_category_title(self, obj):
+        cat = _get_blog_category_of(obj)
+        return cat.title if cat else None
+
+
+class BlogCategoryDetailSerializer(BlogCategoryListSerializer):
+    articles = serializers.SerializerMethodField()
+
+    class Meta(BlogCategoryListSerializer.Meta):
+        fields = BlogCategoryListSerializer.Meta.fields + ("articles",)
+
+    def get_articles(self, obj):
+        request = self.context.get("request")
+        limit = int(request.query_params.get("limit", 100)) if request else 100
+        offset = int(request.query_params.get("offset", 0)) if request else 0
+        qs = (
+            BlogPostPage.objects.child_of(obj)
+            .live()
+            .public()
+            .specific()
+            .order_by("-first_published_at")
+        )
+        items = qs[offset : offset + limit]
+        return BlogArticleListSerializer(items, many=True, context=self.context).data
+
+
+class BlogArticleDetailSerializer(serializers.ModelSerializer):
+    main_image_url = serializers.SerializerMethodField()
+    body = serializers.SerializerMethodField()
+    category_slug = serializers.SerializerMethodField()
+    category_title = serializers.SerializerMethodField()
+
+    class Meta:
+        model = BlogPostPage
+        fields = (
+            "id",
+            "title",
+            "slug",
+            "seo_title",
+            "search_description",
+            "author_name",
+            "first_published_at",
+            "last_published_at",
+            "main_image_url",
+            "body",
+            "category_slug",
+            "category_title",
+        )
+
+    def get_main_image_url(self, obj):
+        return rendition_url(obj.main_image, spec="fill-1200x675|jpegquality-70")
+
+    def get_body(self, obj):
+        return streamfield_to_blocks(obj.body)
+
+    def get_category_slug(self, obj):
+        cat = _get_blog_category_of(obj)
+        return cat.slug if cat else None
+
+    def get_category_title(self, obj):
+        cat = _get_blog_category_of(obj)
+        return cat.title if cat else None
+
 
 
 

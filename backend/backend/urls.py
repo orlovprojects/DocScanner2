@@ -6,16 +6,20 @@ from django.conf.urls.static import static
 from wagtail.admin import urls as wagtailadmin_urls
 from wagtail.documents import urls as wagtaildocs_urls
 
-from docscanner_app.search_api import GuidesSmartSearchView
+from docscanner_app.search_api import GuidesSmartSearchView, BlogSmartSearchView
 
 # === Django REST Framework routers ===
 from rest_framework.routers import DefaultRouter
-from docscanner_app.views import GuideCategoryViewSet, GuideArticleViewSet
+from docscanner_app.views import GuideCategoryViewSet, GuideArticleViewSet, BlogCategoryViewSet, BlogPostViewSet
 
-# 🔹 Создаём DRF router только для naudojimo-gidas
+# 🔹 Создаём DRF router только для naudojimo-gidas i tinklarastis
 guides_router = DefaultRouter()
 guides_router.register(r"guide-categories", GuideCategoryViewSet, basename="guide-category")
 guides_router.register(r"guides", GuideArticleViewSet, basename="guide")
+
+blog_router = DefaultRouter()
+blog_router.register(r"blog-categories", BlogCategoryViewSet, basename="blog-category")
+blog_router.register(r"posts", BlogPostViewSet, basename="blog-post")
 
 # === URL patterns ===
 urlpatterns = [
@@ -26,8 +30,10 @@ urlpatterns = [
 
     # 🔹 Только наш кастомный API (naudojimo-gidas)
     path("guides-api/v2/", include(guides_router.urls)),
-
     path("guides-api/v2/search/", GuidesSmartSearchView.as_view(), name="guides-smart-search"),
+
+    path("blog-api/v2/", include(blog_router.urls)),
+    path("blog-api/v2/search/", BlogSmartSearchView.as_view(), name="blog-smart-search"),
 ]
 
 # === Статика / медиа ===

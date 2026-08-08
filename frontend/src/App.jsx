@@ -57,6 +57,10 @@ const NaudojimoGidas = lazy(() => import('./pages/NaudojimoGidas'));
 const GidoCategories = lazy(() => import('./pages/GidoCategories'));
 const GidoArticle = lazy(() => import('./pages/GidoArticle'));
 
+const Tinklarastis = lazy(() => import('./pages/Tinklarastis'));
+const TinklarastisCategory = lazy(() => import('./pages/TinklarastisCategory'));
+const TinklarastisPost = lazy(() => import('./pages/TinklarastisPost'));
+
 const UploadPage = lazy(() => import('./pages/UploadPage'));
 const WaybillsPage = lazy(() => import('./pages/WaybillsPage'));
 const NustatymaiPage = lazy(() => import('./pages/Nustatymai'));
@@ -230,6 +234,9 @@ function App() {
                 <Route path="/naudojimo-gidas" element={<NaudojimoGidas />} />
                 <Route path="/kategorija/:slug" element={<GidoCategories />} />
                 <Route path="/straipsnis/:slug" element={<GidoArticle />} />
+                <Route path="/tinklarastis" element={<Tinklarastis />} />
+                <Route path="/tinklarastis/tema/:slug" element={<TinklarastisCategory />} />
+                <Route path="/tinklarastis/:slug" element={<TinklarastisPost />} />
 
                 <Route path="/site-pro" element={<SitePro />} />
                 <Route path="/rivile" element={<Rivile />} />

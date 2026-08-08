@@ -8,7 +8,10 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import AllowAny
 
-from docscanner_app.models import GuideCategoryPage, GuidePage
+from docscanner_app.models import (
+    GuideCategoryPage, GuidePage,
+    BlogCategoryPage, BlogPostPage,
+)
 from docscanner_app.serializers import rendition_url  # твой helper из сериализаторов
 
 
@@ -97,5 +100,89 @@ class GuidesSmartSearchView(APIView):
 
         # --- Смешиваем и сортируем по релевантности
         combined = cat_results + guide_results
+        combined.sort(key=lambda x: (-x["score"], x["title"]))
+        return Response({"results": combined[:limit]})
+
+
+class BlogSmartSearchView(APIView):
+    """
+    GET /api/blog-api/v2/search/?q=tekstas&limit=5[&category=<slug>]
+    Смешанные результаты: темы (категории) + посты. До `limit` штук.
+    """
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        q = (request.GET.get("q") or "").strip()
+        try:
+            limit = max(1, min(int(request.GET.get("limit", 5)), 20))
+        except (TypeError, ValueError):
+            limit = 5
+        category_slug = (request.GET.get("category") or "").strip()
+        if not q:
+            return Response({"results": []})
+
+        q_norm = q.lower()
+
+        # --- Категории (только без фильтра по конкретной теме)
+        cat_results = []
+        if not category_slug:
+            cats_qs = (
+                BlogCategoryPage.objects.live().public()
+                .annotate(sim=TrigramSimilarity(norm_expr("search_text"), Value(q_norm)))
+                .filter(Q(search_text__icontains=q_norm) | Q(sim__gt=0.1))
+                .values("id", "slug", "title", "description", "sim")
+            )
+
+            cats_list = list(cats_qs[:limit * 3])
+            cat_ids = [c["id"] for c in cats_list]
+            cat_img_lookup = {
+                obj.id: getattr(obj, "cat_image", None)
+                for obj in BlogCategoryPage.objects.only("id", "cat_image").filter(id__in=cat_ids)
+            }
+
+            for c in cats_list:
+                cat_results.append({
+                    "type": "category",
+                    "id": c["id"],
+                    "title": c["title"],
+                    "snippet": (strip_tags(c.get("description") or "")[:180]),
+                    "image_url": rendition_url(cat_img_lookup.get(c["id"])),
+                    "href": f"/tinklarastis/tema/{c['slug']}",
+                    "score": float(c.get("sim") or 0.0) + 0.05,  # слегка бустим темы
+                })
+
+        # --- Посты
+        posts_qs = BlogPostPage.objects.live().public()
+        if category_slug:
+            parent = BlogCategoryPage.objects.filter(slug=category_slug).first()
+            posts_qs = posts_qs.child_of(parent) if parent else posts_qs.none()
+
+        posts_qs = (
+            posts_qs
+            .annotate(sim=TrigramSimilarity(norm_expr("search_text"), Value(q_norm)))
+            .filter(Q(search_text__icontains=q_norm) | Q(sim__gt=0.1))
+            .values("id", "slug", "title", "sim")
+        )
+
+        post_results = []
+        post_ids = [g["id"] for g in list(posts_qs[:limit * 3])]
+        st_map = dict(BlogPostPage.objects.filter(id__in=post_ids).values_list("id", "search_text"))
+        img_lookup = {obj.id: getattr(obj, "main_image", None)
+                      for obj in BlogPostPage.objects.only("id", "main_image").filter(id__in=post_ids)}
+
+        for g in posts_qs[:limit * 3]:
+            st = (st_map.get(g["id"]) or "").replace("\n", " ").strip()
+            post_results.append({
+                "type": "article",
+                "id": g["id"],
+                "title": g["title"],
+                "snippet": st[:180],
+                "image_url": rendition_url(img_lookup.get(g["id"])),
+                "href": f"/tinklarastis/{g['slug']}",
+                "score": float(g.get("sim") or 0.0),
+            })
+
+        # --- Смешиваем и сортируем по релевантности
+        combined = cat_results + post_results
         combined.sort(key=lambda x: (-x["score"], x["title"]))
         return Response({"results": combined[:limit]})

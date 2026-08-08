@@ -1601,6 +1601,137 @@ class GuidePage(Page):
     ]
 
 
+# -------
+# Wagtail modeli dlai tinklarastis
+# -------
+
+class TinklarastisIndexPage(Page):
+    search_auto_update = False
+    intro = RichTextField(blank=True)
+
+    content_panels = Page.content_panels + [
+        FieldPanel("intro"),
+    ]
+
+    subpage_types = ["docscanner_app.BlogCategoryPage"]
+    max_count = 1
+
+    api_fields = [
+        APIField("title"),
+        APIField("slug"),
+        APIField("seo_title"),
+        APIField("search_description"),
+        APIField("intro"),
+    ]
+
+
+class BlogCategoryPage(Page):
+    search_auto_update = False
+    description = RichTextField(blank=True)
+    cat_image = models.ForeignKey(
+        "wagtailimages.Image",
+        null=True, blank=True,
+        on_delete=models.SET_NULL,
+        related_name="+",
+    )
+    order = models.PositiveIntegerField(default=0)
+    search_text = models.TextField(blank=True, default="")
+
+    def save(self, *args, **kwargs):
+        title = self.title or ""
+        desc = strip_tags(self.description or "")
+        self.search_text = f"{title}\n{desc}".strip()
+        super().save(*args, **kwargs)
+
+    content_panels = Page.content_panels + [
+        FieldPanel("description"),
+        FieldPanel("cat_image"),
+        FieldPanel("order"),
+    ]
+
+    parent_page_types = ["docscanner_app.TinklarastisIndexPage"]
+    subpage_types = ["docscanner_app.BlogPostPage"]
+
+    api_fields = [
+        APIField("title"),
+        APIField("slug"),
+        APIField("seo_title"),
+        APIField("search_description"),
+        APIField("description"),
+        APIField(
+            "cat_image_rendition",
+            serializer=ImageRenditionField("fill-800x450|jpegquality-70", source="cat_image"),
+        ),
+        APIField("order"),
+    ]
+
+
+class BlogPostPage(Page):
+    search_auto_update = False
+    body = StreamField(
+        [
+            ("heading", blocks.CharBlock(form_classname="full title")),
+            ("paragraph", blocks.RichTextBlock(features=[
+                "h2", "h3", "h4", "h5",
+                "bold", "italic", "link", "ol", "ul", "image", "blockquote"
+            ])),
+            ("image", ImageChooserBlock()),
+            ("youtube", EmbedBlock(help_text="Вставь YouTube ссылку")),
+            ("code", blocks.TextBlock(help_text="Вставь кодовый блок")),
+            ("quote", blocks.BlockQuoteBlock()),
+            ("table", blocks.StructBlock([
+                ("caption", blocks.CharBlock(required=False)),
+                ("data", blocks.StreamBlock([
+                    ("row", blocks.ListBlock(blocks.CharBlock())),
+                ])),
+            ])),
+            ("divider", blocks.StaticBlock(label="Space line")),
+        ],
+        use_json_field=True,
+        blank=True,
+    )
+
+    main_image = models.ForeignKey(
+        "wagtailimages.Image",
+        null=True, blank=True,
+        on_delete=models.SET_NULL,
+        related_name="+",
+    )
+    author_name = models.CharField(max_length=100, blank=True)
+    last_updated = models.DateTimeField(auto_now=True)
+    search_text = models.TextField(blank=True, default="")
+
+    def save(self, *args, **kwargs):
+        title = self.title or ""
+        body_txt = _body_to_text(self.body)
+        self.search_text = f"{title}\n{body_txt}".strip()
+        super().save(*args, **kwargs)
+
+    content_panels = Page.content_panels + [
+        FieldPanel("body"),
+        FieldPanel("main_image"),
+        FieldPanel("author_name"),
+    ]
+
+    parent_page_types = ["docscanner_app.BlogCategoryPage"]
+    subpage_types = []
+
+    api_fields = [
+        APIField("id"),
+        APIField("title"),
+        APIField("slug"),
+        APIField("content_type"),
+        APIField("live"),
+        APIField("seo_title"),
+        APIField("search_description"),
+        APIField("first_published_at"),
+        APIField("last_published_at"),
+        APIField("body"),
+        APIField("main_image"),
+        APIField("author_name"),
+    ]
+
+
 
 
 

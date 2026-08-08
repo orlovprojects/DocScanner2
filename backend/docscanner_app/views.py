@@ -22,6 +22,8 @@ from django.core.mail import EmailMultiAlternatives
 from email.utils import formataddr
 from openpyxl import Workbook
 from rest_framework.exceptions import ValidationError
+from django.contrib.postgres.search import TrigramSimilarity
+from django.utils.html import strip_tags
 
 from django.core.files.base import ContentFile
 from .tasks import process_uploaded_file_task 
@@ -4646,6 +4648,68 @@ class GuideArticleViewSet(viewsets.ReadOnlyModelViewSet):
             if self.action == "retrieve"
             else GuideArticleListSerializer
         )
+
+# ==========================
+# Wagtail views dlia tinklarastis
+# ==========================
+
+from .models import BlogCategoryPage, BlogPostPage
+from .serializers import (
+    BlogCategoryListSerializer,
+    BlogCategoryDetailSerializer,
+    BlogArticleListSerializer,
+    BlogArticleDetailSerializer,
+)
+
+
+class BlogCategoryViewSet(viewsets.ReadOnlyModelViewSet):
+    permission_classes = [AllowAny]
+    lookup_field = "slug"
+    queryset = BlogCategoryPage.objects.live().public().order_by("order", "title")
+
+    def get_serializer_class(self):
+        return (
+            BlogCategoryDetailSerializer
+            if self.action == "retrieve"
+            else BlogCategoryListSerializer
+        )
+
+    @action(detail=True, methods=["get"], url_path="articles")
+    def articles(self, request, slug=None):
+        category = self.get_object()
+        try:
+            limit = int(request.query_params.get("limit", 100))
+            offset = int(request.query_params.get("offset", 0))
+        except ValueError:
+            limit, offset = 100, 0
+        qs = (
+            BlogPostPage.objects.child_of(category)
+            .live()
+            .public()
+            .specific()
+            .order_by("-first_published_at")
+        )
+        total = qs.count()
+        items = qs[offset : offset + limit]
+        data = BlogArticleListSerializer(items, many=True, context={"request": request}).data
+        return Response({"count": total, "limit": limit, "offset": offset, "results": data})
+
+
+class BlogPostViewSet(viewsets.ReadOnlyModelViewSet):
+    permission_classes = [AllowAny]
+    lookup_field = "slug"
+
+    def get_queryset(self):
+        return BlogPostPage.objects.live().public().specific()
+
+    def get_serializer_class(self):
+        return (
+            BlogArticleDetailSerializer
+            if self.action == "retrieve"
+            else BlogArticleListSerializer
+        )
+
+
 
 
 # Update doc and item field in Preview
