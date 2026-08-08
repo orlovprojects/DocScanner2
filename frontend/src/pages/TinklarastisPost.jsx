@@ -502,26 +502,6 @@ export default function TinklarastisPost() {
 
   return (
     <Box sx={{ bgcolor: "background.default" }}>
-      {/* hero image */}
-      {article.main_image_url && (
-        <Box sx={{ bgcolor: "grey.50", borderBottom: "1px solid", borderColor: "grey.200" }}>
-          <Container maxWidth="lg">
-            <CardMedia
-              component="img"
-              src={article.main_image_url}
-              alt={article.title}
-              sx={{
-                maxHeight: 520,
-                width: "100%",
-                objectFit: "cover",
-                borderRadius: 2,
-                my: { xs: 2, md: 3 },
-              }}
-              loading="lazy"
-            />
-          </Container>
-        </Box>
-      )}
 
       <Container maxWidth="lg" sx={{ py: { xs: 4, md: 6 } }}>
         {/* JSON-LD schema */}
