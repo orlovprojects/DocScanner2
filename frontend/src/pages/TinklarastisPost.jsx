@@ -43,6 +43,32 @@ const BODY_COMMON = {
   lineHeight: 1.8,
 };
 
+// ===== nofollow для внешних ссылок (свои домены остаются dofollow) =====
+const FOLLOW_DOMAINS = ["dokskenas.lt", "dokskenas", "atlyginimoskaiciuokle.com"];
+
+function addLinkRels(html) {
+  if (!html || typeof window === "undefined") return html;
+  try {
+    const doc = new DOMParser().parseFromString(html, "text/html");
+    doc.querySelectorAll("a[href]").forEach((a) => {
+      const href = a.getAttribute("href") || "";
+      if (href.startsWith("/") || href.startsWith("#")) return; // внутренние — не трогаем
+      let host = "";
+      try {
+        host = new URL(href, window.location.href).hostname;
+      } catch {}
+      const isOwn = FOLLOW_DOMAINS.some((d) => host.includes(d));
+      if (!isOwn) {
+        a.setAttribute("rel", "nofollow noopener noreferrer");
+        a.setAttribute("target", "_blank");
+      }
+    });
+    return doc.body.innerHTML;
+  } catch {
+    return html;
+  }
+}
+
 // ===== utils =====
 function slugify(text) {
   return (text || "")
@@ -305,7 +331,8 @@ export default function TinklarastisPost() {
             sx={{
               ...HEADING_COMMON,
               fontSize: { xs: 26, md: 30 },
-              mt: { xs: 4, md: 5 },
+              lineHeight: 1.5,
+              mt: { xs: 6, md: 8 },
               mb: 1.5,
               scrollMarginTop: 100,
             }}
@@ -320,9 +347,33 @@ export default function TinklarastisPost() {
             key={block.id || i}
             sx={{
               ...BODY_COMMON,
-              fontSize: { xs: 16, md: 17 },
+              fontSize: { xs: 17, md: 17 },
               color: "text.primary",
               "& p": { m: 0, mb: 1.75 },
+              "& h2": {
+                ...HEADING_COMMON,
+                lineHeight: 1.5,
+                fontSize: { xs: 24, md: 28 },
+                mt: { xs: 6, md: 8 },
+                mb: 1.5,
+              },
+              "& h3": {
+                ...HEADING_COMMON,
+                lineHeight: 1.5,
+                fontSize: { xs: 21, md: 24 },
+                mt: { xs: 5, md: 7 },
+                mb: 1.25,
+              },
+              "& h4, & h5, & h6": {
+                ...HEADING_COMMON,
+                lineHeight: 1.5,
+                fontSize: { xs: 18, md: 20 },
+                mt: { xs: 4, md: 6 },
+                mb: 1,
+              },
+              "& ul, & ol": { pl: 4, my: 2 },
+              "& li": { mb: 0.75, pl: 0.5, lineHeight: 1.7 },
+              "& li > p": { m: 0 },
               "& strong": { fontWeight: 700 },
               "& em": { fontStyle: "italic" },
               "& img": {
@@ -357,7 +408,7 @@ export default function TinklarastisPost() {
                 py: 0.2,
               },
             }}
-            dangerouslySetInnerHTML={{ __html: v }}
+            dangerouslySetInnerHTML={{ __html: addLinkRels(v) }}
           />
         );
 
@@ -434,7 +485,7 @@ export default function TinklarastisPost() {
               color: "text.secondary",
               fontStyle: "italic",
               ...BODY_COMMON,
-              fontSize: { xs: 16, md: 17 },
+              fontSize: { xs: 17, md: 17 },
             }}
           >
             {v}
