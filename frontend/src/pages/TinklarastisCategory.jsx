@@ -15,7 +15,7 @@ const API_ORIGIN = (() => {
 })();
 
 async function getCategoryWithArticles(slug) {
-  const res = await fetch(`${API_ORIGIN}/api/blog-api/v2/blog-categories/${slug}/`);
+  const res = await fetch(`${API_ORIGIN}/blog-api/v2/blog-categories/${slug}/`);
   if (!res.ok) return null;
   return res.json();
 }
@@ -44,7 +44,7 @@ export default function TinklarastisCategory() {
     const currentId = ++reqIdRef.current;
     const handle = setTimeout(async () => {
       try {
-        const url = `${API_ORIGIN}/api/blog-api/v2/search/?q=${encodeURIComponent(query.trim())}&limit=5&category=${slug}`;
+        const url = `${API_ORIGIN}/blog-api/v2/search/?q=${encodeURIComponent(query.trim())}&limit=5&category=${slug}`;
         const resp = await fetch(url, { method: "GET", credentials: "include" });
         if (currentId !== reqIdRef.current) return;
         if (!resp.ok) { setResults([]); setOpen(false); setHighlight(-1); return; }
