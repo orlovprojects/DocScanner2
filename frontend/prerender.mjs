@@ -4,6 +4,7 @@ import path from 'path';
 import express from 'express';
 import puppeteer from 'puppeteer';
 import { fileURLToPath } from 'url';
+import { createProxyMiddleware } from 'http-proxy-middleware';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -84,19 +85,47 @@ const loaderHtml = `
 
 async function startServer() {
   const app = express();
+
+  // Прокси API-запросов на Django (same-origin для Puppeteer → без CORS)
+  const apiProxy = createProxyMiddleware({
+    target: 'http://127.0.0.1:8000',
+    changeOrigin: true,
+  });
+  app.use('/api', apiProxy);
+  app.use('/blog-api', apiProxy);
+  app.use('/guides-api', apiProxy);
+  app.use('/media', apiProxy);
+
+  // Статика билда
   app.use(express.static(distDir));
 
+  // SPA fallback
   app.use((req, res) => {
     res.sendFile(path.join(distDir, 'index.html'));
   });
 
   return new Promise((resolve) => {
     const server = app.listen(port, () => {
-      console.log(`[prerender] Static server on http://localhost:${port}`);
+      console.log(`[prerender] Static server + API proxy on http://localhost:${port}`);
       resolve(server);
     });
   });
 }
+// async function startServer() {
+//   const app = express();
+//   app.use(express.static(distDir));
+
+//   app.use((req, res) => {
+//     res.sendFile(path.join(distDir, 'index.html'));
+//   });
+
+//   return new Promise((resolve) => {
+//     const server = app.listen(port, () => {
+//       console.log(`[prerender] Static server on http://localhost:${port}`);
+//       resolve(server);
+//     });
+//   });
+// }
 
 function cleanHtml(html) {
   html = html.replace(/<title>DokSkenas<\/title>/g, '');

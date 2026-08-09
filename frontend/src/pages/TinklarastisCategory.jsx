@@ -7,12 +7,20 @@ import SearchIcon from "@mui/icons-material/Search";
 import { Link as RouterLink, useParams } from "react-router-dom";
 
 const API_ORIGIN = (() => {
+  if (typeof window !== "undefined" && window.__PRERENDER) return ""; // пререндер — относительные URL
   try {
     return new URL(import.meta.env.VITE_BASE_API_URL, window.location.href).origin;
   } catch {
     return "";
   }
 })();
+// const API_ORIGIN = (() => {
+//   try {
+//     return new URL(import.meta.env.VITE_BASE_API_URL, window.location.href).origin;
+//   } catch {
+//     return "";
+//   }
+// })();
 
 async function getCategoryWithArticles(slug) {
   const res = await fetch(`${API_ORIGIN}/blog-api/v2/blog-categories/${slug}/`);

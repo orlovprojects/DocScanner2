@@ -15,9 +15,15 @@ import { Link as RouterLink, useParams } from "react-router-dom";
 import { Helmet } from "react-helmet";
 
 // ===== API base =====
-const API_BASE = import.meta.env.VITE_BASE_API_URL
-  .replace(/\/$/, "")
-  .replace(/\/api$/, "");
+const API_BASE =
+  typeof window !== "undefined" && window.__PRERENDER
+    ? "" // при пререндере — относительные URL (same-origin через прокси)
+    : (import.meta.env.VITE_BASE_API_URL || "")
+        .replace(/\/$/, "")
+        .replace(/\/api$/, "");
+// const API_BASE = import.meta.env.VITE_BASE_API_URL
+//   .replace(/\/$/, "")
+//   .replace(/\/api$/, "");
 
 // ===== fetch one article =====
 async function getArticleBySlug(slug) {

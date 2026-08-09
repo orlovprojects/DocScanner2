@@ -8,12 +8,20 @@ import SearchIcon from "@mui/icons-material/Search";
 import ArrowForwardIcon from "@mui/icons-material/ArrowForward";
 
 const API_ORIGIN = (() => {
+  if (typeof window !== "undefined" && window.__PRERENDER) return ""; // пререндер — относительные URL
   try {
     return new URL(import.meta.env.VITE_BASE_API_URL, window.location.href).origin;
   } catch {
     return "";
   }
 })();
+// const API_ORIGIN = (() => {
+//   try {
+//     return new URL(import.meta.env.VITE_BASE_API_URL, window.location.href).origin;
+//   } catch {
+//     return "";
+//   }
+// })();
 
 function resolveMediaUrl(url) {
   if (!url) return "";
