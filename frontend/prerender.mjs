@@ -134,6 +134,8 @@ async function startServer() {
 // }
 
 function cleanHtml(html) {
+  // localhost:4173 -> прод-домен (canonical, og:url, JSON-LD)
+  html = html.replace(/http:\/\/localhost:4173/g, 'https://atlyginimoskaiciuokle.com');
   html = html.replace(/<title>DokSkenas<\/title>/g, '');
   html = html.replace(/<title>DokSkenas app<\/title>/g, '');
   
