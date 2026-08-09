@@ -90,11 +90,17 @@ async function startServer() {
   const apiProxy = createProxyMiddleware({
     target: 'http://127.0.0.1:8000',
     changeOrigin: true,
+    pathFilter: ['/api/**', '/blog-api/**', '/guides-api/**', '/media/**'],
+    on: {
+      proxyReq: (proxyReq, req) => {
+        console.log(`[proxy] ${req.method} ${req.url} -> ${proxyReq.path}`);
+      },
+      error: (err, req) => {
+        console.log(`[proxy error] ${req.url}: ${err.message}`);
+      },
+    },
   });
-  app.use('/api', apiProxy);
-  app.use('/blog-api', apiProxy);
-  app.use('/guides-api', apiProxy);
-  app.use('/media', apiProxy);
+  app.use(apiProxy);
 
   // Статика билда
   app.use(express.static(distDir));
