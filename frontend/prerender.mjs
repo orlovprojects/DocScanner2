@@ -21,6 +21,7 @@ const routesToPrerender = [
   '/suma-zodziais',
   '/saskaitu-israsymas',
   '/naudojimo-gidas',
+  '/tinklarastis',
   '/susisiekti',
   '/privatumo-politika',
   '/naudojimo-taisykles',
@@ -120,6 +121,62 @@ function addLoader(html) {
   return html;
 }
 
+const API_ORIGIN = process.env.PRERENDER_API_ORIGIN || 'https://atlyginimoskaiciuokle.com';
+
+async function fetchDynamicRoutes() {
+  const routes = [];
+
+  const getJson = async (url) => {
+    try {
+      const r = await fetch(url);
+      if (!r.ok) return null;
+      return await r.json();
+    } catch {
+      return null;
+    }
+  };
+
+  // --- Блог: темы + посты
+  const blogCats = await getJson(`${API_ORIGIN}/blog-api/v2/blog-categories/`);
+  if (Array.isArray(blogCats)) {
+    for (const c of blogCats) if (c?.slug) routes.push(`/tinklarastis/tema/${c.slug}`);
+  }
+  const blogPosts = await getJson(`${API_ORIGIN}/blog-api/v2/posts/`);
+  if (Array.isArray(blogPosts)) {
+    for (const p of blogPosts) if (p?.slug) routes.push(`/tinklarastis/${p.slug}`);
+  }
+
+  // --- Гид: категории + статьи
+  const guideCats = await getJson(`${API_ORIGIN}/guides-api/v2/guide-categories/`);
+  if (Array.isArray(guideCats)) {
+    for (const c of guideCats) if (c?.slug) routes.push(`/kategorija/${c.slug}`);
+  }
+  const guideArticles = await getJson(`${API_ORIGIN}/guides-api/v2/guides/`);
+  if (Array.isArray(guideArticles)) {
+    for (const a of guideArticles) if (a?.slug) routes.push(`/straipsnis/${a.slug}`);
+  }
+
+  return routes;
+}
+
+function generateSitemap(allRoutes, outDir) {
+  const seen = new Set();
+  const urls = [];
+  for (const r of allRoutes) {
+    const path = r === '/' ? '/' : r.replace(/\/+$/, '');
+    if (seen.has(path)) continue;
+    seen.add(path);
+    urls.push(`  <url><loc>${API_ORIGIN}${path}</loc></url>`);
+  }
+  const xml =
+    `<?xml version="1.0" encoding="UTF-8"?>\n` +
+    `<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n` +
+    urls.join('\n') +
+    `\n</urlset>\n`;
+  fs.writeFileSync(path.join(outDir, 'sitemap.xml'), xml, 'utf-8');
+  console.log(`[prerender] sitemap.xml: ${urls.length} URL`);
+}
+
 async function prerender() {
   if (!fs.existsSync(distDir)) {
     console.error('[prerender] dist/ not found. Run `npm run build` first.');
@@ -127,6 +184,10 @@ async function prerender() {
   }
 
   const server = await startServer();
+  const dynamicRoutes = await fetchDynamicRoutes();
+  const allRoutes = [...routesToPrerender, ...dynamicRoutes];
+  console.log(`[prerender] static: ${routesToPrerender.length}, dynamic: ${dynamicRoutes.length}, total: ${allRoutes.length}`);
+  generateSitemap(allRoutes, distDir);
   const browser = await puppeteer.launch({
     headless: 'new',
     args: ['--no-sandbox', '--disable-setuid-sandbox'],
@@ -147,7 +208,7 @@ async function prerender() {
       }
     });
 
-    for (const route of routesToPrerender) {
+    for (const route of allRoutes) {
       const url = `http://localhost:${port}${route}`;
       console.log(`\n[prerender] ========== Rendering ${url} ==========`);
 

@@ -188,8 +188,7 @@ function buildArticleLD({ origin, article, categoryTitle, images, video, lang = 
     publisher: {
       "@type": "Organization",
       name: "DokSkenas",
-      // при желании поменяй на реальный путь к логотипу
-      logo: { "@type": "ImageObject", url: `${origin}/images/logo.png` },
+      logo: { "@type": "ImageObject", url: `${origin}/DokSkenas_logo.jpg` },
     },
     datePublished: article.first_published_at || undefined,
     dateModified: article.last_published_at || article.first_published_at || undefined,

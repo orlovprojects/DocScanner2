@@ -172,6 +172,9 @@ const Footer = () => {
                   spacing={1.25} 
                   alignItems={{ xs: 'center', md: 'center' }}
                 >
+                  <Link href="/tinklarastis" underline="none" color="inherit" sx={linkSx}>
+                    Tinklaraštis
+                  </Link>
                   <Link href="/saskaita-faktura" underline="none" color="inherit" sx={linkSx}>
                     Nemokamas sąskaitos-faktūros generatorius
                   </Link>

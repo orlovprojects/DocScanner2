@@ -12,6 +12,7 @@ import {
   Divider,
 } from "@mui/material";
 import { Link as RouterLink, useParams } from "react-router-dom";
+import { Helmet } from "react-helmet";
 
 // ===== API base =====
 const API_BASE = import.meta.env.VITE_BASE_API_URL
@@ -210,12 +211,13 @@ function buildArticleLD({ origin, article, categoryTitle, images, video, lang = 
     articleSection: categoryTitle || undefined,
     description: description || undefined,
     image: imgList,
-    author: article.author_name ? { "@type": "Person", name: article.author_name } : undefined,
+    author: article.author_name
+      ? { "@type": "Person", name: article.author_name, url: `${origin}/apie-mus` }
+      : undefined,
     publisher: {
       "@type": "Organization",
       name: "DokSkenas",
-      // при желании поменяй на реальный путь к логотипу
-      logo: { "@type": "ImageObject", url: `${origin}/images/logo.png` },
+      logo: { "@type": "ImageObject", url: `${origin}/DokSkenas_logo.jpg` },
     },
     datePublished: article.first_published_at || undefined,
     dateModified: article.last_published_at || article.first_published_at || undefined,
@@ -247,9 +249,6 @@ export default function TinklarastisPost() {
         setLoading(true);
         const data = await getArticleBySlug(slug);
         setArticle(data || null);
-        if (data?.seo_title || data?.title) {
-          document.title = data.seo_title || data.title;
-        }
       } catch (e) {
         console.error("❌ Article fetch error:", e);
       } finally {
@@ -502,6 +501,31 @@ export default function TinklarastisPost() {
 
   return (
     <Box sx={{ bgcolor: "background.default" }}>
+      <Helmet>
+        <title>{article.seo_title || article.title}</title>
+        <meta name="description" content={article.search_description || ""} />
+        <link rel="canonical" href={`${origin}/tinklarastis/${article.slug}`} />
+
+        {/* Open Graph */}
+        <meta property="og:type" content="article" />
+        <meta property="og:title" content={article.seo_title || article.title} />
+        <meta property="og:description" content={article.search_description || ""} />
+        <meta property="og:url" content={`${origin}/tinklarastis/${article.slug}`} />
+        {article.main_image_url && (
+          <meta property="og:image" content={article.main_image_url} />
+        )}
+        <meta property="og:site_name" content="DokSkenas" />
+        <meta property="article:published_time" content={article.first_published_at || ""} />
+        <meta property="article:modified_time" content={article.last_published_at || article.first_published_at || ""} />
+
+        {/* Twitter */}
+        <meta name="twitter:card" content="summary_large_image" />
+        <meta name="twitter:title" content={article.seo_title || article.title} />
+        <meta name="twitter:description" content={article.search_description || ""} />
+        {article.main_image_url && (
+          <meta name="twitter:image" content={article.main_image_url} />
+        )}
+      </Helmet>
 
       <Container maxWidth="lg" sx={{ py: { xs: 4, md: 6 } }}>
         {/* JSON-LD schema */}

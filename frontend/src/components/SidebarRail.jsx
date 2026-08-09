@@ -89,16 +89,16 @@ const SECTIONS = [
       { icon: SettingsOutlinedIcon, text: "Nustatymai", path: "/nustatymai" },
     ],
   },
-  // {
-  //   id: "pirkimai",
-  //   label: "Pirkim.",
-  //   fullLabel: "Pirkimai",
-  //   icon: ShoppingCartOutlinedIcon,
-  //   pathPrefix: ["/pirkimai"],
-  //   items: () => [
-  //     { icon: ListAltIcon, text: "Sąskaitos", path: "/pirkimai" },
-  //   ],
-  // },
+  {
+    id: "pirkimai",
+    label: "Pirkim.",
+    fullLabel: "Pirkimai",
+    icon: ShoppingCartOutlinedIcon,
+    pathPrefix: ["/pirkimai"],
+    items: () => [
+      { icon: ListAltIcon, text: "Sąskaitos", path: "/pirkimai" },
+    ],
+  },
   {
     id: "pardavimai",
     label: "Pardav.",
@@ -114,16 +114,16 @@ const SECTIONS = [
       { icon: SettingsOutlinedIcon, text: "Nustatymai", path: "/israsymas/nustatymai" },
     ],
   },
-  // {
-  //   id: "pinigai",
-  //   label: "Pinigai",
-  //   fullLabel: "Pinigai",
-  //   icon: AccountBalanceIcon,
-  //   pathPrefix: ["/bank"],
-  //   items: () => [
-  //     { icon: ListAltIcon, text: "Banko operacijos", path: "/bank" },
-  //   ],
-  // },
+  {
+    id: "pinigai",
+    label: "Pinigai",
+    fullLabel: "Pinigai",
+    icon: AccountBalanceIcon,
+    pathPrefix: ["/bankas"],
+    items: () => [
+      { icon: ListAltIcon, text: "Banko operacijos", path: "/bankas" },
+    ],
+  },
   {
     id: "apskaita",
     label: "Apsk.",
@@ -131,7 +131,7 @@ const SECTIONS = [
     icon: DvrIcon,
     pathPrefix: ["/apskaitos-centras", "/veiklos-zurnalas", "/oss-zurnalas", "/svs-deklaravimas"],
     items: () => [
-      // { icon: ListAltIcon, text: "Apskaitos centras", path: "/apskaitos-centras" },
+      { icon: ListAltIcon, text: "Apskaitos centras", path: "/apskaitos-centras" },
       { icon: ListAltIcon, text: "IV žurnalas", path: "/veiklos-zurnalas" },
       { icon: ListAltIcon, text: "OSS žurnalas", path: "/oss-zurnalas" },
       { icon: ListAltIcon, text: "SVS žurnalas", path: "/svs-deklaravimas" },
@@ -606,7 +606,7 @@ export default function SidebarRail({
                   <CheckIcon sx={{ fontSize: 18, color: "#7C3AED", flexShrink: 0 }} />
                 )}
 
-                {/* {!isActive && companyProfiles.length > 1 && (
+                {!isActive && companyProfiles.length > 1 && (
                   <Tooltip title="Pašalinti" placement="top" arrow>
                     <IconButton
                       size="small"
@@ -623,7 +623,7 @@ export default function SidebarRail({
                       <DeleteOutlineIcon sx={{ fontSize: 16 }} />
                     </IconButton>
                   </Tooltip>
-                )} */}
+                )}
               </Box>
             );
           })}
