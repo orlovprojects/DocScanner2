@@ -17,8 +17,17 @@ import {
 } from "@mui/material";
 import SearchIcon from "@mui/icons-material/Search";
 import { Link as RouterLink, useParams } from "react-router-dom";
+import { Helmet } from "react-helmet";
 
+// const API_ORIGIN = (() => {
+//   try {
+//     return new URL(import.meta.env.VITE_BASE_API_URL, window.location.href).origin;
+//   } catch {
+//     return "";
+//   }
+// })();
 const API_ORIGIN = (() => {
+  if (typeof window !== "undefined" && window.__PRERENDER) return "";
   try {
     return new URL(import.meta.env.VITE_BASE_API_URL, window.location.href).origin;
   } catch {
@@ -34,6 +43,7 @@ async function getCategoryWithArticles(slug) {
 
 export default function GidoCategoryPage() {
   const { slug } = useParams();
+  const origin = typeof window !== "undefined" ? window.location.origin : "";
 
   const [category, setCategory] = React.useState(null);
   const [loading, setLoading] = React.useState(true);
@@ -152,6 +162,11 @@ export default function GidoCategoryPage() {
 
   return (
     <Container maxWidth="lg" sx={{ py: { xs: 5, md: 8 } }}>
+      <Helmet>
+        <title>{category.title} – DokSkenas</title>
+        <meta name="description" content={(category.description || "").replace(/<[^>]+>/g, "").slice(0, 160)} />
+        <link rel="canonical" href={`${origin}/tinklarastis/tema/${category.slug}`} />
+      </Helmet>
       {/* Breadcrumbs */}
       <Breadcrumbs
         sx={{

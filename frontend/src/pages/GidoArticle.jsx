@@ -1,4 +1,5 @@
 import * as React from "react";
+import { Helmet } from "react-helmet";
 import {
   Box,
   Container,
@@ -14,9 +15,12 @@ import {
 import { Link as RouterLink, useParams } from "react-router-dom";
 
 // ===== API base =====
-const API_BASE = import.meta.env.VITE_BASE_API_URL
-  .replace(/\/$/, "")
-  .replace(/\/api$/, "");
+const API_BASE =
+  typeof window !== "undefined" && window.__PRERENDER
+    ? "" // при пререндере — относительные URL (same-origin через прокси)
+    : (import.meta.env.VITE_BASE_API_URL || "")
+        .replace(/\/$/, "")
+        .replace(/\/api$/, "");
 
 // ===== fetch one article =====
 async function getArticleBySlug(slug) {
@@ -42,6 +46,32 @@ const BODY_COMMON = {
   fontWeight: 400,
   lineHeight: 1.8,
 };
+
+// ===== nofollow для внешних ссылок (свои домены остаются dofollow) =====
+const FOLLOW_DOMAINS = ["dokskenas.lt", "dokskenas", "atlyginimoskaiciuokle.com"];
+
+function addLinkRels(html) {
+  if (!html || typeof window === "undefined") return html;
+  try {
+    const doc = new DOMParser().parseFromString(html, "text/html");
+    doc.querySelectorAll("a[href]").forEach((a) => {
+      const href = a.getAttribute("href") || "";
+      if (href.startsWith("/") || href.startsWith("#")) return; // внутренние — не трогаем
+      let host = "";
+      try {
+        host = new URL(href, window.location.href).hostname;
+      } catch {}
+      const isOwn = FOLLOW_DOMAINS.some((d) => host.includes(d));
+      if (!isOwn) {
+        a.setAttribute("rel", "nofollow noopener noreferrer");
+        a.setAttribute("target", "_blank");
+      }
+    });
+    return doc.body.innerHTML;
+  } catch {
+    return html;
+  }
+}
 
 // ===== utils =====
 function slugify(text) {
@@ -220,9 +250,6 @@ export default function GidoArticle() {
         setLoading(true);
         const data = await getArticleBySlug(slug);
         setArticle(data || null);
-        if (data?.seo_title || data?.title) {
-          document.title = data.seo_title || data.title;
-        }
       } catch (e) {
         console.error("❌ Article fetch error:", e);
       } finally {
@@ -252,14 +279,11 @@ export default function GidoArticle() {
     .filter((b) => b.type === "heading" && b.value)
     .map((b) => ({ text: b.value, id: slugify(b.value) }));
 
-  // Из бэка: category_slug / category_title
   const catSlug = article.category_slug || "";
   const catTitle = article.category_title || "";
 
-  // Дата: last_published_at -> first_published_at
   const published = formatLt(article.last_published_at || article.first_published_at);
 
-  // ===== JSON-LD objects =====
   const origin = typeof window !== "undefined" ? window.location.origin : "";
   const imagesFromBody = collectImagesFromBlocks(blocks);
   const videoFromBody = buildVideoFromBlocks(blocks);
@@ -304,7 +328,8 @@ export default function GidoArticle() {
             sx={{
               ...HEADING_COMMON,
               fontSize: { xs: 26, md: 30 },
-              mt: { xs: 4, md: 5 },
+              lineHeight: 1.5,
+              mt: { xs: 6, md: 8 },
               mb: 1.5,
               scrollMarginTop: 100,
             }}
@@ -319,9 +344,33 @@ export default function GidoArticle() {
             key={block.id || i}
             sx={{
               ...BODY_COMMON,
-              fontSize: { xs: 16, md: 17 },
+              fontSize: { xs: 17, md: 17 },
               color: "text.primary",
               "& p": { m: 0, mb: 1.75 },
+              "& h2": {
+                ...HEADING_COMMON,
+                lineHeight: 1.5,
+                fontSize: { xs: 24, md: 28 },
+                mt: { xs: 6, md: 8 },
+                mb: 1.5,
+              },
+              "& h3": {
+                ...HEADING_COMMON,
+                lineHeight: 1.5,
+                fontSize: { xs: 21, md: 24 },
+                mt: { xs: 5, md: 7 },
+                mb: 1.25,
+              },
+              "& h4, & h5, & h6": {
+                ...HEADING_COMMON,
+                lineHeight: 1.5,
+                fontSize: { xs: 18, md: 20 },
+                mt: { xs: 4, md: 6 },
+                mb: 1,
+              },
+              "& ul, & ol": { pl: 4, my: 2 },
+              "& li": { mb: 0.75, pl: 0.5, lineHeight: 1.7 },
+              "& li > p": { m: 0 },
               "& strong": { fontWeight: 700 },
               "& em": { fontStyle: "italic" },
               "& img": {
@@ -356,7 +405,7 @@ export default function GidoArticle() {
                 py: 0.2,
               },
             }}
-            dangerouslySetInnerHTML={{ __html: v }}
+            dangerouslySetInnerHTML={{ __html: addLinkRels(v) }}
           />
         );
 
@@ -433,7 +482,7 @@ export default function GidoArticle() {
               color: "text.secondary",
               fontStyle: "italic",
               ...BODY_COMMON,
-              fontSize: { xs: 16, md: 17 },
+              fontSize: { xs: 17, md: 17 },
             }}
           >
             {v}
@@ -450,6 +499,35 @@ export default function GidoArticle() {
 
   return (
     <Box sx={{ bgcolor: "background.default" }}>
+      <Helmet>
+        <title>{article.seo_title || article.title}</title>
+        <meta name="description" content={article.search_description || ""} />
+        <link rel="canonical" href={`${origin}/straipsnis/${article.slug}`} />
+
+        {/* Open Graph */}
+        <meta property="og:type" content="article" />
+        <meta property="og:title" content={article.seo_title || article.title} />
+        <meta property="og:description" content={article.search_description || ""} />
+        <meta property="og:url" content={`${origin}/straipsnis/${article.slug}`} />
+        {article.main_image_url && (
+          <meta property="og:image" content={article.main_image_url} />
+        )}
+        <meta property="og:site_name" content="DokSkenas" />
+        <meta property="article:published_time" content={article.first_published_at || ""} />
+        <meta
+          property="article:modified_time"
+          content={article.last_published_at || article.first_published_at || ""}
+        />
+
+        {/* Twitter */}
+        <meta name="twitter:card" content="summary_large_image" />
+        <meta name="twitter:title" content={article.seo_title || article.title} />
+        <meta name="twitter:description" content={article.search_description || ""} />
+        {article.main_image_url && (
+          <meta name="twitter:image" content={article.main_image_url} />
+        )}
+      </Helmet>
+
       {/* hero image */}
       {article.main_image_url && (
         <Box sx={{ bgcolor: "grey.50", borderBottom: "1px solid", borderColor: "grey.200" }}>
@@ -486,7 +564,7 @@ export default function GidoArticle() {
           dangerouslySetInnerHTML={{ __html: JSON.stringify(ldWebPage) }}
         />
 
-        {/* Breadcrumbs: Helvetica, единый размер/высота */}
+        {/* Breadcrumbs */}
         <Breadcrumbs
           sx={{
             mb: 2,
@@ -518,7 +596,7 @@ export default function GidoArticle() {
           <Typography color="text.primary">{article.title}</Typography>
         </Breadcrumbs>
 
-        {/* layout: левый столбец = title + meta + content; правый = TOC */}
+        {/* layout */}
         <Box
           sx={{
             display: "grid",
@@ -530,7 +608,6 @@ export default function GidoArticle() {
             fontFamily: BLOG_FONT_FAMILY,
           }}
         >
-          {/* левый: всё слева */}
           <Box sx={{ maxWidth: 860 }}>
             <Typography
               variant="h3"
@@ -558,7 +635,6 @@ export default function GidoArticle() {
             {blocks.map((b, i) => renderBlock(b, i))}
           </Box>
 
-          {/* правый: TOC */}
           {headings.length > 0 && (
             <Box sx={{ display: { xs: "none", lg: "block" }, position: "sticky", top: 96 }}>
               <Box
@@ -594,7 +670,6 @@ export default function GidoArticle() {
     </Box>
   );
 }
-
 
 
 

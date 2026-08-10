@@ -18,9 +18,17 @@ import ArrowForwardIcon from "@mui/icons-material/ArrowForward";
 import { api } from "../api/endpoints";
 import config from "../config";
 
+// const API_ORIGIN = (() => {
+//   try {
+//     return new URL(config.BASE_API_URL, window.location.href).origin;
+//   } catch {
+//     return "";
+//   }
+// })();
 const API_ORIGIN = (() => {
+  if (typeof window !== "undefined" && window.__PRERENDER) return "";
   try {
-    return new URL(config.BASE_API_URL, window.location.href).origin;
+    return new URL(import.meta.env.VITE_BASE_API_URL, window.location.href).origin;
   } catch {
     return "";
   }
