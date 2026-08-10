@@ -383,6 +383,7 @@ export default function TinklarastisPost() {
               "& em": { fontStyle: "italic" },
               "& img": {
                 maxWidth: "100%",
+                height: "auto",  
                 borderRadius: 2,
                 my: 2.5,
                 display: "block",
