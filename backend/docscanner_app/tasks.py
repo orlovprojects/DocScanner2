@@ -5671,20 +5671,16 @@ NODE_BIN = "/home/season/.nvm/versions/node/v22.11.0/bin/node"
 
 @shared_task(queue="prerender")
 def prerender_route_task(route: str):
-    subprocess.run(
-        [NODE_BIN, "prerender-one.mjs", route],
-        cwd=str(FRONTEND_DIR),
-        timeout=120,
-        check=False,
-    )
+    subprocess.run([NODE_BIN, "prerender-one.mjs", route], cwd=str(FRONTEND_DIR), timeout=120, check=False)
+    subprocess.run([NODE_BIN, "gen-sitemap.mjs"], cwd=str(FRONTEND_DIR), timeout=60, check=False)
 
 
 @shared_task(queue="prerender")
 def remove_prerender_task(route: str):
-    """Удалить папку пререндера (после unpublish/смены slug)."""
     target = DIST_DIR / route.strip("/")
-    if DIST_DIR in target.parents:  # защита от выхода за dist
+    if DIST_DIR in target.parents:
         shutil.rmtree(target, ignore_errors=True)
+    subprocess.run([NODE_BIN, "gen-sitemap.mjs"], cwd=str(FRONTEND_DIR), timeout=60, check=False)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # END - Prerender novoj statji Wagtail
