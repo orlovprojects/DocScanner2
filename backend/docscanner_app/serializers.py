@@ -11,6 +11,7 @@ from django.urls import reverse
 from datetime import date
 from decimal import Decimal
 from django.utils import timezone
+from wagtail.rich_text import expand_db_html
 
 from .models import Payments, MeasurementUnit, InvoiceSeries, Product, RecurringInvoice, RecurringInvoiceLineItem, Invoice, InvoiceEmail, InvoiceSettings, RivileGamaAPIKey, NewsletterCampaign, NewsletterRecipient, CompanyProfile, PurchaseLine, Purchase, JournalEntry, JournalEntryLine, BlogCategoryPage, BlogPostPage
 
@@ -1650,7 +1651,11 @@ class BlogArticleDetailSerializer(serializers.ModelSerializer):
         return rendition_url(obj.main_image, spec="fill-1200x675|jpegquality-70")
 
     def get_body(self, obj):
-        return streamfield_to_blocks(obj.body)
+        blocks = streamfield_to_blocks(obj.body)
+        for b in blocks:
+            if isinstance(b, dict) and b.get("type") == "paragraph" and isinstance(b.get("value"), str):
+                b["value"] = expand_db_html(b["value"])
+        return blocks
 
     def get_category_slug(self, obj):
         cat = _get_blog_category_of(obj)
