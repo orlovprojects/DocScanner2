@@ -23,3 +23,4 @@ class DocscannerAppConfig(AppConfig):
 
         import docscanner_app.celery_signals  # noqa
         import docscanner_app.utils.signals  # noqa
+        import docscanner_app.signals.wagtail_publish  # noqa

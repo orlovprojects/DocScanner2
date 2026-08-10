@@ -5654,3 +5654,38 @@ def process_waybill_task(self, user_id, doc_id):
 # ═══════════════════════════════════════════════════════════════════════════════
 # END - Waybill scan
 # ═══════════════════════════════════════════════════════════════════════════════
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Prerender novoj statji Wagtail
+# ═══════════════════════════════════════════════════════════════════════════════
+import subprocess
+import shutil
+from pathlib import Path
+from celery import shared_task
+
+FRONTEND_DIR = Path("/home/season/DocScanner/frontend")
+DIST_DIR = FRONTEND_DIR / "dist"
+
+
+NODE_BIN = "/home/season/.nvm/versions/node/v22.11.0/bin/node"
+
+@shared_task(queue="prerender")
+def prerender_route_task(route: str):
+    subprocess.run(
+        [NODE_BIN, "prerender-one.mjs", route],
+        cwd=str(FRONTEND_DIR),
+        timeout=120,
+        check=False,
+    )
+
+
+@shared_task(queue="prerender")
+def remove_prerender_task(route: str):
+    """Удалить папку пререндера (после unpublish/смены slug)."""
+    target = DIST_DIR / route.strip("/")
+    if DIST_DIR in target.parents:  # защита от выхода за dist
+        shutil.rmtree(target, ignore_errors=True)
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# END - Prerender novoj statji Wagtail
+# ═══════════════════════════════════════════════════════════════════════════════
