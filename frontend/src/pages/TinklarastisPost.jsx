@@ -261,7 +261,7 @@ function DownloadButton({ label, fileUrl }) {
         sx={{
           my: { xs: 3, md: 4 },
           display: "flex",
-          justifyContent: { xs: "center", sm: "flex-start" },
+          justifyContent: "center",
         }}
       >
         <Box
