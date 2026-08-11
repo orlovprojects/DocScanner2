@@ -16,6 +16,7 @@ import {
 import { Link as RouterLink, useParams } from "react-router-dom";
 import { Helmet } from "react-helmet";
 import DownloadIcon from "@mui/icons-material/Download";
+import "../styles/DownloadButton.css";
 
 // ===== API base =====
 const API_BASE =
@@ -260,7 +261,7 @@ function DownloadButton({ label, fileUrl }) {
         sx={{
           my: { xs: 3, md: 4 },
           display: "flex",
-          justifyContent: { xs: "stretch", sm: "flex-start" },
+          justifyContent: { xs: "center", sm: "flex-start" },
         }}
       >
         <Box
@@ -268,39 +269,17 @@ function DownloadButton({ label, fileUrl }) {
           href={fileUrl || "#"}
           download
           onClick={handleClick}
-          sx={{
-            width: { xs: "100%", sm: "auto" },
-            display: "inline-flex",
-            alignItems: "center",
-            justifyContent: "center",
-            gap: 1,
-            px: { xs: 3, sm: 4 },
-            py: { xs: 1.5, sm: 1.75 },
-            borderRadius: 2.5,
-            background: "linear-gradient(135deg, #F0142F 0%, #C11226 100%)",
-            color: "#fff",
-            textDecoration: "none",
-            fontFamily: HELV,
-            fontWeight: 700,
-            fontSize: 15,
-            lineHeight: 1,
-            boxShadow: "0 6px 18px rgba(200,20,40,0.32)",
-            transition: "transform .15s ease, box-shadow .2s ease, filter .2s ease",
-            userSelect: "none",
-            WebkitTapHighlightColor: "transparent",
-            "&:hover": {
-              filter: "brightness(1.05)",
-              boxShadow: "0 10px 26px rgba(200,20,40,0.40)",
-              transform: "translateY(-1px)",
-            },
-            "&:active": {
-              transform: "translateY(0)",
-              boxShadow: "0 4px 12px rgba(200,20,40,0.30)",
-            },
-          }}
+          className="dl-button"
+          sx={{ width: { xs: "100%", sm: "auto" }, maxWidth: { xs: 360, sm: "none" } }}
         >
-          <DownloadIcon sx={{ fontSize: 20 }} />
-          {label || "Atsisiųsti"}
+          <span className="dl-button-outer">
+            <span className="dl-button-inner">
+              <span className="dl-button-label">
+                <DownloadIcon className="dl-button-icon" />
+                {label || "Atsisiųsti"}
+              </span>
+            </span>
+          </span>
         </Box>
       </Box>
 
@@ -314,14 +293,7 @@ function DownloadButton({ label, fileUrl }) {
           icon={<DownloadIcon fontSize="inherit" />}
           variant="filled"
           onClose={() => setOpen(false)}
-          sx={{
-            fontFamily: HELV,
-            fontWeight: 600,
-            borderRadius: 2,
-            alignItems: "center",
-            bgcolor: "#1D6F42",
-            color: "#fff",
-          }}
+          sx={{ fontFamily: HELV, fontWeight: 600, borderRadius: 2, alignItems: "center", bgcolor: "#1D6F42", color: "#fff" }}
         >
           Siunčiama…
         </Alert>
