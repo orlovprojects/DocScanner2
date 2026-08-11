@@ -1,4 +1,3 @@
-import * as React from "react";
 import {
   Box,
   Container,
@@ -10,9 +9,12 @@ import {
   Chip,
   Stack,
   Divider,
+  Snackbar,
+  Alert,
 } from "@mui/material";
 import { Link as RouterLink, useParams } from "react-router-dom";
 import { Helmet } from "react-helmet";
+import DownloadIcon from "@mui/icons-material/Download";
 
 // ===== API base =====
 const API_BASE =
@@ -242,6 +244,89 @@ function buildArticleLD({ origin, article, categoryTitle, images, video, lang = 
   }
 
   return obj;
+}
+
+function DownloadButton({ label, fileUrl }) {
+  const [open, setOpen] = React.useState(false);
+
+  const handleClick = () => {
+    if (fileUrl) setOpen(true);
+  };
+
+  return (
+    <>
+      <Box
+        sx={{
+          my: { xs: 3, md: 4 },
+          display: "flex",
+          justifyContent: { xs: "stretch", sm: "flex-start" },
+        }}
+      >
+        <Box
+          component="a"
+          href={fileUrl || "#"}
+          download
+          onClick={handleClick}
+          sx={{
+            width: { xs: "100%", sm: "auto" },
+            display: "inline-flex",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 1,
+            px: { xs: 3, sm: 4 },
+            py: { xs: 1.5, sm: 1.75 },
+            borderRadius: 2.5,
+            background: "linear-gradient(135deg, #F0142F 0%, #C11226 100%)",
+            color: "#fff",
+            textDecoration: "none",
+            fontFamily: HELV,
+            fontWeight: 700,
+            fontSize: 15,
+            lineHeight: 1,
+            boxShadow: "0 6px 18px rgba(200,20,40,0.32)",
+            transition: "transform .15s ease, box-shadow .2s ease, filter .2s ease",
+            userSelect: "none",
+            WebkitTapHighlightColor: "transparent",
+            "&:hover": {
+              filter: "brightness(1.05)",
+              boxShadow: "0 10px 26px rgba(200,20,40,0.40)",
+              transform: "translateY(-1px)",
+            },
+            "&:active": {
+              transform: "translateY(0)",
+              boxShadow: "0 4px 12px rgba(200,20,40,0.30)",
+            },
+          }}
+        >
+          <DownloadIcon sx={{ fontSize: 20 }} />
+          {label || "Atsisiųsti"}
+        </Box>
+      </Box>
+
+      <Snackbar
+        open={open}
+        autoHideDuration={2500}
+        onClose={() => setOpen(false)}
+        anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
+      >
+        <Alert
+          icon={<DownloadIcon fontSize="inherit" />}
+          variant="filled"
+          onClose={() => setOpen(false)}
+          sx={{
+            fontFamily: HELV,
+            fontWeight: 600,
+            borderRadius: 2,
+            alignItems: "center",
+            bgcolor: "#1D6F42",
+            color: "#fff",
+          }}
+        >
+          Siunčiama…
+        </Alert>
+      </Snackbar>
+    </>
+  );
 }
 
 export default function TinklarastisPost() {
@@ -497,6 +582,9 @@ export default function TinklarastisPost() {
             {v}
           </Box>
         );
+
+      case "download_button":
+        return <DownloadButton key={block.id || i} label={v?.label} fileUrl={v?.file_url} />;
 
       case "divider":
         return <Divider key={block.id || i} sx={{ my: 4 }} />;

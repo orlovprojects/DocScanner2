@@ -25,6 +25,7 @@ from wagtail.images.blocks import ImageChooserBlock
 from wagtail.embeds.blocks import EmbedBlock
 from wagtail.images.api.fields import ImageRenditionField
 from wagtail.api import APIField
+from .blocks import DownloadButtonBlock
 
 #search
 from django.utils.html import strip_tags
@@ -1677,6 +1678,7 @@ class BlogPostPage(Page):
             ])),
             ("image", ImageChooserBlock()),
             ("youtube", EmbedBlock(help_text="Вставь YouTube ссылку")),
+            ("download_button", DownloadButtonBlock()),
             ("code", blocks.TextBlock(help_text="Вставь кодовый блок")),
             ("quote", blocks.BlockQuoteBlock()),
             ("table", blocks.StructBlock([
