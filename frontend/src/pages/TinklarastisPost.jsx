@@ -339,7 +339,7 @@ function DokSkenasPromo({ mobile = false }) {
   return (
     <Box
       sx={{
-        display: mobile ? { xs: "block", lg: "none" } : { xs: "none", lg: "block" },
+        display: mobile ? { xs: "block", md: "none" } : { xs: "none", md: "block" },
         my: mobile ? 4 : 0,
       }}
     >
@@ -773,10 +773,10 @@ export default function TinklarastisPost() {
         <Box
           sx={{
             display: "grid",
-            gridTemplateColumns: { xs: "1fr", lg: "minmax(0,860px) 240px" },
-            gap: { xs: 0, lg: 6 },
+            gridTemplateColumns: { xs: "1fr", md: "minmax(0,860px) 240px" },
+            gap: { xs: 0, md: 6 },
             alignItems: "start",
-            maxWidth: { xs: "100%", lg: "min(1200px, 100%)" },
+            maxWidth: { xs: "100%", md: "min(1200px, 100%)" },
             mx: "auto",
             fontFamily: BLOG_FONT_FAMILY,
           }}
@@ -815,7 +815,14 @@ export default function TinklarastisPost() {
           </Box>
 
           {/* правая колонка: TOC уходит со скроллом, баннер липнет */}
-          <Box sx={{ display: { xs: "none", lg: "block" }, alignSelf: "stretch", position: "relative" }}>
+          <Box
+            sx={{
+              display: { xs: "none", md: "block" },
+              alignSelf: "stretch",
+              position: "relative",
+              minWidth: 0,
+            }}
+          >
             {toc.length > 0 && (
               <Box
                 sx={{
@@ -859,7 +866,14 @@ export default function TinklarastisPost() {
               </Box>
             )}
 
-            <Box sx={{ position: "sticky", top: 96 }}>
+            <Box
+              sx={{
+                position: "sticky",
+                top: 96,
+                width: "100%",
+                zIndex: 1,
+              }}
+            >
               <DokSkenasPromo />
             </Box>
           </Box>
