@@ -815,11 +815,11 @@ export default function TinklarastisPost() {
             ))}
           </Box>
 
-          {/* правая колонка: TOC уезжает, отдельная нижняя зона держит sticky-баннер */}
+          {/* правая колонка: TOC + sticky-баннер */}
           <Box
             sx={{
-              display: { xs: "none", lg: "grid" },
-              gridTemplateRows: "auto minmax(0, 1fr)",
+              display: { xs: "none", lg: "flex" },
+              flexDirection: "column",
               alignSelf: "stretch",
               position: "relative",
               minWidth: 0,
@@ -870,26 +870,16 @@ export default function TinklarastisPost() {
               </Box>
             )}
 
-            {/* Эта зона занимает ВСЮ оставшуюся высоту строки статьи.
-                Поэтому sticky теперь имеет реальную высокую containing block. */}
+            {/* Sticky-баннер: прямой ребёнок flex-колонки */}
             <Box
               sx={{
-                position: "relative",
-                minHeight: 0,
-                overflow: "visible",
+                position: "sticky",
+                top: "96px",
+                zIndex: 1,
+                width: "100%",
               }}
             >
-              <Box
-                sx={{
-                  position: "sticky",
-                  top: "96px",
-                  width: "100%",
-                  zIndex: 1,
-                  alignSelf: "start",
-                }}
-              >
-                <DokSkenasPromo />
-              </Box>
+              <DokSkenasPromo />
             </Box>
           </Box>
         </Box>
