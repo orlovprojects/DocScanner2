@@ -815,7 +815,7 @@ export default function TinklarastisPost() {
           </Box>
 
           {/* правая колонка: TOC уходит со скроллом, баннер липнет */}
-          <Box sx={{ display: { xs: "none", lg: "block" } }}>
+          <Box sx={{ display: { xs: "none", lg: "block" }, alignSelf: "stretch", position: "relative" }}>
             {toc.length > 0 && (
               <Box
                 sx={{
