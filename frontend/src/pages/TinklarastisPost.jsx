@@ -328,7 +328,7 @@ function DownloadButton({ label, fileUrl }) {
   );
 }
 
-function DokSkenasPromo({ mobile = false }) {
+function DokSkenasPromo({ mobile = false, sticky = false }) {
   const items = [
     { icon: <AccessTimeIcon sx={{ fontSize: 17, color: "#7fe0a8", flexShrink: 0 }} />, text: "nuskaito per 30s" },
     { icon: <CalculateOutlinedIcon sx={{ fontSize: 17, color: "#7fe0a8", flexShrink: 0 }} />, text: "sumiškai arba kiekybiškai" },
@@ -341,6 +341,7 @@ function DokSkenasPromo({ mobile = false }) {
       sx={{
         display: mobile ? { xs: "block", lg: "none" } : { xs: "none", lg: "block" },
         my: mobile ? 4 : 0,
+        ...(sticky && { position: "sticky", top: 96 }),
       }}
     >
       <Box
@@ -695,7 +696,7 @@ export default function TinklarastisPost() {
   };
 
   return (
-    <Box sx={{ bgcolor: "background.default", overflow: "visible" }}>
+    <Box sx={{ bgcolor: "background.default" }}>
       <Helmet>
         <title>{article.seo_title || article.title}</title>
         <meta name="description" content={article.search_description || ""} />
@@ -722,7 +723,7 @@ export default function TinklarastisPost() {
         )}
       </Helmet>
 
-      <Container maxWidth="lg" sx={{ py: { xs: 4, md: 6 }, overflow: "visible" }}>
+      <Container maxWidth="lg" sx={{ py: { xs: 4, md: 6 } }}>
         {/* JSON-LD schema */}
         <script
           type="application/ld+json"
@@ -779,7 +780,6 @@ export default function TinklarastisPost() {
             maxWidth: { xs: "100%", lg: "min(1200px, 100%)" },
             mx: "auto",
             fontFamily: BLOG_FONT_FAMILY,
-            overflow: "visible",
           }}
         >
           {/* левый: всё слева */}
@@ -815,18 +815,10 @@ export default function TinklarastisPost() {
             ))}
           </Box>
 
-          {/* правая колонка: TOC + sticky-баннер */}
-          <Box
-            sx={{
-              display: { xs: "none", lg: "flex" },
-              flexDirection: "column",
-              alignSelf: "stretch",
-              position: "relative",
-              minWidth: 0,
-              minHeight: 0,
-              overflow: "visible",
-            }}
-          >
+          {/* правая колонка: TOC уходит со скроллом, баннер липнет.
+              alignSelf:stretch растягивает колонку на всю высоту статьи —
+              иначе sticky некуда ехать (колонка была высотой только TOC+баннер) */}
+          <Box sx={{ display: { xs: "none", lg: "block" }, alignSelf: "stretch" }}>
             {toc.length > 0 && (
               <Box
                 sx={{
@@ -870,17 +862,7 @@ export default function TinklarastisPost() {
               </Box>
             )}
 
-            {/* Sticky-баннер: прямой ребёнок flex-колонки */}
-            <Box
-              sx={{
-                position: "sticky",
-                top: "96px",
-                zIndex: 1,
-                width: "100%",
-              }}
-            >
-              <DokSkenasPromo />
-            </Box>
+            <DokSkenasPromo sticky />
           </Box>
         </Box>
       </Container>
