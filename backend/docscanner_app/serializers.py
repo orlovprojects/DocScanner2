@@ -3881,7 +3881,7 @@ class PaymentAllocationDetailSerializer(serializers.Serializer):
     payment_date = serializers.DateField()
     confidence = serializers.DecimalField(max_digits=3, decimal_places=2)
     match_reasons = serializers.DictField()
-    note = serializers.CharField()
+    note = serializers.CharField(allow_blank=True)
     direction = serializers.CharField()
     created_at = serializers.DateTimeField()
     transaction = TransactionInfoSerializer(allow_null=True)

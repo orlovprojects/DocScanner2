@@ -1013,6 +1013,9 @@ class PaymentService:
                 "match_reasons": a.match_reasons,
                 "note": a.note,
                 "created_at": a.created_at,
+                "direction": a.direction,
+                "invoice_id": a.invoice_id,
+                "purchase_id": a.purchase_id,
                 "transaction": None,
             }
 

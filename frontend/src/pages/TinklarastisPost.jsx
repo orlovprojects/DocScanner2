@@ -16,6 +16,11 @@ import {
 import { Link as RouterLink, useParams } from "react-router-dom";
 import { Helmet } from "react-helmet";
 import DownloadIcon from "@mui/icons-material/Download";
+import AccessTimeIcon from "@mui/icons-material/AccessTime";
+import CalculateOutlinedIcon from "@mui/icons-material/CalculateOutlined";
+import LinkIcon from "@mui/icons-material/Link";
+import PowerOutlinedIcon from "@mui/icons-material/Power";
+import ArrowForwardIcon from "@mui/icons-material/ArrowForward";
 import "../styles/DownloadButton.css";
 
 // ===== API base =====
@@ -57,27 +62,45 @@ const BODY_COMMON = {
 // ===== nofollow для внешних ссылок (свои домены остаются dofollow) =====
 const FOLLOW_DOMAINS = ["dokskenas.lt", "dokskenas", "atlyginimoskaiciuokle.com"];
 
-function addLinkRels(html) {
-  if (!html || typeof window === "undefined") return html;
-  try {
-    const doc = new DOMParser().parseFromString(html, "text/html");
-    doc.querySelectorAll("a[href]").forEach((a) => {
-      const href = a.getAttribute("href") || "";
-      if (href.startsWith("/") || href.startsWith("#")) return; // внутренние — не трогаем
-      let host = "";
-      try {
-        host = new URL(href, window.location.href).hostname;
-      } catch {}
-      const isOwn = FOLLOW_DOMAINS.some((d) => host.includes(d));
-      if (!isOwn) {
-        a.setAttribute("rel", "nofollow noopener noreferrer");
-        a.setAttribute("target", "_blank");
-      }
-    });
-    return doc.body.innerHTML;
-  } catch {
-    return html;
-  }
+function uniqueId(base, seen) {
+  const b = base || "section";
+  let id = b;
+  let n = 2;
+  while (seen.has(id)) id = `${b}-${n++}`;
+  seen.add(id);
+  return id;
+}
+
+function processParagraphHtml(html, seen) {
+  if (!html) return { html, headings: [] };
+
+  const headings = [];
+
+  const out = html.replace(
+    /<(h2|h3)\b([^>]*)>([\s\S]*?)<\/\1>/gi,
+    (m, tag, attrs, inner) => {
+      const text = inner.replace(/<[^>]*>/g, "").replace(/\s+/g, " ").trim();
+      if (!text) return m;
+      const id = uniqueId(slugify(text), seen);
+      headings.push({ text, id, level: tag.toLowerCase() });
+      const cleaned = attrs.replace(/\sid=["'][^"']*["']/i, "").replace(/\sstyle=["'][^"']*["']/i, "");
+      return `<${tag}${cleaned} id="${id}" style="scroll-margin-top:100px">${inner}</${tag}>`;
+    }
+  );
+
+  const withRels = out.replace(/<a\b([^>]*?)href=["']([^"']+)["']([^>]*)>/gi, (m, pre, href, post) => {
+    if (href.startsWith("/") || href.startsWith("#")) return m;
+    let host = "";
+    try {
+      host = new URL(href, "https://atlyginimoskaiciuokle.com/saskaitu-skaitmenizavimas-dokskenas").hostname;
+    } catch {}
+    const isOwn = FOLLOW_DOMAINS.some((d) => host.includes(d));
+    if (isOwn) return m;
+    const rest = (pre + post).replace(/\srel=["'][^"']*["']/i, "").replace(/\starget=["'][^"']*["']/i, "");
+    return `<a${rest} href="${href}" rel="nofollow noopener noreferrer" target="_blank">`;
+  });
+
+  return { html: withRels, headings };
 }
 
 // ===== utils =====
@@ -302,6 +325,72 @@ function DownloadButton({ label, fileUrl }) {
   );
 }
 
+function DokSkenasPromo({ mobile = false }) {
+  const items = [
+    { icon: <AccessTimeIcon sx={{ fontSize: 17, color: "#7fe0a8", flexShrink: 0 }} />, text: "nuskaito per 30s" },
+    { icon: <CalculateOutlinedIcon sx={{ fontSize: 17, color: "#7fe0a8", flexShrink: 0 }} />, text: "sumiškai arba kiekybiškai" },
+    { icon: <LinkIcon sx={{ fontSize: 17, color: "#7fe0a8", flexShrink: 0 }} />, text: "susieja eilutes su tavo prekių katalogu" },
+    { icon: <PowerOutlinedIcon sx={{ fontSize: 17, color: "#7fe0a8", flexShrink: 0 }} />, text: "integruojasi su tavo apskaitos programa" },
+  ];
+
+  return (
+    <Box
+      sx={{
+        display: mobile ? { xs: "block", lg: "none" } : { xs: "none", lg: "block" },
+        my: mobile ? 4 : 0,
+      }}
+    >
+      <Box
+        sx={{
+          borderRadius: "12px",
+          p: "22px",
+          background: "linear-gradient(160deg, #1D6F42 0%, #14522F 100%)",
+          color: "#fff",
+        }}
+      >
+        <Typography sx={{ fontFamily: HELV, fontWeight: 500, fontSize: 19, lineHeight: 1.3, mb: 0.5 }}>
+          Vargsti su apskaita?
+        </Typography>
+        <Typography sx={{ fontSize: 14, lineHeight: 1.45, mb: 2, color: "#d3f0df" }}>
+          Skaitmenizuok bei išrašyk sąskaitas su DokSkenu
+        </Typography>
+
+        <Stack spacing={1.1} sx={{ mb: 2.25 }}>
+          {items.map((it, i) => (
+            <Box key={i} sx={{ display: "flex", gap: 1.1, fontSize: 13.5, lineHeight: 1.35, alignItems: "flex-start" }}>
+              {it.icon}
+              <span>{it.text}</span>
+            </Box>
+          ))}
+        </Stack>
+
+        <Box
+          component={RouterLink}
+          to="/"
+          sx={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 0.75,
+            py: 1.25,
+            borderRadius: 2,
+            bgcolor: "#fff",
+            color: "#145232",
+            fontFamily: HELV,
+            fontWeight: 500,
+            fontSize: 14,
+            textDecoration: "none",
+            transition: "transform .15s ease, box-shadow .15s ease",
+            "&:hover": { transform: "translateY(-1px)", boxShadow: "0 4px 12px rgba(0,0,0,0.15)" },
+          }}
+        >
+          Sužinoti daugiau <ArrowForwardIcon sx={{ fontSize: 16 }} />
+        </Box>
+      </Box>
+    </Box>
+  );
+}
+
 export default function TinklarastisPost() {
   const { slug } = useParams();
   const [article, setArticle] = React.useState(null);
@@ -338,9 +427,30 @@ export default function TinklarastisPost() {
     );
 
   const blocks = article.body || [];
-  const headings = blocks
-    .filter((b) => b.type === "heading" && b.value)
-    .map((b) => ({ text: b.value, id: slugify(b.value) }));
+
+  const seenIds = new Set();
+  const toc = [];
+  const htmlByBlock = {};
+  const headingIdByBlock = {};
+  blocks.forEach((b, i) => {
+    const key = b.id || i;
+    if (b.type === "heading" && b.value) {
+      const id = uniqueId(slugify(b.value), seenIds);
+      headingIdByBlock[key] = id;
+      toc.push({ text: b.value, id, level: "h2" });
+    } else if (b.type === "paragraph") {
+      const { html, headings } = processParagraphHtml(b.value, seenIds);
+      htmlByBlock[key] = html;
+      headings.forEach((h) => toc.push(h));
+    }
+  });
+
+  let mobileBannerIndex = blocks.findIndex(
+    (b) =>
+      (b.type === "heading" && b.value) ||
+      (b.type === "paragraph" && /<h2[\s>]/i.test(b.value || ""))
+  );
+  if (mobileBannerIndex === -1) mobileBannerIndex = Math.min(1, blocks.length);
 
   // Из бэка: category_slug / category_title
   const catSlug = article.category_slug || "";
@@ -387,7 +497,7 @@ export default function TinklarastisPost() {
       case "heading":
         return (
           <Typography
-            id={slugify(v)}
+            id={headingIdByBlock[block.id || i]}
             key={block.id || i}
             variant="h4"
             component="h2"
@@ -472,7 +582,7 @@ export default function TinklarastisPost() {
                 py: 0.2,
               },
             }}
-            dangerouslySetInnerHTML={{ __html: addLinkRels(v) }}
+            dangerouslySetInnerHTML={{ __html: htmlByBlock[block.id || i] ?? v }}
           />
         );
 
@@ -679,15 +789,21 @@ export default function TinklarastisPost() {
               <Typography variant="body2">{published}</Typography>
             </Stack>
 
-            {blocks.map((b, i) => renderBlock(b, i))}
+            {blocks.map((b, i) => (
+              <React.Fragment key={b.id || i}>
+                {i === mobileBannerIndex && <DokSkenasPromo mobile />}
+                {renderBlock(b, i)}
+              </React.Fragment>
+            ))}
           </Box>
 
-          {/* правый: TOC */}
-          {headings.length > 0 && (
-            <Box sx={{ display: { xs: "none", lg: "block" }, position: "sticky", top: 96 }}>
+          {/* правая колонка: TOC + промо DokSkenas */}
+          <Box sx={{ display: { xs: "none", lg: "block" }, position: "sticky", top: 96 }}>
+            {toc.length > 0 && (
               <Box
                 sx={{
                   p: 2,
+                  mb: 2,
                   border: "1px solid",
                   borderColor: "grey.200",
                   borderRadius: 2,
@@ -698,21 +814,28 @@ export default function TinklarastisPost() {
                   Turinys
                 </Typography>
                 <Stack spacing={1}>
-                  {headings.map((h) => (
+                  {toc.map((h) => (
                     <MuiLink
                       key={h.id}
                       href={`#${h.id}`}
                       underline="hover"
                       color="text.primary"
-                      sx={{ fontSize: 14, lineHeight: 1.6, "&:hover": { color: "primary.main" } }}
+                      sx={{
+                        fontSize: 14,
+                        lineHeight: 1.6,
+                        pl: h.level === "h3" ? 1.5 : 0,
+                        "&:hover": { color: "primary.main" },
+                      }}
                     >
                       {h.text}
                     </MuiLink>
                   ))}
                 </Stack>
               </Box>
-            </Box>
-          )}
+            )}
+
+            <DokSkenasPromo />
+          </Box>
         </Box>
       </Container>
     </Box>
