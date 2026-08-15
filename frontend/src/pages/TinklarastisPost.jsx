@@ -339,7 +339,7 @@ function DokSkenasPromo({ mobile = false }) {
   return (
     <Box
       sx={{
-        display: mobile ? { xs: "block", md: "none" } : { xs: "none", md: "block" },
+        display: mobile ? { xs: "block", lg: "none" } : { xs: "none", lg: "block" },
         my: mobile ? 4 : 0,
       }}
     >
@@ -695,7 +695,7 @@ export default function TinklarastisPost() {
   };
 
   return (
-    <Box sx={{ bgcolor: "background.default" }}>
+    <Box sx={{ bgcolor: "background.default", overflow: "visible" }}>
       <Helmet>
         <title>{article.seo_title || article.title}</title>
         <meta name="description" content={article.search_description || ""} />
@@ -722,7 +722,7 @@ export default function TinklarastisPost() {
         )}
       </Helmet>
 
-      <Container maxWidth="lg" sx={{ py: { xs: 4, md: 6 } }}>
+      <Container maxWidth="lg" sx={{ py: { xs: 4, md: 6 }, overflow: "visible" }}>
         {/* JSON-LD schema */}
         <script
           type="application/ld+json"
@@ -773,12 +773,13 @@ export default function TinklarastisPost() {
         <Box
           sx={{
             display: "grid",
-            gridTemplateColumns: { xs: "1fr", md: "minmax(0,860px) 240px" },
-            gap: { xs: 0, md: 6 },
+            gridTemplateColumns: { xs: "1fr", lg: "minmax(0,860px) 240px" },
+            gap: { xs: 0, lg: 6 },
             alignItems: "start",
-            maxWidth: { xs: "100%", md: "min(1200px, 100%)" },
+            maxWidth: { xs: "100%", lg: "min(1200px, 100%)" },
             mx: "auto",
             fontFamily: BLOG_FONT_FAMILY,
+            overflow: "visible",
           }}
         >
           {/* левый: всё слева */}
@@ -814,13 +815,16 @@ export default function TinklarastisPost() {
             ))}
           </Box>
 
-          {/* правая колонка: TOC уходит со скроллом, баннер липнет */}
+          {/* правая колонка: TOC уезжает, отдельная нижняя зона держит sticky-баннер */}
           <Box
             sx={{
-              display: { xs: "none", md: "block" },
+              display: { xs: "none", lg: "grid" },
+              gridTemplateRows: "auto minmax(0, 1fr)",
               alignSelf: "stretch",
               position: "relative",
               minWidth: 0,
+              minHeight: 0,
+              overflow: "visible",
             }}
           >
             {toc.length > 0 && (
@@ -866,15 +870,26 @@ export default function TinklarastisPost() {
               </Box>
             )}
 
+            {/* Эта зона занимает ВСЮ оставшуюся высоту строки статьи.
+                Поэтому sticky теперь имеет реальную высокую containing block. */}
             <Box
               sx={{
-                position: "sticky",
-                top: 96,
-                width: "100%",
-                zIndex: 1,
+                position: "relative",
+                minHeight: 0,
+                overflow: "visible",
               }}
             >
-              <DokSkenasPromo />
+              <Box
+                sx={{
+                  position: "sticky",
+                  top: "96px",
+                  width: "100%",
+                  zIndex: 1,
+                  alignSelf: "start",
+                }}
+              >
+                <DokSkenasPromo />
+              </Box>
             </Box>
           </Box>
         </Box>
