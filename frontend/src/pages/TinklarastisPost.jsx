@@ -62,6 +62,9 @@ const BODY_COMMON = {
 // ===== nofollow для внешних ссылок (свои домены остаются dofollow) =====
 const FOLLOW_DOMAINS = ["dokskenas.lt", "dokskenas", "atlyginimoskaiciuokle.com"];
 
+// ===== CTA баннера =====
+const PROMO_URL = "https://atlyginimoskaiciuokle.com/saskaitu-skaitmenizavimas-dokskenas";
+
 function uniqueId(base, seen) {
   const b = base || "section";
   let id = b;
@@ -92,7 +95,7 @@ function processParagraphHtml(html, seen) {
     if (href.startsWith("/") || href.startsWith("#")) return m;
     let host = "";
     try {
-      host = new URL(href, "https://atlyginimoskaiciuokle.com/saskaitu-skaitmenizavimas-dokskenas").hostname;
+      host = new URL(href, "https://atlyginimoskaiciuokle.com").hostname;
     } catch {}
     const isOwn = FOLLOW_DOMAINS.some((d) => host.includes(d));
     if (isOwn) return m;
@@ -365,8 +368,8 @@ function DokSkenasPromo({ mobile = false }) {
         </Stack>
 
         <Box
-          component={RouterLink}
-          to="/"
+          component="a"
+          href={PROMO_URL}
           sx={{
             display: "flex",
             alignItems: "center",
@@ -442,6 +445,20 @@ export default function TinklarastisPost() {
       const { html, headings } = processParagraphHtml(b.value, seenIds);
       htmlByBlock[key] = html;
       headings.forEach((h) => toc.push(h));
+    }
+  });
+
+  // нумерация: h2 → 1,2,3; h3 → 1.1, 1.2
+  let h2n = 0;
+  let h3n = 0;
+  toc.forEach((h) => {
+    if (h.level === "h3") {
+      h3n += 1;
+      h.num = `${h2n}.${h3n}`;
+    } else {
+      h2n += 1;
+      h3n = 0;
+      h.num = `${h2n}`;
     }
   });
 
@@ -797,8 +814,8 @@ export default function TinklarastisPost() {
             ))}
           </Box>
 
-          {/* правая колонка: TOC + промо DokSkenas */}
-          <Box sx={{ display: { xs: "none", lg: "block" }, position: "sticky", top: 96 }}>
+          {/* правая колонка: TOC уходит со скроллом, баннер липнет */}
+          <Box sx={{ display: { xs: "none", lg: "block" } }}>
             {toc.length > 0 && (
               <Box
                 sx={{
@@ -821,20 +838,30 @@ export default function TinklarastisPost() {
                       underline="hover"
                       color="text.primary"
                       sx={{
+                        display: "flex",
+                        gap: 0.75,
                         fontSize: 14,
                         lineHeight: 1.6,
-                        pl: h.level === "h3" ? 1.5 : 0,
+                        pl: h.level === "h3" ? 2 : 0,
                         "&:hover": { color: "primary.main" },
                       }}
                     >
-                      {h.text}
+                      <Box
+                        component="span"
+                        sx={{ color: "text.secondary", flexShrink: 0, minWidth: h.level === "h3" ? 24 : 14 }}
+                      >
+                        {h.num}
+                      </Box>
+                      <Box component="span">{h.text}</Box>
                     </MuiLink>
                   ))}
                 </Stack>
               </Box>
             )}
 
-            <DokSkenasPromo />
+            <Box sx={{ position: "sticky", top: 96 }}>
+              <DokSkenasPromo />
+            </Box>
           </Box>
         </Box>
       </Container>
