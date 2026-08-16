@@ -400,11 +400,12 @@ class BankImportService:
                 # ── Create DK for safe bank categories ─────────
                 category_dk = BankCategoryJournalBuilder(self.user, self.company_profile)
                 dk_result = category_dk.create_for_statement(stmt)
+                logger.info(f"[BankImport] Category DK created: {dk_result}")
 
-                logger.info(
-                    "[BankImport] Category DK created: %s",
-                    dk_result,
-                )
+                # ── Agregatorių payout'ai → Pinigai kelyje (273) ──
+                payout_dk = AggregatorPayoutJournalBuilder(self.user, self.company_profile)
+                payout_result = payout_dk.create_for_statement(stmt)
+                logger.info(f"[BankImport] Aggregator payouts: {payout_result}")
 
             stmt.status = "processed"
             stmt.save(update_fields=[
@@ -549,12 +550,13 @@ class BankImportService:
 
             # ── 8. Create / rebuild DK for safe bank categories ─
             category_dk = BankCategoryJournalBuilder(self.user, self.company_profile)
-            dk_result = category_dk.rebuild_for_statement(stmt)
+            dk_result = category_dk.create_for_statement(stmt)
+            logger.info(f"[BankImport] Re-match Category DK: {dk_result}")
 
-            logger.info(
-                "[BankImport] Category DK rebuilt: %s",
-                dk_result,
-            )
+            # ── Agregatorių payout'ai → Pinigai kelyje (273) ──
+            payout_dk = AggregatorPayoutJournalBuilder(self.user, self.company_profile)
+            payout_result = payout_dk.create_for_statement(stmt)
+            logger.info(f"[BankImport] Re-match Aggregator payouts: {payout_result}")
 
             # ── 8. Пересчитать документы ───────────────────
             if affected_invoice_ids:
