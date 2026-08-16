@@ -25,6 +25,7 @@ from rest_framework.exceptions import ValidationError
 from django.contrib.postgres.search import TrigramSimilarity
 from django.utils.html import strip_tags
 
+
 from django.core.files.base import ContentFile
 from .tasks import process_uploaded_file_task 
 
@@ -9551,19 +9552,18 @@ class BankMatchingDebugView(APIView):
             user=request.user,
         )
 
-        qs = (
-            stmt.outgoing_transactions
-            .all()
-            .order_by("transaction_date", "id")
-        )
+        # Показываем и приходы (payout агрегаторов, оплаты клиентов),
+        # и расходы — иначе incoming Stripe/Checkout не видно.
+        out_qs = stmt.outgoing_transactions.all()
+        inc_qs = stmt.incoming_transactions.all()
 
-        # Debug page: показываем всё, кроме уже вручную подтверждённых,
-        # чтобы видеть и unmatched, и likely, и auto.
         if only_unmatched:
-            qs = qs.exclude(match_status__in=[
-                "confirmed",
-                "manually_matched",
-            ])
+            out_qs = out_qs.exclude(match_status__in=["confirmed", "manually_matched"])
+            inc_qs = inc_qs.exclude(match_status__in=["confirmed", "manually_matched"])
+
+        # Помечаем направление, чтобы actual_match знал, где искать аллокацию
+        txns = [("outgoing", t) for t in out_qs] + [("incoming", t) for t in inc_qs]
+        txns.sort(key=lambda pair: (pair[1].transaction_date or date.min, pair[1].id))
 
         from .utils.purchase_matching_signals import SignalPurchaseMatchingEngine
 
@@ -9590,27 +9590,40 @@ class BankMatchingDebugView(APIView):
             "signal_skipped": 0,
         }
 
-        for txn in qs:
+        for direction, txn in txns:
             summary["transactions"] += 1
 
-            actual_match = self._build_actual_match(txn)
+            actual_match = self._build_actual_match(txn, direction)
 
-            try:
-                signal_result = signal_engine._match_one(txn, signal_candidates)
-                signal_match = self._build_signal_match(signal_result)
-            except Exception as e:
-                logger.exception("[BankMatchingDebug] signal dry-run failed txn=%s", txn.id)
+            if direction == "incoming":
+                # Signal engine матчит покупки (outgoing). Для приходов пропускаем.
                 signal_match = {
-                    "status": "error",
+                    "status": "unmatched",
                     "confidence": "0",
                     "confidence_pct": 0,
-                    "error": str(e),
                     "purchase": None,
                     "amount": "0",
                     "matched_document_number": "",
-                    "reasons": {},
+                    "reasons": {"skipped": "incoming"},
                     "signals": {},
                 }
+            else:
+                try:
+                    signal_result = signal_engine._match_one(txn, signal_candidates)
+                    signal_match = self._build_signal_match(signal_result)
+                except Exception as e:
+                    logger.exception("[BankMatchingDebug] signal dry-run failed txn=%s", txn.id)
+                    signal_match = {
+                        "status": "error",
+                        "confidence": "0",
+                        "confidence_pct": 0,
+                        "error": str(e),
+                        "purchase": None,
+                        "amount": "0",
+                        "matched_document_number": "",
+                        "reasons": {},
+                        "signals": {},
+                    }
 
             actual_status = actual_match.get("status") or "unmatched"
             signal_status = signal_match.get("status") or "unmatched"
@@ -9669,11 +9682,16 @@ class BankMatchingDebugView(APIView):
             "items": items,
         })
 
-    def _build_actual_match(self, txn):
+    def _build_actual_match(self, txn, direction="outgoing"):
+        if direction == "incoming":
+            alloc_filter = {"incoming_transaction": txn}
+        else:
+            alloc_filter = {"outgoing_transaction": txn}
+
         alloc = (
             PaymentAllocation.objects
-            .filter(outgoing_transaction=txn)
-            .select_related("purchase")
+            .filter(**alloc_filter)
+            .select_related("purchase", "invoice")
             .order_by("-confidence", "-created_at")
             .first()
         )

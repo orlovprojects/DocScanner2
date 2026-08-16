@@ -192,7 +192,7 @@ const BankMatchingDebugPage = () => {
             InputLabelProps={{ shrink: true }}
           >
             <MenuItem value="true">Be rankiniu būdu patvirtintų</MenuItem>
-            <MenuItem value="false">Visas išlaidas</MenuItem>
+            <MenuItem value="false">Visas operacijas</MenuItem>
           </TextField>
 
           <Button
