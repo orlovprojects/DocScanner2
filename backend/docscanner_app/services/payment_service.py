@@ -1386,14 +1386,17 @@ class AggregatorPayoutJournalBuilder:
 
         for txn in txns:
             # Приоритет: ручная пометка юзера > авто-распознавание по имени
-            provider = (txn.manual_aggregator_provider or "").strip().lower()
+            provider = (getattr(txn, "manual_aggregator_provider", "") or "").strip().lower()
             if not provider:
                 provider = self.company_profile.detect_aggregator_provider(
                     txn.counterparty_name or ""
                 )
+
+            # Не агрегатор → пропускаем, НИКАКОГО JE
             if not provider:
                 skipped += 1
                 continue
+
             try:
                 entry = self._create_for_txn(txn, provider)
                 if entry:
@@ -1408,6 +1411,11 @@ class AggregatorPayoutJournalBuilder:
 
     def _create_for_txn(self, txn, provider: str):
         if txn.journal_entry_id:
+            return None
+
+        # Защита: без провайдера JE не создаём (иначе поймаем всё подряд)
+        provider = (provider or "").strip().lower()
+        if not provider or provider not in self.company_profile.AGGREGATOR_LABELS:
             return None
 
         # Защита: только incoming (payout — всегда приход)

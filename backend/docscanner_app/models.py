@@ -1205,6 +1205,7 @@ class CompanyProfile(models.Model):
         "montonio": "Montonio",
         "paysera": "Paysera",
         "stripe": "Stripe",
+        "checkout": "Checkout.com",
         "shopify": "Shopify",
         "paypal": "PayPal",
         "woocommerce": "WooCommerce",
