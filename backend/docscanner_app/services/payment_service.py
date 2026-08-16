@@ -1347,3 +1347,140 @@ class BankCategoryJournalBuilder:
             label = f"{label} {currency}"
 
         return label[:255]
+    
+
+
+
+class AggregatorPayoutJournalBuilder:
+    """
+    DK įrašai agregatorių payout'ams banko išraše (Variantas A).
+
+    Incoming транзакция, kuri NEpriskirta sąskaitai, bet kontrahentas =
+    agregatorius (Montonio/Stripe/...) → tai payout, uždarantis Pinigai kelyje.
+
+    Provodka (Variantas A):
+        D 271x (bankas)        — banko išrašo suma
+        K 273x (Pinigai kelyje: provider)  — ta pati suma
+
+    Komisija NEskaičiuojama automatiškai — lieka kaboti 273x kaip likutis,
+    kurį vartotojas uždaro rankiniu DK arba pirkimo sąskaita (6200).
+    """
+
+    def __init__(self, user, company_profile=None):
+        self.user = user
+        self.company_profile = company_profile or getattr(user, "active_company_profile", None)
+
+    def create_for_statement(self, statement) -> dict:
+        if not self.company_profile:
+            return {"created": 0, "skipped": 0, "errors": 0}
+
+        created = skipped = errors = 0
+
+        # Только несматченные incoming (payout не привязан к инвойсу)
+        txns = list(
+            statement.incoming_transactions.filter(
+                match_status="unmatched",
+                journal_entry__isnull=True,
+            ).order_by("transaction_date", "id")
+        )
+
+        for txn in txns:
+            # Приоритет: ручная пометка юзера > авто-распознавание по имени
+            provider = (txn.manual_aggregator_provider or "").strip().lower()
+            if not provider:
+                provider = self.company_profile.detect_aggregator_provider(
+                    txn.counterparty_name or ""
+                )
+            if not provider:
+                skipped += 1
+                continue
+            try:
+                entry = self._create_for_txn(txn, provider)
+                if entry:
+                    created += 1
+                else:
+                    skipped += 1
+            except Exception:
+                errors += 1
+                logger.exception("[AggregatorPayout] Failed txn=%s", txn.id)
+
+        return {"created": created, "skipped": skipped, "errors": errors}
+
+    def _create_for_txn(self, txn, provider: str):
+        if txn.journal_entry_id:
+            return None
+
+        # Защита: только incoming (payout — всегда приход)
+        if not isinstance(txn, IncomingTransaction):
+            logger.warning(
+                "[AggregatorPayout] Non-incoming txn %s rejected",
+                getattr(txn, "id", "?"),
+            )
+            return None
+
+        amount = abs(txn.amount or Decimal("0"))
+        if amount <= Decimal("0"):
+            return None
+
+        if (txn.currency or "EUR").upper() != "EUR":
+            return None
+
+        # Транзит счёт агрегатора (тот же ключ, что и на входящей стороне)
+        transit = self.company_profile.get_transit_account("payment_link", provider)
+        transit_code = transit["account"]
+        transit_name = f"Pinigai kelyje ({transit['label']})"
+
+        # Банковский счёт выписки
+        bank_code = "2711"
+        stmt = getattr(txn, "bank_statement", None)
+        if stmt and stmt.account_iban:
+            info = self.company_profile.get_bank_chart_account(
+                stmt.account_iban, stmt.bank_name, stmt.currency or "EUR",
+            )
+            bank_code = info.get("account", "2711")
+
+        desc = f"Agregatoriaus išmoka: {transit['label']}"
+
+        with db_transaction.atomic():
+            locked = IncomingTransaction.objects.select_for_update().get(id=txn.id)
+            if locked.journal_entry_id:
+                return None
+
+            entry = JournalEntry.objects.create(
+                user=self.user,
+                company_profile=self.company_profile,
+                source_type=JournalEntry.SOURCE_BANK,
+                entry_date=locked.transaction_date,
+                period=date(locked.transaction_date.year, locked.transaction_date.month, 1),
+                document_number=locked.doc_number or f"PAYOUT-{locked.id}",
+                counterparty_name=locked.counterparty_name or transit["label"],
+                counterparty_code=locked.counterparty_code or "",
+                description=desc,
+                status=JournalEntry.STATUS_DRAFT,
+                currency="EUR",
+            )
+
+            JournalEntryLine.objects.bulk_create([
+                JournalEntryLine(
+                    entry=entry, side="D",
+                    account_code=bank_code, account_name="Banko sąskaita",
+                    amount=amount, description=desc, sort_order=0,
+                ),
+                JournalEntryLine(
+                    entry=entry, side="K",
+                    account_code=transit_code, account_name=transit_name,
+                    amount=amount, description=desc, sort_order=1,
+                ),
+            ])
+
+            finalize_journal_entry(entry)
+
+            locked.journal_entry = entry
+            locked.match_status = "classified"
+            locked.save(update_fields=["journal_entry", "match_status", "updated_at"])
+
+            logger.info(
+                "[AggregatorPayout] DK #%s: D %s / K %s = %s (%s)",
+                entry.id, bank_code, transit_code, amount, transit["label"],
+            )
+            return entry

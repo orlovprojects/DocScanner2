@@ -296,7 +296,7 @@ function DownloadButton({ label, fileUrl }) {
           download
           onClick={handleClick}
           className="dl-button"
-          sx={{ width: { xs: "100%", sm: "auto" }, maxWidth: { xs: 360, sm: "none" } }}
+          sx={{ width: "auto !important", display: "inline-block", flex: "0 0 auto", alignSelf: "center" }}
         >
           <span className="dl-button-outer">
             <span className="dl-button-inner">

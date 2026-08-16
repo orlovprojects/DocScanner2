@@ -10459,6 +10459,60 @@ class RemoveManualPaymentView(APIView):
         except PaymentAllocation.DoesNotExist:
             return Response({"error": "Not found"}, status=status.HTTP_404_NOT_FOUND)
 
+class MarkAsAggregatorPayoutView(APIView):
+    """
+    POST /api/invoicing/bank-transactions/<pk>/mark-aggregator/
+    Body: { "provider": "montonio" }  (или "" чтобы снять пометку)
+
+    Помечает incoming транзакцию как payout агрегатора и сразу создаёт
+    DK D bankas / K Pinigai kelyje (закрытие транзита, Вариант A).
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, pk):
+        from .models import IncomingTransaction, CompanyProfile
+        from .services.bank_import_service import AggregatorPayoutJournalBuilder
+
+        txn = get_object_or_404(IncomingTransaction, pk=pk, user=request.user)
+        provider = (request.data.get("provider") or "").strip().lower()
+
+        # Валидация провайдера (если не пусто)
+        if provider and provider not in CompanyProfile.AGGREGATOR_LABELS:
+            return Response(
+                {"detail": f"Nežinomas agregatorius: {provider}"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        txn.manual_aggregator_provider = provider
+        txn.save(update_fields=["manual_aggregator_provider", "updated_at"])
+
+        # Снятие пометки — просто сохранили пустое, JE не трогаем здесь
+        if not provider:
+            return Response({"status": "unmarked"})
+
+        # Создаём payout DK сразу
+        cp = txn.company_profile or request.user.active_company_profile
+        builder = AggregatorPayoutJournalBuilder(request.user, cp)
+        try:
+            entry = builder._create_for_txn(txn, provider)
+        except Exception as e:
+            logger.exception("[MarkAggregator] Failed txn=%s", pk)
+            return Response(
+                {"detail": f"Klaida kuriant DK: {e}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+        if not entry:
+            return Response({
+                "status": "marked",
+                "detail": "Pažymėta, bet DK nesukurtas (jau egzistuoja arba ne EUR).",
+            })
+
+        return Response({
+            "status": "marked",
+            "journal_entry_id": entry.id,
+            "provider": provider,
+        })
 
 # ────────────────────────────────────────────────────────────
 # Matching Actions

@@ -955,6 +955,16 @@ class CompanyProfile(models.Model):
             '{"LT19...": {"account": "2711", "bank": "seb", "label": "SEB pagrindinė"}}'
         ),
     )
+    transit_accounts_mapping = models.JSONField(
+        "Tarpinių (agregatorių) sąskaitų susiejimas",
+        default=dict,
+        blank=True,
+        help_text=(
+            'channel:provider → buhalterinė sąskaita (273 grupė). Formatas: '
+            '{"payment_link:montonio": {"account": "2731", "channel": "payment_link", '
+            '"provider": "montonio", "label": "Montonio", "currency": "EUR"}}'
+        ),
+    )
     # Kontaktai / bankas (pardavėjo rekvizitai sąskaitoms)
     phone = models.CharField("Telefonas", max_length=50, blank=True, null=True)
     email = models.EmailField("El. paštas", blank=True, null=True)
@@ -1188,6 +1198,133 @@ class CompanyProfile(models.Model):
             })
 
         return result
+    
+    # ── Tarpinės (agregatorių) sąskaitos — Pinigai kelyje (273) ──
+
+    AGGREGATOR_LABELS = {
+        "montonio": "Montonio",
+        "paysera": "Paysera",
+        "stripe": "Stripe",
+        "shopify": "Shopify",
+        "paypal": "PayPal",
+        "woocommerce": "WooCommerce",
+        "opencart": "OpenCart",
+        "opay": "Opay",
+    }
+
+    @staticmethod
+    def _transit_key(channel: str, provider: str) -> str:
+        ch = (channel or "").strip().lower()
+        pr = (provider or "").strip().lower()
+        if not ch or not pr:
+            return ""
+        return f"{ch}:{pr}"
+
+    def get_transit_account(self, channel: str, provider: str,
+                            currency: str = "EUR", label: str = "") -> dict:
+        """
+        Grąžina tarpinės (Pinigai kelyje, 273) sąskaitos info pagal channel:provider.
+        Jei nėra — sukuria naują 273x sąskaitą (auto-detection).
+        Analogiška get_bank_chart_account.
+        """
+        mapping = self.transit_accounts_mapping or {}
+
+        key = self._transit_key(channel, provider)
+        if not key:
+            return {"account": "2731", "channel": channel, "provider": provider,
+                    "label": label or "Pinigai kelyje", "currency": (currency or "EUR").upper()}
+
+        cur = (currency or "EUR").strip().upper()
+        pr = (provider or "").strip().lower()
+
+        # 1. Exact match
+        if key in mapping:
+            entry = dict(mapping[key])
+            changed = False
+            if not entry.get("label"):
+                entry["label"] = label or self.AGGREGATOR_LABELS.get(pr, provider or "Pinigai kelyje")
+                changed = True
+            if not entry.get("currency"):
+                entry["currency"] = cur
+                changed = True
+            if changed:
+                mapping[key] = entry
+                self.transit_accounts_mapping = mapping
+                self.save(update_fields=["transit_accounts_mapping"])
+            return entry
+
+        # 2. Sukurti naują — sekantis laisvas 273x
+        existing_accounts = {v.get("account", "") for v in mapping.values()}
+        next_account = "2731"
+        for i in range(1, 10):
+            candidate = f"273{i}"
+            if candidate not in existing_accounts:
+                next_account = candidate
+                break
+
+        entry = {
+            "account": next_account,
+            "channel": (channel or "").strip().lower(),
+            "provider": pr,
+            "label": label or self.AGGREGATOR_LABELS.get(pr, provider or "Pinigai kelyje"),
+            "currency": cur,
+        }
+
+        mapping[key] = entry
+        self.transit_accounts_mapping = mapping
+        self.save(update_fields=["transit_accounts_mapping"])
+
+        logger.info(
+            "[CompanyProfile] Auto-created transit mapping: %s → %s (%s)",
+            key, next_account, entry["label"],
+        )
+        return entry
+
+    def set_transit_account(self, channel: str, provider: str, account: str,
+                            label: str = "", currency: str = "EUR"):
+        """Rankinis tarpinės sąskaitos priskyrimas (UI dialogas)."""
+        mapping = self.transit_accounts_mapping or {}
+        key = self._transit_key(channel, provider)
+        if not key:
+            return
+
+        pr = (provider or "").strip().lower()
+        mapping[key] = {
+            "account": account,
+            "channel": (channel or "").strip().lower(),
+            "provider": pr,
+            "label": label or self.AGGREGATOR_LABELS.get(pr, provider or "Pinigai kelyje"),
+            "currency": (currency or "EUR").strip().upper(),
+        }
+        self.transit_accounts_mapping = mapping
+        self.save(update_fields=["transit_accounts_mapping"])
+
+    def get_all_transit_accounts(self) -> list:
+        """Visų tarpinių sąskaitų sąrašas (UI)."""
+        mapping = self.transit_accounts_mapping or {}
+        result = []
+        for key, entry in mapping.items():
+            result.append({
+                "key": key,
+                "channel": entry.get("channel", ""),
+                "provider": entry.get("provider", ""),
+                "account": entry.get("account", "2731"),
+                "label": entry.get("label", ""),
+                "currency": entry.get("currency", "EUR"),
+            })
+        return result
+
+    @staticmethod
+    def detect_aggregator_provider(counterparty_name: str) -> str:
+        """
+        Pagal banko išrašo kontrahento pavadinimą atpažįsta agregatorių.
+        Grąžina provider raktą (montonio/paysera/stripe/...) arba "".
+        """
+        name = (counterparty_name or "").lower()
+        for provider in CompanyProfile.AGGREGATOR_LABELS:
+            if provider in name:
+                return provider
+        return ""
 
     
 ### Integracii s buhalterskimi programami:
@@ -4094,6 +4231,13 @@ class IncomingTransaction(BaseTransaction):
         on_delete=models.CASCADE,
         related_name="incoming_transactions",
     )
+    manual_aggregator_provider = models.CharField(
+        "Rankiniu būdu pažymėtas agregatorius",
+        max_length=32,
+        blank=True,
+        default="",
+        help_text="Jei užpildyta — ši incoming operacija laikoma agregatoriaus išmoka (payout).",
+    )
 
     class Meta:
         ordering = ["-transaction_date", "-id"]
@@ -4163,6 +4307,7 @@ class PaymentAllocation(models.Model):
         ("bank_import", "Banko išrašas"),
         ("payment_link", "Mokėjimo nuoroda"),
         ("provider_payout", "Tarpininko išmoka"),
+        ("ecommerce", "E-parduotuvė"),
         ("manual", "Rankinis"),
         ("api", "API"),
     ]

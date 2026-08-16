@@ -115,6 +115,7 @@ from .views import (
     invoice_update_kor,
     patch_dk_line,
     onboarding_company_search,
+    MarkAsAggregatorPayoutView,
 )
 from .views import (
     counterparty_list_create,
@@ -544,6 +545,7 @@ urlpatterns = [
     path('transactions/<int:pk>/register-dk/', TransactionRegisterDKView.as_view()),
     path('invoicing/invoices/<int:pk>/update-kor/', invoice_update_kor, name='invoice-update-kor'),
 
+    path('invoicing/bank-transactions/<int:pk>/mark-aggregator/', MarkAsAggregatorPayoutView.as_view(), name='mark-aggregator'),
 
     # ─── Direct payment links ───
     # Payment providers

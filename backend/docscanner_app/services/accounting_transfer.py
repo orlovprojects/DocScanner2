@@ -21,6 +21,16 @@ from ..utils.journal_generators import finalize_journal_entry
 logger = logging.getLogger("docscanner_app")
 
 
+TRANSIT_SOURCES = ("payment_link", "provider_payout", "ecommerce")
+
+
+def _channel_for_source(source: str) -> str:
+    """PaymentAllocation.source → transit channel."""
+    if source == "ecommerce":
+        return "ecommerce"
+    return "payment_link"  # payment_link + provider_payout идут одним каналом
+
+
 # ════════════════════════════════════════════════════════════
 # 1. Invoice → JournalEntry (при issue)
 # ════════════════════════════════════════════════════════════
@@ -113,9 +123,18 @@ def create_je_for_allocation(allocation):
     with db_transaction.atomic():
         # Определить проводку
         if direction == "incoming" and allocation.invoice:
-            # Нам заплатили → Dr. банк, Cr. дебиторка
-            debit_code = bank_account
-            debit_name = "Banko sąskaita"
+            # Нам заплатили
+            if allocation.source in TRANSIT_SOURCES:
+                # Через агрегатора → деньги «в пути» (273), не на банке.
+                # Иначе задвоим при импорте выписки с payout агрегатора.
+                provider = (allocation.match_reasons or {}).get("provider", "")
+                channel = _channel_for_source(allocation.source)
+                transit = cp.get_transit_account(channel, provider)
+                debit_code = transit["account"]
+                debit_name = f"Pinigai kelyje ({transit['label']})"
+            else:
+                debit_code = bank_account
+                debit_name = "Banko sąskaita"
             credit_code = "2410"
             credit_name = "Pirkėjų skolos"
             counterparty = allocation.invoice.buyer_name or ""
