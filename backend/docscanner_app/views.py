@@ -6900,28 +6900,8 @@ def invoice_delete(request, pk):
                 "perkelta_i_company_profile",
             ])
 
-        # ── Удалить PaymentAllocations и вернуть транзакции в unmatched ──
-        for alloc in invoice.payment_allocations.all():
-            from .services.accounting_transfer import delete_je_for_allocation
-            delete_je_for_allocation(alloc)
-
-            txn = alloc.transaction
-            alloc.delete()
-
-            if txn:
-                from django.db.models import Sum
-                new_total = txn.allocations.aggregate(t=Sum("amount"))["t"] or 0
-                txn.allocated_amount = new_total
-                if not txn.allocations.exists():
-                    txn.match_status = "unmatched"
-                    txn.match_confidence = 0
-                    txn.transaction_category = ""
-                txn.save(update_fields=[
-                    "allocated_amount", "match_status",
-                    "match_confidence", "transaction_category", "updated_at",
-                ])
-                if txn.bank_statement:
-                    txn.bank_statement.refresh_stats()
+        # ── Снять привязки + JE платежей + вернуть txn в unmatched ──
+        _cleanup_invoice_payment_links(invoice)
 
         invoice.delete()
 
@@ -7277,6 +7257,27 @@ def invoice_mark_paid(request, pk):
 
     return Response(data)
 
+def _cleanup_invoice_payment_links(invoice):
+    """Снять привязки инвойса + JE платежей + вернуть txn в unmatched."""
+    from .services.accounting_transfer import delete_je_for_allocation
+    from django.db.models import Sum
+    for alloc in invoice.payment_allocations.all():
+        delete_je_for_allocation(alloc)
+        txn = alloc.transaction
+        alloc.delete()
+        if txn:
+            txn.allocated_amount = txn.allocations.aggregate(t=Sum("amount"))["t"] or 0
+            if not txn.allocations.exists():
+                txn.match_status = "unmatched"
+                txn.match_confidence = 0
+                txn.matched_document_number = ""
+                txn.transaction_category = ""
+            txn.save(update_fields=[
+                "allocated_amount", "match_status", "match_confidence",
+                "matched_document_number", "transaction_category", "updated_at",
+            ])
+            if txn.bank_statement:
+                txn.bank_statement.refresh_stats()
 
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
@@ -7301,6 +7302,9 @@ def invoice_cancel(request, pk):
         from .services.accounting_transfer import delete_je_for_invoice
         delete_je_for_invoice(invoice)
 
+        # ── Снять платёжные привязки + вернуть txn в unmatched ──
+        _cleanup_invoice_payment_links(invoice)
+
         # Каскад: išankstinė → derived SF/PVM SF
         if invoice.invoice_type == "isankstine":
             derived = list(
@@ -7313,6 +7317,7 @@ def invoice_cancel(request, pk):
                 derived_inv.cancelled_at = now
                 derived_inv.save(update_fields=["status", "cancelled_at", "updated_at"])
                 delete_je_for_invoice(derived_inv)
+                _cleanup_invoice_payment_links(derived_inv)
 
         # Каскад: SF/PVM SF → source išankstinė
         if (
@@ -9280,6 +9285,9 @@ class TransactionListView(APIView):
         q = request.query_params.get("q", "").strip()
 
         def apply_filters(qs, include_match_status=True):
+            # Только транзакции из банковских выписок —
+            # payment-link (вебхучные) операции без bank_statement исключаем
+            qs = qs.filter(bank_statement__isnull=False)
             if cp:
                 qs = qs.filter(company_profile=cp)
             if stmt_id:
