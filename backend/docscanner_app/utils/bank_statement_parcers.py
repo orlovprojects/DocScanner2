@@ -13,7 +13,7 @@ import logging
 import re
 from abc import ABC, abstractmethod
 from datetime import date, datetime
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from typing import BinaryIO, Optional, Union
 from xml.etree import ElementTree as ET
 
@@ -866,6 +866,221 @@ class RevolutCSVParser(BaseBankParser):
 
 
 # ────────────────────────────────────────────────────────────
+# PayPal XLSX (activity export)
+# ────────────────────────────────────────────────────────────
+
+
+class PayPalXLSXParser(BaseBankParser):
+    """
+    PayPal activity export (.xlsx).
+    - Режем внутренние движения: reserve/hold/authorization/currency conversion.
+    - Дедуп по Transaction ID (Memo-эхо схлопывается).
+    - Направление по знаку Gross.
+    - Комиссия (Fee, отрицательная) — отдельной операцией.
+    - Валюта: EUR-нога General Currency Conversion (Reference Txn ID == Transaction ID
+      платежа) даёт amount_eur; курс = foreign/eur.
+    """
+
+    bank_name = "paypal"
+
+    SKIP_TYPE = re.compile(r"reserve|hold|authorization|currency conversion", re.I)
+
+    HEADER_ALIASES = {
+        "date": "transaction_date", "name": "name", "type": "type",
+        "status": "status", "currency": "currency", "gross": "gross",
+        "fee": "fee", "net": "net", "from email address": "from_email",
+        "to email address": "to_email", "transaction id": "txn_id",
+        "item title": "item_title", "invoice number": "invoice_number",
+        "reference txn id": "ref_txn_id", "balance impact": "balance_impact",
+        "subject": "subject", "note": "note",
+    }
+
+    def _dec(self, v):
+        if v is None or v == "":
+            return None
+        if isinstance(v, (int, float, Decimal)):
+            try:
+                return Decimal(str(v))
+            except (InvalidOperation, ValueError):
+                return None
+        s = str(v).strip().replace("\xa0", "").replace(" ", "")
+        if "," in s and "." in s:
+            s = s.replace(".", "").replace(",", ".")
+        elif "," in s:
+            s = s.replace(",", ".")
+        try:
+            return Decimal(s)
+        except (InvalidOperation, ValueError):
+            return None
+
+    def _to_date(self, v):
+        if isinstance(v, datetime):
+            return v.date()
+        if isinstance(v, date):
+            return v
+        if isinstance(v, str):
+            for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%m/%d/%Y", "%d.%m.%Y", "%Y.%m.%d"):
+                try:
+                    return datetime.strptime(v.strip(), fmt).date()
+                except ValueError:
+                    continue
+        return None
+
+    def parse(self, file_content) -> list[dict]:
+        from collections import defaultdict
+        from openpyxl import load_workbook
+
+        raw = self._to_bytes(file_content)
+        wb = load_workbook(io.BytesIO(raw), read_only=True, data_only=True)
+        ws = wb.active
+
+        it = ws.iter_rows(values_only=True)
+        try:
+            header = next(it)
+        except StopIteration:
+            return []
+
+        col = {}
+        for i, h in enumerate(header):
+            key = self.HEADER_ALIASES.get(str(h or "").strip().lower())
+            if key and key not in col:
+                col[key] = i
+
+        if "gross" not in col or "txn_id" not in col:
+            logger.warning("[PayPalXLSX] Missing key columns: %s", list(col))
+            return []
+
+        def g(row, field):
+            i = col.get(field)
+            return row[i] if i is not None and i < len(row) else None
+
+        allrows = list(it)
+
+        # ── Pass 0: EUR-ноги конверсий по Reference Txn ID ──
+        conv_eur = defaultdict(Decimal)
+        for row in allrows:
+            if "Currency Conversion" in str(g(row, "type") or "") \
+                    and str(g(row, "currency") or "") == "EUR":
+                ref = str(g(row, "ref_txn_id") or "").strip()
+                amt = self._dec(g(row, "gross"))
+                if ref and amt is not None:
+                    conv_eur[ref] += abs(amt)
+
+        # ── Pass 1: группировка реальных платежей по Transaction ID ──
+        groups = {}
+        synth = 0
+        for row in allrows:
+            if self.SKIP_TYPE.search(str(g(row, "type") or "")):
+                continue
+            if self._dec(g(row, "gross")) is None:
+                continue
+            tid = str(g(row, "txn_id") or "").strip()
+            if not tid:
+                synth += 1
+                tid = "__NOID_%d" % synth
+            groups.setdefault(tid, []).append(row)
+
+        def first_nonempty(grp, field):
+            for r in grp:
+                v = g(r, field)
+                if v not in (None, ""):
+                    return str(v).strip()
+            return ""
+
+        Q2 = Decimal("0.01")
+        Q6 = Decimal("0.000001")
+        transactions = []
+        for tid, grp in groups.items():
+            rep = next(
+                (r for r in grp if self._dec(g(r, "fee")) not in (None, Decimal("0"))),
+                None,
+            )
+            if rep is None:
+                rep = next(
+                    (r for r in grp if str(g(r, "balance_impact") or "") in ("Credit", "Debit")),
+                    None,
+                )
+            if rep is None:
+                rep = grp[0]
+
+            gross = self._dec(g(rep, "gross")) or Decimal("0")
+            txn_date = self._to_date(g(rep, "transaction_date"))
+            if not txn_date:
+                continue
+
+            direction = "credit" if gross > 0 else "debit"
+            currency = first_nonempty(grp, "currency") or "EUR"
+            amount = abs(gross)
+            real_tid = "" if tid.startswith("__NOID_") else tid
+
+            if currency == "EUR":
+                amount_eur, rate, rate_date = amount, None, None
+            else:
+                eur = conv_eur.get(real_tid)
+                if eur and eur > 0:
+                    amount_eur = eur.quantize(Q2, ROUND_HALF_UP)
+                    rate = (amount / eur).quantize(Q6, ROUND_HALF_UP)
+                    rate_date = txn_date
+                else:
+                    amount_eur, rate, rate_date = None, None, None
+
+            name = first_nonempty(grp, "name")
+            cp_email = (
+                first_nonempty(grp, "from_email")
+                if direction == "credit"
+                else first_nonempty(grp, "to_email")
+            )
+
+            transactions.append({
+                "transaction_date": txn_date,
+                "value_date": txn_date,
+                "doc_number": first_nonempty(grp, "invoice_number"),
+                "bank_operation_code": first_nonempty(grp, "type"),
+                "counterparty_name": name or cp_email,
+                "counterparty_code": "",
+                "counterparty_account": "",
+                "payment_purpose": first_nonempty(grp, "type"),
+                "reference_number": real_tid,
+                "amount": amount,
+                "currency": currency,
+                "amount_eur": amount_eur,
+                "exchange_rate": rate,
+                "exchange_rate_date": rate_date,
+                "direction": direction,
+            })
+
+            fee = self._dec(g(rep, "fee"))
+            if fee is not None and fee != 0:
+                fee_amt = abs(fee)
+                if currency == "EUR":
+                    fee_eur = fee_amt
+                elif rate:
+                    fee_eur = (fee_amt / rate).quantize(Q2, ROUND_HALF_UP)
+                else:
+                    fee_eur = None
+                transactions.append({
+                    "transaction_date": txn_date,
+                    "value_date": txn_date,
+                    "doc_number": "",
+                    "bank_operation_code": "PayPal Fee",
+                    "counterparty_name": "PayPal",
+                    "counterparty_code": "",
+                    "counterparty_account": "",
+                    "payment_purpose": "PayPal komisinis mokestis | %s" % real_tid,
+                    "reference_number": (real_tid + "-FEE") if real_tid else "",
+                    "amount": fee_amt,
+                    "currency": currency,
+                    "amount_eur": fee_eur,
+                    "exchange_rate": rate,
+                    "exchange_rate_date": rate_date,
+                    "direction": "debit" if fee < 0 else "credit",
+                })
+
+        logger.info("[PayPalXLSX] %d ops emitted", len(transactions))
+        return transactions
+
+
+# ────────────────────────────────────────────────────────────
 # Registry & Detection
 # ────────────────────────────────────────────────────────────
 
@@ -879,6 +1094,7 @@ PARSER_REGISTRY = {
     ("luminor", "xml"): ISO20022Parser,
     ("siauliu", "csv"): SwedbankCSVParser,
     ("revolut", "csv"): RevolutCSVParser,
+    ("paypal", "xlsx"): PayPalXLSXParser,
 }
 
 
@@ -938,7 +1154,24 @@ def _detect_bank_from_camt(content: bytes) -> Optional[str]:
 
     return None
 
+def _detect_paypal_xlsx(content: bytes) -> bool:
+    """PayPal activity export (xlsx): узнаём по заголовкам (оба формата — старый без Balance Impact)."""
+    try:
+        from openpyxl import load_workbook
+        wb = load_workbook(io.BytesIO(content), read_only=True, data_only=True)
+        ws = wb.active
+        header = next(ws.iter_rows(max_row=1, values_only=True), ())
+        cols = {str(h or "").strip().lower() for h in header}
+        return {"transaction id", "gross", "fee", "net"}.issubset(cols)
+    except Exception:
+        return False
+
+
 def detect_bank_from_content(content: bytes) -> Optional[str]:
+    # ── PayPal XLSX (бинарный zip, текстом не читается) ──
+    if content[:2] == b"PK" and _detect_paypal_xlsx(content):
+        return "paypal"
+
     text = ""
 
     for enc in ("utf-8-sig", "utf-8", "windows-1257"):
@@ -1032,4 +1265,6 @@ def detect_format_from_content(content: bytes) -> str:
     start = content[:100].strip()
     if start.startswith(b"<?xml") or start.startswith(b"<Document"):
         return "xml"
+    if content[:2] == b"PK":       # XLSX (OOXML zip)
+        return "xlsx"
     return "csv"

@@ -2,7 +2,7 @@ import os
 import logging
 import re
 from datetime import datetime, date
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 
 from django.conf import settings
 from django.db import IntegrityError
@@ -44,7 +44,7 @@ class BankImportError(Exception):
 class BankImportService:
     """Импорт банковской выписки: файл → validate → save raw → parse → dedup → match."""
 
-    ALLOWED_EXTENSIONS = {".csv", ".xml"}
+    ALLOWED_EXTENSIONS = {".csv", ".xml", ".xlsx"}
     ALLOWED_CONTENT_TYPES = {
         "text/csv", "text/xml", "application/xml",
         "application/vnd.ms-excel",  # some systems send CSV as this
@@ -709,6 +709,27 @@ class BankImportService:
                 amount=raw["amount"],
                 currency=raw.get("currency", "EUR"),
             )
+
+            # ── Валюта → EUR (курс из выписки или дефолт для EUR) ──
+            _cur = (raw.get("currency") or "EUR").upper()
+            if _cur == "EUR":
+                txn.amount_eur = raw["amount"]
+                txn.exchange_rate = None
+                txn.exchange_rate_date = None
+            else:
+                txn.amount_eur = raw.get("amount_eur")
+                txn.exchange_rate = raw.get("exchange_rate")
+                txn.exchange_rate_date = raw.get("exchange_rate_date")
+                # Фолбэк: если EUR из выписки нет — курс LB на дату операции
+                if txn.amount_eur is None:
+                    from .accounting_transfer import rate_to_eur
+                    _r = rate_to_eur(_cur, txn.transaction_date)
+                    txn.amount_eur = (
+                        Decimal(str(txn.amount)) / _r
+                    ).quantize(Decimal("0.01"), ROUND_HALF_UP)
+                    txn.exchange_rate = _r
+                    txn.exchange_rate_date = txn.transaction_date
+
             txn.transaction_hash = txn.compute_hash()
 
             try:
@@ -1197,9 +1218,14 @@ class BankCategoryJournalBuilder:
         if amount <= Decimal("0"):
             return None
 
-        # Šitam pirmam sluoksniui auto-DK tik EUR.
+        # Валюту конвертируем в EUR (курс из выписки — PayPal, иначе LB на дату)
         if (txn.currency or "EUR").upper() != "EUR":
-            return None
+            from .accounting_transfer import rate_to_eur
+            if txn.amount_eur:
+                amount = abs(txn.amount_eur)
+            else:
+                _r = rate_to_eur(txn.currency, txn.transaction_date)
+                amount = (amount / _r).quantize(Decimal("0.01"), ROUND_HALF_UP)
 
         debit_account = txn.category_account_debit or cfg["debit_account"]
         debit_name = cfg["debit_name"]
@@ -1433,7 +1459,12 @@ class AggregatorPayoutJournalBuilder:
             return None
 
         if (txn.currency or "EUR").upper() != "EUR":
-            return None
+            from .accounting_transfer import rate_to_eur
+            if txn.amount_eur:
+                amount = abs(txn.amount_eur)
+            else:
+                _r = rate_to_eur(txn.currency, txn.transaction_date)
+                amount = (amount / _r).quantize(Decimal("0.01"), ROUND_HALF_UP)
 
         # Транзит счёт агрегатора (тот же ключ, что и на входящей стороне)
         transit = self.company_profile.get_transit_account("payment_link", provider)

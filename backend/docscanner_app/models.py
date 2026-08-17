@@ -3913,12 +3913,14 @@ class BankStatement(models.Model):
         ("luminor", "Luminor"),
         ("siauliu", "Artea"),
         ("revolut", "Revolut"),
+        ("paypal", "PayPal")
         ("other", "Kitas"),
     ]
 
     FORMAT_CHOICES = [
         ("csv", "CSV"),
         ("xml", "XML (ISO 20022)"),
+        ("xlsx", "XLSX")
     ]
 
     STATUS_CHOICES = [

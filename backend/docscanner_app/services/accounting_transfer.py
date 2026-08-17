@@ -13,7 +13,7 @@ services/accounting_transfer.py
 """
 
 import logging
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 
 from django.db import transaction as db_transaction
 from ..utils.journal_generators import finalize_journal_entry
@@ -29,6 +29,39 @@ def _channel_for_source(source: str) -> str:
     if source == "ecommerce":
         return "ecommerce"
     return "payment_link"  # payment_link + provider_payout идут одним каналом
+
+
+def rate_to_eur(currency, on_date) -> Decimal:
+    """
+    Курс LB к EUR по конвенции '1 EUR = rate * currency' (LB/ECB reference).
+    EUR→1. Фолбэк: последний курс до даты, иначе 1.
+    ВАЖНО: если CurrencyRate.rate хранится как обратный (1 currency = X EUR) —
+    поменять на amount*rate ниже.
+    """
+    code = (currency or "EUR").upper()
+    if code == "EUR" or not on_date:
+        return Decimal("1")
+    from ..models import CurrencyRate
+    obj = (
+        CurrencyRate.objects.filter(currency=code, date=on_date).first()
+        or CurrencyRate.objects.filter(currency=code, date__lt=on_date).order_by("-date").first()
+    )
+    if obj and obj.rate:
+        try:
+            r = Decimal(str(obj.rate))
+            if r > 0:
+                return r
+        except Exception:
+            pass
+    return Decimal("1")
+
+
+def _to_eur(amount, rate) -> Decimal:
+    """Сумма в валюте / курс (currency за 1 EUR) = EUR, до сотых."""
+    if not amount:
+        return Decimal("0.00")
+    rate = rate or Decimal("1")
+    return (Decimal(str(amount)) / rate).quantize(Decimal("0.01"), ROUND_HALF_UP)
 
 
 # ════════════════════════════════════════════════════════════
@@ -106,14 +139,17 @@ def create_je_for_allocation(allocation):
         logger.warning("[AccountingTransfer] No CompanyProfile for allocation %s", allocation.id)
         return None
 
-    # Определить банковский счёт (271x)
+    # Определить банковский счёт (271x) — с учётом валюты (мультивалютные субсчета)
     bank_account = "2711"  # default
-    if txn and hasattr(txn, "bank_statement") and txn.bank_statement:
-        iban = txn.bank_statement.account_iban
-        if iban:
-            bank_account = cp.get_bank_chart_account(
-                iban, txn.bank_statement.bank_name,
-            )
+    if txn and getattr(txn, "bank_statement", None):
+        _bs = txn.bank_statement
+        _info = cp.get_bank_chart_account(
+            _bs.account_iban or "", _bs.bank_name, currency=(txn.currency or "EUR"),
+        )
+        if isinstance(_info, dict):
+            bank_account = _info.get("account") or "2711"
+        elif _info:
+            bank_account = _info
 
     payment_date = allocation.effective_payment_date
     period = payment_date.replace(day=1) if payment_date else None
@@ -188,8 +224,39 @@ def create_je_for_allocation(allocation):
             )
             return None
 
-        txn_currency = txn.currency if txn else "EUR"
-        is_foreign = txn_currency.upper() != "EUR" if txn else False
+        # ── Конвертация в EUR: 2410/4430 по курсу LB на дату документа,
+        #    банк по курсу оплаты (PayPal-факт из выписки, иначе LB) ──
+        doc_obj = allocation.invoice or allocation.purchase
+        doc_currency = (getattr(doc_obj, "currency", None) or "EUR").upper()
+        doc_date = (
+            getattr(doc_obj, "invoice_date", None)
+            or getattr(doc_obj, "operation_date", None)
+            or payment_date
+        )
+        pay_currency = (txn.currency if txn else doc_currency).upper()
+
+        doc_rate = rate_to_eur(doc_currency, doc_date)
+        if txn and txn.exchange_rate:
+            txn_rate = Decimal(str(txn.exchange_rate))
+        elif txn and txn.amount_eur and txn.amount:
+            txn_rate = Decimal(str(txn.amount)) / Decimal(str(txn.amount_eur))
+        elif txn:
+            txn_rate = rate_to_eur(pay_currency, payment_date or doc_date)
+        else:
+            txn_rate = doc_rate  # manual: без отдельного курса оплаты
+
+        doc_eur = _to_eur(allocation.amount, doc_rate)
+        bank_eur = _to_eur(allocation.amount, txn_rate)
+
+        is_incoming_side = allocation.invoice_id is not None
+        if is_incoming_side:
+            debit_eur, credit_eur = bank_eur, doc_eur
+            gain = bank_eur - doc_eur   # нам заплатили: выгода если получили больше EUR
+        else:
+            debit_eur, credit_eur = doc_eur, bank_eur
+            gain = doc_eur - bank_eur   # мы заплатили: выгода если отдали меньше EUR
+
+        is_foreign = pay_currency != "EUR"
 
         je = JournalEntry.objects.create(
             user=document.user,
@@ -204,33 +271,43 @@ def create_je_for_allocation(allocation):
             counterparty_code=counterparty_code,
             description=desc,
             currency="EUR",
-            original_amount=txn.amount if is_foreign else None,
-            original_currency=txn_currency if is_foreign else "",
-            exchange_rate=getattr(txn, "exchange_rate", None) if is_foreign else None,
-            exchange_rate_date=getattr(txn, "exchange_rate_date", None) if is_foreign else None,
+            original_amount=allocation.amount if is_foreign else None,
+            original_currency=pay_currency if is_foreign else "",
+            exchange_rate=txn_rate if is_foreign else None,
+            exchange_rate_date=(payment_date or doc_date) if is_foreign else None,
             status=JournalEntry.STATUS_POSTED,
         )
 
-        JournalEntryLine.objects.bulk_create([
+        je_lines = [
             JournalEntryLine(
-                entry=je,
-                side="D",
-                account_code=debit_code,
-                account_name=debit_name,
-                amount=allocation.amount,
-                description=desc,
-                sort_order=0,
+                entry=je, side="D",
+                account_code=debit_code, account_name=debit_name,
+                amount=debit_eur, description=desc, sort_order=0,
             ),
             JournalEntryLine(
-                entry=je,
-                side="K",
-                account_code=credit_code,
-                account_name=credit_name,
-                amount=allocation.amount,
-                description=desc,
-                sort_order=1,
+                entry=je, side="K",
+                account_code=credit_code, account_name=credit_name,
+                amount=credit_eur, description=desc, sort_order=1,
             ),
-        ])
+        ]
+
+        # ── Курсовая разница: gain>0 → K 5861 (teigiama), gain<0 → D 6861 (neigiama) ──
+        if gain > 0:
+            je_lines.append(JournalEntryLine(
+                entry=je, side="K",
+                account_code="5861", account_name="Teigiama valiutų kursų įtaka",
+                amount=gain, description=f"Kursinis skirtumas: {doc_number}",
+                sort_order=2,
+            ))
+        elif gain < 0:
+            je_lines.append(JournalEntryLine(
+                entry=je, side="D",
+                account_code="6861", account_name="Neigiama valiutų kursų įtaka",
+                amount=-gain, description=f"Kursinis skirtumas: {doc_number}",
+                sort_order=2,
+            ))
+
+        JournalEntryLine.objects.bulk_create(je_lines)
 
         finalize_journal_entry(je)
 
