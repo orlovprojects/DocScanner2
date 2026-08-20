@@ -145,7 +145,9 @@ class InvoiceMatchingEngine:
             txn = IncomingTransaction.objects.get(id=r.transaction_id)
             txn.match_status = r.status
             txn.match_confidence = r.confidence
-            txn.match_details = r.details
+            existing_details = dict(txn.match_details or {})
+            existing_details.update(r.details or {})
+            txn.match_details = existing_details
 
             total_allocated = Decimal("0")
 
@@ -174,11 +176,24 @@ class InvoiceMatchingEngine:
                 except Invoice.DoesNotExist:
                     pass
 
+            # Успешный Invoice matching = обычная įplauka iš pirkėjo,
+            # если classifier раньше не определил более специфичную категорию.
+            if (
+                r.status in ("auto_matched", "likely_matched")
+                and not txn.transaction_category
+            ):
+                txn.transaction_category = "customer_receipt"
+
             txn.allocated_amount = total_allocated
+
             txn.save(update_fields=[
-                "match_status", "match_confidence", "match_details",
-                "allocated_amount", "transaction_category",
-                "matched_document_number", "updated_at",
+                "match_status",
+                "match_confidence",
+                "match_details",
+                "allocated_amount",
+                "transaction_category",
+                "matched_document_number",
+                "updated_at",
             ])
 
             if r.status == "auto_matched":
@@ -808,7 +823,9 @@ class PurchaseMatchingEngine:
             txn = OutgoingTransaction.objects.get(id=r.transaction_id)
             txn.match_status = r.status if r.status != "unmatched" else "unmatched"
             txn.match_confidence = r.confidence
-            txn.match_details = r.details
+            existing_details = dict(txn.match_details or {})
+            existing_details.update(r.details or {})
+            txn.match_details = existing_details
 
             if r.status == "unmatched":
                 txn.save(update_fields=[

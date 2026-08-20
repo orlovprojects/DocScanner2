@@ -50,6 +50,7 @@ const PROGRAM_TO_KEY = {
   debetas: "debetas",
   pragma3: "pragma3",
   site_pro: "site_pro",
+  site_pro_api: "site_pro_api",
   agnum: "agnum",
 };
 
@@ -324,7 +325,7 @@ const PROGRAM_FIELDS_CONFIG = {
   },
   site_pro: {
     programLabel: "Site.pro (B1)",
-    description: "Nurodykite numatytuosius sandėlio ir objekto laukus pirkimams ir pardavimams.",
+    description: "Nurodykite numatytuosius prekės grupės, sandėlio, darbuotojo bei kaštų centro laukus pirkimams ir pardavimams.",
     sections: [
       {
         title: "Pirkimams",
@@ -340,6 +341,37 @@ const PROGRAM_FIELDS_CONFIG = {
         fields: [
           { key: "pardavimas_prekes_grupe", label: "Prekės grupė" },
           { key: "pardavimas_sandelis", label: "Sandėlis" },
+          { key: "pardavimas_darbuotojas", label: "Darbuotojas" },
+          { key: "pardavimas_kastu_centras", label: "Kaštų centras" },
+        ],
+      },
+    ],
+  },
+  site_pro_api: {
+    programLabel: "Site.pro (B1) API",
+    description: "Įveskite Site.pro (B1) API raktą. Pridėkite sandėlį, prekės grupę ir kitus laukus pirkimams ir pardavimams",
+    sections: [
+      {
+        title: "Prisijungimas",
+        fullWidth: true,
+        fields: [
+          { key: "api_raktas", label: "API raktas" },
+        ],
+      },
+      {
+        title: "Pirkimams",
+        fields: [
+          { key: "pirkimas_sandelis", label: "Sandėlis" },
+          { key: "pirkimas_prekes_grupe", label: "Prekės grupė" },
+          { key: "pirkimas_darbuotojas", label: "Darbuotojas" },
+          { key: "pirkimas_kastu_centras", label: "Kaštų centras" },
+        ],
+      },
+      {
+        title: "Pardavimams",
+        fields: [
+          { key: "pardavimas_sandelis", label: "Sandėlis" },
+          { key: "pardavimas_prekes_grupe", label: "Prekės grupė" },
           { key: "pardavimas_darbuotojas", label: "Darbuotojas" },
           { key: "pardavimas_kastu_centras", label: "Kaštų centras" },
         ],

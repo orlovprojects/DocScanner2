@@ -3730,7 +3730,7 @@ class BankStatementUploadSerializer(serializers.Serializer):
         """Validate file extension and size before processing."""
         import os
     
-        ALLOWED_EXT = {".csv", ".xml"}
+        ALLOWED_EXT = {".csv", ".xml", ".xlsx"}
         MAX_SIZE = 20 * 1024 * 1024  # 10 MB
     
         filename = getattr(value, "name", "")
@@ -3738,7 +3738,7 @@ class BankStatementUploadSerializer(serializers.Serializer):
     
         if ext and ext not in ALLOWED_EXT:
             raise serializers.ValidationError(
-                f"Netinkamas failo formatas: {ext}. Priimami tik CSV ir XML failai."
+                f"Netinkamas failo formatas: {ext}. Priimami tik CSV, XLSX ir XML failai."
             )
     
         if value.size > MAX_SIZE:
@@ -3759,6 +3759,8 @@ class TransactionListSerializer(serializers.Serializer):
     counterparty_code = serializers.CharField(allow_blank=True)
     amount = serializers.DecimalField(max_digits=12, decimal_places=2)
     currency = serializers.CharField()
+    amount_eur = serializers.DecimalField(max_digits=12, decimal_places=2, allow_null=True)
+    fee_amount = serializers.DecimalField(max_digits=12, decimal_places=2)
     tx_type = serializers.CharField(allow_blank=True)
     match_status = serializers.CharField()
     transaction_category = serializers.CharField(allow_blank=True)
@@ -3781,6 +3783,11 @@ class TransactionDetailSerializer(serializers.Serializer):
     payment_purpose = serializers.CharField(allow_blank=True)
     amount = serializers.DecimalField(max_digits=12, decimal_places=2)
     currency = serializers.CharField()
+    amount_eur = serializers.DecimalField(max_digits=12, decimal_places=2, allow_null=True)
+    exchange_rate = serializers.DecimalField(max_digits=12, decimal_places=6, allow_null=True)
+    exchange_rate_date = serializers.DateField(allow_null=True)
+    fee_amount = serializers.DecimalField(max_digits=12, decimal_places=2)
+    fee_amount_eur = serializers.DecimalField(max_digits=12, decimal_places=2, allow_null=True)
     bank_operation_code = serializers.CharField(allow_blank=True)
     doc_number = serializers.CharField(allow_blank=True)
     reference_number = serializers.CharField(allow_blank=True)

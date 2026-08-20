@@ -33,6 +33,7 @@ logger = logging.getLogger("docscanner_app")
 @dataclass
 class ClassificationResult:
     transaction_id: int
+    direction: str
     category: str
     debit_account: str
     credit_account: str
@@ -43,6 +44,12 @@ class ClassificationResult:
 # ════════════════════════════════════════════════════════════
 # VMI / Sodra refs
 # ════════════════════════════════════════════════════════════
+
+RETURN_CATEGORIES = {
+    "payment_reversal",
+    "chargeback",
+    "payment_refund",
+}
 
 VMI_ACCOUNTS = {
     "LT057044060007887175",  # SEB
@@ -195,12 +202,64 @@ BUILTIN_PATTERNS = [
         "category": "salary",
         "debit_account": "4491",
     },
+    # ── PayPal special operations ────────────────────────
+    # ВАЖНО: эти правила должны идти ДО provider_payout и generic refund.
+    {
+        "name": "PayPal dispute fee",
+        "field": "bank_operation_code",
+        "operator": "exact",
+        "value": "Dispute Fee",
+        "direction": "debit",
+        "category": "bank_fee",
+        "debit_account": "6880",
+    },
+    {
+        "name": "PayPal payment reversal",
+        "field": "bank_operation_code",
+        "operator": "exact",
+        "value": "Payment Reversal",
+        "direction": "debit",
+        "category": "payment_reversal",
+    },
+    {
+        "name": "PayPal chargeback",
+        "field": "bank_operation_code",
+        "operator": "exact",
+        "value": "Chargeback",
+        "direction": "debit",
+        "category": "chargeback",
+    },
+    {
+        "name": "PayPal payment refund",
+        "field": "bank_operation_code",
+        "operator": "exact",
+        "value": "Payment Refund",
+        "direction": "credit",
+        "category": "payment_refund",
+    },
+    {
+        "name": "PayPal card funding",
+        "field": "bank_operation_code",
+        "operator": "exact",
+        "value": "General Card Deposit",
+        "direction": "credit",
+        "category": "paypal_card_funding",
+    },
+    # ── Shopify pardavimas (per PayPal) — категория без DK, laukia SF ──
+    {
+        "name": "Shopify pardavimas",
+        "field": "payment_purpose",
+        "operator": "contains",
+        "value": "| Shopify",
+        "direction": "credit",
+        "category": "shopify_pardavimas",
+    },
     # ── Provider payout ──
     {
         "name": "Tarpininko išmoka",
         "field": "counterparty_name",
         "operator": "regex",
-        "value": r"(?i)(PAYSERA|Stripe|Shopify|Montonio|PayPal|Square)",
+        "value": r"(?i)(PAYSERA|Stripe|Montonio|PayPal|Square)",
         "direction": "credit",
         "category": "provider_payout",
         "debit_account": "2719",
@@ -217,13 +276,6 @@ BUILTIN_PATTERNS = [
     },
 ]
 
-# ════════════════════════════════════════════════════════════
-# Категории, для которых автоматически ставится classified
-# ════════════════════════════════════════════════════════════
-
-AUTO_CLASSIFIED_CATEGORIES = {
-    "bank_fee", "tax_vmi", "tax_sodra", "salary",
-}
 
 
 # ════════════════════════════════════════════════════════════
@@ -272,14 +324,19 @@ class TransactionClassifier:
         )
 
         for r in results:
-            # Определить модель по направлению
+            Model = (
+                IncomingTransaction
+                if r.direction == "incoming"
+                else OutgoingTransaction
+            )
+
             try:
-                txn = OutgoingTransaction.objects.get(id=r.transaction_id)
-            except OutgoingTransaction.DoesNotExist:
-                try:
-                    txn = IncomingTransaction.objects.get(id=r.transaction_id)
-                except IncomingTransaction.DoesNotExist:
-                    continue
+                txn = Model.objects.get(
+                    id=r.transaction_id,
+                    user=self.user,
+                )
+            except Model.DoesNotExist:
+                continue
 
             txn.transaction_category = r.category
             txn.category_account_debit = r.debit_account
@@ -292,25 +349,37 @@ class TransactionClassifier:
                 "updated_at",
             ]
 
-            # Для safe-категорий сразу ставим classified
-            if r.category in AUTO_CLASSIFIED_CATEGORIES:
-                txn.match_status = "classified"
-                update_fields.append("match_status")
-
             if r.rule_id:
                 txn.category_rule_id = r.rule_id
                 update_fields.append("category_rule_id")
 
-                # Обновить статистику правила
                 try:
-                    rule = BankTransactionRule.objects.get(id=r.rule_id)
+                    rule = BankTransactionRule.objects.get(
+                        id=r.rule_id,
+                        user=self.user,
+                    )
                     rule.times_applied += 1
                     rule.last_applied_at = timezone.now()
-                    rule.save(update_fields=["times_applied", "last_applied_at"])
+                    rule.save(
+                        update_fields=[
+                            "times_applied",
+                            "last_applied_at",
+                        ]
+                    )
                 except BankTransactionRule.DoesNotExist:
                     pass
 
             txn.save(update_fields=update_fields)
+
+            # PayPal refund / reversal / chargeback:
+            # найти исходную банковскую операцию и пометить её
+            # как полностью/частично возвращённый платёж.
+            if r.category in RETURN_CATEGORIES:
+                self._mark_original_payment_returned(
+                    txn=txn,
+                    category=r.category,
+                    direction=r.direction,
+                )
 
         logger.info(
             "[Classifier] Applied %d classifications",
@@ -345,18 +414,44 @@ class TransactionClassifier:
     # ── Classify One ────────────────────────────────────────
 
     def _classify_one(self, txn) -> Optional[ClassificationResult]:
-        # Пропустить уже классифицированные
-        if txn.transaction_category:
-            return None
+        from ..models import IncomingTransaction
 
-        # Пропустить уже matched/proposed к документу.
-        if txn.match_status in (
-            "auto_matched",
-            "likely_matched",
-            "confirmed",
-            "manually_matched",
-            "classified",
-        ):
+        is_incoming = isinstance(txn, IncomingTransaction)
+        txn_direction = "credit" if is_incoming else "debit"
+        direction_str = "incoming" if is_incoming else "outgoing"
+
+        # ── Уже классифицированная операция ──────────────────
+        if txn.transaction_category:
+            existing_category = txn.transaction_category
+
+            # Старые PayPal Payment Refund могли раньше попасть
+            # в generic refund_received. При rematch исправляем категорию.
+            if (
+                existing_category == "refund_received"
+                and (txn.bank_operation_code or "").strip().lower() == "payment refund"
+            ):
+                return ClassificationResult(
+                    transaction_id=txn.id,
+                    direction=direction_str,
+                    category="payment_refund",
+                    debit_account=txn.category_account_debit or "",
+                    credit_account=txn.category_account_credit or "",
+                    description="PayPal payment refund",
+                )
+
+            # Return-операции при rematch должны снова пройти apply_results,
+            # чтобы найти original payment. Повторный вызов безопасен:
+            # _mark_original_payment_returned не дублирует уже созданную связь.
+            if existing_category in RETURN_CATEGORIES:
+                return ClassificationResult(
+                    transaction_id=txn.id,
+                    direction=direction_str,
+                    category=existing_category,
+                    debit_account=txn.category_account_debit or "",
+                    credit_account=txn.category_account_credit or "",
+                    description=existing_category,
+                )
+
             return None
 
         # 1. User rules (highest priority)
@@ -374,6 +469,7 @@ class TransactionClassifier:
 
                 return ClassificationResult(
                     transaction_id=txn.id,
+                    direction=direction_str,
                     category=category,
                     debit_account=debit_account,
                     credit_account=rule.credit_account or "",
@@ -383,24 +479,19 @@ class TransactionClassifier:
                 )
 
         # 2. Built-in patterns
-        from ..models import IncomingTransaction
-        is_incoming = isinstance(txn, IncomingTransaction)
-        txn_direction = "credit" if is_incoming else "debit"
-
         for pattern in BUILTIN_PATTERNS:
-            # Проверить направление
             p_direction = pattern.get("direction", "")
             if p_direction and p_direction != txn_direction:
                 continue
 
             if self._matches_pattern(txn, pattern):
-                # Extra check если нужен
                 extra = pattern.get("extra_check")
                 if extra and not getattr(self, extra)(txn):
                     continue
 
                 return ClassificationResult(
                     transaction_id=txn.id,
+                    direction=direction_str,
                     category=pattern["category"],
                     debit_account=pattern.get("debit_account", ""),
                     credit_account=pattern.get("credit_account", ""),
@@ -450,6 +541,222 @@ class TransactionClassifier:
         return False
 
     # ── Extra checks ────────────────────────────────────────
+
+    def _mark_original_payment_returned(
+        self,
+        txn,
+        category: str,
+        direction: str,
+    ):
+        """
+        Связать PayPal refund/reversal/chargeback с исходным платежом.
+
+        Payment Reversal / Chargeback:
+            outgoing возврат денег клиенту
+            -> ищем исходный IncomingTransaction.
+
+        Payment Refund:
+            incoming возврат денег от продавца
+            -> ищем исходный OutgoingTransaction.
+
+        Новый PayPal parser сохраняет:
+            return txn.doc_number = PayPal Reference Txn ID
+            original.reference_number = PayPal Transaction ID
+
+        Для уже импортированных старых выписок остаются fallback-поиски.
+        """
+        from decimal import InvalidOperation
+
+        from ..models import (
+            IncomingTransaction,
+            OutgoingTransaction,
+        )
+
+        if category in ("payment_reversal", "chargeback"):
+            OriginalModel = IncomingTransaction
+            original_direction = "incoming"
+        elif category == "payment_refund":
+            OriginalModel = OutgoingTransaction
+            original_direction = "outgoing"
+        else:
+            return
+
+        qs = OriginalModel.objects.filter(
+            user=self.user,
+            transaction_date__lte=txn.transaction_date,
+        )
+
+        # Не связываем операции разных company profiles.
+        if getattr(txn, "company_profile_id", None):
+            qs = qs.filter(
+                company_profile_id=txn.company_profile_id,
+            )
+
+        original = None
+        link_ref = (txn.doc_number or "").strip()
+
+        # ── 1. Новый правильный способ ───────────────────────
+        # return.doc_number == original.reference_number
+        if link_ref:
+            original = (
+                qs
+                .filter(reference_number=link_ref)
+                .order_by("-transaction_date", "-id")
+                .first()
+            )
+
+        # ── 2. Fallback для старых Payment Reversal/Chargeback ──
+        # Старый parser сохранял в doc_number Shopify Invoice Number,
+        # поэтому ищем original с тем же doc_number.
+        if (
+            not original
+            and link_ref
+            and category in ("payment_reversal", "chargeback")
+        ):
+            original = (
+                qs
+                .filter(doc_number=link_ref)
+                .exclude(transaction_category__in=RETURN_CATEGORIES)
+                .order_by("-transaction_date", "-id")
+                .first()
+            )
+
+        # ── 3. Fallback для старых Payment Refund ────────────
+        # Раньше Reference Txn ID вообще не сохранялся.
+        if not original and category == "payment_refund":
+            fallback = qs.filter(currency=txn.currency)
+
+            cp_name = (txn.counterparty_name or "").strip()
+            if cp_name and cp_name.lower() != "paypal":
+                fallback = fallback.filter(
+                    counterparty_name__iexact=cp_name,
+                )
+
+            # Сначала точное совпадение суммы.
+            original = (
+                fallback
+                .filter(amount=txn.amount)
+                .order_by("-transaction_date", "-id")
+                .first()
+            )
+
+            # Для partial refund разрешаем amount original >= refund,
+            # но только когда кандидат ровно один.
+            if not original:
+                candidates = list(
+                    fallback
+                    .filter(amount__gte=txn.amount)
+                    .order_by("-transaction_date", "-id")[:2]
+                )
+                if len(candidates) == 1:
+                    original = candidates[0]
+
+        if not original:
+            logger.warning(
+                "[Classifier] Original payment NOT FOUND: "
+                "category=%s txn=%s direction=%s "
+                "doc_number=%r ref=%r amount=%s",
+                category,
+                txn.id,
+                direction,
+                txn.doc_number,
+                txn.reference_number,
+                txn.amount,
+            )
+            return
+
+        original_details = dict(original.match_details or {})
+        txn_details = dict(txn.match_details or {})
+
+        # Уникальный ключ, чтобы rematch не добавлял тот же возврат повторно.
+        link_key = f"{direction}:{txn.id}"
+        links = list(
+            original_details.get("payment_return_transactions")
+            or []
+        )
+
+        already_linked = any(
+            isinstance(item, dict)
+            and str(item.get("key") or "") == link_key
+            for item in links
+        )
+
+        if not already_linked:
+            links.append({
+                "key": link_key,
+                "id": txn.id,
+                "direction": direction,
+                "type": category,
+                "amount": str(txn.amount or "0"),
+                "date": str(txn.transaction_date or ""),
+            })
+
+        def to_decimal(value):
+            try:
+                return Decimal(str(value or "0"))
+            except (InvalidOperation, ValueError, TypeError):
+                return Decimal("0")
+
+        total_returned = sum(
+            (
+                to_decimal(item.get("amount"))
+                for item in links
+                if isinstance(item, dict)
+            ),
+            Decimal("0"),
+        )
+
+        original_amount = to_decimal(original.amount)
+
+        if total_returned >= original_amount:
+            return_status = "full"
+            displayed_returned = original_amount
+        else:
+            return_status = "partial"
+            displayed_returned = total_returned
+
+        # ── Помечаем ORIGINAL payment ────────────────────────
+        original_details.update({
+            "payment_return_status": return_status,
+            "payment_returned_amount": str(displayed_returned),
+            "payment_return_transactions": links,
+        })
+
+        original.match_details = original_details
+        original.save(
+            update_fields=[
+                "match_details",
+                "updated_at",
+            ]
+        )
+
+        # ── Обратная ссылка на original в refund/reversal ────
+        txn_details.update({
+            "original_payment_id": original.id,
+            "original_payment_direction": original_direction,
+            "original_payment_reference": original.reference_number or "",
+            "payment_return_linked": True,
+        })
+
+        txn.match_details = txn_details
+        txn.save(
+            update_fields=[
+                "match_details",
+                "updated_at",
+            ]
+        )
+
+        logger.info(
+            "[Classifier] Linked %s #%s -> %s #%s "
+            "(%s, returned=%s/%s)",
+            category,
+            txn.id,
+            original_direction,
+            original.id,
+            return_status,
+            displayed_returned,
+            original_amount,
+        )
 
     @staticmethod
     def _is_fee_purpose(txn) -> bool:

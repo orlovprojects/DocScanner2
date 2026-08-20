@@ -9264,19 +9264,45 @@ def _build_txn_full(txn, direction_str, allocs):
 # ── 1. TransactionListView.get() ──────────────────────
 # Заменить apply_filters и stats целиком
 
+PROCESSED_MATCH_STATUSES = (
+    "auto_matched", "confirmed", "manually_matched", "classified",
+)
+
+
+def get_action_state(txn) -> str:
+    """
+    Человеческий статус обработки для UI. Чистая функция от полей txn.
+      apdorota          — DK создан или сматчено с высоким confidence
+      reikia_patvirtinimo — есть кандидат, но低 confidence (likely_matched)
+      laukia_dokumento  — нет второй стороны, ждёт действия юзера
+    """
+    if txn.journal_entry_id:
+        return "apdorota"
+    if txn.match_status in PROCESSED_MATCH_STATUSES:
+        return "apdorota"
+    if txn.match_status == "likely_matched":
+        return "reikia_patvirtinimo"
+    return "laukia_dokumento"
 
 class TransactionListView(APIView):
     """
     GET /api/invoicing/bank-transactions/
     Light data для таблицы (без payment_purpose).
     """
+
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):
         user = request.user
         cp = _get_active_cp(user)
-        limit = min(int(request.query_params.get("limit", 50)), 200)
-        offset = int(request.query_params.get("offset", 0))
+
+        limit = min(
+            int(request.query_params.get("limit", 50)),
+            200,
+        )
+        offset = int(
+            request.query_params.get("offset", 0)
+        )
 
         stmt_id = request.query_params.get("statement_id")
         direction = request.query_params.get("direction", "")
@@ -9285,130 +9311,406 @@ class TransactionListView(APIView):
         q = request.query_params.get("q", "").strip()
 
         def apply_filters(qs, include_match_status=True):
-            # Только транзакции из банковских выписок —
-            # payment-link (вебхучные) операции без bank_statement исключаем
-            qs = qs.filter(bank_statement__isnull=False)
+            # Только транзакции из банковских выписок.
+            # Payment-link / webhook операции без bank_statement
+            # здесь не показываем.
+            qs = qs.filter(
+                bank_statement__isnull=False
+            )
+
             if cp:
-                qs = qs.filter(company_profile=cp)
+                qs = qs.filter(
+                    company_profile=cp
+                )
+
             if stmt_id:
-                qs = qs.filter(bank_statement_id=stmt_id)
+                qs = qs.filter(
+                    bank_statement_id=stmt_id
+                )
+
             if include_match_status and match_status:
-                if match_status == "needs_action":
-                    from django.db.models import Q
+                from django.db.models import Q
+
+                if match_status == "reikia_veiksmu":
+                    qs = qs.exclude(
+                        Q(journal_entry__isnull=False)
+                        | Q(
+                            match_status__in=PROCESSED_MATCH_STATUSES
+                        )
+                    )
+
+                elif match_status == "apdorota":
+                    qs = qs.filter(
+                        Q(journal_entry__isnull=False)
+                        | Q(
+                            match_status__in=PROCESSED_MATCH_STATUSES
+                        )
+                    )
+
+                elif match_status == "reikia_patvirtinimo":
+                    qs = qs.filter(
+                        journal_entry__isnull=True,
+                        match_status="likely_matched",
+                    )
+
+                elif match_status == "laukia_dokumento":
+                    qs = (
+                        qs.exclude(
+                            journal_entry__isnull=False
+                        )
+                        .exclude(
+                            match_status__in=PROCESSED_MATCH_STATUSES
+                        )
+                        .exclude(
+                            match_status="likely_matched"
+                        )
+                    )
+
+                # backward compatibility
+                elif match_status == "needs_action":
                     qs = qs.filter(
                         Q(match_status="likely_matched")
-                        | Q(match_status="unmatched", transaction_category="")
+                        | Q(
+                            match_status="unmatched",
+                            transaction_category="",
+                        )
                     )
+
                 elif match_status == "processed":
                     qs = qs.filter(
-                        match_status__in=[
-                            "auto_matched", "confirmed",
-                            "manually_matched", "classified",
-                        ]
+                        match_status__in=PROCESSED_MATCH_STATUSES
                     )
+
                 else:
-                    qs = qs.filter(match_status=match_status)
+                    qs = qs.filter(
+                        match_status=match_status
+                    )
+
             if category:
                 if category == "uncategorized":
-                    qs = qs.filter(transaction_category="")
+                    qs = qs.filter(
+                        transaction_category=""
+                    )
                 else:
-                    qs = qs.filter(transaction_category=category)
+                    qs = qs.filter(
+                        transaction_category=category
+                    )
+
             if q:
                 from django.db.models import Q
+
                 qs = qs.filter(
                     Q(counterparty_name__icontains=q)
                     | Q(counterparty_code__icontains=q)
                     | Q(doc_number__icontains=q)
                 )
+
             return qs
 
-        # Для результатов таблицы — с match_status фильтром
+        # ─────────────────────────────────────────────
+        # TABLE RESULTS
+        # ─────────────────────────────────────────────
+
         inc_qs = apply_filters(
-            IncomingTransaction.objects.filter(user=user).select_related("bank_statement")
-        )
-        out_qs = apply_filters(
-            OutgoingTransaction.objects.filter(user=user).select_related("bank_statement")
+            IncomingTransaction.objects
+            .filter(user=user)
+            .select_related("bank_statement")
         )
 
-        # Для stats — без match_status фильтра
+        out_qs = apply_filters(
+            OutgoingTransaction.objects
+            .filter(user=user)
+            .select_related("bank_statement")
+        )
+
+        # ─────────────────────────────────────────────
+        # STATS
+        #
+        # Без match_status фильтра, чтобы карточки
+        # показывали полную статистику.
+        # ─────────────────────────────────────────────
+
         inc_stats = apply_filters(
-            IncomingTransaction.objects.filter(user=user),
+            IncomingTransaction.objects.filter(
+                user=user
+            ),
             include_match_status=False,
         )
+
         out_stats = apply_filters(
-            OutgoingTransaction.objects.filter(user=user),
+            OutgoingTransaction.objects.filter(
+                user=user
+            ),
             include_match_status=False,
         )
+
+        # ─────────────────────────────────────────────
+        # DIRECTION
+        # ─────────────────────────────────────────────
 
         if direction == "incoming":
             out_qs = OutgoingTransaction.objects.none()
+
         elif direction == "outgoing":
             inc_qs = IncomingTransaction.objects.none()
 
-        total = inc_qs.count() + out_qs.count()
+        # ─────────────────────────────────────────────
+        # TOTAL
+        # ─────────────────────────────────────────────
 
+        total = (
+            inc_qs.count()
+            + out_qs.count()
+        )
+
+        # Берём немного больше, чтобы потом объединить
+        # incoming + outgoing и сделать общий pagination.
         fetch_size = offset + limit + 10
-        inc_list = list(inc_qs.order_by("-transaction_date", "-id")[:fetch_size])
-        out_list = list(out_qs.order_by("-transaction_date", "-id")[:fetch_size])
 
-        merged = [("incoming", t) for t in inc_list] + [("outgoing", t) for t in out_list]
-        merged.sort(key=lambda x: (x[1].transaction_date, x[1].id), reverse=True)
+        inc_list = list(
+            inc_qs
+            .order_by(
+                "-transaction_date",
+                "-id",
+            )[:fetch_size]
+        )
 
-        # likely_matched вверху при фильтре "Reikia veiksmų"
-        if match_status == "needs_action":
-            merged.sort(key=lambda x: (0 if x[1].match_status == "likely_matched" else 1))
+        out_list = list(
+            out_qs
+            .order_by(
+                "-transaction_date",
+                "-id",
+            )[:fetch_size]
+        )
 
-        page = merged[offset:offset + limit]
+        merged = (
+            [
+                ("incoming", txn)
+                for txn in inc_list
+            ]
+            + [
+                ("outgoing", txn)
+                for txn in out_list
+            ]
+        )
+
+        # Сначала сортируем по дате.
+        merged.sort(
+            key=lambda x: (
+                x[1].transaction_date,
+                x[1].id,
+            ),
+            reverse=True,
+        )
+
+        # Затем операции, требующие внимания,
+        # показываем выше обработанных.
+        _ORDER = {
+            "reikia_patvirtinimo": 0,
+            "laukia_dokumento": 1,
+            "apdorota": 2,
+        }
+
+        merged.sort(
+            key=lambda x: _ORDER.get(
+                get_action_state(x[1]),
+                3,
+            )
+        )
+
+        page = merged[
+            offset:offset + limit
+        ]
+
+        # ─────────────────────────────────────────────
+        # RESPONSE
+        # ─────────────────────────────────────────────
 
         results = []
+
         for dir_str, txn in page:
+            return_details = (
+                txn.match_details or {}
+            )
+
             results.append({
                 "id": txn.id,
                 "direction": dir_str,
-                "transaction_date": txn.transaction_date,
-                "counterparty_name": txn.counterparty_name or "",
-                "counterparty_code": txn.counterparty_code or "",
+
+                "transaction_date": (
+                    txn.transaction_date
+                ),
+
+                "counterparty_name": (
+                    txn.counterparty_name or ""
+                ),
+
+                "counterparty_code": (
+                    txn.counterparty_code or ""
+                ),
+
                 "amount": txn.amount,
                 "currency": txn.currency,
-                "tx_type": get_tx_type_display(txn.bank_operation_code),
+                "amount_eur": txn.amount_eur,
+                "fee_amount": txn.fee_amount,
+
+                "tx_type": get_tx_type_display(
+                    txn.bank_operation_code
+                ),
+
                 "match_status": txn.match_status,
-                "transaction_category": txn.transaction_category or "",
+
+                "action_state": get_action_state(
+                    txn
+                ),
+
+                "transaction_category": (
+                    txn.transaction_category or ""
+                ),
+
                 "category_display": (
                     txn.get_transaction_category_display()
-                    if txn.transaction_category else ""
+                    if txn.transaction_category
+                    else ""
                 ),
-                "matched_document_number": txn.matched_document_number or "",
-                "match_confidence": txn.match_confidence,
-                "statement_id": txn.bank_statement_id,
+
+                "matched_document_number": (
+                    txn.matched_document_number or ""
+                ),
+
+                "match_confidence": (
+                    txn.match_confidence
+                ),
+
+                "statement_id": (
+                    txn.bank_statement_id
+                ),
+
                 "bank_name": (
                     txn.bank_statement.get_bank_name_display()
-                    if txn.bank_statement else ""
+                    if txn.bank_statement
+                    else ""
+                ),
+
+                # ─────────────────────────────────────
+                # PAYMENT RETURN
+                #
+                # Эти поля относятся к ORIGINAL
+                # банковской операции.
+                #
+                # Front показывает возле Statusas
+                # маленькую иконку возврата.
+                # ─────────────────────────────────────
+
+                "payment_return_status": (
+                    return_details.get(
+                        "payment_return_status",
+                        "",
+                    )
+                ),
+
+                "payment_returned_amount": (
+                    return_details.get(
+                        "payment_returned_amount",
+                        "",
+                    )
+                ),
+
+                "payment_return_transactions": (
+                    return_details.get(
+                        "payment_return_transactions",
+                        [],
+                    )
+                ),
+
+                # ─────────────────────────────────────
+                # ORIGINAL PAYMENT LINK
+                #
+                # Эти поля будут заполнены уже
+                # на самой refund / reversal /
+                # chargeback операции.
+                # ─────────────────────────────────────
+
+                "original_payment_id": (
+                    return_details.get(
+                        "original_payment_id"
+                    )
+                ),
+
+                "original_payment_direction": (
+                    return_details.get(
+                        "original_payment_direction",
+                        "",
+                    )
+                ),
+
+                "payment_return_linked": bool(
+                    return_details.get(
+                        "payment_return_linked"
+                    )
                 ),
             })
 
-        # ── Stats: 3 карточки ──
-        def count_status(qs, status):
-            return qs.filter(match_status=status).count()
+        # ─────────────────────────────────────────────
+        # STATS
+        # ─────────────────────────────────────────────
 
-        processed_statuses = [
-            "auto_matched", "confirmed", "manually_matched", "classified",
-        ]
+        from django.db.models import Q
+
+        def bucket_counts(qs):
+            apdorota = qs.filter(
+                Q(journal_entry__isnull=False)
+                | Q(
+                    match_status__in=PROCESSED_MATCH_STATUSES
+                )
+            ).count()
+
+            reikia = qs.filter(
+                journal_entry__isnull=True,
+                match_status="likely_matched",
+            ).count()
+
+            total_count = qs.count()
+
+            laukia = (
+                total_count
+                - apdorota
+                - reikia
+            )
+
+            return (
+                apdorota,
+                reikia,
+                laukia,
+                total_count,
+            )
+
+        a_i, r_i, l_i, t_i = bucket_counts(
+            inc_stats
+        )
+
+        a_o, r_o, l_o, t_o = bucket_counts(
+            out_stats
+        )
 
         stats = {
-            "total": inc_stats.count() + out_stats.count(),
-            "processed": sum(
-                count_status(inc_stats, s) + count_status(out_stats, s)
-                for s in processed_statuses
+            "total": t_i + t_o,
+
+            "apdorota": (
+                a_i + a_o
             ),
-            "needs_action": (
-                count_status(inc_stats, "likely_matched")
-                + count_status(out_stats, "likely_matched")
-                + inc_stats.filter(
-                    match_status="unmatched", transaction_category="",
-                ).count()
-                + out_stats.filter(
-                    match_status="unmatched", transaction_category="",
-                ).count()
+
+            "reikia_veiksmu": (
+                (r_i + r_o)
+                + (l_i + l_o)
+            ),
+
+            "reikia_patvirtinimo": (
+                r_i + r_o
+            ),
+
+            "laukia_dokumento": (
+                l_i + l_o
             ),
         }
 
@@ -9492,6 +9794,12 @@ def _build_txn_full(txn, direction_str, allocs):
         "category_account_debit": txn.category_account_debit or "",
         "category_account_credit": txn.category_account_credit or "",
         "journal_entry_id": txn.journal_entry_id,
+        "action_state": get_action_state(txn),
+        "amount_eur": txn.amount_eur,
+        "exchange_rate": txn.exchange_rate,
+        "exchange_rate_date": txn.exchange_rate_date,
+        "fee_amount": txn.fee_amount,
+        "fee_amount_eur": txn.fee_amount_eur,
     })
     return data
 
@@ -9751,6 +10059,10 @@ class BankMatchingDebugView(APIView):
             "transaction_date": txn.transaction_date.isoformat() if txn.transaction_date else None,
             "amount": str(txn.amount),
             "currency": txn.currency,
+            "amount_eur": str(txn.amount_eur) if txn.amount_eur is not None else None,
+            "fee_amount": str(txn.fee_amount or "0"),
+            "fee_amount_eur": str(txn.fee_amount_eur) if txn.fee_amount_eur is not None else None,
+            "exchange_rate": str(txn.exchange_rate) if txn.exchange_rate is not None else None,
             "counterparty_name": txn.counterparty_name or "",
             "counterparty_code": txn.counterparty_code or "",
             "counterparty_account": txn.counterparty_account or "",

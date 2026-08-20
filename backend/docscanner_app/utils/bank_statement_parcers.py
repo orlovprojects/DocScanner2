@@ -869,45 +869,75 @@ class RevolutCSVParser(BaseBankParser):
 # PayPal XLSX (activity export)
 # ────────────────────────────────────────────────────────────
 
-
 class PayPalXLSXParser(BaseBankParser):
     """
     PayPal activity export (.xlsx).
-    - Режем внутренние движения: reserve/hold/authorization/currency conversion.
+
+    - Режем внутренние движения:
+      reserve / hold / authorization / currency conversion.
     - Дедуп по Transaction ID (Memo-эхо схлопывается).
     - Направление по знаку Gross.
-    - Комиссия (Fee, отрицательная) — отдельной операцией.
-    - Валюта: EUR-нога General Currency Conversion (Reference Txn ID == Transaction ID
-      платежа) даёт amount_eur; курс = foreign/eur.
+    - PayPal Fee сохраняется в fee_amount.
+    - Валюта:
+      EUR-нога General Currency Conversion
+      (Reference Txn ID == Transaction ID платежа)
+      даёт amount_eur; курс = foreign / eur.
+    - Shopify определяется как по старому Custom Number = "Shopify",
+      так и по новому JSON-формату {"shop_id": ..., "session_id": ...}.
+    - Для Payment Refund Reference Txn ID сохраняется в doc_number,
+      чтобы можно было найти исходную PayPal outgoing transaction.
     """
 
     bank_name = "paypal"
 
-    SKIP_TYPE = re.compile(r"reserve|hold|authorization|currency conversion", re.I)
+    SKIP_TYPE = re.compile(
+        r"reserve|hold|authorization|currency conversion",
+        re.I,
+    )
 
     HEADER_ALIASES = {
-        "date": "transaction_date", "name": "name", "type": "type",
-        "status": "status", "currency": "currency", "gross": "gross",
-        "fee": "fee", "net": "net", "from email address": "from_email",
-        "to email address": "to_email", "transaction id": "txn_id",
-        "item title": "item_title", "invoice number": "invoice_number",
-        "reference txn id": "ref_txn_id", "balance impact": "balance_impact",
-        "subject": "subject", "note": "note",
+        "date": "transaction_date",
+        "name": "name",
+        "type": "type",
+        "status": "status",
+        "currency": "currency",
+        "gross": "gross",
+        "fee": "fee",
+        "net": "net",
+        "from email address": "from_email",
+        "to email address": "to_email",
+        "transaction id": "txn_id",
+        "item title": "item_title",
+        "invoice number": "invoice_number",
+        "reference txn id": "ref_txn_id",
+        "balance impact": "balance_impact",
+        "subject": "subject",
+        "note": "note",
+        "custom number": "custom_number",
     }
 
     def _dec(self, v):
         if v is None or v == "":
             return None
+
         if isinstance(v, (int, float, Decimal)):
             try:
                 return Decimal(str(v))
             except (InvalidOperation, ValueError):
                 return None
-        s = str(v).strip().replace("\xa0", "").replace(" ", "")
+
+        s = (
+            str(v)
+            .strip()
+            .replace("\xa0", "")
+            .replace(" ", "")
+        )
+
         if "," in s and "." in s:
             s = s.replace(".", "").replace(",", ".")
         elif "," in s:
             s = s.replace(",", ".")
+
         try:
             return Decimal(s)
         except (InvalidOperation, ValueError):
@@ -916,14 +946,26 @@ class PayPalXLSXParser(BaseBankParser):
     def _to_date(self, v):
         if isinstance(v, datetime):
             return v.date()
+
         if isinstance(v, date):
             return v
+
         if isinstance(v, str):
-            for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%m/%d/%Y", "%d.%m.%Y", "%Y.%m.%d"):
+            for fmt in (
+                "%Y-%m-%d",
+                "%d/%m/%Y",
+                "%m/%d/%Y",
+                "%d.%m.%Y",
+                "%Y.%m.%d",
+            ):
                 try:
-                    return datetime.strptime(v.strip(), fmt).date()
+                    return datetime.strptime(
+                        v.strip(),
+                        fmt,
+                    ).date()
                 except ValueError:
                     continue
+
         return None
 
     def parse(self, file_content) -> list[dict]:
@@ -931,154 +973,390 @@ class PayPalXLSXParser(BaseBankParser):
         from openpyxl import load_workbook
 
         raw = self._to_bytes(file_content)
-        wb = load_workbook(io.BytesIO(raw), read_only=True, data_only=True)
+
+        wb = load_workbook(
+            io.BytesIO(raw),
+            read_only=True,
+            data_only=True,
+        )
+
         ws = wb.active
 
         it = ws.iter_rows(values_only=True)
+
         try:
             header = next(it)
         except StopIteration:
             return []
 
+        # ─────────────────────────────────────────────
+        # Columns
+        # ─────────────────────────────────────────────
+
         col = {}
+
         for i, h in enumerate(header):
-            key = self.HEADER_ALIASES.get(str(h or "").strip().lower())
+            key = self.HEADER_ALIASES.get(
+                str(h or "").strip().lower()
+            )
+
             if key and key not in col:
                 col[key] = i
 
         if "gross" not in col or "txn_id" not in col:
-            logger.warning("[PayPalXLSX] Missing key columns: %s", list(col))
+            logger.warning(
+                "[PayPalXLSX] Missing key columns: %s",
+                list(col),
+            )
             return []
 
         def g(row, field):
             i = col.get(field)
-            return row[i] if i is not None and i < len(row) else None
+
+            if i is not None and i < len(row):
+                return row[i]
+
+            return None
 
         allrows = list(it)
 
-        # ── Pass 0: EUR-ноги конверсий по Reference Txn ID ──
+        # ─────────────────────────────────────────────
+        # Pass 0
+        #
+        # EUR-ноги валютных конверсий.
+        #
+        # PayPal может иметь:
+        #
+        # Payment 100 USD
+        # Currency Conversion ... EUR
+        #
+        # Reference Txn ID конверсии указывает
+        # на Transaction ID исходного платежа.
+        # ─────────────────────────────────────────────
+
         conv_eur = defaultdict(Decimal)
+
         for row in allrows:
-            if "Currency Conversion" in str(g(row, "type") or "") \
-                    and str(g(row, "currency") or "") == "EUR":
-                ref = str(g(row, "ref_txn_id") or "").strip()
-                amt = self._dec(g(row, "gross"))
+            tx_type = str(g(row, "type") or "")
+            currency = str(g(row, "currency") or "")
+
+            if (
+                "Currency Conversion" in tx_type
+                and currency == "EUR"
+            ):
+                ref = str(
+                    g(row, "ref_txn_id") or ""
+                ).strip()
+
+                amt = self._dec(
+                    g(row, "gross")
+                )
+
                 if ref and amt is not None:
                     conv_eur[ref] += abs(amt)
 
-        # ── Pass 1: группировка реальных платежей по Transaction ID ──
+        # ─────────────────────────────────────────────
+        # Pass 1
+        #
+        # Группируем реальные операции по
+        # PayPal Transaction ID.
+        # ─────────────────────────────────────────────
+
         groups = {}
         synth = 0
+
         for row in allrows:
-            if self.SKIP_TYPE.search(str(g(row, "type") or "")):
+            tx_type = str(
+                g(row, "type") or ""
+            )
+
+            # Reserve / hold / auth / currency conversion
+            # отдельными bank transactions не создаём.
+            if self.SKIP_TYPE.search(tx_type):
                 continue
+
             if self._dec(g(row, "gross")) is None:
                 continue
-            tid = str(g(row, "txn_id") or "").strip()
+
+            tid = str(
+                g(row, "txn_id") or ""
+            ).strip()
+
             if not tid:
                 synth += 1
                 tid = "__NOID_%d" % synth
-            groups.setdefault(tid, []).append(row)
+
+            groups.setdefault(
+                tid,
+                [],
+            ).append(row)
 
         def first_nonempty(grp, field):
             for r in grp:
                 v = g(r, field)
+
                 if v not in (None, ""):
                     return str(v).strip()
+
             return ""
 
         Q2 = Decimal("0.01")
         Q6 = Decimal("0.000001")
+
         transactions = []
+
+        # ─────────────────────────────────────────────
+        # Build transactions
+        # ─────────────────────────────────────────────
+
         for tid, grp in groups.items():
+
+            # Сначала пытаемся выбрать строку,
+            # где присутствует PayPal Fee.
             rep = next(
-                (r for r in grp if self._dec(g(r, "fee")) not in (None, Decimal("0"))),
+                (
+                    r
+                    for r in grp
+                    if self._dec(g(r, "fee"))
+                    not in (
+                        None,
+                        Decimal("0"),
+                    )
+                ),
                 None,
             )
+
+            # Если fee строки нет —
+            # берём строку с реальным Balance Impact.
             if rep is None:
                 rep = next(
-                    (r for r in grp if str(g(r, "balance_impact") or "") in ("Credit", "Debit")),
+                    (
+                        r
+                        for r in grp
+                        if str(
+                            g(r, "balance_impact") or ""
+                        ) in (
+                            "Credit",
+                            "Debit",
+                        )
+                    ),
                     None,
                 )
+
             if rep is None:
                 rep = grp[0]
 
-            gross = self._dec(g(rep, "gross")) or Decimal("0")
-            txn_date = self._to_date(g(rep, "transaction_date"))
+            # ─────────────────────────────────────────
+            # Basic transaction fields
+            # ─────────────────────────────────────────
+
+            gross = (
+                self._dec(g(rep, "gross"))
+                or Decimal("0")
+            )
+
+            txn_date = self._to_date(
+                g(rep, "transaction_date")
+            )
+
             if not txn_date:
                 continue
 
-            direction = "credit" if gross > 0 else "debit"
-            currency = first_nonempty(grp, "currency") or "EUR"
+            direction = (
+                "credit"
+                if gross > 0
+                else "debit"
+            )
+
+            currency = (
+                first_nonempty(
+                    grp,
+                    "currency",
+                )
+                or "EUR"
+            )
+
             amount = abs(gross)
-            real_tid = "" if tid.startswith("__NOID_") else tid
+
+            real_tid = (
+                ""
+                if tid.startswith("__NOID_")
+                else tid
+            )
+
+            # ─────────────────────────────────────────
+            # EUR amount / FX
+            # ─────────────────────────────────────────
 
             if currency == "EUR":
-                amount_eur, rate, rate_date = amount, None, None
-            else:
-                eur = conv_eur.get(real_tid)
-                if eur and eur > 0:
-                    amount_eur = eur.quantize(Q2, ROUND_HALF_UP)
-                    rate = (amount / eur).quantize(Q6, ROUND_HALF_UP)
-                    rate_date = txn_date
-                else:
-                    amount_eur, rate, rate_date = None, None, None
+                amount_eur = amount
+                rate = None
+                rate_date = None
 
-            name = first_nonempty(grp, "name")
-            cp_email = (
-                first_nonempty(grp, "from_email")
-                if direction == "credit"
-                else first_nonempty(grp, "to_email")
+            else:
+                eur = conv_eur.get(
+                    real_tid
+                )
+
+                if eur and eur > 0:
+                    amount_eur = eur.quantize(
+                        Q2,
+                        ROUND_HALF_UP,
+                    )
+
+                    rate = (
+                        amount / eur
+                    ).quantize(
+                        Q6,
+                        ROUND_HALF_UP,
+                    )
+
+                    rate_date = txn_date
+
+                else:
+                    amount_eur = None
+                    rate = None
+                    rate_date = None
+
+            # ─────────────────────────────────────────
+            # Counterparty
+            # ─────────────────────────────────────────
+
+            name = first_nonempty(
+                grp,
+                "name",
             )
+
+            cp_email = (
+                first_nonempty(
+                    grp,
+                    "from_email",
+                )
+                if direction == "credit"
+                else first_nonempty(
+                    grp,
+                    "to_email",
+                )
+            )
+
+            # ─────────────────────────────────────────
+            # PayPal fee
+            # ─────────────────────────────────────────
+
+            fee = self._dec(
+                g(rep, "fee")
+            )
+
+            if (
+                fee is not None
+                and fee != 0
+            ):
+                fee_amt = abs(fee)
+
+                if currency == "EUR":
+                    fee_eur = fee_amt
+
+                elif rate:
+                    fee_eur = (
+                        fee_amt / rate
+                    ).quantize(
+                        Q2,
+                        ROUND_HALF_UP,
+                    )
+
+                else:
+                    fee_eur = None
+
+            else:
+                fee_amt = Decimal("0")
+                fee_eur = Decimal("0")
+
+            # ─────────────────────────────────────────
+            # PayPal transaction type
+            # ─────────────────────────────────────────
+
+            tx_type = first_nonempty(grp, "type")
+
+            # Shopify:
+            # старый Custom Number = "Shopify"
+            # новый = {"shop_id": ..., "session_id": ...}
+            custom_number = first_nonempty(grp, "custom_number")
+            custom_lower = custom_number.lower()
+
+            is_shopify = (
+                "shopify" in custom_lower
+                or '"shop_id"' in custom_lower
+                or "'shop_id'" in custom_lower
+            )
+
+            invoice_number = first_nonempty(grp, "invoice_number")
+            ref_txn_id = first_nonempty(grp, "ref_txn_id")
+
+            # Для этих операций Reference Txn ID указывает прямо
+            # на Transaction ID исходной PayPal операции.
+            #
+            # Поэтому кладём его в doc_number,
+            # а classifier потом ищет:
+            # original.reference_number == txn.doc_number
+            return_link_types = {
+                "Payment Refund",
+                "Payment Reversal",
+                "Chargeback",
+            }
+
+            if tx_type in return_link_types and ref_txn_id:
+                doc_number = ref_txn_id
+            else:
+                doc_number = invoice_number
+
+
+            payment_purpose = tx_type
+
+            if is_shopify:
+                payment_purpose += " | Shopify"
+
+
+            counterparty_name = name or cp_email
+
+            # У Dispute Fee PayPal часто не даёт Name,
+            # поэтому показываем нормального контрагента.
+            if tx_type == "Dispute Fee":
+                counterparty_name = "PayPal"
+
 
             transactions.append({
                 "transaction_date": txn_date,
                 "value_date": txn_date,
-                "doc_number": first_nonempty(grp, "invoice_number"),
-                "bank_operation_code": first_nonempty(grp, "type"),
-                "counterparty_name": name or cp_email,
+
+                "doc_number": doc_number,
+                "bank_operation_code": tx_type,
+
+                "counterparty_name": counterparty_name,
                 "counterparty_code": "",
                 "counterparty_account": "",
-                "payment_purpose": first_nonempty(grp, "type"),
+
+                "payment_purpose": payment_purpose,
+
+                # Transaction ID самой текущей PayPal операции
                 "reference_number": real_tid,
+
                 "amount": amount,
                 "currency": currency,
                 "amount_eur": amount_eur,
                 "exchange_rate": rate,
                 "exchange_rate_date": rate_date,
                 "direction": direction,
+
+                "fee_amount": fee_amt,
+                "fee_amount_eur": fee_eur,
             })
 
-            fee = self._dec(g(rep, "fee"))
-            if fee is not None and fee != 0:
-                fee_amt = abs(fee)
-                if currency == "EUR":
-                    fee_eur = fee_amt
-                elif rate:
-                    fee_eur = (fee_amt / rate).quantize(Q2, ROUND_HALF_UP)
-                else:
-                    fee_eur = None
-                transactions.append({
-                    "transaction_date": txn_date,
-                    "value_date": txn_date,
-                    "doc_number": "",
-                    "bank_operation_code": "PayPal Fee",
-                    "counterparty_name": "PayPal",
-                    "counterparty_code": "",
-                    "counterparty_account": "",
-                    "payment_purpose": "PayPal komisinis mokestis | %s" % real_tid,
-                    "reference_number": (real_tid + "-FEE") if real_tid else "",
-                    "amount": fee_amt,
-                    "currency": currency,
-                    "amount_eur": fee_eur,
-                    "exchange_rate": rate,
-                    "exchange_rate_date": rate_date,
-                    "direction": "debit" if fee < 0 else "credit",
-                })
+        logger.info(
+            "[PayPalXLSX] %d ops emitted",
+            len(transactions),
+        )
 
-        logger.info("[PayPalXLSX] %d ops emitted", len(transactions))
         return transactions
-
 
 # ────────────────────────────────────────────────────────────
 # Registry & Detection

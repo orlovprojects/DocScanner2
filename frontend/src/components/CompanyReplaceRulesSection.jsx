@@ -21,11 +21,17 @@ const EMPTY_FORM = {
   id: null,
   enabled: true,
   match_pavadinimas: "",
+
+  match_kodas_op: "any",
   match_kodas: "",
+
+  match_pvm_kodas_op: "any",
   match_pvm_kodas: "",
+
   match_salies_kodas: "",
   match_tipas: "",
   change_target: "",
+
   result_pavadinimas: "",
   result_kodas: "",
   result_pvm_kodas: "",
@@ -132,8 +138,46 @@ const RulesList = React.memo(({ rules, onEdit, onDelete }) => {
                   </Typography>
                   <Stack spacing={0.75}>
                     {r.match_pavadinimas && <Typography variant="body2"><strong>Pavadinimas:</strong> {r.match_pavadinimas}</Typography>}
-                    {r.match_kodas && <Typography variant="body2"><strong>Kodas:</strong> {r.match_kodas}</Typography>}
-                    {r.match_pvm_kodas && <Typography variant="body2"><strong>PVM kodas:</strong> {r.match_pvm_kodas}</Typography>}
+                    {(() => {
+                      const op =
+                        r.match_kodas_op ||
+                        (r.match_kodas ? "eq" : "any");
+
+                      if (op === "any") return null;
+
+                      const value =
+                        op === "empty"
+                          ? "Tuščias"
+                          : op === "not_empty"
+                          ? "Netuščias"
+                          : `Lygu ${r.match_kodas}`;
+
+                      return (
+                        <Typography variant="body2">
+                          <strong>Įmonės kodas:</strong> {value}
+                        </Typography>
+                      );
+                    })()}
+                    {(() => {
+                      const op =
+                        r.match_pvm_kodas_op ||
+                        (r.match_pvm_kodas ? "eq" : "any");
+
+                      if (op === "any") return null;
+
+                      const value =
+                        op === "empty"
+                          ? "Tuščias"
+                          : op === "not_empty"
+                          ? "Netuščias"
+                          : `Lygu ${r.match_pvm_kodas}`;
+
+                      return (
+                        <Typography variant="body2">
+                          <strong>PVM kodas:</strong> {value}
+                        </Typography>
+                      );
+                    })()}
                     {r.match_salies_kodas && <Typography variant="body2"><strong>Šalis:</strong> {countryName(r.match_salies_kodas)}</Typography>}
                     {r.match_tipas && <Typography variant="body2"><strong>Tipas:</strong> {r.match_tipas === "juridinis" ? "Juridinis" : "Fizinis"}</Typography>}
                   </Stack>
@@ -191,18 +235,28 @@ export default function CompanyReplaceRulesSection({ companyReplaceRules, setCom
     setForm({
       id: rule.id || null,
       enabled: rule.enabled !== false,
+
       match_pavadinimas: rule.match_pavadinimas || "",
+
+      match_kodas_op:
+        rule.match_kodas_op || (rule.match_kodas ? "eq" : "any"),
       match_kodas: rule.match_kodas || "",
+
+      match_pvm_kodas_op:
+        rule.match_pvm_kodas_op || (rule.match_pvm_kodas ? "eq" : "any"),
       match_pvm_kodas: rule.match_pvm_kodas || "",
+
       match_salies_kodas: rule.match_salies_kodas || "",
       match_tipas: rule.match_tipas || "",
       change_target: rule.change_target || "",
+
       result_pavadinimas: rule.result_pavadinimas || "",
       result_kodas: rule.result_kodas || "",
       result_pvm_kodas: rule.result_pvm_kodas || "",
       result_salies_kodas: rule.result_salies_kodas || "",
       result_tipas: rule.result_tipas || "",
     });
+
     setError("");
   }, []);
 
@@ -222,9 +276,42 @@ export default function CompanyReplaceRulesSection({ companyReplaceRules, setCom
     setSuccess(false);
 
     try {
+      // Additional validation: when operator is "eq", the corresponding code must be provided
+      if (
+        form.match_kodas_op === "eq" &&
+        !form.match_kodas?.trim()
+      ) {
+        setError('Pasirinkus "Lygu", nurodykite įmonės kodą.');
+        setSaving(false);
+        return;
+      }
+
+      if (
+        form.match_pvm_kodas_op === "eq" &&
+        !form.match_pvm_kodas?.trim()
+      ) {
+        setError('Pasirinkus "Lygu", nurodykite PVM kodą.');
+        setSaving(false);
+        return;
+      }
+
       const hasCondition =
-        form.match_pavadinimas?.trim() || form.match_kodas?.trim() ||
-        form.match_pvm_kodas?.trim() || form.match_salies_kodas || form.match_tipas;
+        form.match_pavadinimas?.trim() ||
+
+        (
+          form.match_kodas_op === "eq"
+            ? form.match_kodas?.trim()
+            : form.match_kodas_op !== "any"
+        ) ||
+
+        (
+          form.match_pvm_kodas_op === "eq"
+            ? form.match_pvm_kodas?.trim()
+            : form.match_pvm_kodas_op !== "any"
+        ) ||
+
+        form.match_salies_kodas ||
+        form.match_tipas;
 
       if (!hasCondition) {
         setError("Nurodykite bent vieną taikymo sąlygą.");
@@ -249,12 +336,25 @@ export default function CompanyReplaceRulesSection({ companyReplaceRules, setCom
       const payloadRule = {
         id: nextId,
         enabled: !!form.enabled,
+
         match_pavadinimas: (form.match_pavadinimas || "").trim(),
-        match_kodas: (form.match_kodas || "").trim(),
-        match_pvm_kodas: (form.match_pvm_kodas || "").trim(),
+
+        match_kodas_op: form.match_kodas_op || "any",
+        match_kodas:
+          form.match_kodas_op === "eq"
+            ? (form.match_kodas || "").trim()
+            : "",
+
+        match_pvm_kodas_op: form.match_pvm_kodas_op || "any",
+        match_pvm_kodas:
+          form.match_pvm_kodas_op === "eq"
+            ? (form.match_pvm_kodas || "").trim()
+            : "",
+
         match_salies_kodas: form.match_salies_kodas || "",
         match_tipas: form.match_tipas || "",
         change_target: form.change_target || "",
+
         result_pavadinimas: (form.result_pavadinimas || "").trim(),
         result_kodas: (form.result_kodas || "").trim(),
         result_pvm_kodas: (form.result_pvm_kodas || "").trim(),
@@ -331,21 +431,108 @@ export default function CompanyReplaceRulesSection({ companyReplaceRules, setCom
                   <Grid2 size={{ xs: 12 }}>
                     <TextField size="small" label="Kontrahento pavadinimas" value={form.match_pavadinimas} onChange={(e) => setForm((p) => ({ ...p, match_pavadinimas: e.target.value }))} fullWidth placeholder="pvz.: UAB Pavyzdys" />
                   </Grid2>
-                  <Grid2 size={{ xs: 12, md: 6 }}>
-                    <TextField size="small" label="Įmonės kodas" value={form.match_kodas} onChange={(e) => setForm((p) => ({ ...p, match_kodas: e.target.value }))} fullWidth />
+                  {/* Įmonės kodas: full width row */}
+                  <Grid2 size={{ xs: 12 }}>
+                    <Stack direction={{ xs: "column", sm: "row" }} spacing={1}>
+                      <FormControl size="small" sx={{ width: { xs: "100%", sm: 150 }, flexShrink: 0 }}>
+                        <InputLabel shrink>Sąlyga</InputLabel>
+                        <Select
+                          displayEmpty
+                          label="Sąlyga"
+                          value={form.match_kodas_op || "any"}
+                          onChange={(e) => {
+                            const op = e.target.value;
+                            setForm((p) => ({
+                              ...p,
+                              match_kodas_op: op,
+                              match_kodas: op === "eq" ? p.match_kodas : "",
+                            }));
+                          }}
+                        >
+                          <MenuItem value="any">Nesvarbu</MenuItem>
+                          <MenuItem value="eq">Lygu</MenuItem>
+                          <MenuItem value="empty">Tuščias</MenuItem>
+                          <MenuItem value="not_empty">Netuščias</MenuItem>
+                        </Select>
+                      </FormControl>
+                      <TextField
+                        size="small"
+                        label="Įmonės kodas"
+                        value={form.match_kodas}
+                        onChange={(e) => setForm((p) => ({ ...p, match_kodas: e.target.value }))}
+                        disabled={form.match_kodas_op !== "eq"}
+                        fullWidth
+                        sx={{
+                          "& .MuiInputBase-root.Mui-disabled": {
+                            backgroundColor: "grey.100",
+                          },
+                          "& .MuiInputBase-input.Mui-disabled": {
+                            WebkitTextFillColor: "rgba(0, 0, 0, 0.38)",
+                          },
+                        }}
+                      />
+                    </Stack>
+                  </Grid2>
+                  {/* PVM kodas: full width row */}
+                  <Grid2 size={{ xs: 12 }}>
+                    <Stack direction={{ xs: "column", sm: "row" }} spacing={1}>
+                      <FormControl size="small" sx={{ width: { xs: "100%", sm: 150 }, flexShrink: 0 }}>
+                        <InputLabel shrink>Sąlyga</InputLabel>
+                        <Select
+                          displayEmpty
+                          label="Sąlyga"
+                          value={form.match_pvm_kodas_op || "any"}
+                          onChange={(e) => {
+                            const op = e.target.value;
+                            setForm((p) => ({
+                              ...p,
+                              match_pvm_kodas_op: op,
+                              match_pvm_kodas: op === "eq" ? p.match_pvm_kodas : "",
+                            }));
+                          }}
+                        >
+                          <MenuItem value="any">Nesvarbu</MenuItem>
+                          <MenuItem value="eq">Lygu</MenuItem>
+                          <MenuItem value="empty">Tuščias</MenuItem>
+                          <MenuItem value="not_empty">Netuščias</MenuItem>
+                        </Select>
+                      </FormControl>
+                      <TextField
+                        size="small"
+                        label="PVM kodas"
+                        value={form.match_pvm_kodas}
+                        onChange={(e) => setForm((p) => ({ ...p, match_pvm_kodas: e.target.value }))}
+                        disabled={form.match_pvm_kodas_op !== "eq"}
+                        fullWidth
+                        sx={{
+                          "& .MuiInputBase-root.Mui-disabled": {
+                            backgroundColor: "grey.100",
+                          },
+                          "& .MuiInputBase-input.Mui-disabled": {
+                            WebkitTextFillColor: "rgba(0, 0, 0, 0.38)",
+                          },
+                        }}
+                      />
+                    </Stack>
                   </Grid2>
                   <Grid2 size={{ xs: 12, md: 6 }}>
-                    <TextField size="small" label="PVM kodas" value={form.match_pvm_kodas} onChange={(e) => setForm((p) => ({ ...p, match_pvm_kodas: e.target.value }))} fullWidth />
-                  </Grid2>
-                  <Grid2 size={{ xs: 12, md: 6 }}>
-                    <Autocomplete
-                      disablePortal size="small" options={COUNTRY_OPTIONS}
-                      getOptionLabel={getCountryOptionLabel}
-                      value={COUNTRY_OPTIONS.find((opt) => opt.code === form.match_salies_kodas) || null}
-                      onChange={(_, v) => setForm((p) => ({ ...p, match_salies_kodas: v ? v.code : "" }))}
-                      renderInput={(params) => <TextField {...params} label="Šalis" />}
-                      isOptionEqualToValue={isCountryOptionEqualToValue}
-                    />
+                    {/* Šalis: Select with explicit "Nesvarbu" */}
+                    <FormControl size="small" fullWidth>
+                      <InputLabel shrink>Šalis</InputLabel>
+                      <Select
+                        displayEmpty
+                        label="Šalis"
+                        value={form.match_salies_kodas}
+                        onChange={(e) => setForm((p) => ({ ...p, match_salies_kodas: e.target.value }))}
+                      >
+                        <MenuItem value="">Nesvarbu</MenuItem>
+                        {COUNTRY_OPTIONS.map((country) => (
+                          <MenuItem key={country.code} value={country.code}>
+                            {country.name}
+                          </MenuItem>
+                        ))}
+                      </Select>
+                    </FormControl>
                   </Grid2>
                   <Grid2 size={{ xs: 12, md: 6 }}>
                     <FormControl size="small" fullWidth>
@@ -396,8 +583,15 @@ export default function CompanyReplaceRulesSection({ companyReplaceRules, setCom
                   <Grid2 size={{ xs: 12, md: 6 }}>
                     <FormControl size="small" fullWidth>
                       <InputLabel shrink>Naujas tipas</InputLabel>
-                      <Select displayEmpty label="Naujas tipas" value={form.result_tipas} onChange={(e) => setForm((p) => ({ ...p, result_tipas: e.target.value }))}>
-                        <MenuItem value="">Nekeisti</MenuItem>
+                      <Select
+                        displayEmpty
+                        label="Naujas tipas"
+                        value={form.result_tipas}
+                        onChange={(e) => setForm((p) => ({ ...p, result_tipas: e.target.value }))}
+                      >
+                        <MenuItem value="">
+                          <em>—</em>
+                        </MenuItem>
                         <MenuItem value="juridinis">Juridinis asmuo</MenuItem>
                         <MenuItem value="fizinis">Fizinis asmuo</MenuItem>
                       </Select>

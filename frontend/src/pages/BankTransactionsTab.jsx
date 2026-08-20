@@ -21,6 +21,10 @@ import {
   Description as DocIcon,
   PostAdd as DKIcon,
   Warning as WarningIcon,
+  HourglassEmpty as HourglassIcon,
+  CheckCircle as DoneIcon,
+  PriorityHigh as ExclaimIcon,
+  UndoRounded as PaymentReturnedIcon,
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import { invoicingApi } from '../api/invoicingApi';
@@ -29,30 +33,47 @@ import RegisterDKDialog from '../components/RegisterDKDialog';
 
 // ── Config ──
 
-const STATUS_MAP = {
-  auto_matched:     { label: 'Susieta',               color: 'success' },
-  confirmed:        { label: 'Susieta',               color: 'success' },
-  manually_matched: { label: 'Susieta',               color: 'info' },
-  likely_matched:   { label: 'Laukia patvirtinimo',   color: 'warning' },
-  classified:       { label: 'Atpažinta',             color: 'info' },
-  unmatched:        { label: 'Nesusieta',             color: 'default' },
+const ACTION_STATE_CFG = {
+  apdorota:            { label: 'Apdorota',             bg: '#e8f5e9', fg: '#2e7d32', Icon: DoneIcon },
+  reikia_patvirtinimo: { label: 'Reikia patvirtinimo',  bg: '#fff3e0', fg: '#ed6c02', Icon: ExclaimIcon },
+  laukia_dokumento:    { label: 'Laukia dokumento',     bg: '#f5f5f5', fg: '#757575', Icon: HourglassIcon },
+};
+
+const PAYMENT_RETURN_CFG = {
+  full: {
+    label: 'Mokėjimas grąžintas',
+    bg: '#fff3e0',
+    fg: '#ef6c00',
+    border: '#ffcc80',
+  },
+  partial: {
+    label: 'Dalis mokėjimo grąžinta',
+    bg: '#fff8e1',
+    fg: '#f57c00',
+    border: '#ffe082',
+  },
 };
 
 const CAT_CFG = {
-  supplier_payment:  { label: 'Mokėjimas tiekėjui',      color: '#1565c0' },
-  customer_receipt:  { label: 'Įplauka iš pirkėjo',      color: '#2e7d32' },
-  bank_fee:          { label: 'Banko mokestis',           color: '#795548' },
-  tax_vmi:           { label: 'VMI mokestis',             color: '#d32f2f' },
-  tax_sodra:         { label: 'Sodra / VSDFV',           color: '#c62828' },
-  salary:            { label: 'Darbo užmokestis',         color: '#6a1b9a' },
-  owner_withdrawal:  { label: 'Savininko lėšų paėmimas', color: '#37474f' },
-  owner_deposit:     { label: 'Savininko įnašas',        color: '#37474f' },
-  loan_payment:      { label: 'Paskolos grąžinimas',     color: '#4527a0' },
-  loan_received:     { label: 'Gauta paskola',           color: '#4527a0' },
-  provider_payout:   { label: 'Tarpininko išmoka',       color: '#00695c' },
-  refund_received:   { label: 'Gautas grąžinimas',       color: '#ff6f00' },
-  other_expense:     { label: 'Kitos sąnaudos',          color: '#757575' },
-  other_income:      { label: 'Kitos pajamos',           color: '#757575' },
+  supplier_payment:    { label: 'Mokėjimas tiekėjui',         color: '#1565c0' },
+  customer_receipt:    { label: 'Įplauka iš pirkėjo',         color: '#2e7d32' },
+  bank_fee:            { label: 'Banko mokestis',             color: '#795548' },
+  tax_vmi:             { label: 'VMI mokestis',               color: '#d32f2f' },
+  tax_sodra:           { label: 'Sodra / VSDFV',              color: '#c62828' },
+  salary:              { label: 'Darbo užmokestis',           color: '#6a1b9a' },
+  owner_withdrawal:    { label: 'Savininko lėšų paėmimas',    color: '#37474f' },
+  owner_deposit:       { label: 'Savininko įnašas',           color: '#37474f' },
+  loan_payment:        { label: 'Paskolos grąžinimas',        color: '#4527a0' },
+  loan_received:       { label: 'Gauta paskola',              color: '#4527a0' },
+  provider_payout:     { label: 'Tarpininko išmoka',          color: '#00695c' },
+  refund_received:     { label: 'Gautas grąžinimas',          color: '#ff6f00' },
+  payment_refund:      { label: 'Mokėjimo grąžinimas',        color: '#fb8c00' },
+  payment_reversal:    { label: 'Mokėjimo atšaukimas',        color: '#ef6c00' },
+  chargeback:          { label: 'Chargeback',                 color: '#e65100' },
+  paypal_card_funding: { label: 'PayPal sąskaitos papildymas', color: '#0070ba' },
+  other_expense:       { label: 'Kitos sąnaudos',             color: '#757575' },
+  other_income:        { label: 'Kitos pajamos',              color: '#757575' },
+  shopify_pardavimas:  { label: 'Shopify pardavimas',         color: '#4F7D28', bg: '#95BF4724', border: '#95BF477A' },
 };
 
 const MANUAL_CATS = [
@@ -60,18 +81,26 @@ const MANUAL_CATS = [
   'owner_withdrawal', 'owner_deposit',
   'loan_payment', 'loan_received',
   'provider_payout', 'refund_received',
+  'payment_refund', 'payment_reversal', 'chargeback', 'paypal_card_funding',
   'other_expense', 'other_income',
 ];
 
 const BANK_CFG = {
   swedbank: 'Swedbank', seb: 'SEB', luminor: 'Luminor',
-  siauliu: 'Artea', revolut: 'Revolut', other: 'Kitas',
+  siauliu: 'Artea', revolut: 'Revolut', paypal: 'PayPal', other: 'Kitas',
 };
 
 const fmt = (v, c = 'EUR') => v == null ? '—' : `${parseFloat(v).toFixed(2).replace('.', ',')} ${c === 'EUR' ? '€' : c}`;
 const fmtD = (d) => { if (!d) return '—'; const p = String(d).split('-'); return p.length === 3 ? `${p[2]}/${p[1]}/${p[0]}` : d; };
 
-const isMatchedStatus = (s) => ['auto_matched', 'confirmed', 'manually_matched', 'likely_matched'].includes(s);
+const isMatchedStatus = (s) =>
+  ['auto_matched', 'confirmed', 'manually_matched', 'likely_matched'].includes(s);
+
+const getPaymentReturnStatus = (txn) =>
+  txn?.payment_return_status || txn?.match_details?.payment_return_status || '';
+
+const getPaymentReturnedAmount = (txn) =>
+  txn?.payment_returned_amount || txn?.match_details?.payment_returned_amount || '';
 
 // ══════════════════════════════════════════
 
@@ -83,7 +112,7 @@ const BankTransactionsTab = ({ statements = [], initialStatementId = '', onClear
   // ── Table state ──
   const [txns, setTxns] = useState([]);
   const [txnTotal, setTxnTotal] = useState(0);
-  const [apiStats, setApiStats] = useState({ total: 0, processed: 0, needs_action: 0 });
+  const [apiStats, setApiStats] = useState({ total: 0, apdorota: 0, reikia_veiksmu: 0 });
   const [txnLoad, setTxnLoad] = useState(true);
   const [txnMore, setTxnMore] = useState(false);
   const txnOff = useRef(0), txnHas = useRef(true), txnSen = useRef(null), txnObs = useRef(null);
@@ -235,9 +264,88 @@ const BankTransactionsTab = ({ statements = [], initialStatementId = '', onClear
     </Tooltip>
   );
 
-  const rSts = (t) => {
-    const c = STATUS_MAP[t.match_status] || STATUS_MAP.unmatched;
-    return <Chip label={c.label} color={c.color} size="small" variant="outlined" sx={{ fontSize: 11, height: 22 }} />;
+  const rPaymentReturn = (txn) => {
+    const status = getPaymentReturnStatus(txn);
+
+    if (!status) {
+      return null;
+    }
+
+    const amount = getPaymentReturnedAmount(txn);
+    const formattedAmount = amount ? fmt(amount, txn.currency) : '';
+    const isPartial = status === 'partial';
+
+    const title = isPartial
+      ? `Dalis mokėjimo grąžinta${formattedAmount ? ` · ${formattedAmount}` : ''}`
+      : `Mokėjimas grąžintas${formattedAmount ? ` · ${formattedAmount}` : ''}`;
+
+    return (
+      <Tooltip title={title}>
+        <Box
+          sx={{
+            width: 24,
+            height: 24,
+            borderRadius: '50%',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            bgcolor: isPartial ? '#fff8e1' : '#fff3e0',
+            border: '1px solid',
+            borderColor: isPartial ? '#ffe082' : '#ffcc80',
+            flexShrink: 0,
+          }}
+        >
+          <PaymentReturnedIcon
+            sx={{
+              fontSize: 15,
+              color: isPartial ? '#f9a825' : '#ef6c00',
+            }}
+          />
+        </Box>
+      </Tooltip>
+    );
+  };
+
+  const rSts = (txn) => {
+    const config =
+      ACTION_STATE_CFG[txn.action_state] || ACTION_STATE_CFG.laukia_dokumento;
+    const StatusIcon = config.Icon;
+
+    return (
+      <Box
+        sx={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 0.75,
+          flexWrap: 'wrap',
+        }}
+      >
+        <Chip
+          icon={
+            <StatusIcon
+              sx={{
+                fontSize: 15,
+                color: `${config.fg} !important`,
+              }}
+            />
+          }
+          label={config.label}
+          size="small"
+          sx={{
+            fontSize: 11,
+            height: 22,
+            fontWeight: 600,
+            bgcolor: config.bg,
+            color: config.fg,
+            '& .MuiChip-icon': {
+              ml: 0.5,
+            },
+          }}
+        />
+
+        {rPaymentReturn(txn)}
+      </Box>
+    );
   };
 
   const rCat = (t) => {
@@ -267,8 +375,12 @@ const BankTransactionsTab = ({ statements = [], initialStatementId = '', onClear
     return (
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, '&:hover .edit-icon': { opacity: 1 } }}>
         <Chip label={c?.label || t.category_display} size="small" sx={{
-          fontSize: 11, height: 22, backgroundColor: `${c?.color || '#757575'}14`,
-          color: c?.color || '#757575', border: `1px solid ${c?.color || '#757575'}40`,
+          fontSize: 11,
+          height: 22,
+          fontWeight: 700,
+          backgroundColor: c?.bg || `${c?.color || '#757575'}14`,
+          color: c?.color || '#757575',
+          border: `1px solid ${c?.border || `${c?.color || '#757575'}40`}`,
         }} />
         {t.match_status === 'unmatched' && (
           <IconButton size="small" className="edit-icon" sx={{ opacity: 0, transition: 'opacity 0.15s', p: 0.25 }}
@@ -319,10 +431,10 @@ const BankTransactionsTab = ({ statements = [], initialStatementId = '', onClear
       <Box sx={{ display: 'flex', gap: 1.5, mb: 2, flexWrap: 'wrap' }}>
         <SC icon={<BankIcon sx={{ color: '#1565c0' }} />} label="Iš viso" value={apiStats.total}
           active={txnF.match_status === ''} onClick={() => handleStatClick('')} />
-        <SC icon={<CheckCircleIcon sx={{ color: '#2e7d32' }} />} label="Apdorota" value={apiStats.processed} color="#2e7d32"
-          active={txnF.match_status === 'processed'} onClick={() => handleStatClick('processed')} />
-        <SC icon={<WarningIcon sx={{ color: '#d32f2f' }} />} label="Reikia veiksmų" value={apiStats.needs_action} color="#d32f2f"
-          active={txnF.match_status === 'needs_action'} onClick={() => handleStatClick('needs_action')} />
+        <SC icon={<CheckCircleIcon sx={{ color: '#2e7d32' }} />} label="Apdorota" value={apiStats.apdorota} color="#2e7d32"
+          active={txnF.match_status === 'apdorota'} onClick={() => handleStatClick('apdorota')} />
+        <SC icon={<WarningIcon sx={{ color: '#ed6c02' }} />} label="Reikia veiksmų" value={apiStats.reikia_veiksmu} color="#ed6c02"
+          active={txnF.match_status === 'reikia_veiksmu'} onClick={() => handleStatClick('reikia_veiksmu')} />
       </Box>
 
       {/* ══ FILTERS ══ */}
@@ -372,7 +484,7 @@ const BankTransactionsTab = ({ statements = [], initialStatementId = '', onClear
                   </TableCell>
                   <TableCell align="right"><Typography fontSize={13} fontWeight={700} color={t.direction === 'incoming' ? 'success.main' : 'text.primary'}>{t.direction === 'incoming' ? '+' : '-'}{fmt(t.amount, t.currency)}</Typography></TableCell>
                   <TableCell>
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, flexWrap: 'wrap' }}>
                       {rSts(t)}
                       {t.match_confidence > 0 && t.match_confidence < 1 && (
                         <Typography variant="caption" color="text.secondary" sx={{ fontSize: 11 }}>
@@ -419,6 +531,50 @@ const BankTransactionsTab = ({ statements = [], initialStatementId = '', onClear
               {!dtlLoad && dtlTxn.payment_purpose && (
                 <Typography fontSize={12} color="text.secondary" sx={{ mt: 1, wordBreak: 'break-word' }}>{dtlTxn.payment_purpose}</Typography>
               )}
+
+              {!dtlLoad &&
+                getPaymentReturnStatus(dtlTxn) &&
+                PAYMENT_RETURN_CFG[getPaymentReturnStatus(dtlTxn)] && (
+                  <Box sx={{ mt: 1 }}>
+                    <Chip
+                      icon={
+                        <PaymentReturnedIcon
+                          sx={{
+                            fontSize: 15,
+                            color: `${
+                              PAYMENT_RETURN_CFG[getPaymentReturnStatus(dtlTxn)].fg
+                            } !important`,
+                          }}
+                        />
+                      }
+                      label={
+                        getPaymentReturnStatus(dtlTxn) === 'partial' &&
+                        getPaymentReturnedAmount(dtlTxn)
+                          ? `${PAYMENT_RETURN_CFG.partial.label} (${fmt(
+                              getPaymentReturnedAmount(dtlTxn),
+                              dtlTxn.currency,
+                            )})`
+                          : PAYMENT_RETURN_CFG[getPaymentReturnStatus(dtlTxn)].label
+                      }
+                      size="small"
+                      sx={{
+                        fontSize: 11,
+                        height: 22,
+                        fontWeight: 600,
+                        bgcolor:
+                          PAYMENT_RETURN_CFG[getPaymentReturnStatus(dtlTxn)].bg,
+                        color:
+                          PAYMENT_RETURN_CFG[getPaymentReturnStatus(dtlTxn)].fg,
+                        border: `1px solid ${
+                          PAYMENT_RETURN_CFG[getPaymentReturnStatus(dtlTxn)].border
+                        }`,
+                        '& .MuiChip-icon': {
+                          ml: 0.5,
+                        },
+                      }}
+                    />
+                  </Box>
+                )}
             </Paper>
           )}
 

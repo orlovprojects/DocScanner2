@@ -2163,7 +2163,7 @@ def process_uploaded_file_task(self, user_id, doc_id, scan_type, split_depth=0, 
                     "structured_json",
                 ])
         except Exception as e:
-            logger.warning("Failed to apply company_replace_rules (post-enrich): %s", e)
+            logger.exception("Failed to apply company_replace_rules (post-enrich): %s", e)
         _log_t("apply_company_replace_rules (post-enrich)", t0)
 
         # 15.06) Пересчёт готовности к экспорту после обогащения контрагентов

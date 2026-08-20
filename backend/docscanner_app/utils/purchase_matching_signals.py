@@ -73,7 +73,10 @@ class SignalPurchaseMatchingEngine:
                 if r.status == "unmatched" or not r.purchase_id:
                     txn.match_status = "unmatched"
                     txn.match_confidence = Decimal("0")
-                    txn.match_details = r.reasons or {}
+
+                    existing_details = dict(txn.match_details or {})
+                    existing_details.update(r.reasons or {})
+                    txn.match_details = existing_details
                     txn.matched_document_number = ""
                     txn.save(update_fields=[
                         "match_status",
@@ -116,20 +119,30 @@ class SignalPurchaseMatchingEngine:
 
                 txn.match_status = r.status
                 txn.match_confidence = r.confidence
-                txn.match_details = {
+
+                existing_details = dict(txn.match_details or {})
+                existing_details.update({
                     **(r.reasons or {}),
                     "allocation_id": alloc.id,
                     "signals": r.signals or {},
                     "experimental_signal_matching": True,
-                }
+                })
+                txn.match_details = existing_details
                 txn.matched_document_number = r.matched_document_number or ""
                 txn.allocated_amount = r.amount
+
+                # Если classifier не нашёл более специфичную категорию,
+                # успешный Purchase matching = mokėjimas tiekėjui.
+                if not txn.transaction_category:
+                    txn.transaction_category = "supplier_payment"
+
                 txn.save(update_fields=[
                     "match_status",
                     "match_confidence",
                     "match_details",
                     "matched_document_number",
                     "allocated_amount",
+                    "transaction_category",
                     "updated_at",
                 ])
 

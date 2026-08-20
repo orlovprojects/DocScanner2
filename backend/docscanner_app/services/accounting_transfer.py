@@ -248,13 +248,24 @@ def create_je_for_allocation(allocation):
         doc_eur = _to_eur(allocation.amount, doc_rate)
         bank_eur = _to_eur(allocation.amount, txn_rate)
 
+        # ── Komisinis (PayPal / banko mokestis) на той же операции ──
+        fee_eur = Decimal("0")
+        if txn and txn.fee_amount:
+            fee_eur = (
+                Decimal(str(txn.fee_amount_eur))
+                if txn.fee_amount_eur
+                else _to_eur(txn.fee_amount, txn_rate)
+            )
+
         is_incoming_side = allocation.invoice_id is not None
         if is_incoming_side:
-            debit_eur, credit_eur = bank_eur, doc_eur
-            gain = bank_eur - doc_eur   # нам заплатили: выгода если получили больше EUR
+            # нам заплатили: на банк падает нетто (за вычетом комиссии)
+            debit_eur, credit_eur = bank_eur - fee_eur, doc_eur
+            gain = bank_eur - doc_eur
         else:
-            debit_eur, credit_eur = doc_eur, bank_eur
-            gain = doc_eur - bank_eur   # мы заплатили: выгода если отдали меньше EUR
+            # мы заплатили: с банка ушла сумма + комиссия
+            debit_eur, credit_eur = doc_eur, bank_eur + fee_eur
+            gain = doc_eur - bank_eur
 
         is_foreign = pay_currency != "EUR"
 
@@ -291,20 +302,29 @@ def create_je_for_allocation(allocation):
             ),
         ]
 
+        # ── Komisinis mokestis → D 6880 (savaime subalansuota su banko koja) ──
+        if fee_eur > 0:
+            je_lines.append(JournalEntryLine(
+                entry=je, side="D",
+                account_code="6880", account_name="Banko ir mokėjimų sistemų mokesčiai",
+                amount=fee_eur, description=f"Komisinis mokestis: {doc_number}",
+                sort_order=2,
+            ))
+
         # ── Курсовая разница: gain>0 → K 5861 (teigiama), gain<0 → D 6861 (neigiama) ──
         if gain > 0:
             je_lines.append(JournalEntryLine(
                 entry=je, side="K",
                 account_code="5861", account_name="Teigiama valiutų kursų įtaka",
                 amount=gain, description=f"Kursinis skirtumas: {doc_number}",
-                sort_order=2,
+                sort_order=3,
             ))
         elif gain < 0:
             je_lines.append(JournalEntryLine(
                 entry=je, side="D",
                 account_code="6861", account_name="Neigiama valiutų kursų įtaka",
                 amount=-gain, description=f"Kursinis skirtumas: {doc_number}",
-                sort_order=2,
+                sort_order=3,
             ))
 
         JournalEntryLine.objects.bulk_create(je_lines)

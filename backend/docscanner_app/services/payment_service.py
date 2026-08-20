@@ -318,94 +318,174 @@ class BankImportService:
                 stmt.duplicates_skipped = dupes
                 stmt.duplicate_details = duplicate_details
 
-                if created_inc:
-                    logger.info(
-                        "[BankImport] Starting matching for %d incoming transactions...",
-                        len(created_inc),
+                # ── 10. Classify ALL bank transactions first ───────────────
+                from ..utils.transaction_classifier import TransactionClassifier
+                from ..utils.bank_transaction_policy import should_try_document_match
+
+                all_created = list(created_inc) + list(created_out)
+
+                if all_created:
+                    classifier = TransactionClassifier(
+                        self.user,
+                        self.company_profile,
                     )
+                    classified = classifier.classify_and_apply(all_created)
+
+                    logger.info(
+                        "[BankImport] Classified %d/%d bank transactions",
+                        len(classified),
+                        len(all_created),
+                    )
+
+
+                # ВАЖНО:
+                # classifier сохраняет другие model instances через ORM,
+                # поэтому перечитываем транзакции из DB.
+                incoming_txns = list(
+                    stmt.incoming_transactions
+                    .select_related("category_rule")
+                    .all()
+                )
+
+                outgoing_txns = list(
+                    stmt.outgoing_transactions
+                    .select_related("category_rule")
+                    .all()
+                )
+
+
+                # ── 11. Categories that do NOT require documents ───────────
+
+                # Bank fee / VMI / Sodra / salary → direct DK
+                category_dk = BankCategoryJournalBuilder(
+                    self.user,
+                    self.company_profile,
+                )
+                dk_result = category_dk.create_for_statement(stmt)
+
+                logger.info(
+                    "[BankImport] Direct category DK created: %s",
+                    dk_result,
+                )
+
+
+                # Aggregator payout → D 271x / K 273x
+                payout_dk = AggregatorPayoutJournalBuilder(
+                    self.user,
+                    self.company_profile,
+                )
+                payout_result = payout_dk.create_for_statement(stmt)
+
+                logger.info(
+                    "[BankImport] Aggregator payouts: %s",
+                    payout_result,
+                )
+
+
+                # Перечитать после direct processing:
+                # обработанные операции получили match_status=classified / journal_entry.
+                incoming_txns = list(
+                    stmt.incoming_transactions
+                    .select_related("category_rule")
+                    .all()
+                )
+
+                outgoing_txns = list(
+                    stmt.outgoing_transactions
+                    .select_related("category_rule")
+                    .all()
+                )
+
+
+                # ── 12. Route remaining transactions to document matching ──
+
+                incoming_for_matching = [
+                    txn
+                    for txn in incoming_txns
+                    if txn.match_status == "unmatched"
+                    and should_try_document_match(txn, "incoming")
+                ]
+
+                outgoing_for_matching = [
+                    txn
+                    for txn in outgoing_txns
+                    if txn.match_status == "unmatched"
+                    and should_try_document_match(txn, "outgoing")
+                ]
+
+
+                # ── Incoming → Invoice ──────────────────────────────────────
+                if incoming_for_matching:
+                    logger.info(
+                        "[BankImport] Starting invoice matching for %d/%d incoming transactions...",
+                        len(incoming_for_matching),
+                        len(incoming_txns),
+                    )
+
                     engine = InvoiceMatchingEngine(self.user)
-                    results = engine.match_transactions(created_inc)
+                    results = engine.match_transactions(incoming_for_matching)
                     engine.apply_results(results)
 
                     matched = sum(
                         1 for r in results
                         if getattr(r, "status", "unmatched") != "unmatched"
                     )
+
                     logger.info(
-                        "[BankImport] Matching complete: %d/%d matched",
-                        matched, len(results),
+                        "[BankImport] Invoice matching complete: %d/%d matched",
+                        matched,
+                        len(results),
                     )
 
-                    # ── Auto SF creation for auto_matched invoices ──
+                    # Auto SF creation for auto_matched invoices
                     for r in results:
                         if getattr(r, "status", "") == "auto_matched":
                             for prop in r.allocations:
                                 try:
                                     from .auto_sf import maybe_auto_create_sf
                                     from ..models import Invoice
+
                                     inv = Invoice.objects.get(id=prop.invoice_id)
                                     created_sf = maybe_auto_create_sf(inv)
+
                                     if created_sf:
                                         logger.info(
                                             "[BankImport] Auto SF created: %s for invoice %s",
-                                            created_sf.full_number, inv.full_number,
+                                            created_sf.full_number,
+                                            inv.full_number,
                                         )
                                 except Exception as e:
                                     logger.warning(
                                         "[BankImport] Auto SF failed for invoice %s: %s",
-                                        prop.invoice_id, e,
+                                        prop.invoice_id,
+                                        e,
                                     )
 
-                # ── Match outgoing → Purchase ──────────────────
-                if created_out:
+
+                # ── Outgoing → Purchase ─────────────────────────────────────
+                if outgoing_for_matching:
                     logger.info(
-                        "[BankImport] Starting SIGNAL purchase matching for %d outgoing transactions...",
-                        len(created_out),
+                        "[BankImport] Starting purchase matching for %d/%d outgoing transactions...",
+                        len(outgoing_for_matching),
+                        len(outgoing_txns),
                     )
 
                     from ..utils.purchase_matching_signals import SignalPurchaseMatchingEngine
 
                     p_engine = SignalPurchaseMatchingEngine(self.user)
-                    p_results = p_engine.match_transactions(created_out)
+                    p_results = p_engine.match_transactions(outgoing_for_matching)
                     p_engine.apply_results(p_results)
 
                     p_matched = sum(
                         1 for r in p_results
                         if getattr(r, "status", "unmatched") != "unmatched"
                     )
+
                     logger.info(
                         "[BankImport] Purchase matching complete: %d/%d matched",
-                        p_matched, len(p_results),
+                        p_matched,
+                        len(p_results),
                     )
-
-                # ── Classify remaining unmatched ───────────────
-                from ..utils.transaction_classifier import TransactionClassifier
-                all_unmatched = list(
-                    stmt.outgoing_transactions.filter(
-                        match_status="unmatched", transaction_category="",
-                    )
-                ) + list(
-                    stmt.incoming_transactions.filter(
-                        match_status="unmatched", transaction_category="",
-                    )
-                )
-                if all_unmatched:
-                    classifier = TransactionClassifier(self.user)
-                    classified = classifier.classify_and_apply(all_unmatched)
-                    logger.info(
-                        "[BankImport] Classified %d/%d unmatched transactions",
-                        len(classified), len(all_unmatched),
-                    )
-
-                # ── Create DK for safe bank categories ─────────
-                category_dk = BankCategoryJournalBuilder(self.user, self.company_profile)
-                dk_result = category_dk.create_for_statement(stmt)
-                logger.info(f"[BankImport] Category DK created: {dk_result}")
-
-                # ── Agregatorių payout'ai → Pinigai kelyje (273) ──
-                payout_dk = AggregatorPayoutJournalBuilder(self.user, self.company_profile)
-                payout_result = payout_dk.create_for_statement(stmt)
-                logger.info(f"[BankImport] Aggregator payouts: {payout_result}")
 
             stmt.status = "processed"
             stmt.save(update_fields=[
@@ -506,47 +586,102 @@ class BankImportService:
                 allocated_amount=0,
             )
 
-            # ── 5. Matching incoming → Invoice ─────────────
-            inc_txns = list(stmt.incoming_transactions.all())
-            if inc_txns:
+            # ── 5. Classify ALL transactions ───────────────────────
+            all_txns = (
+                list(stmt.incoming_transactions.all())
+                + list(stmt.outgoing_transactions.all())
+            )
+
+            if all_txns:
+                TransactionClassifier(
+                    self.user,
+                    self.company_profile,
+                ).classify_and_apply(all_txns)
+
+
+            # ── 6. Process categories without documents ────────────
+            category_dk = BankCategoryJournalBuilder(
+                self.user,
+                self.company_profile,
+            )
+            dk_result = category_dk.create_for_statement(stmt)
+
+            logger.info(
+                "[BankImport] Re-match direct category DK: %s",
+                dk_result,
+            )
+
+
+            payout_dk = AggregatorPayoutJournalBuilder(
+                self.user,
+                self.company_profile,
+            )
+            payout_result = payout_dk.create_for_statement(stmt)
+
+            logger.info(
+                "[BankImport] Re-match aggregator payouts: %s",
+                payout_result,
+            )
+
+
+            # ── 7. Route remaining transactions ────────────────────
+            from ..utils.bank_transaction_policy import should_try_document_match
+
+            inc_txns = list(
+                stmt.incoming_transactions
+                .select_related("category_rule")
+                .all()
+            )
+
+            out_txns = list(
+                stmt.outgoing_transactions
+                .select_related("category_rule")
+                .all()
+            )
+
+            inc_for_matching = [
+                txn
+                for txn in inc_txns
+                if txn.match_status == "unmatched"
+                and should_try_document_match(txn, "incoming")
+            ]
+
+            out_for_matching = [
+                txn
+                for txn in out_txns
+                if txn.match_status == "unmatched"
+                and should_try_document_match(txn, "outgoing")
+            ]
+
+
+            # Incoming → Invoice
+            if inc_for_matching:
                 engine = InvoiceMatchingEngine(self.user)
-                results = engine.match_transactions(inc_txns)
+                results = engine.match_transactions(inc_for_matching)
                 engine.apply_results(results)
 
-            # ── 6. Matching outgoing → Purchase ────────────
-            out_txns = list(stmt.outgoing_transactions.all())
-            if out_txns:
+
+            # Outgoing → Purchase
+            if out_for_matching:
                 logger.info(
                     "[BankImport] Starting SIGNAL re-match for %d outgoing transactions...",
-                    len(out_txns),
+                    len(out_for_matching),
                 )
 
                 p_engine = SignalPurchaseMatchingEngine(self.user)
-                p_results = p_engine.match_transactions(out_txns)
+                p_results = p_engine.match_transactions(out_for_matching)
                 p_engine.apply_results(p_results)
 
                 p_matched = sum(
                     1 for r in p_results
                     if getattr(r, "status", "unmatched") != "unmatched"
                 )
+
                 logger.info(
                     "[BankImport] SIGNAL purchase re-match complete: %d/%d matched",
                     p_matched,
                     len(p_results),
                 )
-
-            # ── 7. Classify remaining ──────────────────────
-            all_unmatched = list(
-                stmt.outgoing_transactions.filter(
-                    match_status="unmatched", transaction_category="",
-                )
-            ) + list(
-                stmt.incoming_transactions.filter(
-                    match_status="unmatched", transaction_category="",
-                )
-            )
-            if all_unmatched:
-                TransactionClassifier(self.user).classify_and_apply(all_unmatched)
 
             # ── 8. Create / rebuild DK for safe bank categories ─
             category_dk = BankCategoryJournalBuilder(self.user, self.company_profile)
@@ -708,6 +843,8 @@ class BankImportService:
                 reference_number=raw.get("reference_number", ""),
                 amount=raw["amount"],
                 currency=raw.get("currency", "EUR"),
+                fee_amount=raw.get("fee_amount") or 0,
+                fee_amount_eur=raw.get("fee_amount_eur"),
             )
 
             # ── Валюта → EUR (курс из выписки или дефолт для EUR) ──
@@ -1087,28 +1224,9 @@ class PaymentService:
 # Category DK entries for bank transactions
 # ════════════════════════════════════════════════════════════
 
-SAFE_BANK_DK_CATEGORIES = {
-    "bank_fee": {
-        "debit_account": "6880",
-        "debit_name": "Banko mokesčiai",
-        "description": "Banko mokestis",
-    },
-    "tax_vmi": {
-        "debit_account": "4481",
-        "debit_name": "Mokėtini mokesčiai VMI",
-        "description": "VMI įmoka",
-    },
-    "tax_sodra": {
-        "debit_account": "4482",
-        "debit_name": "Mokėtina Sodra",
-        "description": "Sodra įmoka",
-    },
-    "salary": {
-        "debit_account": "4461",
-        "debit_name": "Mokėtinas darbo užmokestis",
-        "description": "Darbo užmokesčio išmokėjimas",
-    },
-}
+from ..utils.bank_transaction_policy import get_direct_journal_categories
+
+SAFE_BANK_DK_CATEGORIES = get_direct_journal_categories()
 
 
 class BankCategoryJournalBuilder:
@@ -1405,10 +1523,15 @@ class AggregatorPayoutJournalBuilder:
         created = skipped = errors = 0
 
         # Только несматченные incoming (payout не привязан к инвойсу)
+        from django.db.models import Q
+
         txns = list(
             statement.incoming_transactions.filter(
                 match_status="unmatched",
                 journal_entry__isnull=True,
+            ).filter(
+                Q(transaction_category="provider_payout")
+                | ~Q(manual_aggregator_provider="")
             ).order_by("transaction_date", "id")
         )
 

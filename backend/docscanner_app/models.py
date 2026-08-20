@@ -4103,6 +4103,7 @@ class BaseTransaction(models.Model):
         ("refund_received", "Gautas grąžinimas"),
         ("other_expense", "Kitos sąnaudos"),
         ("other_income", "Kitos pajamos"),
+        ("shopify_pardavimas", "Shopify pardavimas"),
     ]
 
     transaction_category = models.CharField(
@@ -4172,6 +4173,15 @@ class BaseTransaction(models.Model):
         "Valiutos keitimo mokestis", max_digits=12, decimal_places=2,
         default=0,
         help_text="Banko konvertavimo komisinis, EUR",
+    )
+    fee_amount = models.DecimalField(
+        "Komisinis mokestis", max_digits=12, decimal_places=2, default=0,
+        help_text="PayPal/banko komisinis operacijos valiuta. Visada teigiamas.",
+    )
+    fee_amount_eur = models.DecimalField(
+        "Komisinis mokestis EUR", max_digits=12, decimal_places=2,
+        null=True, blank=True,
+        help_text="Komisinis EUR. Jei currency=EUR — lygus fee_amount.",
     )
 
     created_at = models.DateTimeField(auto_now_add=True)
