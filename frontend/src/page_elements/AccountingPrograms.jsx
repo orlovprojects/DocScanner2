@@ -15,6 +15,7 @@ export const ACCOUNTING_PROGRAMS = [
   { value: "optimum", label: "Optimum" },
   { value: "debetas", label: "Debetas" },
   { value: "site_pro", label: "Site.pro (B1)" },
+  { value: "site_pro_api", label: "Site.pro (B1) (per API)" },
   { value: "apsa", label: "APSA" },
   { value: "isaf", label: "iSAF" },
   { value: "paulita", label: "Paulita" }

@@ -2665,6 +2665,118 @@ def export_to_rivile_gama_api_task(self, session_id: int, api_key_id: int, own_c
     )
 
 
+@shared_task(bind=True, max_retries=0)
+def export_to_site_pro_task(self, session_id: int, api_key_id: int, own_company_code: str = None):
+    """Экспорт ExportSession в Site.pro (B1) через REST API. Ключ из APIProviderKey."""
+    from docscanner_app.models import ExportSession, ScannedDocument, Invoice, APIProviderKey
+    from docscanner_app.exports.site_pro_api import (
+        export_document_to_site_pro,
+        save_site_pro_export_result,
+        build_auth_headers,
+        SiteProResolver,
+    )
+
+    try:
+        session = ExportSession.objects.get(pk=session_id)
+    except ExportSession.DoesNotExist:
+        logger.error("[SITE_PRO_TASK] ExportSession %s not found", session_id)
+        return
+
+    session.stage = ExportSession.Stage.PROCESSING
+    session.started_at = timezone.now()
+    session.save(update_fields=["stage", "started_at"])
+
+    try:
+        api_key_obj = APIProviderKey.objects.get(pk=api_key_id)
+    except APIProviderKey.DoesNotExist:
+        logger.error("[SITE_PRO_TASK] session=%s API key %s not found", session_id, api_key_id)
+        session.stage = ExportSession.Stage.DONE
+        session.finished_at = timezone.now()
+        session.save(update_fields=["stage", "finished_at"])
+        return
+
+    api_key = api_key_obj.get_api_key()
+    if not api_key:
+        logger.error("[SITE_PRO_TASK] session=%s Site.pro API key empty", session_id)
+        session.stage = ExportSession.Stage.DONE
+        session.finished_at = timezone.now()
+        session.save(update_fields=["stage", "finished_at"])
+        return
+
+    user = session.user
+    if session.invoice_documents.exists():
+        documents = list(session.invoice_documents.all().prefetch_related("line_items"))
+    else:
+        documents = list(session.documents.all().prefetch_related("line_items"))
+    session.total_documents = len(documents)
+    session.save(update_fields=["total_documents"])
+
+    start_time = time.time()
+    success_count = 0
+    partial_count = 0
+    error_count = 0
+
+    # ОДИН resolver на весь прогон: кэш справочников + code→id клиентов/товаров (дедуп по пачке)
+    resolver = SiteProResolver(build_auth_headers(api_key))
+
+    for doc in documents:
+        doc_id = doc.pk
+        try:
+            result = export_document_to_site_pro(
+                doc=doc,
+                api_key=api_key,
+                user=user,
+                own_company_code=own_company_code,
+                resolver=resolver,
+            )
+            save_site_pro_export_result(
+                export_result=result,
+                user=user,
+                session=session,
+                program=session.program,
+            )
+
+            if result.overall_status == "success":
+                success_count += 1
+            elif result.overall_status == "partial_success":
+                partial_count += 1
+            else:
+                error_count += 1
+
+            if result.overall_status in ("success", "partial_success"):
+                updated = ScannedDocument.objects.filter(pk=doc_id).update(status="exported")
+                if not updated:
+                    Invoice.objects.filter(pk=doc_id).update(exported=True, exported_at=timezone.now())
+
+        except Exception as e:
+            logger.exception("[SITE_PRO_TASK] session=%s doc=%s klaida: %s", session_id, doc_id, e)
+            error_count += 1
+            updated = ScannedDocument.objects.filter(pk=doc_id).update(
+                site_pro_api_status="error", site_pro_last_try_date=timezone.now(),
+            )
+            if not updated:
+                Invoice.objects.filter(pk=doc_id).update(
+                    site_pro_api_status="error", site_pro_last_try_date=timezone.now(),
+                )
+
+        session.processed_documents += 1
+        session.success_count = success_count
+        session.partial_count = partial_count
+        session.error_count = error_count
+        session.save(update_fields=[
+            "processed_documents", "success_count", "partial_count", "error_count",
+        ])
+
+    total_time = time.time() - start_time
+    session.stage = ExportSession.Stage.DONE
+    session.finished_at = timezone.now()
+    session.save(update_fields=["stage", "finished_at"])
+
+    logger.info(
+        "[SITE_PRO_TASK] session=%s DONE total_docs=%d time=%.1fs success=%d partial=%d error=%d",
+        session_id, len(documents), total_time, success_count, partial_count, error_count,
+    )
+
 
 
 #Integracii s Google Drive i DropBox

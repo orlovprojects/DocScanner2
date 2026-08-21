@@ -348,16 +348,9 @@ const PROGRAM_FIELDS_CONFIG = {
     ],
   },
   site_pro_api: {
-    programLabel: "Site.pro (B1) API",
+    programLabel: "Site.pro (B1) (per API)",
     description: "Įveskite Site.pro (B1) API raktą. Pridėkite sandėlį, prekės grupę ir kitus laukus pirkimams ir pardavimams",
     sections: [
-      {
-        title: "Prisijungimas",
-        fullWidth: true,
-        fields: [
-          { key: "api_raktas", label: "API raktas" },
-        ],
-      },
       {
         title: "Pirkimams",
         fields: [

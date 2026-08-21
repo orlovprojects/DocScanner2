@@ -2623,7 +2623,7 @@ export default function NustatymaiPage() {
         </Box>
       )}
 
-      {["rivile_gama_api", "dineta", "optimum"].includes(program) && (
+      {["site_pro_api", "rivile_gama_api", "dineta", "optimum"].includes(program) && (
         <APIProviderKeys provider={program} />
       )}
 

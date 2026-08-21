@@ -2061,6 +2061,74 @@ def export_documents(request):
         }, status=202)
 
 
+    # ========================= SITE.PRO (B1) API =========================
+    elif export_type == 'site_pro_api':
+        logger.info("[EXP] SITE.PRO(B1) API export started")
+        assign_random_prekes_kodai(documents)
+
+        from docscanner_app.models import ExportSession
+        from .utils.api_key_resolver import resolve_api_key
+
+        all_docs = (pirkimai_docs or []) + (pardavimai_docs or [])
+        if not all_docs:
+            logger.warning("[EXP] SITE.PRO_API no documents to export")
+            return Response({"error": "No documents to export"}, status=400)
+
+        # company_code для поиска ключа
+        if source == "invoice":
+            sp_company = "__israsymas__"
+        elif cp_key:
+            cp = cp_key.strip()
+            sp_company = cp.split(":", 1)[1].strip() if cp.lower().startswith("id:") else cp
+        else:
+            sp_company = str(getattr(user, "company_code", "") or "").strip()
+
+        if source == "invoice":
+            api_key_obj = resolve_api_key(user, "site_pro_api", sp_company, strict=True)
+        else:
+            api_key_obj = resolve_api_key(user, "site_pro_api", sp_company)
+        if not api_key_obj:
+            logger.warning("[EXP] SITE.PRO_API key missing for company=%s", sp_company)
+            return Response(
+                {"error": f"Site.pro API raktas nerastas įmonei {sp_company}. "
+                          "Pridėkite raktą Nustatymuose."},
+                status=400,
+            )
+
+        doc_ids = [d.pk for d in all_docs]
+
+        session = ExportSession.objects.create(
+            user=request.user,
+            program='site_pro_api',
+            stage=ExportSession.Stage.QUEUED,
+            total_documents=len(doc_ids),
+        )
+        if source == "invoice":
+            session.invoice_documents.set(doc_ids)
+        else:
+            session.documents.set(doc_ids)
+
+        # own_company_code для extra_fields (sandelis/grupe/darbuotojas)
+        own_cc = "__israsymas__" if source == "invoice" else cp_key
+
+        task = export_to_site_pro_task.delay(session.id, api_key_obj.pk, own_cc)
+        session.task_id = task.id
+        session.save(update_fields=["task_id"])
+
+        logger.info(
+            "[EXP] SITE.PRO_API session=%s task=%s docs=%d company=%s key=%s",
+            session.pk, task.id, len(doc_ids), sp_company, api_key_obj.pk,
+        )
+
+        return Response({
+            "status": "ok",
+            "session_id": session.pk,
+            "total_documents": len(doc_ids),
+            "message": "Export started",
+        }, status=202)
+
+
+
     # ========================= DINETA (API) =========================
     elif export_type == 'dineta':
         logger.info("[EXP] DINETA API export started")
@@ -12771,7 +12839,7 @@ from rest_framework.response import Response
 
 logger = logging.getLogger("docscanner_app")
 
-VALID_PROVIDERS = {"rivile_gama_api", "dineta", "optimum"}
+VALID_PROVIDERS = {"rivile_gama_api", "dineta", "optimum", "site_pro_api"}
 
 
 def _verify_key(provider, credentials):
@@ -12810,11 +12878,16 @@ def _verify_key(provider, credentials):
             from docscanner_app.exports.optimum import optimum_hello
             optimum_hello(credentials.get("api_key", ""))
             return True, ""
+        
+        elif provider == "site_pro_api":
+            from docscanner_app.exports.site_pro_api import site_pro_hello
+            site_pro_hello(credentials.get("api_key", ""))
+            return True, ""
 
     except Exception as e:
         return False, str(e) or f"{provider}: klaida"
 
-    return False, "Nežinomas teikėjas."
+    return False, "Nežinomas teikėjas"
 
 
 @api_view(["GET", "POST"])
@@ -13035,6 +13108,7 @@ PROVIDER_CRED_FIELDS = {
     "rivile_gama_api": ["api_key"],
     "dineta": ["url", "username", "password"],
     "optimum": ["api_key"],
+    "site_pro_api": ["api_key"],
 }
 
 

@@ -23,6 +23,7 @@ PROGRAM_TO_FIELD = {
     "debetas":         "debetas_extra_fields",
     "pragma3":         "pragma3_extra_fields",
     "site_pro":        "site_pro_extra_fields",
+    "site_pro_api":    "site_pro_api_extra_fields",
     "agnum":           "agnum_extra_fields",
 }
 

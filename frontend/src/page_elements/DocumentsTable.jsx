@@ -383,7 +383,7 @@ export default function DocumentsTable({
   const loadMoreTriggerRef = useRef(null);
 
   // Показывать столбец API status? (для API-программ)
-  const showApiStatusCol = accountingProgram === "optimum" || accountingProgram === "dineta" || accountingProgram === "rivile_gama_api";
+  const showApiStatusCol = accountingProgram === "optimum" || accountingProgram === "dineta" || accountingProgram === "rivile_gama_api" || accountingProgram === "site_pro_api";
 
   useEffect(() => {
     onSearchChangeRef.current = onSearchChange;
@@ -476,11 +476,15 @@ export default function DocumentsTable({
       ? d.dineta_api_status
       : accountingProgram === "rivile_gama_api"
       ? d.rivile_api_status
+      : accountingProgram === "site_pro_api"
+      ? d.site_pro_api_status
       : d.optimum_api_status;
     const date = accountingProgram === "dineta"
       ? d.dineta_last_try_date
       : accountingProgram === "rivile_gama_api"
       ? d.rivile_api_last_try
+      : accountingProgram === "site_pro_api"
+      ? d.site_pro_last_try_date
       : d.optimum_last_try_date;
     const dateStr = fmtApiDate(date);
     const iconSx = isMobile ? { fontSize: 18 } : { fontSize: 20 };
@@ -1099,7 +1103,7 @@ export default function DocumentsTable({
 
             {showApiStatusCol && (
               <TableCell sx={{ fontWeight: 600, textAlign: "center" }}>
-                {accountingProgram === "dineta" ? "Dineta API" : accountingProgram === "rivile_gama_api" ? "Rivile API" : "Optimum API"}
+                {accountingProgram === "dineta" ? "Dineta API" : accountingProgram === "rivile_gama_api" ? "Rivile API" : accountingProgram === "site_pro_api" ? "Site.pro API" : "Optimum API"}
               </TableCell>
             )}
 

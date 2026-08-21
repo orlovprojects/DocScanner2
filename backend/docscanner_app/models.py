@@ -395,6 +395,9 @@ class ScannedDocument(models.Model):
     dineta_api_status = models.CharField(max_length=20, blank=True, default='')
     dineta_last_try_date = models.DateTimeField(null=True, blank=True)
 
+    site_pro_api_status = models.CharField(max_length=20, blank=True, null=True)
+    site_pro_last_try_date = models.DateTimeField(blank=True, null=True)
+
     rivile_api_status = models.CharField(
         "Rivile API statusas",
         max_length=20,
@@ -662,6 +665,7 @@ ACCOUNTING_PROGRAM_CHOICES = [
     ('optimum', 'Optimum'),
     ('debetas', 'Debetas'),
     ('site_pro', 'Site.Pro (B1)'),
+    ("site_pro_api", "Site.pro (per API)"),
     ('apsa', 'APSA'),
     ('isaf', 'iSAF'),
     ('paulita', 'Paulita'),
@@ -753,6 +757,7 @@ class CustomUser(AbstractUser):
     pragma4_extra_fields       = models.JSONField(default=dict, blank=True)
     optimum_extra_fields       = models.JSONField(default=dict, blank=True)
     dineta_extra_fields       = models.JSONField(default=dict, blank=True)
+    site_pro_api_extra_fields   = models.JSONField(default=dict, blank=True)
 
     min_ilgalaikis_turtas_amount = models.IntegerField(default=500)
 
@@ -2707,6 +2712,8 @@ class Invoice(models.Model):
     optimum_last_try_date = models.DateTimeField(null=True, blank=True)
     dineta_api_status = models.CharField(max_length=20, blank=True, default="")
     dineta_last_try_date = models.DateTimeField(null=True, blank=True)
+    site_pro_api_status = models.CharField(max_length=20, blank=True, null=True)
+    site_pro_last_try_date = models.DateTimeField(blank=True, null=True)
     rivile_api_status = models.CharField(
         "Rivile API statusas",
         max_length=20,
@@ -4994,6 +5001,7 @@ class APIProviderKey(models.Model):
         ("rivile_gama_api", "Rivile GAMA API"),
         ("dineta", "Dineta"),
         ("optimum", "Optimum"),
+        ("site_pro_api", "Site.pro"),
     ]
 
     user = models.ForeignKey(

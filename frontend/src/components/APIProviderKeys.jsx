@@ -35,6 +35,18 @@ const PROVIDER_CONFIG = {
     ],
     maskField: "api_key",
   },
+    site_pro_api: {
+    title: "Site.pro (B1) API sąsajos nustatymai",
+    tooltip: "Priskirkite API raktą tam tikrai įmonei, jei vedate kelių įmonių apskaitą, arba pasirinkite \"Naudoti visoms įmonėms\" opciją. API raktą rasite Site.pro programoje: Parametrai → Integracijos → API supaprastinta",
+    israsymasTooltip: "Įveskite Site.pro (B1) API raktą, kuris bus naudojamas eksportuojant sąskaitas. API raktą rasite Site.pro programoje: Parametrai → Integracijos → API supaprastinta",
+    showInstructions: false,
+    videoUrl: "",
+    israsymasVideoUrl: "",
+    fields: [
+      { key: "api_key", label: "API raktas", type: "password", required: true, placeholder: "Įveskite Site.pro API raktą" },
+    ],
+    maskField: "api_key",
+  },
   dineta: {
     title: "Dineta API sąsajos nustatymai",
     tooltip: "Priskirkite API raktą tam tikrai įmonei, jei vedate kelių įmonių apskaitą, arba pasirinkite \"Naudoti visoms įmonėms\" opciją, jei vedate vienos įmonės apskaitą.",
