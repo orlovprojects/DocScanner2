@@ -168,8 +168,38 @@ def build_auth_headers(api_key: str) -> dict:
 # =========================================================
 # HTTP слой (retry + user-friendly ошибки) — как в dineta.py
 # =========================================================
-def _check_inner_json_error(body: str) -> str:
-    """Site.pro иногда отдаёт HTTP 200 с {"status":400,"message":"..."} в теле."""
+def _humanize_api_error(data: dict) -> str:
+    """
+    Человекочитаемая ошибка из ответа Site.pro. Форматы:
+      {"code":400,"shortMessage":"Error","message":"...","errors":{"headers":["..."],"field":["..."]}}
+      {"status":400,"message":"..."}
+    Вложенные errors (headers/поля) приоритетнее общего message.
+    """
+    if not isinstance(data, dict):
+        return ""
+    parts = []
+    errs = data.get("errors")
+    if isinstance(errs, dict):
+        for _v in errs.values():
+            if isinstance(_v, list):
+                parts.extend(_s(x) for x in _v if _s(x))
+            elif _v:
+                parts.append(_s(_v))
+    elif isinstance(errs, list):
+        parts.extend(_s(x) for x in errs if _s(x))
+    if parts:
+        return "; ".join(parts)[:500]
+    msg = _s(data.get("message") or data.get("shortMessage")
+             or data.get("detail") or data.get("error"))
+    return msg[:500]
+
+
+def _response_error(body: str) -> str:
+    """
+    Текст ошибки из тела ответа, если это ошибка Site.pro; иначе ''.
+    Ошибкой считаем code/status >= 400 ИЛИ непустой errors
+    (Site.pro отдаёт code=400 — не только status — и на HTTP 200, и на 4xx).
+    """
     if not body or not body.strip():
         return ""
     try:
@@ -178,10 +208,19 @@ def _check_inner_json_error(body: str) -> str:
         return ""
     if not isinstance(data, dict):
         return ""
+    code = data.get("code")
     status = data.get("status")
-    if isinstance(status, int) and status >= 400:
-        return _s(data.get("message", ""))[:500] or f"Site.pro klaida (status {status})"
+    is_err = (isinstance(code, int) and code >= 400) or (isinstance(status, int) and status >= 400)
+    errs = data.get("errors")
+    has_errs = isinstance(errs, (list, dict)) and len(errs) > 0
+    if is_err or has_errs:
+        return _humanize_api_error(data) or f"Site.pro klaida (code {code or status})"
     return ""
+
+
+def _check_inner_json_error(body: str) -> str:
+    """Site.pro может вернуть HTTP 200 с телом-ошибкой ({"code":400,...} / errors)."""
+    return _response_error(body)
 
 
 def _send_request_once(url: str, payload, headers: dict,
@@ -242,6 +281,10 @@ def _send_request(url: str, payload, headers: dict,
 
 
 def _build_error_message(resp, body: str) -> str:
+    # сначала — вложенная ошибка Site.pro (errors.headers[], code, message)
+    nested = _response_error(body)
+    if nested:
+        return nested
     if resp.status_code == 401:
         return "Neteisingas Site.pro API raktas (401)"
     if resp.status_code == 404:
@@ -249,8 +292,7 @@ def _build_error_message(resp, body: str) -> str:
     try:
         data = resp.json()
         if isinstance(data, dict):
-            return (data.get("message", "") or data.get("error", "")
-                    or data.get("detail", "") or f"HTTP {resp.status_code}")
+            return (_humanize_api_error(data) or f"HTTP {resp.status_code}")
     except Exception:
         pass
     return body[:500] if body else f"HTTP {resp.status_code}"
@@ -359,7 +401,7 @@ class SiteProResolver:
 
     # ---- низкоуровневый list ----
     def _list(self, endpoint: str, filters: Optional[dict] = None, rows: int = LIST_ROWS) -> list:
-        payload = {"rows": rows, "page": 1, "sidx": "", "sord": "asc"}
+        payload = {"rows": rows, "page": 1}
         if filters:
             payload["filters"] = filters
         res = _send_request(f"{self.base_url}/{endpoint}", payload, self.headers)
@@ -927,13 +969,15 @@ def save_site_pro_export_result(export_result: SiteProDocumentResult, user,
 # Hello — проверка подключения
 # =========================================================
 def site_pro_hello(api_key: str) -> str:
-    """HTTP 200 на warehouses/list → OK, иначе SiteProError."""
+    """HTTP 200 на warehouses/list → OK, иначе SiteProError с человеческим текстом."""
     headers = build_auth_headers(api_key)
     res = _send_request(
         f"{API_BASE}/reference-book/warehouses/list",
-        {"rows": 1, "page": 1, "sidx": "", "sord": "asc"},
+        {"rows": 10, "page": 1},
         headers,
     )
+    logger.info("[SITE_PRO] hello http=%s ok=%s error=%s body=%s",
+                res.status_code, res.success, res.error or "-", res.response_body[:300])
     if res.exception:
         raise SiteProError(f"Ryšio klaida: {res.exception}")
     if res.status_code == 401:
