@@ -29,7 +29,7 @@ from django.utils.html import strip_tags
 from django.core.files.base import ContentFile
 from .tasks import process_uploaded_file_task 
 
-from .tasks import start_session_processing, export_to_optimum_task, export_to_dineta_task, export_to_rivile_gama_api_task
+from .tasks import start_session_processing, export_to_optimum_task, export_to_dineta_task, export_to_rivile_gama_api_task, export_to_site_pro_task,
 
 
 from rest_framework.parsers import MultiPartParser, FormParser
