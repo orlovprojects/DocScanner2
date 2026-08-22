@@ -2255,7 +2255,8 @@ class APIExportArticleLog(models.Model):
         related_name='article_logs'
     )
     article_name = models.CharField(max_length=255)
-    article_code = models.CharField(max_length=100, blank=True, default='')
+    article_code = models.CharField(max_length=100, blank=True, default="")
+    kind = models.CharField(max_length=10, blank=True, default="item")  # "item" | "line"
     status = models.CharField(max_length=10)
     result = models.IntegerField(null=True, blank=True)
     error = models.TextField(blank=True, default='')

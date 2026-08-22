@@ -122,6 +122,42 @@ const API_STATUS_COLORS = {
   error: "#f44336",
 };
 
+const OP_TYPE_LABELS = { sale: "pardavimas", purchase: "pirkimas" };
+
+function ArticleStatusRow({ a }) {
+  const ok = a.status === "success" || a.status === "duplicate";
+  return (
+    <Box
+      sx={{
+        p: 1.25,
+        mb: 0.75,
+        borderRadius: 1,
+        bgcolor: ok ? alpha(API_STATUS_COLORS.success, 0.04) : alpha(API_STATUS_COLORS.error, 0.04),
+        border: `1px solid ${ok ? alpha(API_STATUS_COLORS.success, 0.15) : alpha(API_STATUS_COLORS.error, 0.15)}`,
+      }}
+    >
+      <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+        {ok ? (
+          <CheckCircleIcon sx={{ color: API_STATUS_COLORS.success, fontSize: 16 }} />
+        ) : (
+          <CancelIcon sx={{ color: API_STATUS_COLORS.error, fontSize: 16 }} />
+        )}
+        <Typography variant="body2" fontWeight={500} sx={{ flex: 1 }}>
+          {a.article_name || "—"}
+        </Typography>
+        {a.article_code && (
+          <Chip label={a.article_code} size="small" variant="outlined" sx={{ fontSize: 11 }} />
+        )}
+      </Box>
+      {a.error && (
+        <Typography variant="caption" sx={{ mt: 0.5, display: "block", color: "error.main", wordBreak: "break-word" }}>
+          {a.error}
+        </Typography>
+      )}
+    </Box>
+  );
+}
+
 // ── Popup for export log details ──
 function ExportLogPopup({ open, onClose, documentId, program }) {
   const [loading, setLoading] = useState(false);
@@ -242,17 +278,33 @@ function ExportLogPopup({ open, onClose, documentId, program }) {
               </>
             )}
 
-            {/* Invoice / Operation section */}
-            <Typography variant="subtitle2" sx={{ mb: 1 }}>
+            {/* Prekės / paslaugos — товары (reference-book/items/create) */}
+            {(logData.articles || []).some((a) => a.kind !== "line") && (
+              <>
+                <Typography variant="subtitle2" sx={{ mb: 1 }}>
+                  Prekės / paslaugos ({(logData.articles || []).filter((a) => a.kind !== "line").length})
+                </Typography>
+                {(logData.articles || [])
+                  .filter((a) => a.kind !== "line")
+                  .map((a, idx) => (
+                    <ArticleStatusRow key={`item-${idx}`} a={a} />
+                  ))}
+              </>
+            )}
+
+            {/* Dokumentas (pardavimas / pirkimas) — header */}
+            <Typography variant="subtitle2" sx={{ mb: 1, mt: 2 }}>
               {logData.invoice_type?.startsWith("setOperation")
                 ? `Operacija (${logData.invoice_type})`
+                : OP_TYPE_LABELS[logData.invoice_type]
+                ? `Dokumentas (${OP_TYPE_LABELS[logData.invoice_type]})`
                 : `Sąskaita faktūra (${logData.invoice_type || "—"})`}
             </Typography>
 
             <Box
               sx={{
                 p: 1.5,
-                mb: 2,
+                mb: 1.5,
                 borderRadius: 1,
                 bgcolor: logData.invoice_status === "success"
                   ? alpha(API_STATUS_COLORS.success, 0.06)
@@ -289,54 +341,18 @@ function ExportLogPopup({ open, onClose, documentId, program }) {
               )}
             </Box>
 
-            {/* Articles section */}
-            {logData.articles && logData.articles.length > 0 && (
-              <>
-                <Typography variant="subtitle2" sx={{ mb: 1 }}>
-                  Prekės / paslaugos ({logData.articles.length})
+            {/* Dokumento eilutės — строки (sale-items / purchase-items) */}
+            {(logData.articles || []).some((a) => a.kind === "line") && (
+              <Box sx={{ mb: 2 }}>
+                <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 0.75 }}>
+                  Dokumento eilutės ({(logData.articles || []).filter((a) => a.kind === "line").length})
                 </Typography>
-
-                {logData.articles.map((a, idx) => (
-                  <Box
-                    key={idx}
-                    sx={{
-                      p: 1.25,
-                      mb: 0.75,
-                      borderRadius: 1,
-                      bgcolor: (a.status === "success" || a.status === "duplicate")
-                        ? alpha(API_STATUS_COLORS.success, 0.04)
-                        : alpha(API_STATUS_COLORS.error, 0.04),
-                      border: `1px solid ${
-                        (a.status === "success" || a.status === "duplicate")
-                          ? alpha(API_STATUS_COLORS.success, 0.15)
-                          : alpha(API_STATUS_COLORS.error, 0.15)
-                      }`,
-                    }}
-                  >
-                    <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-                      {(a.status === "success" || a.status === "duplicate") ? (
-                        <CheckCircleIcon sx={{ color: API_STATUS_COLORS.success, fontSize: 16 }} />
-                      ) : (
-                        <CancelIcon sx={{ color: API_STATUS_COLORS.error, fontSize: 16 }} />
-                      )}
-                      <Typography variant="body2" fontWeight={500} sx={{ flex: 1 }}>
-                        {a.article_name || "—"}
-                      </Typography>
-                      {a.article_code && (
-                        <Chip label={a.article_code} size="small" variant="outlined" sx={{ fontSize: 11 }} />
-                      )}
-                    </Box>
-                    {a.error && (
-                      <Typography
-                        variant="caption"
-                        sx={{ mt: 0.5, display: "block", color: "error.main", wordBreak: "break-word" }}
-                      >
-                        {a.error}
-                      </Typography>
-                    )}
-                  </Box>
-                ))}
-              </>
+                {(logData.articles || [])
+                  .filter((a) => a.kind === "line")
+                  .map((a, idx) => (
+                    <ArticleStatusRow key={`line-${idx}`} a={a} />
+                  ))}
+              </Box>
             )}
           </Box>
         )}

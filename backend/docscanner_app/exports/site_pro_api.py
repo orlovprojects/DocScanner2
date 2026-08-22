@@ -139,6 +139,7 @@ class SiteProItemResult:
     code: str = ""
     barcode: str = ""
     item_id: Optional[int] = None
+    item_create_result: Optional[SiteProRequestResult] = None
     line_result: Optional[SiteProRequestResult] = None
     message: str = ""
 
@@ -757,7 +758,7 @@ def export_document_to_site_pro(
                 item_id, item_res = resolver.find_or_create_item(doc, it, group_id, vat_rate=vat_pct)
                 name, code, barcode = _get_item_identity(doc, it)
                 ir = SiteProItemResult(name=_s(name), code=_s(code), barcode=_s(barcode),
-                                       item_id=item_id, line_result=item_res)
+                                       item_id=item_id, item_create_result=item_res)
                 result.item_results.append(ir)
                 if not item_id:
                     ir.message = "no item id"
@@ -773,7 +774,7 @@ def export_document_to_site_pro(
                                                              vat_rate=getattr(doc, "vat_percent", None))
             name, code, barcode = _get_item_identity(doc, None)
             ir = SiteProItemResult(name=_s(name) or "Preke", code=_s(code), barcode=_s(barcode),
-                                   item_id=item_id, line_result=item_res)
+                                   item_id=item_id, item_create_result=item_res)
             result.item_results.append(ir)
             if item_id:
                 amount_wo = _safe_D(getattr(doc, "amount_wo_vat", 0) or 0)
@@ -833,12 +834,14 @@ def export_document_to_site_pro(
 
         # ── OVERALL STATUS ───────────────────────────────────
         header_ok = bool(result.header_result and result.header_result.success)
+        item_creates = [ir.item_create_result for ir in result.item_results if ir.item_create_result is not None]
+        items_ok = bool(item_creates) and all(r.success for r in item_creates)
         lines = [ir.line_result for ir in result.item_results if ir.line_result is not None]
         lines_ok = bool(lines) and all(lr.success for lr in lines)
 
-        if header_ok and lines_ok:
+        if header_ok and items_ok and lines_ok:
             result.overall_status = "success"
-        elif header_ok and any(lr.success for lr in lines):
+        elif header_ok and (any(lr.success for lr in lines) or any(r.success for r in item_creates)):
             result.overall_status = "partial_success"
         else:
             result.overall_status = "error"
@@ -929,23 +932,40 @@ def save_site_pro_export_result(export_result: SiteProDocumentResult, user,
 
     article_logs = []
     for ir in export_result.item_results:
-        lr = ir.line_result
-        art_status = "success" if (lr and lr.success) else "error"
-        art_result = lr.status_code if lr else 0
-        art_error = lr.error if lr else ""
-        art_response = (lr.response_body[:2000] if lr else "")
+        # 1) Prekės / paslaugos — товар (reference-book/items/create)
+        cr = ir.item_create_result
+        item_status = "success" if (cr and cr.success) else "error"
         article_logs.append(
             APIExportArticleLog(
                 export_log=export_log,
+                kind="item",
                 article_name=_s(ir.name)[:255],
                 article_code=_s(ir.code)[:100],
-                status=art_status[:10],
-                result=art_result,
-                error=art_error,
-                full_response=art_response,
-                message=_s(ir.item_id or ir.message)[:255],
+                status=item_status[:10],
+                result=(cr.status_code if cr else 0),
+                error=(cr.error if cr else ""),
+                full_response=(cr.response_body[:2000] if cr else ""),
+                message=_s(ir.item_id or "")[:255],
             )
         )
+
+        # 2) Dokumento eilutė — строка (warehouse/{sale,purchase}-items)
+        lr = ir.line_result
+        if lr is not None:
+            line_status = "success" if lr.success else "error"
+            article_logs.append(
+                APIExportArticleLog(
+                    export_log=export_log,
+                    kind="line",
+                    article_name=_s(ir.name)[:255],
+                    article_code=_s(ir.code)[:100],
+                    status=line_status[:10],
+                    result=lr.status_code,
+                    error=lr.error,
+                    full_response=lr.response_body[:2000],
+                    message=_s(ir.item_id or ir.message)[:255],
+                )
+            )
     if article_logs:
         APIExportArticleLog.objects.bulk_create(article_logs)
 

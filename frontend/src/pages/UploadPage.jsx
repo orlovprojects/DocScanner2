@@ -48,7 +48,7 @@ const getScanTypes = (catalogMatchingEnabled) => [
   },
 ];
 
-const API_EXPORT_PROGRAMS = new Set(["optimum", "dineta", "rivile_gama_api"]);
+const API_EXPORT_PROGRAMS = new Set(["optimum", "dineta", "rivile_gama_api", "site_pro_api"]);
 
 // YouTube video tutorials for each accounting program
 const EXPORT_TUTORIALS = {

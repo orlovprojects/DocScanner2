@@ -112,18 +112,20 @@ const TYPE_CONFIG = {
 
 // ── API export helpers ──
 
-const API_PROGRAMS = new Set(["rivile_gama_api", "dineta", "optimum"]);
+const API_PROGRAMS = new Set(["rivile_gama_api", "dineta", "optimum", "site_pro_api"]);
 
 const API_STATUS_FIELD = {
   rivile_gama_api: "rivile_api_status",
   dineta: "dineta_api_status",
   optimum: "optimum_api_status",
+  site_pro_api: "site_pro_api_status",
 };
 
 const API_PROGRAM_LABEL = {
   rivile_gama_api: "Rivile API",
   dineta: "Dineta API",
   optimum: "Optimum API",
+  site_pro_api: "Site.pro API",
 };
 
 const fmtAmount = (val, currency = 'EUR') => {

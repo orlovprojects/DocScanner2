@@ -6477,6 +6477,7 @@ def export_log_detail(request, document_id):
                 "status": a.status,
                 "result": a.result,
                 "error": a.error,
+                "kind": getattr(a, "kind", "item"),
             }
             for a in export_log.article_logs.all()
         ],
