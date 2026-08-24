@@ -100,6 +100,7 @@ from .exports.optimum import optimum_hello, OptimumError
 from .utils.password_encryption import decrypt_password
 from .utils.password_encryption import encrypt_password
 from .exports.rivile_gama_api import verify_api_key
+from .exports.lengvaskaita import export_to_lengvaskaita
 
 
 from .exports.pragma4 import export_to_pragma40_xml
@@ -1351,6 +1352,61 @@ def export_documents(request):
             export_success = True
 
 
+    # ========================= LENGVASKAITA (XLS) =========================
+    elif export_type == 'lengvaskaita':
+        logger.info("[EXP] LENGVASKAITA export started")
+ 
+        all_docs = (pirkimai_docs or []) + (pardavimai_docs or [])
+ 
+        if not all_docs:
+            logger.warning("[EXP] LENGVASKAITA no documents to export")
+            return Response({"error": "No documents to export"}, status=400)
+ 
+        try:
+            result = export_to_lengvaskaita(
+                all_docs,
+                user=request.user,
+                own_company_code=cp_key,
+            )
+        except FileNotFoundError as e:
+            logger.exception("[EXP] LENGVASKAITA template not found: %s", e)
+            return Response(
+                {"error": "LengvaSkaita template not found", "detail": str(e)},
+                status=500,
+            )
+        except Exception as e:
+            logger.exception("[EXP] LENGVASKAITA export failed: %s", e)
+            return Response(
+                {"error": "LengvaSkaita export failed", "detail": str(e)},
+                status=500,
+            )
+ 
+        files_to_export = []
+ 
+        if result.get("pirkimai"):
+            files_to_export.append((f"{today_str}_lengvaskaita_pirkimai.xls", result["pirkimai"]))
+        if result.get("pardavimai"):
+            files_to_export.append((f"{today_str}_lengvaskaita_pardavimai.xls", result["pardavimai"]))
+ 
+        logger.info("[EXP] LENGVASKAITA files_to_export=%s", [n for n, _ in files_to_export])
+ 
+        if len(files_to_export) > 1:
+            zip_buffer = io.BytesIO()
+            with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+                for filename, content in files_to_export:
+                    zf.writestr(filename, content)
+            zip_buffer.seek(0)
+            response = HttpResponse(zip_buffer.read(), content_type='application/zip')
+            response['Content-Disposition'] = f'attachment; filename={today_str}_lengvaskaita.zip'
+            export_success = True
+        elif len(files_to_export) == 1:
+            filename, content = files_to_export[0]
+            response = HttpResponse(content, content_type='application/vnd.ms-excel')
+            response['Content-Disposition'] = f'attachment; filename="{filename}"'
+            export_success = True
+        else:
+            logger.warning("[EXP] LENGVASKAITA nothing to export")
+            response = Response({"error": "No documents to export"}, status=400)
 
     # ========================= Butent =========================
     elif export_type == 'butent':

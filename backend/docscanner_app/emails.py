@@ -406,6 +406,7 @@ VIDEO_BY_PROGRAM = {
     "apskaita5":   {"label": "Apskaita 5",   "url": "https://youtu.be/_HeD_TKUsl0"},
     "finvalda":    {"label": "Centą",      "url": "https://youtu.be/n1OGeQ9quEk"},
     "dineta":      {"label": "Dinetą",      "url": "https://youtu.be/MLCPSPmcupE"},
+    "centas":      {"label": "Centą",      "url": "https://youtu.be/mL-X8AhQc94"},
     # Добавляй по мере появления видео. Если программы нет в словаре —
     # строка про видео просто не попадёт в письмо.
 }

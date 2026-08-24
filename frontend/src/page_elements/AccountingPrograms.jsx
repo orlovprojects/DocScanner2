@@ -18,5 +18,6 @@ export const ACCOUNTING_PROGRAMS = [
   { value: "site_pro_api", label: "Site.pro (B1) (per API)" },
   { value: "apsa", label: "APSA" },
   { value: "isaf", label: "iSAF" },
-  { value: "paulita", label: "Paulita" }
+  { value: "paulita", label: "Paulita" },
+  { value: "lengvaskaita", label: "Lengvaskaita" }
 ].sort((a, b) => a.label.localeCompare(b.label));

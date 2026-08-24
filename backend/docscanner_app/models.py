@@ -669,6 +669,7 @@ ACCOUNTING_PROGRAM_CHOICES = [
     ('apsa', 'APSA'),
     ('isaf', 'iSAF'),
     ('paulita', 'Paulita'),
+    ('lengvaskaita', 'Lengvaskaita'),
     ('rivile_gama_api', 'Rivilė GAMA (per API)'),
     ('dokskenas_erp', 'DokSkenas ERP'),
     # добавь нужные программы
