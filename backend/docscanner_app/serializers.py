@@ -1200,6 +1200,7 @@ class CompanyProfileSerializer(serializers.ModelSerializer):
             user.onboarding_completed = True
             user.save(update_fields=[
                 "active_company_profile",
+                "default_accounting_program",
                 "onboarding_completed",
             ])
 
