@@ -23,6 +23,7 @@ import SellIcon from "@mui/icons-material/Sell";
 import LayersIcon from "@mui/icons-material/Layers";
 
 import { api } from "../api/endpoints";
+import { useCompanyProfiles } from "../contexts/useCompanyProfiles";
 import DocumentsTable from "../page_elements/DocumentsTable";
 import PreviewDialog from "../page_elements/PreviewDialog";
 import DocumentsFilters from "../components/DocumentsFilters";
@@ -108,6 +109,7 @@ function resolveDirection(doc, selectedCpKey) {
 export default function UploadPage() {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
+  const { activeId, profileEpoch } = useCompanyProfiles();
 
   const [docs, setDocs] = useState([]);
   const [nextUrl, setNextUrl] = useState(null);
@@ -276,7 +278,7 @@ export default function UploadPage() {
     setSelectionMode("none");
     setExcludedIds([]);
     fetchDocs();
-  }, [filters.status, filters.dateFrom, filters.dateTo, filters.search, selectedCpKey]);
+  }, [filters.status, filters.dateFrom, filters.dateTo, filters.search, selectedCpKey, activeId]);
 
   useEffect(() => {
     if (!filters.dateFrom || !filters.dateTo) return;
@@ -312,7 +314,7 @@ export default function UploadPage() {
       .then(res => setUser(res.data))
       .catch(() => setUser(null))
       .finally(() => setUserLoaded(true));
-  }, []);
+  }, [profileEpoch]);
 
   const loadMore = async () => {
     if (!nextUrl || loadingMore || loadingDocs) return;

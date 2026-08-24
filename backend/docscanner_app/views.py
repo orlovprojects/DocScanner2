@@ -16046,23 +16046,33 @@ class CompanyProfileViewSet(viewsets.ModelViewSet):
 
         if was_active:
             new_active = user.company_profiles.first()
-            user.active_company_profile = new_active
-            user.save(update_fields=["active_company_profile"])
+            if new_active:
+                new_active.apply_as_active()
+
+    # @action(detail=True, methods=["post"], url_path="set-active")
+    # def set_active(self, request, pk=None):
+    #     profile = self.get_object()
+    #     user = request.user
+    #     user.active_company_profile = profile
+
+    #     update_fields = ["active_company_profile"]
+    #     if profile.accounting_program:
+    #         user.default_accounting_program = profile.accounting_program
+    #         update_fields.append("default_accounting_program")
+
+    #     user.save(update_fields=update_fields)
+    #     return Response({"detail": "OK", "active_id": profile.id})
 
     @action(detail=True, methods=["post"], url_path="set-active")
     def set_active(self, request, pk=None):
         profile = self.get_object()
-        user = request.user
-        user.active_company_profile = profile
-
-        update_fields = ["active_company_profile"]
-        if profile.accounting_program:
-            user.default_accounting_program = profile.accounting_program
-            update_fields.append("default_accounting_program")
-
-        user.save(update_fields=update_fields)
-        return Response({"detail": "OK", "active_id": profile.id})
-
+        profile.user = request.user
+        profile.apply_as_active()
+        return Response({
+            "detail": "OK",
+            "active_id": profile.id,
+            "accounting_program": profile.accounting_program,
+        })
 
 
 

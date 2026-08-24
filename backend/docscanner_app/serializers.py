@@ -1197,6 +1197,8 @@ class CompanyProfileSerializer(serializers.ModelSerializer):
         user = profile.user
         if user.active_company_profile is None:
             user.active_company_profile = profile
+            if profile.accounting_program:
+                user.default_accounting_program = profile.accounting_program
             user.onboarding_completed = True
             user.save(update_fields=[
                 "active_company_profile",

@@ -1017,6 +1017,17 @@ class CompanyProfile(models.Model):
                 "company_iban", "company_address", "company_country_iso",
             ])
 
+    def apply_as_active(self):
+        """Padaro šį profilį aktyviu ir nukopijuoja jo programą į CustomUser."""
+        user = self.user
+        user.active_company_profile = self
+        if self.accounting_program:
+            user.default_accounting_program = self.accounting_program
+        user.save(update_fields=[
+            "active_company_profile",
+            "default_accounting_program",
+        ])
+
     def get_bank_chart_account(self, iban: str, bank_name: str = "", currency: str = "EUR") -> dict:
         """
         Grąžina banko sąskaitos info:

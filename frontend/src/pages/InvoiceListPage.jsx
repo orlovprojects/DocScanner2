@@ -462,7 +462,7 @@ const InvoiceListPage = () => {
   const navigate = useNavigate();
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
-  const { activeId } = useCompanyProfiles();
+  const { activeId, profileEpoch } = useCompanyProfiles();
 
   const [invoices, setInvoices] = useState([]);
   const [total, setTotal] = useState(0);
@@ -541,7 +541,7 @@ const InvoiceListPage = () => {
     api.get('/profile/', { withCredentials: true })
       .then((res) => setUser(res.data))
       .catch(() => setUser(null));
-  }, []);
+  }, [profileEpoch]);
 
   const programKey = user?.default_accounting_program || '';
   const programLabel =
