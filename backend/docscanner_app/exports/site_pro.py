@@ -35,6 +35,22 @@ SITE_PRO_TEMPLATE_SALES = "site_pro_import_pardavimai.xlsx"
 
 
 # =========================
+# Операции Site.pro (файловый импорт — матч по ИМЕНИ)
+# =========================
+# PIRK - Pirkimas prekių, medžiagų, žaliavų, detalių  (и prekės, и paslaugos)
+# PPP  - Pardavimai (paslaugos)                       (файлом можно ТОЛЬКО paslaugos)
+#
+# ВАЖНО: типы-возвраты (PRG "Pardavimo grąžinimas", PIRG "Pirkimo grąžinimas")
+# файловым импортом НЕ находятся (#200201) — Site.pro ищет только среди
+# isPurchase / isSale. Поэтому kreditinės идут ОБЫЧНЫМ типом операции
+# с ОТРИЦАТЕЛЬНОЙ priceExclVat — проверено по DK: сторно ложится
+# на те же счета с минусом.
+
+OP_NAME_PIRKIMAS = "Pirkimas prekių, medžiagų, žaliavų, detalių"
+OP_NAME_PARDAVIMAS = "Pardavimai (paslaugos)"
+
+
+# =========================
 # Helpers
 # =========================
 
@@ -187,6 +203,39 @@ def _get_party_code(doc, *, role: str, id_field: str, vat_field: str, id_program
 
 def _doc_type(doc) -> str:
     return _s(getattr(doc, "pirkimas_pardavimas", "")).lower()
+
+
+# =========================
+# Кредитные (grąžinimai)
+# =========================
+
+def _is_credit(doc) -> bool:
+    """Кредитная (grąžinimo) sąskaita — ScannedDocument / Invoice."""
+    return bool(getattr(doc, "is_credit_invoice", False))
+
+
+def _abs_if_credit(value: Decimal, is_credit: bool) -> Decimal:
+    """
+    Нормализация величины кредитного документа к положительной.
+    В БД знаки у doc и line_items могут быть любыми, поэтому приводим к модулю.
+    Используется для quantity, скидки и промежуточных расчётов.
+    """
+    if is_credit:
+        return abs(value)
+    return value
+
+
+def _price_for_export(value: Decimal, is_credit: bool) -> Decimal:
+    """
+    priceExclVat для файлового импорта.
+
+    Kreditinė идёт обычным типом операции, поэтому сторно задаётся
+    ОТРИЦАТЕЛЬНОЙ ценой. quantity при этом остаётся положительным,
+    чтобы знак не задваивался.
+    """
+    if is_credit:
+        return -abs(value)
+    return value
 
 
 # =========================
@@ -379,17 +428,18 @@ def _get_item_identity(doc, it=None):
     return name, code, barcode
 
 
-def _get_operation_type_name(doc_type_str: str, attr_name: str) -> str:
+def _get_operation_type_name(doc_type_str: str) -> str:
     """
-    Правило:
-      - Pirkimas + Prekės -> "Pirkimas"
-      - Pirkimas + Paslaugos -> "Pirkimas (paslaugos)"
-      - Pardavimas + Prekės -> "Pardavimai"
-      - Pardavimas + Paslaugos -> "Pardavimas (paslaugos)"
+    Тип операции — атрибут ДОКУМЕНТА (не строки).
+
+    Файловый импорт Site.pro:
+      - pirkimai:   и prekės, и paslaugos -> один тип PIRK
+      - pardavimai: Site.pro принимает ТОЛЬКО paslaugas -> всегда PPP
+      - kreditinės: тот же обычный тип, знак даёт отрицательная priceExclVat
     """
     if doc_type_str == "pirkimas":
-        return "Pirkimas (paslaugos)" if attr_name == "Paslaugos" else "Pirkimas"
-    return "Pardavimas (paslaugos)" if attr_name == "Paslaugos" else "Pardavimai"
+        return OP_NAME_PIRKIMAS
+    return OP_NAME_PARDAVIMAS
 
 
 # =========================
@@ -551,9 +601,13 @@ def _calc_discounted_price_map(doc, items_list: list) -> dict:
     Возвращает dict: {id(item) -> new_price_excl_vat_float}
     Скидка invoice_discount_wo_vat распределяется пропорционально subtotal = qty * price.
     Последняя строка получает остаток скидки.
+
+    Для кредитных считаем по модулю; минус ставится позже, в _price_for_export.
     """
     if not items_list:
         return {}
+
+    is_credit = _is_credit(doc)
 
     discount_raw = getattr(doc, "invoice_discount_wo_vat", None)
     if discount_raw in (None, "", 0, "0"):
@@ -566,6 +620,8 @@ def _calc_discounted_price_map(doc, items_list: list) -> dict:
                        discount_raw, getattr(doc, "pk", None))
         return {}
 
+    discount_wo = _abs_if_credit(discount_wo, is_credit)
+
     if discount_wo <= 0:
         return {}
 
@@ -573,8 +629,8 @@ def _calc_discounted_price_map(doc, items_list: list) -> dict:
     sum_subtotal = Decimal("0")
 
     for it in items_list:
-        qty = _safe_D(getattr(it, "quantity", 1) or 1)
-        price = _safe_D(getattr(it, "price", 0) or 0)
+        qty = _abs_if_credit(_safe_D(getattr(it, "quantity", 1) or 1), is_credit)
+        price = _abs_if_credit(_safe_D(getattr(it, "price", 0) or 0), is_credit)
         subtotal = qty * price
         subtotals.append((qty, price, subtotal))
         sum_subtotal += subtotal
@@ -697,6 +753,11 @@ def _export_clients(documents: list) -> bytes:
 # ---------- ITEMS ----------
 
 def _export_items(documents: list, user=None, own_company_code=None) -> bytes:
+    """
+    ВАЖНО: для pardavimai Site.pro файлом принимает только PASLAUGAS,
+    поэтому карточки товаров из документов-продаж создаём как "Paslaugos"
+    (иначе тип операции PPP не сойдётся с prekės-позицией).
+    """
     wb, ws = _load_template(SITE_PRO_TEMPLATE_ITEMS)
     base_to_col = _build_field_map(ws, key_row=2)
 
@@ -740,18 +801,27 @@ def _export_items(documents: list, user=None, own_company_code=None) -> bytes:
         extra_fields = _get_site_pro_extra_for_doc(user, doc, own_company_code)
         group_name = _get_group_name(extra_fields, t) or None
 
+        # pardavimai -> всё конвертируем в Paslaugos
+        force_paslaugos = (t == "pardavimas")
+
         line_items = getattr(doc, "line_items", None)
         if line_items and hasattr(line_items, "all") and line_items.exists():
             for it in list(line_items.all()):
-                attr = _attribute_name_from_preke_paslauga(
-                    _resolved_field(it, "preke_paslauga")
-                    or getattr(doc, "preke_paslauga", None)
-                )
+                if force_paslaugos:
+                    attr = "Paslaugos"
+                else:
+                    attr = _attribute_name_from_preke_paslauga(
+                        _resolved_field(it, "preke_paslauga")
+                        or getattr(doc, "preke_paslauga", None)
+                    )
                 unit = _get_measure_unit(it)
                 name, code, barcode = _get_item_identity(doc, it)
                 add_item(name, attr, unit, group_name, code=code, barcode=barcode)
         else:
-            doc_attr = _attribute_name_from_preke_paslauga(getattr(doc, "preke_paslauga", None))
+            if force_paslaugos:
+                doc_attr = "Paslaugos"
+            else:
+                doc_attr = _attribute_name_from_preke_paslauga(getattr(doc, "preke_paslauga", None))
             name, code, barcode = _get_item_identity(doc, None)
             if not name:
                 name = "Paslauga" if doc_attr == "Paslaugos" else "Preke"
@@ -785,6 +855,8 @@ def _export_purchases(documents: list, user=None, own_company_code=None) -> byte
         if _doc_type(doc) != "pirkimas":
             continue
 
+        is_credit = _is_credit(doc)
+
         extra_fields = _get_site_pro_extra_for_doc(user, doc, own_company_code)
         supplier = _get_seller_fields(doc)
         purchase_date = _get_doc_date(doc)
@@ -797,42 +869,40 @@ def _export_purchases(documents: list, user=None, own_company_code=None) -> byte
         cost_center = _get_cost_center(extra_fields, "pirkimas") or ""
         employee = _get_purchase_employee_name(extra_fields)
 
+        # тип операции — один на весь документ
+        op_type = _get_operation_type_name("pirkimas")
+
+        base = {
+            "purchaseDate": purchase_date,
+            "number": number,
+            "operationTypeName": op_type,
+            "currencyId": currency,
+            "supplierName": supplier["name"],
+            "warehouseName": warehouse,
+        }
+        if supplier["code"]:
+            base["supplierCode"] = supplier["code"]
+        if cost_center:
+            base["costCenter"] = cost_center
+        if employee:
+            base["employee"] = employee
+        if series:
+            base["series"] = series
+
         line_items = getattr(doc, "line_items", None)
         if line_items and hasattr(line_items, "all") and line_items.exists():
             items_list = list(line_items.all())
             price_map = _calc_discounted_price_map(doc, items_list)
 
             for it in items_list:
-                attr = _attribute_name_from_preke_paslauga(
-                    _resolved_field(it, "preke_paslauga")
-                    or getattr(doc, "preke_paslauga", None)
-                )
-                op_type = _get_operation_type_name("pirkimas", attr)
-
-                base = {
-                    "purchaseDate": purchase_date,
-                    "number": number,
-                    "operationTypeName": op_type,
-                    "currencyId": currency,
-                    "supplierName": supplier["name"],
-                    "warehouseName": warehouse,
-                }
-                if supplier["code"]:
-                    base["supplierCode"] = supplier["code"]
-                if cost_center:
-                    base["costCenter"] = cost_center
-                if employee:
-                    base["employee"] = employee
-                if series:
-                    base["series"] = series
-
                 item_name, code, barcode = _get_item_identity(doc, it)
-                qty = _safe_D(getattr(it, "quantity", 1) or 1)
+                qty = _abs_if_credit(_safe_D(getattr(it, "quantity", 1) or 1), is_credit)
 
                 if price_map:
                     price = _safe_D(price_map.get(id(it), getattr(it, "price", 0) or 0))
                 else:
                     price = _safe_D(getattr(it, "price", 0) or 0)
+                price = _price_for_export(_abs_if_credit(price, is_credit), is_credit)
 
                 row = dict(base)
                 row.update({
@@ -849,7 +919,7 @@ def _export_purchases(documents: list, user=None, own_company_code=None) -> byte
                 vat_rate = getattr(it, "vat_percent", None)
                 if vat_rate is not None and _s(vat_rate) != "":
                     try:
-                        row["vatRate"] = float(_safe_D(vat_rate))
+                        row["vatRate"] = float(abs(_safe_D(vat_rate)))
                     except Exception:
                         pass
 
@@ -860,28 +930,8 @@ def _export_purchases(documents: list, user=None, own_company_code=None) -> byte
                 rows.append(row)
 
         else:
-            doc_attr = _attribute_name_from_preke_paslauga(getattr(doc, "preke_paslauga", None))
-            op_type = _get_operation_type_name("pirkimas", doc_attr)
-
-            base = {
-                "purchaseDate": purchase_date,
-                "number": number,
-                "operationTypeName": op_type,
-                "currencyId": currency,
-                "supplierName": supplier["name"],
-                "warehouseName": warehouse,
-            }
-            if supplier["code"]:
-                base["supplierCode"] = supplier["code"]
-            if cost_center:
-                base["costCenter"] = cost_center
-            if employee:
-                base["employee"] = employee
-            if series:
-                base["series"] = series
-
-            amount_wo = _safe_D(getattr(doc, "amount_wo_vat", 0) or 0)
-            discount_wo = _safe_D(getattr(doc, "invoice_discount_wo_vat", 0) or 0)
+            amount_wo = _abs_if_credit(_safe_D(getattr(doc, "amount_wo_vat", 0) or 0), is_credit)
+            discount_wo = _abs_if_credit(_safe_D(getattr(doc, "invoice_discount_wo_vat", 0) or 0), is_credit)
             if discount_wo > 0:
                 amount_wo = amount_wo - discount_wo
                 if amount_wo < 0:
@@ -895,7 +945,7 @@ def _export_purchases(documents: list, user=None, own_company_code=None) -> byte
             row.update({
                 "items": item_name,
                 "quantity": 1,
-                "priceExclVat": float(_quantize_2(amount_wo)),
+                "priceExclVat": float(_quantize_2(_price_for_export(amount_wo, is_credit))),
             })
 
             if code:
@@ -906,7 +956,7 @@ def _export_purchases(documents: list, user=None, own_company_code=None) -> byte
             vat_rate = getattr(doc, "vat_percent", None)
             if vat_rate is not None and _s(vat_rate) != "":
                 try:
-                    row["vatRate"] = float(_safe_D(vat_rate))
+                    row["vatRate"] = float(abs(_safe_D(vat_rate)))
                 except Exception:
                     pass
 
@@ -931,6 +981,11 @@ def _export_purchases(documents: list, user=None, own_company_code=None) -> byte
 # ---------- SALES ----------
 
 def _export_sales(documents: list, user=None, own_company_code=None) -> bytes:
+    """
+    Site.pro файлом принимает ТОЛЬКО paslaugų pardavimus,
+    поэтому тип операции всегда "Pardavimai (paslaugos)".
+    Kreditinės идут тем же типом с отрицательной priceExclVat.
+    """
     wb, ws = _load_template(SITE_PRO_TEMPLATE_SALES)
     base_to_col = _build_field_map(ws, key_row=2)
 
@@ -942,6 +997,8 @@ def _export_sales(documents: list, user=None, own_company_code=None) -> bytes:
     for doc in documents:
         if _doc_type(doc) != "pardavimas":
             continue
+
+        is_credit = _is_credit(doc)
 
         extra_fields = _get_site_pro_extra_for_doc(user, doc, own_company_code)
         buyer = _get_buyer_fields(doc)
@@ -955,40 +1012,38 @@ def _export_sales(documents: list, user=None, own_company_code=None) -> bytes:
         employee = _get_employee_name(extra_fields)
         cost_center = _get_cost_center(extra_fields, "pardavimas") or ""
 
+        # тип операции — один на весь документ
+        op_type = _get_operation_type_name("pardavimas")
+
+        base = {
+            "saleDate": sale_date,
+            "series": series,
+            "number": number,
+            "operationTypeName": op_type,
+            "currencyId": currency,
+            "employee": employee,
+            "clientName": buyer["name"],
+            "warehouseName": warehouse,
+        }
+        if buyer["code"]:
+            base["clientCode"] = buyer["code"]
+        if cost_center:
+            base["costCenter"] = cost_center
+
         line_items = getattr(doc, "line_items", None)
         if line_items and hasattr(line_items, "all") and line_items.exists():
             items_list = list(line_items.all())
             price_map = _calc_discounted_price_map(doc, items_list)
 
             for it in items_list:
-                attr = _attribute_name_from_preke_paslauga(
-                    _resolved_field(it, "preke_paslauga")
-                    or getattr(doc, "preke_paslauga", None)
-                )
-                op_type = _get_operation_type_name("pardavimas", attr)
-
-                base = {
-                    "saleDate": sale_date,
-                    "series": series,
-                    "number": number,
-                    "operationTypeName": op_type,
-                    "currencyId": currency,
-                    "employee": employee,
-                    "clientName": buyer["name"],
-                    "warehouseName": warehouse,
-                }
-                if buyer["code"]:
-                    base["clientCode"] = buyer["code"]
-                if cost_center:
-                    base["costCenter"] = cost_center
-
                 item_name, code, barcode = _get_item_identity(doc, it)
-                qty = _safe_D(getattr(it, "quantity", 1) or 1)
+                qty = _abs_if_credit(_safe_D(getattr(it, "quantity", 1) or 1), is_credit)
 
                 if price_map:
                     price = _safe_D(price_map.get(id(it), getattr(it, "price", 0) or 0))
                 else:
                     price = _safe_D(getattr(it, "price", 0) or 0)
+                price = _price_for_export(_abs_if_credit(price, is_credit), is_credit)
 
                 row = dict(base)
                 row.update({
@@ -1005,7 +1060,7 @@ def _export_sales(documents: list, user=None, own_company_code=None) -> bytes:
                 vat_rate = getattr(it, "vat_percent", None)
                 if vat_rate is not None and _s(vat_rate) != "":
                     try:
-                        row["vatRate"] = float(_safe_D(vat_rate))
+                        row["vatRate"] = float(abs(_safe_D(vat_rate)))
                     except Exception:
                         pass
 
@@ -1016,26 +1071,8 @@ def _export_sales(documents: list, user=None, own_company_code=None) -> bytes:
                 rows.append(row)
 
         else:
-            doc_attr = _attribute_name_from_preke_paslauga(getattr(doc, "preke_paslauga", None))
-            op_type = _get_operation_type_name("pardavimas", doc_attr)
-
-            base = {
-                "saleDate": sale_date,
-                "series": series,
-                "number": number,
-                "operationTypeName": op_type,
-                "currencyId": currency,
-                "employee": employee,
-                "clientName": buyer["name"],
-                "warehouseName": warehouse,
-            }
-            if buyer["code"]:
-                base["clientCode"] = buyer["code"]
-            if cost_center:
-                base["costCenter"] = cost_center
-
-            amount_wo = _safe_D(getattr(doc, "amount_wo_vat", 0) or 0)
-            discount_wo = _safe_D(getattr(doc, "invoice_discount_wo_vat", 0) or 0)
+            amount_wo = _abs_if_credit(_safe_D(getattr(doc, "amount_wo_vat", 0) or 0), is_credit)
+            discount_wo = _abs_if_credit(_safe_D(getattr(doc, "invoice_discount_wo_vat", 0) or 0), is_credit)
             if discount_wo > 0:
                 amount_wo = amount_wo - discount_wo
                 if amount_wo < 0:
@@ -1049,7 +1086,7 @@ def _export_sales(documents: list, user=None, own_company_code=None) -> bytes:
             row.update({
                 "items": item_name,
                 "quantity": 1,
-                "priceExclVat": float(_quantize_2(amount_wo)),
+                "priceExclVat": float(_quantize_2(_price_for_export(amount_wo, is_credit))),
             })
 
             if code:
@@ -1060,7 +1097,7 @@ def _export_sales(documents: list, user=None, own_company_code=None) -> bytes:
             vat_rate = getattr(doc, "vat_percent", None)
             if vat_rate is not None and _s(vat_rate) != "":
                 try:
-                    row["vatRate"] = float(_safe_D(vat_rate))
+                    row["vatRate"] = float(abs(_safe_D(vat_rate)))
                 except Exception:
                     pass
 
@@ -1080,7 +1117,6 @@ def _export_sales(documents: list, user=None, own_company_code=None) -> bytes:
     wb.save(bio)
     bio.seek(0)
     return bio.read()
-
 
 
 
