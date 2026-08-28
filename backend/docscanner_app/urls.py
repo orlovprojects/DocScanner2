@@ -116,6 +116,7 @@ from .views import (
     patch_dk_line,
     onboarding_company_search,
     MarkAsAggregatorPayoutView,
+    AggregatorAccountMappingView,
 )
 from .views import (
     counterparty_list_create,
@@ -183,6 +184,10 @@ from .views import (
     TransactionListView,
     TransactionClassifyView,
     TransactionManualMatchView,
+    TransactionMatchCandidatesView,
+    UserDKTemplateView,
+    TransactionDeferView,
+    TransactionIgnoreView,
     BankTransactionRuleListView,
     BankTransactionRuleDetailView,
     PurchaseSearchView,
@@ -521,6 +526,11 @@ urlpatterns = [
     path('invoicing/bank-transactions/<int:pk>/', TransactionDetailView.as_view(), name='bank-transaction-detail'),
     path('invoicing/bank-transactions/<int:pk>/classify/', TransactionClassifyView.as_view(), name='bank-transaction-classify'),
     path('invoicing/bank-transactions/<int:pk>/match/', TransactionManualMatchView.as_view(), name='bank-transaction-match'),
+    path("invoicing/bank-transactions/<int:pk>/match-candidates/", TransactionMatchCandidatesView.as_view(), name="bank-txn-match-candidates"),    
+    path("invoicing/dk-templates/", UserDKTemplateView.as_view(), name="dk-templates"),
+    path("invoicing/bank-transactions/<int:pk>/defer/", TransactionDeferView.as_view(), name="bank-txn-defer"),
+    path("invoicing/bank-transactions/<int:pk>/ignore/", TransactionIgnoreView.as_view(), name="bank-txn-ignore"),   
+    
     path('invoicing/allocations/<int:pk>/preview/', AllocationPreviewView.as_view(), name='allocation-preview'),
     path("apskaita/dk-eilutes/<int:pk>/", patch_dk_line),
     path("apskaita/rankiniai-dk/", manual_dk_collection, name="manual-dk-collection"),
@@ -546,6 +556,8 @@ urlpatterns = [
     path('invoicing/invoices/<int:pk>/update-kor/', invoice_update_kor, name='invoice-update-kor'),
 
     path('invoicing/bank-transactions/<int:pk>/mark-aggregator/', MarkAsAggregatorPayoutView.as_view(), name='mark-aggregator'),
+
+    path("invoicing/aggregator-accounts/", AggregatorAccountMappingView.as_view(), name="aggregator-accounts"),
 
     # ─── Direct payment links ───
     # Payment providers

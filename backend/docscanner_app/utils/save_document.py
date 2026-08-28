@@ -14,7 +14,11 @@ from ..utils.data_resolver import (
 from ..validators.default_currency import set_default_currency
 from ..validators.vat_klas import auto_select_pvm_code  # новая сигнатура (см. вызовы ниже)
 from ..validators.currency_converter import to_iso_currency
-from ..validators.company_name_normalizer import normalize_company_name_v2
+from ..validators.company_name_normalizer import (   
+    normalize_company_name_v2,
+    looks_like_person, person_names_match,
+    has_lt_legal_form, company_names_match, looks_like_lt_code,
+)
 from ..validators.vat_validator import validate_vat
 from ..validators.vat_code_sanitizer import sanitize_vat_code
 from ..utils.company_replace_rules_applier import apply_company_replace_rules
@@ -129,7 +133,47 @@ def _find_existing_counterparty_data(model_class, party_type: str, name: str, us
                     "id_programoje": doc_prog,
                 }
     
-    return None
+    # === Фолбэк: физлица + иностранные фирмы без kodas/PVM kodas ===
+    if looks_like_person(name):
+        matcher = person_names_match
+        skip_lt_codes = False
+    elif has_lt_legal_form(name):
+        return None                       # LT фирмы — только точное совпадение
+    else:
+        if len(normalize_company_name_v2(name)) < 6:
+            return None
+        matcher = company_names_match
+        skip_lt_codes = True              # чужой литовский код не подставляем
+
+    qs2 = model_class.objects.filter(user=user)
+    if exclude_doc_id:
+        qs2 = qs2.exclude(pk=exclude_doc_id)
+    qs2 = qs2.order_by("uploaded_at").only(
+        "seller_name", "seller_id", "seller_vat_code", "seller_id_programoje",
+        "buyer_name", "buyer_id", "buyer_vat_code", "buyer_id_programoje",
+    )
+
+    weak = None
+    for doc in qs2.iterator():
+        for side in ("seller", "buyer"):
+            other = getattr(doc, f"{side}_name", None)
+            if not other or not matcher(name, other):
+                continue
+
+            d_id = (str(getattr(doc, f"{side}_id") or "")).strip()
+            d_vat = (str(getattr(doc, f"{side}_vat_code") or "")).strip()
+            d_prog = (str(getattr(doc, f"{side}_id_programoje") or "")).strip()
+
+            if (d_id or d_vat) and not (skip_lt_codes and looks_like_lt_code(d_id, d_vat)):
+                return {
+                    "id": d_id or None,
+                    "vat_code": d_vat or None,
+                    "id_programoje": d_prog or None,
+                }
+            if d_prog and weak is None:
+                weak = {"id": None, "vat_code": None, "id_programoje": d_prog}
+
+    return weak
 
 
 def _apply_top_level_fields(

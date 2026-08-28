@@ -1165,8 +1165,9 @@ class CompanyProfile(models.Model):
             "swedbank": "Swedbank",
             "seb": "SEB",
             "luminor": "Luminor",
-            "siauliu": "Šiaulių bankas",
+            "siauliu": "Artea",
             "revolut": "Revolut",
+            "paypal": "PayPal",
         }
 
         label = bank_labels.get(bank, bank_name or "Bankas")
@@ -1331,6 +1332,39 @@ class CompanyProfile(models.Model):
                 "currency": entry.get("currency", "EUR"),
             })
         return result
+
+    # ── Sumų skirtumų (mokėjimo vs dokumento) sąskaitos ──
+
+    DIFF_ACCOUNTS_DEFAULT = {
+        "fee":          "6810",   # banko / tarpininko mokestis
+        "writeoff_exp": "6401",   # gavome mažiau -> kitos sąnaudos
+        "writeoff_inc": "5401",   # sumokėjome mažiau -> kitos pajamos
+        "advance_out":  "2080",   # permoka tiekėjui
+        "advance_in":   "4420",   # permoka iš pirkėjo
+        "fx_gain":      "5803",
+        "fx_loss":      "6803",
+    }
+
+    DIFF_ACCOUNT_LABELS = {
+        "fee":          "Kitos finansinės ir investicinės veiklos sąnaudos",
+        "writeoff_exp": "Kitos sąnaudos",
+        "writeoff_inc": "Kitos pajamos",
+        "advance_out":  "Sumokėti avansai tiekėjams",
+        "advance_in":   "Iš pirkėjų gauti avansai",
+        "fx_gain":      "Teigiama valiutų kursų pokyčio įtaka",
+        "fx_loss":      "Neigiama valiutų kursų pokyčio įtaka",
+    }
+
+    def get_diff_account(self, kind: str) -> dict:
+        """
+        Grąžina sąskaitą sumų skirtumui.
+        kind: fee | writeoff_exp | writeoff_inc | advance_out | advance_in | fx_gain | fx_loss
+        """
+        k = (kind or "").strip().lower()
+        return {
+            "account": self.DIFF_ACCOUNTS_DEFAULT.get(k, "6401"),
+            "label": self.DIFF_ACCOUNT_LABELS.get(k, "Kitos sąnaudos"),
+        }
 
     @staticmethod
     def detect_aggregator_provider(counterparty_name: str) -> str:
@@ -4115,6 +4149,7 @@ class BaseTransaction(models.Model):
         ("tax_sodra", "Sodra / VSDFV"),
         ("salary", "Darbo užmokestis"),
         ("provider_payout", "Tarpininko išmoka"),
+        ("tax_customs", "Muitinės mokestis"),
         # ── Rankinis ──
         ("owner_withdrawal", "Savininko lėšų paėmimas"),
         ("owner_deposit", "Savininko įnašas"),
@@ -6171,6 +6206,79 @@ class JournalEntryLine(models.Model):
     def __str__(self):
         return f"{self.side} {self.account_code} {self.amount}"
     
+
+class UserDKTemplate(models.Model):
+    """
+    Vartotojo susikurtas DK korespondencijos šablonas banko operacijoms.
+
+    lines formatas toks pat kaip DK_TEMPLATES (bank_dk_register.py):
+      [{"side":"debit","code":"6300","name":"Nuomos sąnaudos","amount_mode":"full"},
+       {"side":"credit","code":"[bank]","name":"[bank_name]","amount_mode":"full"}]
+    """
+
+    DIRECTION_CHOICES = [
+        ("outgoing", "Išlaidos"),
+        ("incoming", "Įplaukos"),
+        ("both", "Abi"),
+    ]
+
+    user = models.ForeignKey(
+        "CustomUser", on_delete=models.CASCADE, related_name="dk_templates",
+    )
+    company_profile = models.ForeignKey(
+        "CompanyProfile", on_delete=models.CASCADE, related_name="dk_templates",
+    )
+
+    name = models.CharField("Pavadinimas", max_length=120)
+    direction = models.CharField(
+        "Kryptis", max_length=10, choices=DIRECTION_CHOICES, default="both",
+    )
+    category = models.CharField(
+        "Kategorija", max_length=40, blank=True, default="",
+        help_text="Neprivaloma: susieja šabloną su transaction_category",
+    )
+
+    lines = models.JSONField("Korespondencijos eilutės", default=list)
+
+    times_used = models.PositiveIntegerField(default=0)
+    last_used_at = models.DateTimeField(null=True, blank=True)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-times_used", "name"]
+        verbose_name = "DK šablonas"
+        verbose_name_plural = "DK šablonai"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["company_profile", "name"], name="uq_dk_template_name",
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=["company_profile", "-times_used"],
+                name="idx_dktpl_profile_used",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.name} ({self.company_profile_id})"
+
+    def mark_used(self):
+        from django.utils import timezone
+        self.times_used += 1
+        self.last_used_at = timezone.now()
+        self.save(update_fields=["times_used", "last_used_at"])
+        ordering = ["-times_used", "name"]
+        constraints = [
+            models.UniqueConstraint(fields=["company_profile", "name"],
+                                    name="uq_dk_template_name"),
+        ]
+        indexes = [
+            models.Index(fields=["company_profile", "-times_used"],
+                         name="idx_dktpl_profile_used"),
+        ]
+
 # ========================================================
 # END - DK
 # ========================================================

@@ -30,6 +30,7 @@ import { useNavigate } from 'react-router-dom';
 import { invoicingApi } from '../api/invoicingApi';
 import { useCompanyProfiles } from '../contexts/useCompanyProfiles';
 import RegisterDKDialog from '../components/RegisterDKDialog';
+import ResolveTransactionDialog from '../components/ResolveTransactionDialog';
 
 // ── Config ──
 
@@ -70,6 +71,7 @@ const CAT_CFG = {
   payment_refund:      { label: 'Mokėjimo grąžinimas',        color: '#fb8c00' },
   payment_reversal:    { label: 'Mokėjimo atšaukimas',        color: '#ef6c00' },
   chargeback:          { label: 'Chargeback',                 color: '#e65100' },
+  tax_customs:         { label: 'Muitinės mokestis',        color: '#5d4037' },
   paypal_card_funding: { label: 'PayPal sąskaitos papildymas', color: '#0070ba' },
   other_expense:       { label: 'Kitos sąnaudos',             color: '#757575' },
   other_income:        { label: 'Kitos pajamos',              color: '#757575' },
@@ -135,10 +137,6 @@ const BankTransactionsTab = ({ statements = [], initialStatementId = '', onClear
 
   // ── Match dialog ──
   const [mtDlg, setMtDlg] = useState({ open: false, txn: null });
-  const [mtQ, setMtQ] = useState('');
-  const [mtRes, setMtRes] = useState([]);
-  const [mtSLoad, setMtSLoad] = useState(false);
-  const [mtLoad, setMtLoad] = useState(false);
 
   useEffect(() => { setTxnF(p => ({ ...p, statement_id: initialStatementId })); }, [initialStatementId]);
 
@@ -223,23 +221,7 @@ const BankTransactionsTab = ({ statements = [], initialStatementId = '', onClear
   };
 
   // ── Match dialog ──
-  const openMt = (txn) => { setMtDlg({ open: true, txn }); setMtQ(''); setMtRes([]); };
-  useEffect(() => {
-    if (!mtDlg.open || mtQ.length < 2) { setMtRes([]); return; }
-    const t = setTimeout(async () => {
-      setMtSLoad(true);
-      try {
-        if (mtDlg.txn.direction === 'incoming') {
-          const { data } = await invoicingApi.getInvoices({ q: mtQ, limit: 10, category: 'israsytos' });
-          setMtRes((data.results || []).map(i => ({ type: 'invoice', id: i.id, number: i.full_number || `${i.document_series}-${i.document_number}`, name: i.buyer_name, amount: i.amount_with_vat, date: i.invoice_date })));
-        } else {
-          const { data } = await invoicingApi.getPurchases({ q: mtQ, limit: 10 });
-          setMtRes((data.results || []).map(p => ({ type: 'purchase', id: p.id, number: `${p.document_series || ''}${p.document_number || ''}`, name: p.seller_name, amount: p.amount_with_vat, date: p.invoice_date })));
-        }
-      } catch { setMtRes([]); } finally { setMtSLoad(false); }
-    }, 300);
-    return () => clearTimeout(t);
-  }, [mtQ, mtDlg.open]);
+  const openMt = (txn, tab = 'match') => { setMtDlg({ open: true, txn, tab }); };
 
   const doMt = async (doc) => {
     setMtLoad(true);
@@ -646,8 +628,10 @@ const BankTransactionsTab = ({ statements = [], initialStatementId = '', onClear
                       <ConfidenceRing value={parseFloat(dtlFirstAlloc?.confidence || dtlAlloc?.confidence || 0)} />
                       <Box>
                         <Typography fontWeight={700} fontSize={15}>Patikimumas</Typography>
-                        <Chip label={STATUS_MAP[dtlTxn.match_status]?.label} color={STATUS_MAP[dtlTxn.match_status]?.color}
-                          size="small" variant="outlined" sx={{ fontSize: 11, height: 20, mt: 0.25 }} />
+                        <Chip label={(ACTION_STATE_CFG[dtlTxn.action_state] || ACTION_STATE_CFG.laukia_dokumento).label}
+                          size="small" variant="outlined" sx={{ fontSize: 11, height: 20, mt: 0.25,
+                            color: (ACTION_STATE_CFG[dtlTxn.action_state] || ACTION_STATE_CFG.laukia_dokumento).fg,
+                            borderColor: (ACTION_STATE_CFG[dtlTxn.action_state] || ACTION_STATE_CFG.laukia_dokumento).fg }} />
                       </Box>
                     </Box>
                   )}
@@ -793,41 +777,15 @@ const BankTransactionsTab = ({ statements = [], initialStatementId = '', onClear
       />
 
       {/* ══ MATCH DIALOG ══ */}
-      <Dialog open={mtDlg.open} onClose={() => setMtDlg({ open: false, txn: null })} maxWidth="sm" fullWidth disableScrollLock>
-        <DialogTitle>Susieti su dokumentu</DialogTitle>
-        <DialogContent>{mtDlg.txn && (<Box sx={{ mt: 1 }}>
-          <Paper variant="outlined" sx={{ p: 1.5, mb: 2, borderRadius: 2, bgcolor: '#f9f9f9' }}>
-            <Typography fontSize={13}><strong>{mtDlg.txn.counterparty_name}</strong></Typography>
-            <Typography fontSize={14} fontWeight={700}>{fmt(mtDlg.txn.amount, mtDlg.txn.currency)}</Typography>
-          </Paper>
-          <TextField fullWidth size="small" placeholder="Ieškoti dokumento..." value={mtQ} onChange={e => setMtQ(e.target.value)} autoFocus
-            InputProps={{ startAdornment: <InputAdornment position="start"><SearchIcon fontSize="small" /></InputAdornment>,
-              endAdornment: mtSLoad ? <CircularProgress size={18} /> : null }} />
-          <Box sx={{ mt: 1.5, maxHeight: 300, overflow: 'auto' }}>
-            {mtRes.length === 0 && mtQ.length >= 2 && !mtSLoad && (
-              <Typography variant="body2" color="text.secondary" sx={{ py: 2, textAlign: 'center' }}>Nerasta</Typography>
-            )}
-            {mtRes.map(d => (
-              <Paper key={`${d.type}-${d.id}`} variant="outlined" sx={{ p: 1.5, mb: 1, borderRadius: 2, cursor: 'pointer', '&:hover': { bgcolor: '#f5f5f5' } }}
-                onClick={() => doMt(d)}>
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <Box>
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
-                      <Chip label={d.type === 'invoice' ? 'SF' : 'Pirk.'} size="small"
-                        color={d.type === 'invoice' ? 'primary' : 'secondary'} sx={{ fontSize: 10, height: 18 }} />
-                      <Typography fontSize={13} fontWeight={700}>{d.number}</Typography>
-                    </Box>
-                    <Typography variant="caption" color="text.secondary">{d.name} · {fmtD(d.date)}</Typography>
-                  </Box>
-                  <Typography fontWeight={700} fontSize={13}>{fmt(d.amount)}</Typography>
-                </Box>
-              </Paper>
-            ))}
-          </Box>
-          {mtLoad && <LinearProgress sx={{ mt: 1 }} />}
-        </Box>)}</DialogContent>
-        <DialogActions><Button onClick={() => setMtDlg({ open: false, txn: null })}>Atšaukti</Button></DialogActions>
-      </Dialog>
+      <ResolveTransactionDialog
+        open={mtDlg.open}
+        txn={mtDlg.txn}
+        initialTab={mtDlg.tab || 'match'}
+        onClose={() => setMtDlg({ open: false, txn: null, tab: 'match' })}
+        onSuccess={() => loadTxns(true)}
+        showSnack={show}
+        onOpenDkDialog={(t) => setDkDlg({ open: true, txn: t })}
+      />
     </>
   );
 };

@@ -2799,8 +2799,10 @@ export default function PreviewDialog({
                   {selected.preview_url && (
                     <ZoomableImage
                       src={selected.preview_url}
-                      buttonSize={36}
-                      maxHeight="calc(75vh - 60px)"
+                      buttonSize={44}
+                      maxHeight="calc(100vh - 90px)"
+                      fitOnLoad
+                      fitRatio={1}
                     />
                   )}
                 </Box>

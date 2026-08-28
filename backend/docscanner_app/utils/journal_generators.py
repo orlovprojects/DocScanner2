@@ -80,31 +80,38 @@ def _get_account_name(code):
         "1220": "Mašinų ir įrangos įsigijimo savikaina",
         "1230": "Transporto priemonių įsigijimo savikaina",
         "1240": "Kitų įrenginių, prietaisų įsigijimo savikaina",
-        "2010": "Žaliavos, medžiagos",
-        "2040": "Prekės perpardavimui",
-        "2080": "Avansai tiekėjams",
-        "2410": "Pirkėjų skolos",
-        "2441": "Gautinas PVM",
+        "2010": "Žaliavos, medžiagos ir komplektavimo detalės",
+        "2040": "Pirktos prekės, skirtos perparduoti",
+        "2080": "Sumokėti avansai tiekėjams",
+        "2410": "Pirkėjų skolų vertė",
+        "2441": "Gautinas pridėtinės vertės mokestis",
         "271": "Sąskaitos bankuose",
         "272": "Kasa",
+        "273": "Pinigai kelyje",
         "291": "Ateinančių laikotarpių sąnaudos",
 
         # Nuosavas kapitalas
         "3010": "Įstatinis kapitalas",
 
         # Įsipareigojimai
-        "4430": "Skolos tiekėjams",
-        "4480": "Kitos mokėtinos sumos",
-        "4481": "Mokėtini mokesčiai",
-        "4492": "Mokėtinas PVM",
+        "4420": "Iš pirkėjų gauti avansai",
+        "4430": "Skolos tiekėjams už prekes ir paslaugas",
+        "4480": "Mokėtinas darbo užmokestis",
+        "4481": "Mokėtinas gyventojų pajamų mokestis",
+        "4482": "Mokėtinos socialinio draudimo įmokos",
+        "4492": "Mokėtinas pridėtinės vertės mokestis",
+        "4493": "Kiti į biudžetą mokėtini mokesčiai",
 
         # Pajamos
         "5000": "Parduotų prekių pajamos",
         "5001": "Suteiktų paslaugų pajamos",
         "509": "Nuolaidos, grąžinimas",
-        "5009": "Apvalinimas",
+        "5009": "Atsiskaitymų grynais pinigais apvalinimas",
         "5400": "Ilgalaikio turto perleidimo pelnas",
-        "5401": "Kitos veiklos pajamos",
+        "5401": "Kitos pajamos",
+        "5803": "Teigiama valiutų kursų pokyčio įtaka",
+        "5804": "Baudų ir delspinigių pajamos",
+        "5810": "Kitos finansinės ir investicinės veiklos pajamos",
 
         # Sąnaudos
         "6000": "Parduotų prekių savikaina",
@@ -112,21 +119,22 @@ def _get_account_name(code):
         "6002": "Įsigytų prekių ir paslaugų savikaina",
         "6003": "Tiesioginės gamybos išlaidos",
         "6004": "Netiesioginės gamybos išlaidos",
-        "6200": "Komisiniai mokesčiai",
-        "6202": "Reklamos sąnaudos",
+        "6200": "Komisiniai mokesčiai pardavėjams",
+        "6202": "Paslaugų ir prekių reklamos sąnaudos",
         "6208": "Kitos pardavimo sąnaudos",
         "6300": "Nuomos sąnaudos",
         "6301": "Remonto ir eksploatacijos sąnaudos",
-        "6302": "Išmokos tretiesiems asmenims",
+        "6302": "Išmokų tretiesiems asmenims sąnaudos",
         "6303": "Draudimo sąnaudos",
-        "6304": "Darbuotojų darbo užmokestis",
+        "6304": "Darbuotojų darbo užmokestis ir su juo susijusios sąnaudos",
         "6308": "Veiklos mokesčių sąnaudos",
-        "6311": "Baudos ir delspinigiai",
-        "6312": "Kitos bendrosios sąnaudos",
+        "6311": "Baudų ir delspinigių sąnaudos",
+        "6312": "Kitos bendrosios ir administracinės sąnaudos",
         "6401": "Kitos sąnaudos",
-        "6802": "Palūkanų sąnaudos",
-        "6803": "Valiutų kursų nuostoliai",
-        "6810": "Kitos finansinės sąnaudos",
+        "6802": "Kitų įmonių suteiktų paskolų palūkanų sąnaudos",
+        "6803": "Neigiama valiutų kursų pokyčio įtaka",
+        "6804": "Baudų ir delspinigių sąnaudos",
+        "6810": "Kitos finansinės ir investicinės veiklos sąnaudos",
     }
     return ACCOUNTS.get(str(code or ""), "")
 
@@ -136,6 +144,13 @@ def _to_decimal(value):
     if value is None:
         return Decimal("0")
     return Decimal(str(value))
+
+def _to_eur_amount(value, rate):
+    """Konvertuoja dokumento valiutos sumą į EUR. rate: 1 EUR = X valiutos."""
+    value = _to_decimal(value)
+    if not rate or rate == Decimal("1"):
+        return value
+    return (value / rate).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
 JE_AMOUNT_QUANT = Decimal("0.0001")
 
@@ -462,6 +477,13 @@ def generate_purchase_journal_entry(purchase):
 
     document_number = f"{purchase.document_series or ''}{purchase.document_number or ''}".strip()
 
+    # ── Valiuta → EUR pagal LB kursą dokumento datai ──
+    from ..services.accounting_transfer import rate_to_eur
+
+    doc_currency = (purchase.currency or "EUR").upper()
+    is_foreign = doc_currency != "EUR"
+    doc_rate = rate_to_eur(doc_currency, entry_date) if is_foreign else Decimal("1")
+
     entry = JournalEntry.objects.create(
         user=purchase.user,
         company_profile=purchase.company_profile,
@@ -473,16 +495,21 @@ def generate_purchase_journal_entry(purchase):
         counterparty_name=purchase.seller_name or "",
         counterparty_code=purchase.seller_id or "",
         description=f"Pirkimas: {purchase.seller_name or ''}".strip(),
-        currency=purchase.currency or "EUR",
+        currency="EUR",
+        original_amount=_to_decimal(purchase.amount_with_vat) if is_foreign else None,
+        original_currency=doc_currency if is_foreign else "",
+        exchange_rate=doc_rate if is_foreign else None,
+        exchange_rate_date=entry_date if is_foreign else None,
         status=JournalEntry.STATUS_DRAFT,
     )
 
     lines = []
     sort_order = 0
 
-    amount_wo_vat = _to_decimal(purchase.amount_wo_vat)
-    vat_amount = _to_decimal(purchase.vat_amount)
-    amount_with_vat = _to_decimal(purchase.amount_with_vat)
+    amount_wo_vat = _to_eur_amount(purchase.amount_wo_vat, doc_rate)
+    vat_amount = _to_eur_amount(purchase.vat_amount, doc_rate)
+    # Skaičiuojame iš dedamųjų, kad D ir K sutaptų iki cento po apvalinimo
+    amount_with_vat = amount_wo_vat + vat_amount
 
     kredito_code = purchase.kredito_saskaita or "4430"
     pvm_code = purchase.pvm_saskaita or "2441"
@@ -504,13 +531,17 @@ def generate_purchase_journal_entry(purchase):
 
             groups[code] += subtotal
 
-        for code in sorted(groups.keys()):
+        # Grupes paskirstome proporcingai jau konvertuotai EUR sumai,
+        # likutis tenka paskutinei sąskaitai — jokio apvalinimo skirtumo.
+        eur_groups = _allocate_groups_to_total(groups, amount_wo_vat)
+
+        for code in sorted(eur_groups.keys()):
             sort_order = _add_line(
                 lines,
                 entry=entry,
                 side="D",
                 account_code=code,
-                amount=groups[code],
+                amount=eur_groups[code],
                 description=f"Pirkimas {purchase.seller_name or ''}".strip(),
                 sort_order=sort_order,
             )

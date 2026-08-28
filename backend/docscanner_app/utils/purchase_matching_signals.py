@@ -14,7 +14,9 @@ logger = logging.getLogger("docscanner_app")
 
 AUTO_THRESHOLD = Decimal("0.85")
 LIKELY_THRESHOLD = Decimal("0.60")
-
+# Prekybininkas + tiksli suma be dokumento numerio: žemesnė auto riba,
+# nes unikalumo patikra jau atmeta dviprasmiškus atvejus.
+MERCHANT_AUTO_THRESHOLD = Decimal("0.70")
 
 @dataclass
 class SignalPurchaseMatchResult:
@@ -43,6 +45,9 @@ class SignalPurchaseMatchingEngine:
         self.user = user
 
     def match_transactions(self, transactions):
+        transactions = list(transactions)
+        self._reset_previous_allocations(transactions)
+
         purchases = list(self._load_purchases())
         candidates = [self._purchase_to_candidate(p) for p in purchases]
 
@@ -71,8 +76,14 @@ class SignalPurchaseMatchingEngine:
                 txn = r.txn
 
                 if r.status == "unmatched" or not r.purchase_id:
+                    # Praleistos operacijos (mokesčiai, alga, komisiniai) —
+                    # jas tvarko classifier, matcher jų statuso neliečia.
+                    if (r.reasons or {}).get("skip_matching"):
+                        continue
+
                     txn.match_status = "unmatched"
                     txn.match_confidence = Decimal("0")
+                    txn.allocated_amount = Decimal("0")
 
                     existing_details = dict(txn.match_details or {})
                     existing_details.update(r.reasons or {})
@@ -144,6 +155,7 @@ class SignalPurchaseMatchingEngine:
                     "allocated_amount",
                     "transaction_category",
                     "updated_at",
+                    "allocated_amount",
                 ])
 
                 changed_purchase_ids.add(r.purchase_id)
@@ -199,8 +211,37 @@ class SignalPurchaseMatchingEngine:
                 signals=self._serialize_signals(signals),
             )
 
-        scored.sort(key=lambda x: x[1], reverse=True)
+        def _date_gap(c):
+            inv_d = c.get("invoice_date")
+            if not inv_d or not txn.transaction_date:
+                return 9999
+            return abs((txn.transaction_date - inv_d).days)
+
+        # Vienodo balo atveju laimi kandidatas, kurio data arčiau mokėjimo.
+        scored.sort(key=lambda x: (-x[1], _date_gap(x[0])))
         best, best_score, best_reasons = scored[0]
+
+        # Merchant+suma be numerio: pasitikim tik jei kandidatas vienintelis.
+        # Kitaip 25.00 USD Klaviyo gali pataikyti į bet kurią iš 5 sąskaitų.
+        if best_reasons.pop("_needs_uniqueness_check", None):
+            rivals = [
+                c for c, s, r in scored[1:]
+                if s >= best_score - Decimal("0.15")
+                and c.get("id") != best.get("id")
+            ]
+            if rivals:
+                best_gap = _date_gap(best)
+                if all(_date_gap(c) > best_gap for c in rivals):
+                    best_reasons["Artimiausias pagal datą"] = f"{best_gap} d."
+                else:
+                    best_score -= Decimal("0.30")
+                    best_reasons["Keli panašūs kandidatai"] = len(rivals) + 1
+
+        intermediary_no_auto = bool(best_reasons.get("_intermediary_no_auto"))
+
+        for _c, _s, _r in scored:
+            _r.pop("_needs_uniqueness_check", None)
+            _r.pop("_intermediary_no_auto", None)
 
         if best_score < LIKELY_THRESHOLD:
             return SignalPurchaseMatchResult(
@@ -215,12 +256,50 @@ class SignalPurchaseMatchingEngine:
                 signals=self._serialize_signals(signals),
             )
 
-        # Saugumas: cross-currency kol kas tik proposed,
-        # nes DK / valiutos kurso įtaka dar nėra pilnai sutvarkyta.
-        if best_score >= AUTO_THRESHOLD and not signals.is_cross_currency and not signals.conversion_fee:
-            status = "auto_matched"
-        else:
-            status = "likely_matched"
+        # Ambiguity guard: jei antras kandidatas beveik toks pat geras — nerizikuojam
+        second_score = scored[1][1] if len(scored) > 1 else Decimal("0")
+        is_ambiguous = (best_score - second_score) < Decimal("0.10")
+
+        # Cross-currency leidžiam auto, jei dokumento valiuta sutampa su
+        # originalia operacijos valiuta (tiksli suma, be kurso spėliojimo).
+        fx_guess = "Suma panašiai sutampa (keitimo kursas)" in best_reasons
+        currency_exact = (
+            (signals.original_currency or signals.bank_currency or "").upper()
+            == (best.get("currency") or "EUR").upper()
+        )
+
+        has_number = any(
+            k.startswith("Dokumento numeris") for k in best_reasons
+        )
+
+        # Prekybininkas atpažintas pagal alias, suma sutampa iki cento
+        # ir kandidatas vienintelis (dviprasmiški jau numušti aukščiau).
+        merchant_unique = (
+            "Prekybininkas ir suma sutampa" in best_reasons
+            and "Keli panašūs kandidatai" not in best_reasons
+        )
+
+        # IBAN + vardas + tiksli suma bankiniam pavedimui yra toks pat
+        # stiprus signalas kaip dokumento numeris.
+        iban_combo = "Tiekėjas ir suma vienareikšmiškai sutampa" in best_reasons
+
+        # Vienodo balo atveju datos artumas jau išsprendė, kuris kandidatas
+        # teisingas — dviprasmiškumo žymė nebeblokuoja.
+        if "Artimiausias pagal datą" in best_reasons:
+            is_ambiguous = False
+
+        auto_ok = (
+            not is_ambiguous
+            and currency_exact
+            and not fx_guess
+            and not intermediary_no_auto
+            and (
+                (best_score >= AUTO_THRESHOLD and (has_number or iban_combo))
+                or (best_score >= MERCHANT_AUTO_THRESHOLD and merchant_unique)
+            )
+        )
+
+        status = "auto_matched" if auto_ok else "likely_matched"
 
         amount = self._allocation_amount(signals, best)
 
@@ -234,6 +313,49 @@ class SignalPurchaseMatchingEngine:
             reasons=self._json_safe(best_reasons),
             signals=self._serialize_signals(signals),
         )
+    
+    def _reset_previous_allocations(self, transactions):
+        """
+        Prieš pakartotinį susiejimą pašalinam ankstesnius automatinius
+        šio importo susiejimus, kad dokumentai vėl taptų kandidatais.
+        Rankinių ir patvirtintų neliečiam — jie lieka apmokėti ir
+        į kandidatų sąrašą nebepatenka (taip ir turi būti).
+        """
+        from ..services.accounting_transfer import delete_je_for_allocation
+
+        txn_ids = [t.id for t in transactions if getattr(t, "id", None)]
+        if not txn_ids:
+            return
+
+        allocs = list(
+            PaymentAllocation.objects.filter(
+                outgoing_transaction_id__in=txn_ids,
+                source="bank_import",
+                status__in=["auto", "proposed"],
+            )
+        )
+        if not allocs:
+            return
+
+        purchase_ids = {a.purchase_id for a in allocs if a.purchase_id}
+
+        with db_transaction.atomic():
+            for a in allocs:
+                try:
+                    delete_je_for_allocation(a)
+                except Exception as e:
+                    logger.warning(
+                        "[SignalPurchaseMatch] JE delete failed alloc=%s: %s", a.id, e,
+                    )
+                a.delete()
+
+            for p in Purchase.objects.filter(id__in=purchase_ids):
+                try:
+                    p.recalc_from_allocations()
+                except Exception as e:
+                    logger.warning(
+                        "[SignalPurchaseMatch] purchase=%s recalc failed: %s", p.id, e,
+                    )
 
     def _load_purchases(self):
         return (

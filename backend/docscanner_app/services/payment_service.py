@@ -586,6 +586,19 @@ class BankImportService:
                 allocated_amount=0,
             )
 
+            # ── 4b. Perskaičiuoti dokumentus PRIEŠ matching'ą ──────
+            # Kitaip Purchase lieka payment_status="paid" iš praėjusio
+            # progono ir _load_purchases() jį išmeta iš kandidatų.
+            if affected_invoice_ids:
+                from ..models import Invoice
+                for inv in Invoice.objects.filter(id__in=affected_invoice_ids):
+                    inv.recalc_payment_status()
+
+            if affected_purchase_ids:
+                from ..models import Purchase
+                for p in Purchase.objects.filter(id__in=affected_purchase_ids):
+                    p.recalc_from_allocations()
+
             # ── 5. Classify ALL transactions ───────────────────────
             all_txns = (
                 list(stmt.incoming_transactions.all())
@@ -682,16 +695,6 @@ class BankImportService:
                     p_matched,
                     len(p_results),
                 )
-
-            # ── 8. Create / rebuild DK for safe bank categories ─
-            category_dk = BankCategoryJournalBuilder(self.user, self.company_profile)
-            dk_result = category_dk.create_for_statement(stmt)
-            logger.info(f"[BankImport] Re-match Category DK: {dk_result}")
-
-            # ── Agregatorių payout'ai → Pinigai kelyje (273) ──
-            payout_dk = AggregatorPayoutJournalBuilder(self.user, self.company_profile)
-            payout_result = payout_dk.create_for_statement(stmt)
-            logger.info(f"[BankImport] Re-match Aggregator payouts: {payout_result}")
 
             # ── 8. Пересчитать документы ───────────────────
             if affected_invoice_ids:
@@ -845,6 +848,7 @@ class BankImportService:
                 currency=raw.get("currency", "EUR"),
                 fee_amount=raw.get("fee_amount") or 0,
                 fee_amount_eur=raw.get("fee_amount_eur"),
+                exchange_fee=raw.get("exchange_fee") or 0,
             )
 
             # ── Валюта → EUR (курс из выписки или дефолт для EUR) ──

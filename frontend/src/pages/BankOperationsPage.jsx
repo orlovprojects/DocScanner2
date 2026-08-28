@@ -15,6 +15,7 @@ import {
   EditOutlined as EditIcon,
   InfoOutlined as InfoIcon,
   WarningAmberOutlined as WarningIcon,
+  SwapHorizOutlined as SwapIcon,
 } from '@mui/icons-material';
 import { invoicingApi } from '../api/invoicingApi';
 import { useInvSubscription } from '../contexts/InvSubscriptionContext';
@@ -28,10 +29,14 @@ const BANK_CFG = {
   swedbank: { label: 'Swedbank', color: '#ff6600' },
   seb:      { label: 'SEB',      color: '#00843d' },
   luminor:  { label: 'Luminor',  color: '#572381' },
-  siauliu:  { label: 'Šiaulių b.', color: '#003882' },
+  siauliu:  { label: 'Artea',    color: '#003882' },
   revolut:  { label: 'Revolut',  color: '#0075eb' },
+  paypal:   { label: 'PayPal',   color: '#0070ba' },
   other:    { label: 'Kitas',    color: '#757575' },
 };
+
+// Sąskaitos be IBAN pagal prigimtį — nerodome įspėjimo
+const NO_IBAN_BANKS = new Set(['paypal']);
 
 const STMT_STS = {
   uploaded:   { label: 'Įkeltas',     color: 'default' },
@@ -47,6 +52,8 @@ const fmtD = (d) => {
 };
 
 const CHART_ACCOUNTS = ['2711', '2712', '2713', '2714', '2715', '2716', '2717', '2718', '2719'];
+
+const TRANSIT_ACCOUNTS = ['2731', '2732', '2733', '2734', '2735', '2736', '2737', '2738', '2739'];
 
 const DialogHeader = ({ title, onClose }) => (
   <DialogTitle sx={{ pr: 6, pb: 1.25, fontWeight: 700 }}>
@@ -99,6 +106,14 @@ const BankOperationsPage = () => {
   const [baLoad, setBaLoad] = useState(false);
   const [baEdit, setBaEdit] = useState(null);
   const [baDelete, setBaDelete] = useState(null);
+
+  // ── Aggregators ──
+  const [agDlg, setAgDlg] = useState(false);
+  const [ag, setAg] = useState([]);
+  const [agKnown, setAgKnown] = useState([]);
+  const [agLoad, setAgLoad] = useState(false);
+  const [agEdit, setAgEdit] = useState(null);
+  const [agNew, setAgNew] = useState({ provider: '', account: '' });
 
   // ── Filter state shared with Tab 2 ──
   const [stmtFilter, setStmtFilter] = useState('');
@@ -167,6 +182,27 @@ const BankOperationsPage = () => {
   const loadRules = async () => { setRulesLoad(true); try { const { data } = await invoicingApi.getBankRules(); setRules(data.results || data || []); } catch {} finally { setRulesLoad(false); } };
   const delRule = async (id) => { try { await invoicingApi.deleteBankRule(id); show('Taisyklė ištrinta'); loadRules(); } catch { show('Nepavyko', 'error'); } };
   const loadBa = async () => { setBaLoad(true); try { const { data } = await invoicingApi.getBankAccounts(); setBa(data || []); } catch {} finally { setBaLoad(false); } };
+  const loadAg = async () => {
+    setAgLoad(true);
+    try {
+      const { data } = await invoicingApi.getAggregatorAccounts();
+      setAg(data.accounts || []);
+      setAgKnown(data.known_providers || []);
+    } catch { show('Nepavyko įkelti', 'error'); }
+    finally { setAgLoad(false); }
+  };
+
+  const saveAg = async (provider, account, label, channel) => {
+    try {
+      const { data } = await invoicingApi.updateAggregatorAccount({
+        provider, account, label: label || '', channel: channel || 'payment_link',
+      });
+      setAg(data.accounts || []);
+      setAgEdit(null);
+      setAgNew({ provider: '', account: '' });
+      show('Atnaujinta. Jau sukurti DK įrašai nekeičiami — paleiskite pakartotinį susiejimą.', 'info');
+    } catch (e) { show(e.response?.data?.detail || 'Nepavyko', 'error'); }
+  };
 
   const saveBankAccount = async (b) => {
     const acc = document.getElementById(`baa-${b.key}`)?.value || b.account;
@@ -225,6 +261,7 @@ const BankOperationsPage = () => {
         <Typography variant="h1" sx={{ color: palette.primary, fontWeight: 500, fontSize: 24 }}>Banko operacijos</Typography>
         <Box sx={{ display: 'flex', gap: 1 }}>
           <Button variant="outlined" size="small" startIcon={<BankIcon />} onClick={() => { setBaDlg(true); loadBa(); }}>Sąskaitos</Button>
+          <Button variant="outlined" size="small" startIcon={<SwapIcon />} onClick={() => { setAgDlg(true); loadAg(); }}>Mokėjimų agregatoriai</Button>
           <Button variant="outlined" size="small" startIcon={<RuleIcon />} onClick={() => { setRulesDlg(true); loadRules(); }}>Taisyklės</Button>
           <Button variant="contained" startIcon={<UploadIcon />} onClick={() => setUploadDlg(true)} disabled={subLoad || locked}>Importuoti išrašą</Button>
         </Box>
@@ -366,7 +403,7 @@ const BankOperationsPage = () => {
             <Button variant="outlined" component="label" startIcon={<UploadIcon />} fullWidth
               sx={{ justifyContent: 'flex-start', textTransform: 'none', py: 1.5 }}>
               {selFile ? selFile.name : 'Pasirinkti failą...'}
-              <input type="file" hidden accept=".csv,.xml" onChange={e => setSelFile(e.target.files[0] || null)} />
+              <input type="file" hidden accept=".csv,.xml,.xlsx" onChange={e => setSelFile(e.target.files[0] || null)} />
             </Button>
             <TextField
                 select
@@ -385,8 +422,9 @@ const BankOperationsPage = () => {
                         swedbank: 'Swedbank',
                         seb: 'SEB',
                         luminor: 'Luminor',
-                        siauliu: 'Šiaulių bankas',
+                        siauliu: 'Artea',
                         revolut: 'Revolut',
+                        paypal: 'PayPal',
                     };
 
                     return labels[value] || value;
@@ -400,6 +438,7 @@ const BankOperationsPage = () => {
                 <MenuItem value="luminor">Luminor</MenuItem>
                 <MenuItem value="siauliu">Artea</MenuItem>
                 <MenuItem value="revolut">Revolut</MenuItem>
+                <MenuItem value="paypal">PayPal</MenuItem>
             </TextField>
             {uploading && <LinearProgress />}
           </Box>
@@ -571,25 +610,32 @@ const BankOperationsPage = () => {
           : (
             <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
               {ba.map(b => {
-                const noI = !b.iban;
+                const noI = !b.iban && !NO_IBAN_BANKS.has((b.bank || '').toLowerCase());
                 const usedAccounts = ba.filter(x => x.key !== b.key).map(x => x.account);
                 return (
                   <Paper key={b.key} variant="outlined" sx={{ p: 2, borderRadius: 2, ...(noI ? { borderColor: '#ed6c02', borderStyle: 'dashed' } : {}) }}>
                     <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 1 }}>
                       <Box>
                         <Typography fontSize={14} fontWeight={700}>{b.label || b.bank || b.key}</Typography>
-                        {b.iban
-                          ? <Typography variant="caption" color="text.secondary" sx={{ fontFamily: 'monospace' }}>{b.iban}</Typography>
-                          : <Chip label="Rekomenduojame priskirti IBAN numerį" size="small" color="warning" variant="outlined" sx={{ fontSize: 11, height: 22, mt: 0.5 }} />
-                        }
+                        {b.iban ? (
+                          <Typography variant="caption" color="text.secondary" sx={{ fontFamily: 'monospace' }}>{b.iban}</Typography>
+                        ) : NO_IBAN_BANKS.has((b.bank || '').toLowerCase()) ? (
+                          <Typography variant="caption" color="text.secondary">
+                            {BANK_CFG[(b.bank || '').toLowerCase()]?.label || b.bank} · IBAN nenaudojamas
+                          </Typography>
+                        ) : (
+                          <Chip label="Rekomenduojame priskirti IBAN numerį" size="small" color="warning" variant="outlined" sx={{ fontSize: 11, height: 22, mt: 0.5 }} />
+                        )}
                       </Box>
                       <Chip label={b.currency} size="small" variant="outlined" />
                     </Box>
                     {baEdit === b.key ? (
                       <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
-                        <TextField size="small" label="IBAN numeris" defaultValue={b.iban || ''} placeholder="Pvz. LT197044090100690265"
-                          inputProps={{ id: `bai-${b.key}`, style: { fontFamily: 'monospace' } }} fullWidth
-                          helperText="IBAN padės tiksliau susieti operacijas" />
+                        {!NO_IBAN_BANKS.has((b.bank || '').toLowerCase()) && (
+                          <TextField size="small" label="IBAN numeris" defaultValue={b.iban || ''} placeholder="Pvz. LT197044090100690265"
+                            inputProps={{ id: `bai-${b.key}`, style: { fontFamily: 'monospace' } }} fullWidth
+                            helperText="IBAN padės tiksliau susieti operacijas" />
+                        )}
                         <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
                           <TextField select size="small" label="Kor. sąskaita" defaultValue={b.account}
                             inputProps={{ id: `baa-${b.key}` }} sx={{ width: 150 }}
@@ -675,6 +721,94 @@ const BankOperationsPage = () => {
             Pašalinti
           </Button>
         </DialogActions>
+      </Dialog>
+
+      {/* ═══ AGGREGATORS DIALOG ═══ */}
+      <Dialog open={agDlg} onClose={() => setAgDlg(false)} maxWidth="sm" fullWidth disableScrollLock>
+        <DialogHeader title="Mokėjimų agregatoriai" onClose={() => setAgDlg(false)} />
+        <DialogContent>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            Agregatorių (Stripe, Checkout.com, PayPal ir kt.) įplaukos pirma patenka į „Pinigai kelyje" (273 grupė),
+            o gavus išmoką į banką ši sąskaita uždaroma. Kiekvienam agregatoriui reikia atskiros sąskaitos.
+          </Typography>
+
+          {agLoad ? <Box sx={{ py: 3, textAlign: 'center' }}><CircularProgress /></Box> : (
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+              {ag.length === 0 && (
+                <Typography variant="body2" color="text.secondary" sx={{ py: 2, textAlign: 'center' }}>
+                  Agregatorių dar nėra. Jie atpažįstami automatiškai importuojant išrašą.
+                </Typography>
+              )}
+
+              {ag.map(a => {
+                const used = ag.filter(x => x.key !== a.key).map(x => x.account);
+                return (
+                  <Paper key={a.key} variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 1 }}>
+                      <Box>
+                        <Typography fontSize={14} fontWeight={700}>{a.label || a.provider}</Typography>
+                        <Typography variant="caption" color="text.secondary">{a.channel} · {a.provider}</Typography>
+                      </Box>
+                      <Chip label={a.currency} size="small" variant="outlined" />
+                    </Box>
+
+                    {agEdit === a.key ? (
+                      <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', justifyContent: 'flex-end' }}>
+                        <TextField select size="small" label="Kor. sąskaita" defaultValue={a.account}
+                          inputProps={{ id: `aga-${a.key}` }} sx={{ width: 160 }} autoFocus
+                          SelectProps={{ MenuProps: { disableScrollLock: true } }}>
+                          {TRANSIT_ACCOUNTS.map(c => (
+                            <MenuItem key={c} value={c} disabled={used.includes(c)}>
+                              {c}{used.includes(c) ? ' (užimta)' : ''}
+                            </MenuItem>
+                          ))}
+                        </TextField>
+                        <Button size="small" onClick={() => setAgEdit(null)}>Atšaukti</Button>
+                        <Button size="small" variant="contained" onClick={() => saveAg(
+                          a.provider,
+                          document.getElementById(`aga-${a.key}`)?.value || a.account,
+                          a.label, a.channel,
+                        )}>Išsaugoti</Button>
+                      </Box>
+                    ) : (
+                      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <Typography fontSize={13}>
+                          Pinigai kelyje: <strong style={{ fontFamily: 'monospace' }}>{a.account}</strong>
+                        </Typography>
+                        <Tooltip title="Keisti sąskaitą">
+                          <IconButton size="small" onClick={() => setAgEdit(a.key)}><EditIcon fontSize="small" /></IconButton>
+                        </Tooltip>
+                      </Box>
+                    )}
+                  </Paper>
+                );
+              })}
+
+              <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, borderStyle: 'dashed' }}>
+                <Typography fontSize={13} fontWeight={700} sx={{ mb: 1.5 }}>Pridėti agregatorių</Typography>
+                <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+                  <TextField select size="small" label="Agregatorius" value={agNew.provider}
+                    onChange={e => setAgNew(p => ({ ...p, provider: e.target.value }))} sx={{ flex: 1 }}
+                    SelectProps={{ MenuProps: { disableScrollLock: true } }}>
+                    {agKnown
+                      .filter(k => !ag.some(a => a.provider === k.provider))
+                      .map(k => <MenuItem key={k.provider} value={k.provider}>{k.label}</MenuItem>)}
+                  </TextField>
+                  <TextField select size="small" label="Sąskaita" value={agNew.account}
+                    onChange={e => setAgNew(p => ({ ...p, account: e.target.value }))} sx={{ width: 140 }}
+                    SelectProps={{ MenuProps: { disableScrollLock: true } }}>
+                    {TRANSIT_ACCOUNTS.map(c => {
+                      const taken = ag.some(a => a.account === c);
+                      return <MenuItem key={c} value={c} disabled={taken}>{c}{taken ? ' (užimta)' : ''}</MenuItem>;
+                    })}
+                  </TextField>
+                  <Button size="small" variant="contained" disabled={!agNew.provider || !agNew.account}
+                    onClick={() => saveAg(agNew.provider, agNew.account)}>Pridėti</Button>
+                </Box>
+              </Paper>
+            </Box>
+          )}
+        </DialogContent>
       </Dialog>
 
       {/* Snackbar */}

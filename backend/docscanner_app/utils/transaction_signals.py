@@ -41,30 +41,50 @@ logger = logging.getLogger("docscanner_app")
 # Known IBANs for pre-classification
 # ════════════════════════════════════════════════════════════
 
-# VMI (Valstybinė mokesčių inspekcija) — налоговая
-VMI_IBANS = {
-    "LT057044060007887175",
-    "LT247300010112394300",  # VMI alternative
-}
+from .tax_payment_refs import (
+    VMI_ACCOUNTS as VMI_IBANS,
+    SODRA_ACCOUNTS as SODRA_IBANS,
+    CUSTOMS_ACCOUNTS as CUSTOMS_IBANS,
+)
 
-# Sodra (socialinis draudimas) — соцстрах
-SODRA_IBANS = {
-    "LT337044060007740589",
-    "LT817300010129203471",
-}
-
-# Muitinė (таможня)
-CUSTOMS_IBANS = {
-    "LT374010042400369573",
-}
-
-# All institutional IBANs (not supplier payments)
 INSTITUTIONAL_IBANS = VMI_IBANS | SODRA_IBANS | CUSTOMS_IBANS
+
+# # VMI (Valstybinė mokesčių inspekcija) — налоговая
+# VMI_IBANS = {
+#     "LT057044060007887175",
+#     "LT247300010112394300",  # VMI alternative
+# }
+
+# # Sodra (socialinis draudimas) — соцстрах
+# SODRA_IBANS = {
+#     "LT337044060007740589",
+#     "LT817300010129203471",
+# }
+
+# # Muitinė (таможня)
+# CUSTOMS_IBANS = {
+#     "LT374010042400369573",
+# }
+
+# # All institutional IBANs (not supplier payments)
+# INSTITUTIONAL_IBANS = VMI_IBANS | SODRA_IBANS | CUSTOMS_IBANS
 
 
 # ════════════════════════════════════════════════════════════
 # Merchant aliases — bank name → seller name in invoices
 # ════════════════════════════════════════════════════════════
+
+# Pinigų perlaidų tarpininkai: banke matosi tarpininko vardas,
+# o tikrasis gavėjas — sąskaitoje. Suma gali skirtis dėl tarpininko komisinio.
+MONEY_TRANSFER_INTERMEDIARIES = {
+    "transfergo", "wise", "transferwise", "revolut", "paysera",
+    "western union", "moneygram", "remitly", "payoneer",
+}
+
+
+def is_money_transfer(signals) -> bool:
+    name = (signals.merchant_name_clean or "").lower()
+    return any(m in name for m in MONEY_TRANSFER_INTERMEDIARIES)
 
 # Maps normalized merchant keyword → known seller names
 MERCHANT_ALIASES = {
@@ -614,7 +634,7 @@ def score_with_signals(
         # Stripped prefix match: reference "278277805" matches invoice "T278277805"
         if inv_number_digits and len(inv_number_digits) >= 6 and norm == inv_number_digits:
             number_found = True
-            score += Decimal("0.35")
+            score += Decimal("0.40") if ref.confidence == "high" else Decimal("0.35")
             reasons["Dokumento numeris rastas (be prefikso)"] = f"{ref.value} → {candidate['full_number']}"
             break
 
@@ -652,6 +672,14 @@ def score_with_signals(
             score += Decimal("0.15")
             reasons["Suma artima bendrai sumai (±1%)"] = str(total)
             amount_match = True
+        elif (
+            is_money_transfer(signals)
+            and remaining > 0
+            and abs(match_amount - remaining) / remaining <= Decimal("0.03")
+        ):
+            score += Decimal("0.10")
+            reasons["Suma su tarpininko komisiniu (±3%)"] = str(remaining)
+            amount_match = True
         elif match_amount < remaining:
             score += Decimal("0.05")
             reasons["Dalinė įmoka"] = True
@@ -683,11 +711,17 @@ def score_with_signals(
     txn_code = signals.counterparty_code
     inv_code = candidate.get("seller_code", "")
 
+    iban_match = bool(
+        signals.counterparty_iban
+        and candidate.get("seller_iban")
+        and signals.counterparty_iban == candidate.get("seller_iban")
+    )
+
     if txn_code and inv_code:
         if txn_code == inv_code:
             score += Decimal("0.40")
             reasons["Tiekėjo kodas sutampa"] = txn_code
-        else:
+        elif not iban_match:
             score -= Decimal("0.30")
             reasons["Tiekėjo kodas nesutampa"] = f"{txn_code} ≠ {inv_code}"
 
@@ -708,8 +742,48 @@ def score_with_signals(
         else:
             reasons["Tiekėjo pavadinimas panašus"] = True
     elif name_score < Decimal("0"):
-        score += name_score
-        reasons["Tiekėjo pavadinimas nesutampa"] = True
+        # Per tarpininką (TransferGo, Wise) banke matosi tarpininko vardas,
+        # ne tikrojo gavėjo — vardo neatitikimas nieko nereiškia.
+        if is_money_transfer(signals):
+            reasons["Mokėjimas per tarpininką"] = signals.merchant_name_clean
+            if amount_match:
+                score += Decimal("0.30")
+                reasons["Suma sutampa (per tarpininką)"] = True
+                # Tikrojo gavėjo vardo banke nematyti — auto niekada,
+                # tik vartotojo patvirtinimas.
+                reasons["_intermediary_no_auto"] = True
+        else:
+            score += name_score
+            reasons["Tiekėjo pavadinimas nesutampa"] = True
+
+    # ── 4d. Combo: IBAN + tikslus pavadinimas + tiksli suma ─
+    # Bankiniam pavedimui dokumento numeris niekada nesutaps
+    # (banke – mokėjimo nurodymo nr.), todėl šis derinys
+    # laikomas tokiu pat stipriu kaip numerio atitikimas.
+    if (
+        iban_match
+        and amount_match
+        and not number_found
+        and name_score >= Decimal("0.20")
+    ):
+        score += Decimal("0.15")
+        reasons["Tiekėjas ir suma vienareikšmiškai sutampa"] = True
+
+    # ── 4e. Kortelės mokėjimas SaaS tiekėjui be dokumento numerio ─
+    # Merchant atpažintas pagal alias + suma sutampa iki cento.
+    # Bonusas duodamas tik jei kandidatas VIENINTELIS — unikalumą
+    # tikrina variklis (žr. _match_one), čia tik pažymime požymį.
+    if (
+        not number_found
+        and amount_match
+        and signals.merchant_alias_matches
+        and name_score > Decimal("0")
+    ):
+        seller_lower = (candidate.get("seller_name") or "").lower()
+        if any(a in seller_lower for a in signals.merchant_alias_matches):
+            score += Decimal("0.25")
+            reasons["Prekybininkas ir suma sutampa"] = True
+            reasons["_needs_uniqueness_check"] = True
 
     # ════════════════════════════════════════════════════════
     # 5. ДАТА

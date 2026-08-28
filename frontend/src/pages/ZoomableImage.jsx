@@ -131,6 +131,7 @@ export default function ZoomableImage({
   const containerRef = useRef(null);
   const userZoomedRef = useRef(false);
   const skipResizeRef = useRef(false);
+  const pinchRef = useRef({ startDist: 0, startZoom: 1 });
 
   const iconSize = Math.round(buttonSize * 0.6);
 
@@ -241,6 +242,51 @@ export default function ZoomableImage({
     return () => observer.disconnect();
   }, [fitOnLoad, naturalSize.width, fitToPage]);
 
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return undefined;
+
+    const dist = (touches) => {
+      const [a, b] = touches;
+      return Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+    };
+
+    const onStart = (e) => {
+      if (e.touches.length !== 2) return;
+      pinchRef.current = {
+        startDist: dist(e.touches),
+        startZoom: zoom,
+      };
+    };
+
+    const onMove = (e) => {
+      if (e.touches.length !== 2) return;
+      if (!pinchRef.current.startDist) return;
+      e.preventDefault();
+      const ratio = dist(e.touches) / pinchRef.current.startDist;
+      userZoomedRef.current = true;
+      setZoom(
+        Math.min(3, Math.max(0.1, pinchRef.current.startZoom * ratio))
+      );
+    };
+
+    const onEnd = () => {
+      pinchRef.current = { startDist: 0, startZoom: 1 };
+    };
+
+    container.addEventListener("touchstart", onStart, { passive: true });
+    container.addEventListener("touchmove", onMove, { passive: false });
+    container.addEventListener("touchend", onEnd, { passive: true });
+    container.addEventListener("touchcancel", onEnd, { passive: true });
+
+    return () => {
+      container.removeEventListener("touchstart", onStart);
+      container.removeEventListener("touchmove", onMove);
+      container.removeEventListener("touchend", onEnd);
+      container.removeEventListener("touchcancel", onEnd);
+    };
+  }, [zoom]);
+
   const renderedWidth = naturalSize.width
     ? Math.max(1, Math.round(naturalSize.width * zoom))
     : null;
@@ -327,6 +373,7 @@ export default function ZoomableImage({
                 backgroundColor: "#fafafa",
                 border: "1px solid #eee",
                 borderRadius: 2,
+                touchAction: "pan-x pan-y",
               }
         }
       >

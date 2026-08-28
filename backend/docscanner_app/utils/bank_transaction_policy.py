@@ -37,8 +37,8 @@ CATEGORY_POLICIES = {
         "requires_document": False,
         "auto_create_je": True,
         "journal": {
-            "debit_account": "6880",
-            "debit_name": "Banko mokesčiai",
+            "debit_account": "6810",
+            "debit_name": "Kitos finansinės ir investicinės veiklos sąnaudos",
             "description": "Banko mokestis",
         },
     },
@@ -63,12 +63,22 @@ CATEGORY_POLICIES = {
         },
     },
 
+    "tax_customs": {
+        "requires_document": False,
+        "auto_create_je": True,
+        "journal": {
+            "debit_account": "4493",
+            "debit_name": "Kiti į biudžetą mokėtini mokesčiai",
+            "description": "Muitinės įmoka",
+        },
+    },
+
     "salary": {
         "requires_document": False,
         "auto_create_je": True,
         "journal": {
             # фактический account может быть переопределён classifier/rule
-            "debit_account": "4491",
+            "debit_account": "4480",
             "debit_name": "Mokėtinas darbo užmokestis",
             "description": "Darbo užmokesčio išmokėjimas",
         },

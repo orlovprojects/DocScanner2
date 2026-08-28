@@ -1735,7 +1735,7 @@ export default function PurchasePreviewDialog({
           <CloseIcon sx={{ fontSize: 28 }} />
         </IconButton>
         <Box sx={{ width: "100%", height: "100%", p: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
-          {purchase?.preview_url && <ZoomableImage src={purchase.preview_url} buttonSize={48} maxHeight="calc(100vh - 100px)" />}
+          {purchase?.preview_url && <ZoomableImage src={purchase.preview_url} buttonSize={48} maxHeight="calc(100vh - 100px)" fitOnLoad fitRatio={1} />}
         </Box>
       </Dialog>
     </LocalizationProvider>

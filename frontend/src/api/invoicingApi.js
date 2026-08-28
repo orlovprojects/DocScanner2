@@ -230,6 +230,12 @@ export const invoicingApi = {
   updateBankAccount: (data) =>
     api.post('/invoicing/bank-accounts/', data, { withCredentials: true }),
 
+  getAggregatorAccounts: () =>
+    api.get('/invoicing/aggregator-accounts/'),
+
+  updateAggregatorAccount: (payload) =>
+    api.post('/invoicing/aggregator-accounts/', payload),
+
   getBankTransactionDetail: (id, direction) =>
     api.get(`/invoicing/bank-transactions/${id}/`, { params: { direction }, withCredentials: true }),
 
@@ -264,6 +270,26 @@ export const invoicingApi = {
 
   matchTransaction: (id, data) =>
     api.post(`/invoicing/bank-transactions/${id}/match/`, data, { withCredentials: true }),
+
+  getMatchCandidates: (id, params, config) =>
+    api.get(`/invoicing/bank-transactions/${id}/match-candidates/`, {
+      params, withCredentials: true, ...config,
+    }),
+
+  getUserDKTemplates: (params) =>
+    api.get('/invoicing/dk-templates/', { params, withCredentials: true }),
+
+  createUserDKTemplate: (data) =>
+    api.post('/invoicing/dk-templates/', data, { withCredentials: true }),
+
+  deleteUserDKTemplate: (id) =>
+    api.delete('/invoicing/dk-templates/', { params: { id }, withCredentials: true }),
+
+  deferTransaction: (id, data) =>
+    api.post(`/invoicing/bank-transactions/${id}/defer/`, data, { withCredentials: true }),
+
+  ignoreTransaction: (id, data) =>
+    api.post(`/invoicing/bank-transactions/${id}/ignore/`, data, { withCredentials: true }),
 
   getDKTemplates: (txnId) => api.get(`/transactions/${txnId}/dk-templates/`),
   registerDK: (txnId, data) => api.post(`/transactions/${txnId}/register-dk/`, data),

@@ -9258,6 +9258,75 @@ class BankAccountMappingView(APIView):
         return Response({"status": "updated", "accounts": cp.get_all_bank_accounts()})
 
 
+class AggregatorAccountMappingView(APIView):
+    """
+    GET  /api/invoicing/aggregator-accounts/ — tarpinių (273x) sąskaitų sąrašas
+    POST /api/invoicing/aggregator-accounts/ — priskirti/pakeisti sąskaitą
+         Body: { provider, account, channel?, label?, currency? }
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        from .models import CompanyProfile
+        cp = _get_active_cp(request.user)
+        if not cp:
+            return Response({"accounts": [], "known_providers": []})
+
+        return Response({
+            "accounts": cp.get_all_transit_accounts(),
+            "known_providers": [
+                {"provider": k, "label": v}
+                for k, v in CompanyProfile.AGGREGATOR_LABELS.items()
+            ],
+        })
+
+    def post(self, request):
+        from .models import CompanyProfile
+        cp = _get_active_cp(request.user)
+        if not cp:
+            return Response(
+                {"detail": "Įmonės profilis nerastas."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        provider = (request.data.get("provider") or "").strip().lower()
+        account = (request.data.get("account") or "").strip()
+        channel = (request.data.get("channel") or "payment_link").strip().lower()
+        label = (request.data.get("label") or "").strip()
+        currency = (request.data.get("currency") or "EUR").strip().upper()
+
+        if not provider or not account:
+            return Response(
+                {"detail": "provider ir account privalomi."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if not account.startswith("273"):
+            return Response(
+                {"detail": "Tarpinė sąskaita turi būti iš 273 grupės."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Ta pati sąskaita negali priklausyti dviem agregatoriams —
+        # kitaip pinigų kelyje likučiai susimaišo ir payout'o nesuderinsi.
+        key = CompanyProfile._transit_key(channel, provider)
+        for entry in cp.get_all_transit_accounts():
+            if entry["account"] == account and entry["key"] != key:
+                return Response(
+                    {"detail": f"Sąskaita {account} jau priskirta: {entry['label']}."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        cp.set_transit_account(
+            channel=channel, provider=provider,
+            account=account, label=label, currency=currency,
+        )
+
+        return Response({
+            "status": "updated",
+            "accounts": cp.get_all_transit_accounts(),
+        })
+
 
 # ────────────────────────────────────────────────────────────
 # Bank Transactions (unified list + actions)
@@ -10185,6 +10254,7 @@ class BankMatchingDebugView(APIView):
             "amount": str(txn.amount),
             "currency": txn.currency,
             "amount_eur": str(txn.amount_eur) if txn.amount_eur is not None else None,
+            "exchange_fee": str(txn.exchange_fee or "0"),
             "fee_amount": str(txn.fee_amount or "0"),
             "fee_amount_eur": str(txn.fee_amount_eur) if txn.fee_amount_eur is not None else None,
             "exchange_rate": str(txn.exchange_rate) if txn.exchange_rate is not None else None,
@@ -10333,15 +10403,15 @@ class TransactionClassifyView(APIView):
 
         # Apply classification
         CATEGORY_DEFAULTS = {
-            "bank_fee": "6880",
+            "bank_fee": "6810",
             "tax_vmi": "4481",
             "tax_sodra": "4482",
-            "salary": "4491",
-            "owner_withdrawal": "3120",
-            "owner_deposit": "3120",
-            "loan_payment": "3011",
-            "loan_received": "4010",
-            "provider_payout": "2719",
+            "salary": "4480",
+            "owner_withdrawal": "24472",
+            "owner_deposit": "308",
+            "loan_payment": "4410",
+            "loan_received": "4410",
+            "provider_payout": "2731",
         }
 
         category = data["category"]
@@ -10434,6 +10504,282 @@ class TransactionClassifyView(APIView):
             "applied_to_similar": applied_count,
         })
 
+class UserDKTemplateView(APIView):
+    """
+    GET  /api/invoicing/dk-templates/        — sąrašas (dažniausiai naudoti viršuje)
+    POST /api/invoicing/dk-templates/        — sukurti
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        from .models import UserDKTemplate
+
+        cp = _get_active_cp(request.user)
+        qs = UserDKTemplate.objects.filter(user=request.user, is_active=True)
+        if cp:
+            qs = qs.filter(company_profile=cp)
+
+        direction = (request.query_params.get("direction") or "").strip()
+        if direction in ("incoming", "outgoing"):
+            qs = qs.filter(Q(direction=direction) | Q(direction="both"))
+
+        return Response({
+            "results": [{
+                "id": t.id,
+                "name": t.name,
+                "direction": t.direction,
+                "category": t.category,
+                "lines": t.lines,
+                "times_used": t.times_used,
+            } for t in qs[:100]]
+        })
+
+    def post(self, request):
+        from .models import UserDKTemplate
+
+        cp = _get_active_cp(request.user)
+        if not cp:
+            return Response({"detail": "Nėra aktyvaus įmonės profilio."}, status=400)
+
+        name = (request.data.get("name") or "").strip()
+        lines = request.data.get("lines") or []
+
+        if not name:
+            return Response({"detail": "Nurodykite pavadinimą."}, status=400)
+        if len(lines) < 2:
+            return Response({"detail": "Reikia bent dviejų eilučių."}, status=400)
+
+        for i, ln in enumerate(lines):
+            if (ln.get("side") or "").lower() not in ("debit", "credit"):
+                return Response({"detail": f"Eilutė {i+1}: neteisinga pusė."}, status=400)
+            if not (ln.get("code") or "").strip():
+                return Response({"detail": f"Eilutė {i+1}: sąskaitos kodas privalomas."}, status=400)
+
+        if UserDKTemplate.objects.filter(company_profile=cp, name=name).exists():
+            return Response({"detail": "Toks pavadinimas jau egzistuoja."}, status=400)
+
+        t = UserDKTemplate.objects.create(
+            user=request.user,
+            company_profile=cp,
+            name=name[:120],
+            direction=(request.data.get("direction") or "both"),
+            category=(request.data.get("category") or "")[:40],
+            lines=lines,
+        )
+        return Response({"id": t.id, "name": t.name, "lines": t.lines}, status=201)
+
+    def delete(self, request):
+        from .models import UserDKTemplate
+
+        tpl_id = request.query_params.get("id")
+        if not tpl_id:
+            return Response({"detail": "Nurodykite id."}, status=400)
+
+        cp = _get_active_cp(request.user)
+        qs = UserDKTemplate.objects.filter(id=tpl_id, user=request.user)
+        if cp:
+            qs = qs.filter(company_profile=cp)
+
+        n = qs.update(is_active=False)
+        return Response({"deleted": n})
+
+
+class TransactionDeferView(APIView):
+    """
+    POST /api/invoicing/bank-transactions/<id>/defer/
+    Body: { days?: 30, reason?: "", note?: "", undo?: false }
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, pk):
+        from datetime import timedelta
+        from .models import IncomingTransaction, OutgoingTransaction
+
+        txn = None
+        for Model in (OutgoingTransaction, IncomingTransaction):
+            try:
+                txn = Model.objects.get(id=pk, user=request.user)
+                break
+            except Model.DoesNotExist:
+                continue
+        if txn is None:
+            return Response({"detail": "Operacija nerasta."}, status=404)
+
+        cp = _get_active_cp(request.user)
+        if cp and txn.company_profile_id != cp.id:
+            return Response({"detail": "Operacija nerasta."}, status=404)
+
+        details = dict(txn.match_details or {})
+
+        if request.data.get("undo"):
+            details.pop("deferred", None)
+            txn.match_details = details
+            txn.match_status = "unmatched"
+            txn.save(update_fields=["match_status", "match_details", "updated_at"])
+            return Response({"status": "unmatched"})
+
+        try:
+            days = int(request.data.get("days") or 30)
+        except (TypeError, ValueError):
+            days = 30
+        days = max(1, min(days, 365))
+
+        details["deferred"] = {
+            "until": str((txn.transaction_date or timezone.now().date()) + timedelta(days=days)),
+            "days": days,
+            "reason": (request.data.get("reason") or "")[:100],
+            "note": (request.data.get("note") or "")[:500],
+            "at": timezone.now().isoformat(),
+        }
+
+        txn.match_details = details
+        txn.match_status = "deferred"
+        txn.save(update_fields=["match_status", "match_details", "updated_at"])
+        return Response({"status": "deferred", "until": details["deferred"]["until"]})
+
+
+class TransactionIgnoreView(APIView):
+    """
+    POST /api/invoicing/bank-transactions/<id>/ignore/
+    Body: { note?: "", undo?: false }
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, pk):
+        from .models import IncomingTransaction, OutgoingTransaction
+
+        txn = None
+        for Model in (OutgoingTransaction, IncomingTransaction):
+            try:
+                txn = Model.objects.get(id=pk, user=request.user)
+                break
+            except Model.DoesNotExist:
+                continue
+        if txn is None:
+            return Response({"detail": "Operacija nerasta."}, status=404)
+
+        cp = _get_active_cp(request.user)
+        if cp and txn.company_profile_id != cp.id:
+            return Response({"detail": "Operacija nerasta."}, status=404)
+
+        if txn.journal_entry_id:
+            return Response(
+                {"detail": "Operacija turi DK įrašą. Pirmiausia jį pašalinkite."},
+                status=400,
+            )
+
+        details = dict(txn.match_details or {})
+
+        if request.data.get("undo"):
+            details.pop("ignored", None)
+            txn.match_details = details
+            txn.match_status = "unmatched"
+            txn.save(update_fields=["match_status", "match_details", "updated_at"])
+            return Response({"status": "unmatched"})
+
+        details["ignored"] = {
+            "note": (request.data.get("note") or "")[:500],
+            "at": timezone.now().isoformat(),
+        }
+
+        txn.match_details = details
+        txn.match_status = "ignored"
+        txn.save(update_fields=["match_status", "match_details", "updated_at"])
+        return Response({"status": "ignored"})
+
+class TransactionMatchCandidatesView(APIView):
+    """
+    GET /api/invoicing/bank-transactions/<id>/match-candidates/
+    ?q=&date_from=&date_to=&status=unpaid|partial|open
+    &same_currency=1&similar_amount=0&limit=30&offset=0
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request, pk):
+        from datetime import datetime
+        from .models import IncomingTransaction, OutgoingTransaction
+        from .services.match_candidates import get_match_candidates
+
+        direction = ""
+        txn = None
+        try:
+            txn = OutgoingTransaction.objects.select_related("bank_statement").get(
+                id=pk, user=request.user,
+            )
+            direction = "outgoing"
+        except OutgoingTransaction.DoesNotExist:
+            try:
+                txn = IncomingTransaction.objects.select_related("bank_statement").get(
+                    id=pk, user=request.user,
+                )
+                direction = "incoming"
+            except IncomingTransaction.DoesNotExist:
+                return Response({"detail": "Operacija nerasta."}, status=404)
+
+        cp = _get_active_cp(request.user)
+        if cp and txn.company_profile_id != cp.id:
+            return Response({"detail": "Operacija nerasta."}, status=404)
+
+        def _date(name):
+            raw = (request.query_params.get(name) or "").strip()
+            if not raw:
+                return None
+            try:
+                return datetime.strptime(raw, "%Y-%m-%d").date()
+            except ValueError:
+                return None
+
+        def _bool(name, default):
+            raw = request.query_params.get(name)
+            if raw is None:
+                return default
+            return str(raw).lower() in ("1", "true", "yes", "on")
+
+        try:
+            limit = min(int(request.query_params.get("limit", 30)), 100)
+            offset = max(int(request.query_params.get("offset", 0)), 0)
+        except ValueError:
+            limit, offset = 30, 0
+
+        data = get_match_candidates(
+            txn=txn,
+            direction=direction,
+            user=request.user,
+            company_profile=cp,
+            q=(request.query_params.get("q") or "").strip(),
+            date_from=_date("date_from"),
+            date_to=_date("date_to"),
+            status=(request.query_params.get("status") or "unpaid").strip(),
+            same_currency=_bool("same_currency", True),
+            similar_amount=_bool("similar_amount", False),
+            limit=limit,
+            offset=offset,
+        )
+
+        allocated = sum(
+            (Decimal(str(a.amount or 0)) for a in txn.allocations.exclude(status="proposed")),
+            Decimal("0"),
+        )
+        amount = Decimal(str(txn.amount or 0))
+
+        data["transaction"] = {
+            "id": txn.id,
+            "direction": direction,
+            "amount": str(amount),
+            "amount_eur": str(txn.amount_eur) if getattr(txn, "amount_eur", None) else None,
+            "currency": txn.currency or "EUR",
+            "transaction_date": txn.transaction_date,
+            "counterparty_name": txn.counterparty_name or "",
+            "counterparty_code": txn.counterparty_code or "",
+            "counterparty_account": txn.counterparty_account or "",
+            "payment_purpose": txn.payment_purpose or "",
+            "doc_number": txn.doc_number or "",
+            "reference_number": txn.reference_number or "",
+            "bank_name": getattr(txn.bank_statement, "bank_name", "") or "",
+            "allocated_amount": str(allocated),
+            "remaining_amount": str(max(amount - allocated, Decimal("0"))),
+        }
+        return Response(data)
 
 class TransactionManualMatchView(APIView):
     """

@@ -19,8 +19,10 @@ from typing import Optional
 
 from .tax_payment_refs import (
     extract_payment_code,
+    get_default_customs_account,
     get_default_sodra_account,
     get_default_vmi_account,
+    is_customs_account,
     is_sodra_account,
     is_vmi_account,
 )
@@ -51,63 +53,65 @@ RETURN_CATEGORIES = {
     "payment_refund",
 }
 
-VMI_ACCOUNTS = {
-    "LT057044060007887175",  # SEB
-}
+# VMI/Sodra sąskaitos ir įmokų kodai — vienintelis šaltinis tax_payment_refs.py
 
-SODRA_ACCOUNTS = {
-    "LT337044060007740589",  # SEB
-}
+# VMI_ACCOUNTS = {
+#     "LT057044060007887175",  # SEB
+# }
 
-VMI_PAYMENT_CODES = {
-    "1001": {"label": "VMI įmoka", "account": "4481"},
-    "1311": {"label": "VMI įmoka", "account": "4481"},
-}
+# SODRA_ACCOUNTS = {
+#     "LT337044060007740589",  # SEB
+# }
 
-SODRA_PAYMENT_CODES = {
-    "252": {"label": "Sodra įmoka", "account": "4482"},
-}
+# VMI_PAYMENT_CODES = {
+#     "1001": {"label": "VMI įmoka", "account": "4481"},
+#     "1311": {"label": "VMI įmoka", "account": "4481"},
+# }
 
-
-def _normalize_iban(value: str) -> str:
-    return re.sub(r"\s+", "", str(value or "")).upper()
+# SODRA_PAYMENT_CODES = {
+#     "252": {"label": "Sodra įmoka", "account": "4482"},
+# }
 
 
-def _is_vmi_account(value: str) -> bool:
-    return _normalize_iban(value) in VMI_ACCOUNTS
+# def _normalize_iban(value: str) -> str:
+#     return re.sub(r"\s+", "", str(value or "")).upper()
 
 
-def _is_sodra_account(value: str) -> bool:
-    return _normalize_iban(value) in SODRA_ACCOUNTS
+# def _is_vmi_account(value: str) -> bool:
+#     return _normalize_iban(value) in VMI_ACCOUNTS
 
 
-def _extract_payment_code(txn) -> str:
-    ref = str(getattr(txn, "reference_number", "") or "").strip()
-    if ref.isdigit() and 2 <= len(ref) <= 6:
-        return ref
-
-    purpose = str(getattr(txn, "payment_purpose", "") or "")
-
-    patterns = [
-        r"įmokos\s+kodas\s*[:\-]?\s*(\d{2,6})",
-        r"imokos\s+kodas\s*[:\-]?\s*(\d{2,6})",
-        r"(?:^|[,;\s])(\d{2,6})(?:[,;\s]|$)",
-    ]
-
-    for p in patterns:
-        m = re.search(p, purpose, flags=re.IGNORECASE)
-        if m:
-            return m.group(1)
-
-    return ""
+# def _is_sodra_account(value: str) -> bool:
+#     return _normalize_iban(value) in SODRA_ACCOUNTS
 
 
-def _default_vmi_account(code: str = "") -> str:
-    return VMI_PAYMENT_CODES.get(str(code or "").strip(), {}).get("account") or "4481"
+# def _extract_payment_code(txn) -> str:
+#     ref = str(getattr(txn, "reference_number", "") or "").strip()
+#     if ref.isdigit() and 2 <= len(ref) <= 6:
+#         return ref
+
+#     purpose = str(getattr(txn, "payment_purpose", "") or "")
+
+#     patterns = [
+#         r"įmokos\s+kodas\s*[:\-]?\s*(\d{2,6})",
+#         r"imokos\s+kodas\s*[:\-]?\s*(\d{2,6})",
+#         r"(?:^|[,;\s])(\d{2,6})(?:[,;\s]|$)",
+#     ]
+
+#     for p in patterns:
+#         m = re.search(p, purpose, flags=re.IGNORECASE)
+#         if m:
+#             return m.group(1)
+
+#     return ""
 
 
-def _default_sodra_account(code: str = "") -> str:
-    return SODRA_PAYMENT_CODES.get(str(code or "").strip(), {}).get("account") or "4482"
+# def _default_vmi_account(code: str = "") -> str:
+#     return VMI_PAYMENT_CODES.get(str(code or "").strip(), {}).get("account") or "4481"
+
+
+# def _default_sodra_account(code: str = "") -> str:
+#     return SODRA_PAYMENT_CODES.get(str(code or "").strip(), {}).get("account") or "4482"
 
 # ════════════════════════════════════════════════════════════
 # Built-in patterns (применяются если user rules не сработали)
@@ -141,7 +145,7 @@ BUILTIN_PATTERNS = [
         "value": "ACMTMDOP",
         "direction": "debit",
         "category": "bank_fee",
-        "debit_account": "6880",
+        "debit_account": "6810",
     },
     {
         "name": "Banko mokestis (bendras)",
@@ -150,7 +154,7 @@ BUILTIN_PATTERNS = [
         "value": r"(?i)(FEES|CHRG|COMM|mokest|paslaug)",
         "direction": "debit",
         "category": "bank_fee",
-        "debit_account": "6880",
+        "debit_account": "6810",
     },
     {
         "name": "Banko mokestis pagal pavadinimą",
@@ -159,7 +163,17 @@ BUILTIN_PATTERNS = [
         "value": r"(?i)^(SEB bankas|Swedbank|Luminor|Revolut)$",
         "direction": "debit",
         "category": "bank_fee",
-        "debit_account": "6880",
+        "debit_account": "6810",
+        "extra_check": "_is_fee_purpose",
+    },
+    {
+        "name": "Banko mokestis pagal paskirtį",
+        "field": "payment_purpose",
+        "operator": "regex",
+        "value": r"(?i)(paslaugų plano|paslaugu plano|mėnesio mokestis|menesio mokestis|komisinis|už pervedim|uz pervedim|aptarnavimo mokestis)",
+        "direction": "debit",
+        "category": "bank_fee",
+        "debit_account": "6810",
         "extra_check": "_is_fee_purpose",
     },
     # ── VMI ──
@@ -192,6 +206,24 @@ BUILTIN_PATTERNS = [
         "category": "tax_sodra",
         "debit_account": "4482",
     },
+    {
+        "name": "Muitinė pagal surenkamąją sąskaitą",
+        "field": "counterparty_account",
+        "operator": "custom",
+        "value": "is_customs_account",
+        "direction": "debit",
+        "category": "tax_customs",
+        "debit_account": "4493",
+    },
+    {
+        "name": "Muitinės mokestis",
+        "field": "counterparty_name",
+        "operator": "regex",
+        "value": r"(?i)(muitin)",
+        "direction": "debit",
+        "category": "tax_customs",
+        "debit_account": "4493",
+    },
     # ── Darbo užmokestis ──
     {
         "name": "Atlyginimas",
@@ -200,7 +232,7 @@ BUILTIN_PATTERNS = [
         "value": r"(?i)(darbo užmokest|atlyginim|salary|DU už|avansas už)",
         "direction": "debit",
         "category": "salary",
-        "debit_account": "4491",
+        "debit_account": "4480",
     },
     # ── PayPal special operations ────────────────────────
     # ВАЖНО: эти правила должны идти ДО provider_payout и generic refund.
@@ -211,7 +243,7 @@ BUILTIN_PATTERNS = [
         "value": "Dispute Fee",
         "direction": "debit",
         "category": "bank_fee",
-        "debit_account": "6880",
+        "debit_account": "6810",
     },
     {
         "name": "PayPal payment reversal",
@@ -259,10 +291,10 @@ BUILTIN_PATTERNS = [
         "name": "Tarpininko išmoka",
         "field": "counterparty_name",
         "operator": "regex",
-        "value": r"(?i)(PAYSERA|Stripe|Montonio|PayPal|Square)",
+        "value": r"(?i)(PAYSERA|Stripe|Montonio|PayPal|Square|Checkout\.?com|CHECKOUT LTD|Adyen|Klarna|SumUp|Revolut Payments|Opay|MakeCommerce|Neopay|Kevin)",
         "direction": "credit",
         "category": "provider_payout",
-        "debit_account": "2719",
+        "debit_account": "2731",
     },
     # ── Grąžinimai ──
     {
@@ -466,6 +498,9 @@ class TransactionClassifier:
                 elif category == "tax_sodra":
                     code = extract_payment_code(txn)
                     debit_account = get_default_sodra_account(code)
+                elif category == "tax_customs":
+                    code = extract_payment_code(txn)
+                    debit_account = get_default_customs_account(code)
 
                 return ClassificationResult(
                     transaction_id=txn.id,
@@ -534,6 +569,8 @@ class TransactionClassifier:
         elif operator == "custom":
             if value == "is_vmi_account":
                 return is_vmi_account(field_value)
+            if value == "is_customs_account":
+                return is_customs_account(field_value)
             if value == "is_sodra_account":
                 return is_sodra_account(field_value)
             return False

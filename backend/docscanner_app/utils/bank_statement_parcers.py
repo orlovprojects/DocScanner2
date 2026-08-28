@@ -19,6 +19,10 @@ from xml.etree import ElementTree as ET
 
 logger = logging.getLogger("docscanner_app")
 
+FX_FEE_RE = re.compile(
+    r"valiutos\s+keitimo\s+mok\.\s*([\d.,]+)\s*EUR",
+    re.IGNORECASE,
+)
 
 class BaseBankParser(ABC):
     bank_name: str = ""
@@ -485,6 +489,10 @@ class SEBCSVParser(BaseBankParser):
             dk = get("dk").upper()
             direction = "credit" if dk == "C" or dk == "K" else "debit"
 
+            purpose = get("purpose")
+            fx_m = FX_FEE_RE.search(purpose)
+            fx_fee = (self._parse_amount(fx_m.group(1)) or Decimal("0")) if fx_m else Decimal("0")
+            
             transactions.append({
                 "transaction_date": txn_date,
                 "value_date": self._parse_date(get("value_date")),
@@ -493,7 +501,8 @@ class SEBCSVParser(BaseBankParser):
                 "counterparty_name": get("counterparty_name"),
                 "counterparty_code": get("counterparty_code"),
                 "counterparty_account": get("counterparty_account"),
-                "payment_purpose": get("purpose"),
+                "payment_purpose": purpose,                
+                "exchange_fee": fx_fee,
                 "reference_number": get("reference") or get("tx_code"),
                 "amount": abs(amount),
                 "currency": get("currency") or "EUR",

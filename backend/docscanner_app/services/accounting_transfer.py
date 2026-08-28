@@ -181,7 +181,7 @@ def create_je_for_allocation(allocation):
         elif direction == "outgoing" and allocation.purchase:
             # Мы заплатили → Dr. кредиторка, Cr. банк
             debit_code = "4430"
-            debit_name = "Tiekėjų skolos"
+            debit_name = "Skolos tiekėjams už prekes ir paslaugas"
             credit_code = bank_account
             credit_name = "Banko sąskaita"
             counterparty = allocation.purchase.seller_name or ""
@@ -206,7 +206,7 @@ def create_je_for_allocation(allocation):
         elif direction == "manual" and allocation.purchase:
             # Ручная пометка purchase → Dr. кредиторка, Cr. банк
             debit_code = "4430"
-            debit_name = "Tiekėjų skolos"
+            debit_name = "Skolos tiekėjams už prekes ir paslaugas"
             credit_code = bank_account
             credit_name = "Banko sąskaita"
             counterparty = allocation.purchase.seller_name or ""
@@ -249,6 +249,8 @@ def create_je_for_allocation(allocation):
         bank_eur = _to_eur(allocation.amount, txn_rate)
 
         # ── Komisinis (PayPal / banko mokestis) на той же операции ──
+        # fee_amount — išskaičiuotas IŠ sumos, operacijos valiuta (PayPal).
+        # exchange_fee — valiutos keitimo mokestis, nurašomas PAPILDOMAI, visada EUR (SEB kortelė).
         fee_eur = Decimal("0")
         if txn and txn.fee_amount:
             fee_eur = (
@@ -256,6 +258,8 @@ def create_je_for_allocation(allocation):
                 if txn.fee_amount_eur
                 else _to_eur(txn.fee_amount, txn_rate)
             )
+        if txn and txn.exchange_fee:
+            fee_eur += Decimal(str(txn.exchange_fee))
 
         is_incoming_side = allocation.invoice_id is not None
         if is_incoming_side:
@@ -302,27 +306,27 @@ def create_je_for_allocation(allocation):
             ),
         ]
 
-        # ── Komisinis mokestis → D 6880 (savaime subalansuota su banko koja) ──
+        # ── Komisinis mokestis → D 6810 (savaime subalansuota su banko koja) ──
         if fee_eur > 0:
             je_lines.append(JournalEntryLine(
                 entry=je, side="D",
-                account_code="6880", account_name="Banko ir mokėjimų sistemų mokesčiai",
+                account_code="6810", account_name="Kitos finansinės ir investicinės veiklos sąnaudos",
                 amount=fee_eur, description=f"Komisinis mokestis: {doc_number}",
                 sort_order=2,
             ))
 
-        # ── Курсовая разница: gain>0 → K 5861 (teigiama), gain<0 → D 6861 (neigiama) ──
+        # ── Курсовая разница: gain>0 → K 5803 (teigiama), gain<0 → D 6803 (neigiama) ──
         if gain > 0:
             je_lines.append(JournalEntryLine(
                 entry=je, side="K",
-                account_code="5861", account_name="Teigiama valiutų kursų įtaka",
+                account_code="5803", account_name="Teigiama valiutų kursų pokyčio įtaka",
                 amount=gain, description=f"Kursinis skirtumas: {doc_number}",
                 sort_order=3,
             ))
         elif gain < 0:
             je_lines.append(JournalEntryLine(
                 entry=je, side="D",
-                account_code="6861", account_name="Neigiama valiutų kursų įtaka",
+                account_code="6803", account_name="Neigiama valiutų kursų pokyčio įtaka",
                 amount=-gain, description=f"Kursinis skirtumas: {doc_number}",
                 sort_order=3,
             ))
@@ -365,7 +369,7 @@ def create_je_for_classified_transaction(txn, company_profile):
     (bank_fee, tax_vmi, pos_purchase и т.д.)
 
     Debit:
-        Dr. category_account_debit (6880/4481/etc.)
+        Dr. category_account_debit (6810/4481/etc.)
     Credit:
         Cr. 271x (banko sąskaita)
 

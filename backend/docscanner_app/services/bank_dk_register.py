@@ -41,7 +41,7 @@ DK_TEMPLATES = [
         "category": "bank_fee",
         "directions": ["outgoing"],
         "lines": [
-            {"side": "debit", "code": "6880", "name": "Banko mokesčiai", "amount_mode": "full"},
+            {"side": "debit", "code": "6810", "name": "Kitos finansinės ir investicinės veiklos sąnaudos", "amount_mode": "full"},
             {"side": "credit", "code": "[bank]", "name": "[bank_name]", "amount_mode": "full"},
         ],
     },
@@ -71,7 +71,7 @@ DK_TEMPLATES = [
         "category": "salary",
         "directions": ["outgoing"],
         "lines": [
-            {"side": "debit", "code": "4461", "name": "Mokėtinas darbo užmokestis", "amount_mode": "full"},
+            {"side": "debit", "code": "4480", "name": "Mokėtinas darbo užmokestis", "amount_mode": "full"},
             {"side": "credit", "code": "[bank]", "name": "[bank_name]", "amount_mode": "full"},
         ],
     },
@@ -93,7 +93,7 @@ DK_TEMPLATES = [
         "category": "owner_withdrawal",
         "directions": ["outgoing"],
         "lines": [
-            {"side": "debit", "code": "3120", "name": "Savininko paėmimai", "amount_mode": "full"},
+            {"side": "debit", "code": "24472", "name": "Įmonės savininkų asmeniniams poreikiams išmokėtos lėšos", "amount_mode": "full"},
             {"side": "credit", "code": "[bank]", "name": "[bank_name]", "amount_mode": "full"},
         ],
     },
@@ -104,7 +104,7 @@ DK_TEMPLATES = [
         "directions": ["incoming"],
         "lines": [
             {"side": "debit", "code": "[bank]", "name": "[bank_name]", "amount_mode": "full"},
-            {"side": "credit", "code": "3110", "name": "Savininko kapitalas", "amount_mode": "full"},
+            {"side": "credit", "code": "308", "name": "Savininkų įnašai", "amount_mode": "full"},
         ],
     },
     {
@@ -113,7 +113,7 @@ DK_TEMPLATES = [
         "category": "loan_payment",
         "directions": ["outgoing"],
         "lines": [
-            {"side": "debit", "code": "4010", "name": "Ilgalaikės paskolos", "amount_mode": "full"},
+            {"side": "debit", "code": "4410", "name": "Įsipareigojimai pagal trumpalaikių paskolų sutartis", "amount_mode": "full"},
             {"side": "credit", "code": "[bank]", "name": "[bank_name]", "amount_mode": "full"},
         ],
     },
@@ -124,7 +124,7 @@ DK_TEMPLATES = [
         "directions": ["incoming"],
         "lines": [
             {"side": "debit", "code": "[bank]", "name": "[bank_name]", "amount_mode": "full"},
-            {"side": "credit", "code": "4010", "name": "Ilgalaikės paskolos", "amount_mode": "full"},
+            {"side": "credit", "code": "4410", "name": "Įsipareigojimai pagal trumpalaikių paskolų sutartis", "amount_mode": "full"},
         ],
     },
     {
@@ -133,7 +133,7 @@ DK_TEMPLATES = [
         "category": "",
         "directions": ["outgoing"],
         "lines": [
-            {"side": "debit", "code": "6860", "name": "Palūkanų sąnaudos", "amount_mode": "full"},
+            {"side": "debit", "code": "6802", "name": "Kitų įmonių suteiktų paskolų palūkanų sąnaudos", "amount_mode": "full"},
             {"side": "credit", "code": "[bank]", "name": "[bank_name]", "amount_mode": "full"},
         ],
     },
@@ -144,7 +144,7 @@ DK_TEMPLATES = [
         "directions": ["incoming"],
         "lines": [
             {"side": "debit", "code": "[bank]", "name": "[bank_name]", "amount_mode": "full"},
-            {"side": "credit", "code": "5810", "name": "Palūkanų pajamos", "amount_mode": "full"},
+            {"side": "credit", "code": "5802", "name": "Kitų suteiktų paskolų palūkanų pajamos", "amount_mode": "full"},
         ],
     },
     {
@@ -153,7 +153,7 @@ DK_TEMPLATES = [
         "category": "",
         "directions": ["outgoing"],
         "lines": [
-            {"side": "debit", "code": "2720", "name": "Kasa", "amount_mode": "full"},
+            {"side": "debit", "code": "272", "name": "Kasa", "amount_mode": "full"},
             {"side": "credit", "code": "[bank]", "name": "[bank_name]", "amount_mode": "full"},
         ],
     },
@@ -164,7 +164,7 @@ DK_TEMPLATES = [
         "directions": ["incoming"],
         "lines": [
             {"side": "debit", "code": "[bank]", "name": "[bank_name]", "amount_mode": "full"},
-            {"side": "credit", "code": "2720", "name": "Kasa", "amount_mode": "full"},
+            {"side": "credit", "code": "272", "name": "Kasa", "amount_mode": "full"},
         ],
     },
     {
@@ -174,8 +174,8 @@ DK_TEMPLATES = [
         "directions": ["incoming"],
         "lines": [
             {"side": "debit", "code": "[bank]", "name": "[bank_name]", "amount_mode": "full"},
-            {"side": "debit", "code": "6880", "name": "Tarpininko komisinis", "amount_mode": "empty"},
-            {"side": "credit", "code": "2718", "name": "Tarpininko sąskaita", "amount_mode": "balance"},
+            {"side": "debit", "code": "6810", "name": "Tarpininko komisinis", "amount_mode": "empty"},
+            {"side": "credit", "code": "2731", "name": "Pinigai kelyje (tarpininkas)", "amount_mode": "balance"},
         ],
     },
     {
@@ -398,7 +398,7 @@ class BankDKRegisterService:
         bank_name = getattr(stmt, "bank_name", "") if stmt else ""
         currency = getattr(stmt, "currency", "") if stmt else ""
 
-        code = "2710"
+        code = "2711"
         name = "Bankas"
 
         if self.company_profile and hasattr(self.company_profile, "get_bank_chart_account"):
