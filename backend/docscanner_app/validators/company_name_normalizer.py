@@ -48,25 +48,15 @@ LT_TRANSLIT = {
     'ą': 'a', 'č': 'c', 'ę': 'e', 'ė': 'e', 'į': 'i', 'š': 's',
     'ų': 'u', 'ū': 'u', 'ž': 'z', 'ü': 'u', 'ö': 'o', 'ä': 'a',
     'ł': 'l', 'ń': 'n', 'ó': 'o', 'ś': 's', 'ź': 'z', 'ż': 'z',
-    'ø': 'o', 'å': 'a', 'æ': 'a', 'ß': 'ss', 'đ': 'd', 'ł': 'l',
+    'ø': 'o', 'å': 'a', 'æ': 'a', 'ß': 'ss', 'đ': 'd', 
 }
 
-import difflib
 
 PERSON_NOISE = {
     "ukininkas", "ukininke", "individuali", "veikla", "verslo", "liudijimas",
     "fizinis", "asmuo", "pvm", "moketojas", "gyv", "pvz",
 }
 
-# падежные окончания LT (порядок: длинные первыми)
-_PERSON_ENDINGS = (
-    "aiciui", "aicio", "aitis", "aites", "aitei", "aite", "aiti",
-    "ienes", "ienei", "iene",
-    "iaus", "ius", "ios", "ies", "ais", "iui",
-    "aus", "ams", "ose",
-    "as", "is", "ys", "us", "os", "es", "ei", "ui", "ai",
-    "a", "e", "o", "u", "i",
-)
 
 
 def _translit_ascii(s: str) -> str:
@@ -76,11 +66,27 @@ def _translit_ascii(s: str) -> str:
     return ''.join(c for c in s if unicodedata.category(c) != 'Mn')
 
 
+_SURNAME_MAP = (
+    (r'(aiciui|aicio|aitis|aiti)$', 'ait'),
+    (r'(aites|aitei|aite)$', 'ait'),
+    (r'(ienes|ienei|iene)$', 'ien'),
+    (r'(ytes|ytei|yte)$', 'yt'),
+    (r'(utes|utei|ute|utis|uto)$', 'ut'),
+    (r'(uno|unas|una)$', 'un'),
+)
+
+_CASE_ENDINGS = ("iaus", "aus", "ies", "ios", "ius", "iui",
+                 "as", "is", "ys", "us", "os", "es", "ei", "ai", "ui",
+                 "a", "e", "o", "u", "i", "s")
+
+
 def _person_stem(token: str) -> str:
-    """'jonaitis'/'jonaicio' -> 'jon', 'petrauskas'/'petrauskiene' -> 'petrausk', 'ona'/'onos' -> 'on'"""
-    min_len = 2 if len(token) <= 4 else 3
-    for suf in _PERSON_ENDINGS:
-        if token.endswith(suf) and len(token) - len(suf) >= min_len:
+    for pat, repl in _SURNAME_MAP:
+        new = re.sub(pat, repl, token)
+        if new != token:
+            return new
+    for suf in _CASE_ENDINGS:
+        if token.endswith(suf) and len(token) - len(suf) >= 2:
             return token[:-len(suf)]
     return token
 
@@ -97,21 +103,34 @@ def person_tokens(name: str) -> list[str]:
             and not p.isdigit()]
 
 
+COMPANY_WORDS = {
+    "motors", "auto", "autos", "car", "cars", "service", "services", "group",
+    "grupe", "akademija", "firma", "salonas", "studija", "studio", "klinika",
+    "clinic", "shop", "store", "com", "lt", "eu", "transport", "logistics",
+    "express", "market", "prekyba", "statyba", "consulting", "travel", "taxi",
+    "cafe", "bar", "hotel", "gmail", "info",
+}
+
+
 def looks_like_person(name: str) -> bool:
-    """Похоже на ФИО, а не на компанию."""
     if not name:
         return False
     low = _translit_ascii(name.lower())
+    if "@" in low or any(ch.isdigit() for ch in low):
+        return False
     if any(re.search(r'(^|[\s,\.])' + re.escape(_translit_ascii(f)) + r'([\s,\.]|$)', low)
            for f in LEGAL_FORMS_ALL):
         return False
     toks = person_tokens(name)
-    return 2 <= len(toks) <= 4 and all(t.isalpha() for t in toks)
-
+    if not (2 <= len(toks) <= 4):
+        return False
+    if any(t in COMPANY_WORDS for t in toks):
+        return False
+    return all(t.isalpha() and len(t) >= 3 for t in toks)
 
 def normalize_person_name(name: str) -> str:
     """Ключ, не зависящий от порядка слов: 'Jonas Jonaitis' == 'Jonaitis Jonas' -> 'jon|jon'"""
-    toks = [_person_stem(t) for t in person_tokens(name) if len(t) > 1]
+    toks = [_person_stem(t) for t in person_tokens(name) if len(t) >= 3]
     return "|".join(sorted(set(toks)))
 
 LT_LEGAL_FORMS = {"uab", "mb", "iv", "kb", "vsi", "vss", "ii", "tub", "kub", "zub", "ue"}
@@ -165,7 +184,7 @@ def _company_stem(token: str) -> str:
     return token
 
 
-def company_names_match(a: str, b: str, fuzzy: float = 0.92) -> bool:
+def company_names_match(a: str, b: str) -> bool:
     ta, tb = company_tokens(a), company_tokens(b)
     if not ta or not tb:
         return False
@@ -182,39 +201,14 @@ def company_names_match(a: str, b: str, fuzzy: float = 0.92) -> bool:
     if sa == sb:                                        # падежи / формы слов
         return True
 
-    # одно название — подмножество другого ("Baltic Trade" vs "Baltic Trade Europe")
-    if set(sa) < set(sb) or set(sb) < set(sa):
-        core = min(sa, sb, key=len)
-        if len("".join(core)) >= 8:
-            return True
+    return False
 
-    ja, jb = "".join(sa), "".join(sb)                   # опечатки OCR
-    if min(len(ja), len(jb)) < 8:
-        return False
-    return difflib.SequenceMatcher(None, ja, jb).ratio() >= fuzzy
-
-def person_names_match(a: str, b: str, fuzzy: float = 0.86) -> bool:
-    ta, tb = person_tokens(a), person_tokens(b)
+def person_names_match(a: str, b: str) -> bool:
+    ta = {_person_stem(t) for t in person_tokens(a) if len(t) >= 3}
+    tb = {_person_stem(t) for t in person_tokens(b) if len(t) >= 3}
     if len(ta) < 2 or len(tb) < 2:
         return False
-    short, pool = (ta, list(tb)) if len(ta) <= len(tb) else (tb, list(ta))
-    matched = 0
-    for t in short:
-        found = None
-        for c in pool:
-            if len(t) == 1 or len(c) == 1:      # инициал
-                if t[0] == c[0]:
-                    found = c
-                    break
-                continue
-            st, sc = _person_stem(t), _person_stem(c)
-            if st == sc or difflib.SequenceMatcher(None, st, sc).ratio() >= fuzzy:
-                found = c
-                break
-        if found:
-            pool.remove(found)
-            matched += 1
-    return matched == len(short)
+    return ta == tb
 
 def normalize_company_name_v2(name: str) -> str:
     """
