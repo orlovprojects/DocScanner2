@@ -3839,6 +3839,9 @@ class TransactionManualMatchSerializer(serializers.Serializer):
     amount = serializers.DecimalField(
         max_digits=12, decimal_places=2, required=False, allow_null=True,
     )
+    amount_txn = serializers.DecimalField(
+        max_digits=12, decimal_places=2, required=False, allow_null=True,
+    )
 
 
 class BankTransactionRuleSerializer(serializers.ModelSerializer):
@@ -3931,6 +3934,7 @@ class MarkPaidSerializer(serializers.Serializer):
     amount = serializers.DecimalField(max_digits=12, decimal_places=2)
     payment_date = serializers.DateField()
     note = serializers.CharField(required=False, default="", allow_blank=True)
+    payment_account = serializers.CharField(required=False, allow_blank=True, default="")
 
 
 # ────────────────────────────────────────────────────────────

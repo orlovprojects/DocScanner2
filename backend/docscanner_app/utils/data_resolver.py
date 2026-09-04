@@ -656,6 +656,78 @@ def _ensure_vat_percent_cleared_when_separate(doc: Dict[str, Any]) -> None:
             doc["vat_percent"] = None
             append_log(doc, f"separate_vat-cleanup: vat_percent was {vp}, cleared to None")
 
+def _fix_vat_percent_from_amounts(doc: Dict[str, Any]) -> bool:
+    """
+    Если суммы документа согласованы:
+        amount_wo_vat + vat_amount ≈ amount_with_vat
+
+    вычисляем фактическую ставку VAT из:
+        vat_amount / amount_wo_vat * 100
+
+    Округляем до ближайшего целого процента и проверяем обратно.
+
+    Если:
+        amount_wo_vat * candidate_rate / 100 ≈ vat_amount
+    с погрешностью <= 0.02,
+    исправляем vat_percent.
+
+    Returns True, если vat_percent был изменён.
+    """
+
+    if bool(doc.get("separate_vat")):
+        return False
+
+    wo = d(doc.get("amount_wo_vat"), 2)
+    vat = d(doc.get("vat_amount"), 2)
+    w = d(doc.get("amount_with_vat"), 2)
+
+    if wo <= 0:
+        return False
+
+    # Сначала должны быть надёжны сами суммы документа
+    if not _approx(Q2(wo + vat), w, tol=Decimal("0.02")):
+        return False
+
+    # Фактическая ставка по суммам
+    raw_rate = vat / wo * Decimal("100")
+
+    # Ближайший целый процент
+    candidate_rate = raw_rate.to_integral_value(rounding=ROUND_HALF_UP)
+
+    # Проверяем ставку обратно через сумму VAT
+    candidate_vat = Q2(
+        wo * candidate_rate / Decimal("100")
+    )
+
+    diff = (candidate_vat - vat).copy_abs()
+
+    if diff > Decimal("0.02"):
+        return False
+
+    old_rate = doc.get("vat_percent")
+
+    doc["vat_percent"] = candidate_rate
+
+    if d(old_rate, 2) != candidate_rate:
+        doc["_orig_vat_percent"] = old_rate
+        doc["_vat_percent_auto_fixed"] = True
+
+        append_log(
+            doc,
+            f"vat-percent-fix: "
+            f"LLM vp={old_rate}, "
+            f"effective={raw_rate:.4f}%, "
+            f"candidate={candidate_rate}%, "
+            f"candidate_vat={candidate_vat}, "
+            f"actual_vat={vat}, "
+            f"Δ={diff:.4f} "
+            f"→ vat_percent := {candidate_rate}"
+        )
+
+        return True
+
+    return False
+
 
 def resolve_document_amounts(doc: Dict[str, Any]) -> Dict[str, Any]:
     """
@@ -696,6 +768,9 @@ def resolve_document_amounts(doc: Dict[str, Any]) -> Dict[str, Any]:
     v   = d(doc.get("vat_amount"), 2)         # ← 2 знака
     vp  = d(doc.get("vat_percent"), 2)
 
+
+    # Vat_percent pomeniali stoby vychislialby jesle vozmozno i drugije sumy sxodiaca
+
     append_log(doc, f"check#0 discounts: invoice_discount_wo_vat={inv_wo}, invoice_discount_with_vat={inv_w}")
     if v < 0 or vp < 0:
         append_log(doc, f"warn: negative VAT values (vat_amount={v}, vat_percent={vp})")
@@ -706,10 +781,32 @@ def resolve_document_amounts(doc: Dict[str, Any]) -> Dict[str, Any]:
     if inv_w > 0 and w > 0 and inv_w > w:
         append_log(doc, f"warn: invoice_discount_with_vat({inv_w}) > amount_with_vat({w})")
 
+    # Попытаться математически нормализовать/исправить vat_percent
+    # до финальных проверок.
+    _fix_vat_percent_from_amounts(doc)
+
+    # Обновляем локальный vp после возможного исправления
+    vp = d(doc.get("vat_percent"), 2)
+
     # separate_vat → никаких скидочных эвристик, только якоря "как есть"
     if bool(doc.get("separate_vat")):
         append_log(doc, "skip: separate_vat=True → anchors only, no discount reconciliation")
         return _calc_anchors_discount_aware(doc, allow_discount_from_with=False)
+
+    # append_log(doc, f"check#0 discounts: invoice_discount_wo_vat={inv_wo}, invoice_discount_with_vat={inv_w}")
+    # if v < 0 or vp < 0:
+    #     append_log(doc, f"warn: negative VAT values (vat_amount={v}, vat_percent={vp})")
+    # if inv_wo < 0 or inv_w < 0:
+    #     append_log(doc, f"warn: negative discounts (inv_wo={inv_wo}, inv_with={inv_w})")
+    # if inv_wo > 0 and wo > 0 and inv_wo > wo:
+    #     append_log(doc, f"warn: invoice_discount_wo_vat({inv_wo}) > amount_wo_vat({wo})")
+    # if inv_w > 0 and w > 0 and inv_w > w:
+    #     append_log(doc, f"warn: invoice_discount_with_vat({inv_w}) > amount_with_vat({w})")
+
+    # # separate_vat → никаких скидочных эвристик, только якоря "как есть"
+    # if bool(doc.get("separate_vat")):
+    #     append_log(doc, "skip: separate_vat=True → anchors only, no discount reconciliation")
+    #     return _calc_anchors_discount_aware(doc, allow_discount_from_with=False)
 
     # --- 2) если без скидок уже wo+vat≈with → скидки информационные (обнулим) ---
     if _approx(Q2(wo + v), w):  # ← Q2 вместо Q4

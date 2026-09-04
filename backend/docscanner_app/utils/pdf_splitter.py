@@ -90,6 +90,31 @@ def _count_pages_in_bytes(pdf_bytes: bytes) -> int:
     except Exception:
         return 0
 
+def _pick_batch_size(pdf_path: str, total_pages: int) -> int:
+    """
+    Размер батча по среднему весу страницы, а не по весу всего файла.
+    Если батч из BATCH_SIZE страниц не влезет в лимит Gemini — берём меньший,
+    чтобы не уходить в JPEG-компрессию и не терять номера документов.
+    """
+    try:
+        import os
+        size = os.path.getsize(pdf_path)
+    except Exception:
+        return BATCH_SIZE_SMALL
+
+    if total_pages < 1:
+        return BATCH_SIZE_SMALL
+
+    avg_page = size / total_pages
+
+    if avg_page * BATCH_SIZE > MAX_GEMINI_BATCH_BYTES:
+        logger.info(
+            "[PDF-SPLIT] Batch size reduced to %d (avg page %.0f KB, %d pages)",
+            BATCH_SIZE_SMALL, avg_page / 1024, total_pages,
+        )
+        return BATCH_SIZE_SMALL
+
+    return BATCH_SIZE
 
 # def _maybe_compress_pdf_bytes(pdf_bytes: bytes) -> bytes:
 #     """
@@ -363,7 +388,7 @@ def _ask_gemini_pdf(pdf_bytes: bytes, prompt: str, model: str = None) -> str:
                 response = client.models.generate_content(
                     model=current_model,
                     contents=contents,
-                    config={"temperature": 0, "max_output_tokens": 4096},
+                    config={"temperature": 0, "max_output_tokens": 32768},
                 )
                 elapsed = _time.perf_counter() - t0
                 result = (getattr(response, "text", "") or "").strip()
@@ -443,12 +468,22 @@ def _parse_split_json(raw: str) -> dict:
     return json.loads(m.group(0))
 
 
-BATCH_SIZE = 25
+BATCH_SIZE = 50
+BATCH_SIZE_SMALL = 25
+PRE_CLASSIFY_PAGES = 25
+
 BOUNDARY_CONTEXT_RADIUS = 2
 MAX_BOUNDARY_VERIFY_PASSES = 5
 
 MAX_GEMINI_BATCH_BYTES = 20 * 1024 * 1024  # 20 MB
 DOWNSCALE_DPI = 150
+
+# Пустые страницы: до 2 подряд клеим к соседнему документу,
+# 3+ подряд выносим отдельным rejected-документом.
+MAX_GLUED_BLANK_RUN = 2
+
+UNASSIGNED_KINDS = ("blank", "fragment", "separator", "unreadable")
+REJECTED_KINDS = ("fragment", "unreadable")
 
 
 def _norm_code(value) -> str:
@@ -532,6 +567,38 @@ def _normalize_batch_pages(raw_pages: list, page_start: int, page_end: int) -> l
 
     return cleaned
 
+def _normalize_unassigned(raw_items: list, page_start: int, page_end: int) -> list[dict]:
+    """
+    Нормализует unassigned_pages из ответа Gemini.
+    Возвращает [{"page": <0-based>, "kind": "blank|fragment|separator|unreadable"}].
+    """
+    result = []
+    seen = set()
+
+    for item in raw_items or []:
+        if isinstance(item, dict):
+            raw_page = item.get("page")
+            kind = (item.get("kind") or "").strip().lower()
+        else:
+            raw_page = item
+            kind = "blank"
+
+        pages = _normalize_batch_pages([raw_page], page_start, page_end)
+        if not pages:
+            continue
+
+        page = pages[0]
+        if page in seen:
+            continue
+
+        if kind not in UNASSIGNED_KINDS:
+            kind = "blank"
+
+        seen.add(page)
+        result.append({"page": page, "kind": kind})
+
+    result.sort(key=lambda x: x["page"])
+    return result
 
 def _clean_group(group: dict) -> dict:
     pages = []
@@ -552,6 +619,7 @@ def _clean_group(group: dict) -> dict:
             numbers.append({
                 "number": item["number"],
                 "series": item.get("series"),
+                "invoice_date": item.get("invoice_date"),
             })
 
     return {
@@ -566,6 +634,7 @@ def _clean_group(group: dict) -> dict:
         "continues_previous": _as_bool(group.get("continues_previous"), False),
         "confidence": _normalize_confidence(group.get("confidence")),
         "method": group.get("method", "gemini"),
+        "unassigned_kind": group.get("unassigned_kind"),
     }
 
 
@@ -700,6 +769,7 @@ def _merge_group_meta(left: dict, right: dict) -> dict:
         "pages": merged_pages,
         "number": left.get("number") or right.get("number"),
         "series": left.get("series") or right.get("series"),
+        "invoice_date": left.get("invoice_date") or right.get("invoice_date"),
         "numbers": merged_numbers,
         "multiple_on_page": (
             _as_bool(left.get("multiple_on_page"), False)
@@ -752,7 +822,10 @@ def _find_suspicious_boundaries(groups: list[dict]) -> list[dict]:
 
         reasons = []
 
-        if right_start != left_end + 1:
+        if left.get("unassigned_kind") or right.get("unassigned_kind"):
+            continue
+
+        if right_start < left_end + 1:
             reasons.append("gap_or_overlap")
 
         if left.get("complete") is False:
@@ -953,6 +1026,139 @@ def _merge_boundary_groups(
 
     return new_groups, True
 
+def _is_glue_target(group: dict) -> bool:
+    """
+    Куда МОЖНО приклеить пустую страницу.
+    Нельзя: multiple_on_page (обязаны остаться одностраничными)
+    и rejected-группы (fragment/unreadable — они всё равно не обрабатываются).
+    """
+    if _as_bool(group.get("multiple_on_page"), False):
+        return False
+    if group.get("unassigned_kind"):
+        return False
+    return True
+
+
+def _make_unassigned_group(pages: list[int], kind: str) -> dict:
+    return {
+        "pages": sorted(pages),
+        "number": None,
+        "series": None,
+        "invoice_date": None,
+        "numbers": [],
+        "multiple_on_page": False,
+        "documents_on_page": 0,
+        "complete": True,
+        "continues_previous": False,
+        "confidence": "low",
+        "method": f"unassigned_{kind}",
+        "unassigned_kind": kind,
+    }
+
+
+def _apply_unassigned_pages(
+    groups: list[dict],
+    unassigned: list[dict],
+    total_pages: int,
+) -> list[dict]:
+    """
+    Раскладывает страницы, которые модель никуда не отнесла:
+      - blank/separator, до MAX_GLUED_BLANK_RUN подряд → клеим к соседнему документу
+      - blank/separator, 3+ подряд → отдельная группа (пойдёт в rejected)
+      - fragment/unreadable → всегда отдельная группа (пойдёт в rejected)
+
+    Плюс страхуемся: страницы, которых нет ни в documents, ни в unassigned,
+    считаем blank и обрабатываем по тем же правилам.
+    """
+    cleaned = []
+    for g in groups:
+        cg = _clean_group(g)
+        if g.get("unassigned_kind"):
+            cg["unassigned_kind"] = g["unassigned_kind"]
+        if cg["pages"]:
+            cleaned.append(cg)
+
+    cleaned.sort(key=_group_sort_key)
+
+    kind_by_page = {}
+    for item in unassigned or []:
+        kind_by_page[item["page"]] = item["kind"]
+
+    owned = set()
+    for group in cleaned:
+        owned.update(group["pages"])
+
+    free_pages = [p for p in range(total_pages) if p not in owned]
+
+    if not free_pages:
+        return cleaned
+
+    silent = [p for p in free_pages if p not in kind_by_page]
+    if silent:
+        logger.warning(
+            "[PDF-SPLIT] Pages missing from model response, treating as blank: %s",
+            [p + 1 for p in silent],
+        )
+        for p in silent:
+            kind_by_page[p] = "blank"
+
+    logger.info(
+        "[PDF-SPLIT] Unassigned pages: %s",
+        [(p + 1, kind_by_page[p]) for p in free_pages],
+    )
+
+    # Группируем подряд идущие страницы одного kind
+    runs = []
+    for p in free_pages:
+        kind = kind_by_page[p]
+        if runs and runs[-1]["kind"] == kind and runs[-1]["pages"][-1] == p - 1:
+            runs[-1]["pages"].append(p)
+        else:
+            runs.append({"kind": kind, "pages": [p]})
+
+    for run in runs:
+        kind = run["kind"]
+        pages = run["pages"]
+
+        glueable = (
+            kind not in REJECTED_KINDS
+            and len(pages) <= MAX_GLUED_BLANK_RUN
+        )
+
+        if not glueable:
+            cleaned.append(_make_unassigned_group(pages, kind))
+            cleaned.sort(key=_group_sort_key)
+            logger.info(
+                "[PDF-SPLIT] Unassigned run kept separate: pages=%s kind=%s",
+                [p + 1 for p in pages], kind,
+            )
+            continue
+
+        first = pages[0]
+        targets = [g for g in cleaned if _is_glue_target(g)]
+
+        prev_groups = [g for g in targets if max(g["pages"]) < first]
+        next_groups = [g for g in targets if min(g["pages"]) > pages[-1]]
+
+        if prev_groups:
+            target = max(prev_groups, key=lambda g: max(g["pages"]))
+        elif next_groups:
+            target = min(next_groups, key=lambda g: min(g["pages"]))
+        else:
+            cleaned.append(_make_unassigned_group(pages, kind))
+            cleaned.sort(key=_group_sort_key)
+            continue
+
+        target["pages"] = sorted(set(target["pages"] + pages))
+        logger.info(
+            "[PDF-SPLIT] Glued %s pages %s to document %s",
+            kind,
+            [p + 1 for p in pages],
+            [p + 1 for p in target["pages"]],
+        )
+
+    cleaned.sort(key=_group_sort_key)
+    return cleaned
 
 def _finalize_groups_or_raise(groups: list[dict], total_pages: int) -> list[dict]:
     """
@@ -992,20 +1198,14 @@ def _finalize_groups_or_raise(groups: list[dict], total_pages: int) -> list[dict
 
     if missing:
         logger.warning(
-            "[PDF-SPLIT] Missing pages in final map, attaching to nearest groups: %s",
+            "[PDF-SPLIT] Missing pages after unassigned pass, attaching as blank: %s",
             [p + 1 for p in missing],
         )
+        cleaned = _apply_unassigned_pages(cleaned, [], total_pages)
 
-        if len(missing) > 3:
-            raise ValueError(f"Too many missing pages in split map: {[p + 1 for p in missing[:10]]}")
-
-        for p in missing:
-            nearest = min(
-                cleaned,
-                key=lambda g: min(abs(p - x) for x in g["pages"]),
-            )
-            nearest["pages"].append(p)
-            nearest["pages"] = sorted(set(nearest["pages"]))
+    owned_pages = set()
+    for group in cleaned:
+        owned_pages.update(group["pages"])
 
     for group in cleaned:
         pages = sorted(group["pages"])
@@ -1013,9 +1213,22 @@ def _finalize_groups_or_raise(groups: list[dict], total_pages: int) -> list[dict
         if len(pages) > 1:
             expected = list(range(pages[0], pages[-1] + 1))
             if pages != expected:
-                raise ValueError(
-                    f"Non-contiguous document pages in split map: {[p + 1 for p in pages]}"
-                )
+                gap = [p for p in expected if p not in pages]
+                stolen = [p for p in gap if p in owned_pages]
+
+                if stolen:
+                    logger.warning(
+                        "[PDF-SPLIT] Non-contiguous group %s, gap pages %s belong to other groups, leaving as is",
+                        [p + 1 for p in pages],
+                        [p + 1 for p in stolen],
+                    )
+                else:
+                    logger.warning(
+                        "[PDF-SPLIT] Non-contiguous document pages, filling range: %s",
+                        [p + 1 for p in pages],
+                    )
+                    pages = expected
+                    owned_pages.update(pages)
 
         group["pages"] = pages
 
@@ -1074,6 +1287,7 @@ def _classify_batch(
             "complete": _as_bool(item.get("complete"), True),
             "number": item.get("number"),
             "series": item.get("series"),
+            "invoice_date": item.get("invoice_date"),
             "numbers": item.get("numbers") or [],
             "multiple_on_page": _as_bool(item.get("multiple_on_page"), False),
             "documents_on_page": _safe_int(item.get("documents_on_page"), 0),
@@ -1083,13 +1297,19 @@ def _classify_batch(
 
     normalized_docs = _collapse_same_page_multi_docs(normalized_docs)
     result["documents"] = normalized_docs
+    result["unassigned_pages"] = _normalize_unassigned(
+        result.get("unassigned_pages") or [],
+        page_start,
+        page_end,
+    )
 
     logger.info(
-        "[PDF-SPLIT] Batch pages %d-%d: groups=%d logical_docs=%d",
+        "[PDF-SPLIT] Batch pages %d-%d: groups=%d logical_docs=%d unassigned=%s",
         page_start + 1,
         page_end,
         len(normalized_docs),
         _logical_doc_count(normalized_docs),
+        [(u["page"] + 1, u["kind"]) for u in result["unassigned_pages"]],
     )
 
     return result
@@ -1122,16 +1342,19 @@ def classify_pdf_pages(pdf_path: str, total_pages: int) -> list[dict]:
         }]
 
     groups = []
+    all_unassigned = []
+    batch_size = _pick_batch_size(pdf_path, total_pages)
 
-    for batch_index, page_start in enumerate(range(0, total_pages, BATCH_SIZE), start=1):
-        page_end = min(page_start + BATCH_SIZE, total_pages)
+    for batch_index, page_start in enumerate(range(0, total_pages, batch_size), start=1):
+        page_end = min(page_start + batch_size, total_pages)
 
         logger.info(
-            "[PDF-SPLIT] Batch %d: pages %d-%d of %d",
+            "[PDF-SPLIT] Batch %d: pages %d-%d of %d (batch_size=%d)",
             batch_index,
             page_start + 1,
             page_end,
             total_pages,
+            batch_size,
         )
 
         try:
@@ -1143,6 +1366,7 @@ def classify_pdf_pages(pdf_path: str, total_pages: int) -> list[dict]:
                 is_first_batch=(batch_index == 1),
             )
             batch_docs = result.get("documents", [])
+            all_unassigned.extend(result.get("unassigned_pages") or [])
         except Exception as e:
             logger.warning(
                 "[PDF-SPLIT] Batch classification failed for pages %d-%d: %s",
@@ -1170,7 +1394,7 @@ def classify_pdf_pages(pdf_path: str, total_pages: int) -> list[dict]:
         for item in batch_docs:
             groups.append(_clean_group(item))
 
-    groups.sort(key=_group_sort_key)
+    groups = _apply_unassigned_pages(groups, all_unassigned, total_pages)
 
     logger.info(
         "[PDF-SPLIT] Draft groups before verification: %s",
@@ -1263,6 +1487,8 @@ def classify_pdf_pages(pdf_path: str, total_pages: int) -> list[dict]:
         group.pop("complete", None)
         group.pop("continues_previous", None)
         group.pop("confidence", None)
+        if not group.get("unassigned_kind"):
+            group.pop("unassigned_kind", None)
         group["method"] = group.get("method") or "gemini_verified"
 
     logger.info(
@@ -1456,6 +1682,21 @@ Possible cases:
 3. The first visible page may continue a document from previous pages
 4. The last visible page may continue into later pages
 
+PAGE COVERAGE — MANDATORY:
+Every page between {start} and {end} MUST appear EXACTLY ONCE in your answer,
+either inside "documents" or inside "unassigned_pages". Never silently skip a page.
+
+Put a page into "unassigned_pages" only if it does not belong to any document
+you can identify, and set "kind":
+- "blank": the page is empty or has no meaningful content (back side of a scan, empty sheet)
+- "separator": a divider sheet, barcode sheet, or service page between documents
+- "fragment": the page clearly belongs to some accounting document, but that
+  document's beginning and end are NOT present in these pages
+- "unreadable": the page cannot be read at all
+
+Do NOT put a page into "unassigned_pages" just because it is a continuation page
+of a document that IS present here — such pages belong to that document.
+
 {continuation_note}
 
 Respond ONLY in JSON format, no extra text, no markdown:
@@ -1488,6 +1729,10 @@ Respond ONLY in JSON format, no extra text, no markdown:
       ],
       "confidence": "medium"
     }}
+  ],
+  "unassigned_pages": [
+    {{"page": 4, "kind": "blank"}},
+    {{"page": 5, "kind": "fragment"}}
   ]
 }}
 
@@ -1504,6 +1749,7 @@ Field rules:
 - When multiple_on_page is true, return ONE entry for that page with the count and numbers
 - confidence: high, medium, or low
 - A receipt/payment confirmation attached to an invoice is part of that invoice, not a separate document
+- unassigned_pages: ORIGINAL page numbers between {start} and {end} that belong to no document, each with a kind. Use an empty array if every page belongs to a document
 """
 
 CONTINUATION_NOTE_FIRST = (
@@ -1607,7 +1853,7 @@ def pre_classify_pdf(pdf_path: str) -> dict:
             "needs_full_split": False,
         }
 
-    pages_to_send = min(total_pages, BATCH_SIZE)
+    pages_to_send = min(total_pages, PRE_CLASSIFY_PAGES)
 
     prompt = PRE_CLASSIFY_PROMPT.format(
         total=total_pages,
@@ -1659,7 +1905,15 @@ def pre_classify_pdf(pdf_path: str) -> dict:
             })
 
         normalized_docs = _collapse_same_page_multi_docs(normalized_docs)
-        total_docs = _logical_doc_count(normalized_docs)
+
+        if total_pages <= pages_to_send:
+            normalized_docs = _apply_unassigned_pages(
+                normalized_docs, [], total_pages,
+            )
+
+        total_docs = _logical_doc_count(
+            [g for g in normalized_docs if not g.get("unassigned_kind")]
+        )
 
         if model_total_docs != total_docs:
             logger.warning(
@@ -1697,6 +1951,6 @@ def pre_classify_pdf(pdf_path: str) -> dict:
         return {
             "total_docs": 1,
             "documents": [],
-            "needs_full_split": total_pages > BATCH_SIZE,
+            "needs_full_split": total_pages > PRE_CLASSIFY_PAGES,
             "error": str(e),
         }

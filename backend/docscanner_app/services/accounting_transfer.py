@@ -139,8 +139,15 @@ def create_je_for_allocation(allocation):
         logger.warning("[AccountingTransfer] No CompanyProfile for allocation %s", allocation.id)
         return None
 
+    # Rankinis mokėjimas be nurodytos sąskaitos — DK įrašo nekuriam.
+    # Dokumentas vis tiek tampa apmokėtu, sąskaitą buhalteris nurodys vėliau.
+    if allocation.needs_account or (
+        not allocation.transaction and not allocation.payment_account
+    ):
+        return None
+
     # Определить банковский счёт (271x) — с учётом валюты (мультивалютные субсчета)
-    bank_account = "2711"  # default
+    bank_account = allocation.payment_account or "2711"
     if txn and getattr(txn, "bank_statement", None):
         _bs = txn.bank_statement
         _info = cp.get_bank_chart_account(
@@ -193,15 +200,23 @@ def create_je_for_allocation(allocation):
             desc = f"Mokėjimas tiekėjui už {doc_number}"
 
         elif direction == "manual" and allocation.invoice:
-            # Ручная пометка invoice → Dr. банк (default), Cr. дебиторка
-            debit_code = bank_account
-            debit_name = "Banko sąskaita"
-            credit_code = "2410"
-            credit_name = "Pirkėjų skolos"
+            # Kreditinė — pinigus grąžinam MES, tad kojos apverstos.
+            if allocation.invoice.is_credit_invoice is True:
+                debit_code = "2410"
+                debit_name = "Pirkėjų skolos"
+                credit_code = bank_account
+                credit_name = "Banko sąskaita"
+                desc_prefix = "Grąžinimas pirkėjui už"
+            else:
+                debit_code = bank_account
+                debit_name = "Banko sąskaita"
+                credit_code = "2410"
+                credit_name = "Pirkėjų skolos"
+                desc_prefix = "Rankinis mokėjimas už"
             counterparty = allocation.invoice.buyer_name or ""
             counterparty_code = allocation.invoice.buyer_id or ""
             doc_number = allocation.invoice.full_number
-            desc = f"Rankinis mokėjimas už {doc_number}"
+            desc = f"{desc_prefix} {doc_number}"
 
         elif direction == "manual" and allocation.purchase:
             # Ручная пометка purchase → Dr. кредиторка, Cr. банк
@@ -245,8 +260,18 @@ def create_je_for_allocation(allocation):
         else:
             txn_rate = doc_rate  # manual: без отдельного курса оплаты
 
-        doc_eur = _to_eur(allocation.amount, doc_rate)
-        bank_eur = _to_eur(allocation.amount, txn_rate)
+        # B variantas: skolos pusė — dokumento kursu, banko pusė — realiai
+        # judėjusia suma. Naujos aliokacijos turi paskaičiuotus laukus,
+        # senos — skaičiuojam kaip anksčiau.
+        if allocation.doc_rate:
+            doc_eur = allocation.debt_eur
+        else:
+            doc_eur = _to_eur(allocation.amount, doc_rate)
+
+        if allocation.amount_eur is not None:
+            bank_eur = Decimal(str(allocation.amount_eur))
+        else:
+            bank_eur = _to_eur(allocation.amount, txn_rate)
 
         # ── Komisinis (PayPal / banko mokestis) на той же операции ──
         # fee_amount — išskaičiuotas IŠ sumos, operacijos valiuta (PayPal).
@@ -271,7 +296,7 @@ def create_je_for_allocation(allocation):
             debit_eur, credit_eur = doc_eur, bank_eur + fee_eur
             gain = doc_eur - bank_eur
 
-        is_foreign = pay_currency != "EUR"
+        is_foreign = pay_currency != "EUR" or doc_currency != "EUR"
 
         je = JournalEntry.objects.create(
             user=document.user,
@@ -287,7 +312,7 @@ def create_je_for_allocation(allocation):
             description=desc,
             currency="EUR",
             original_amount=allocation.amount if is_foreign else None,
-            original_currency=pay_currency if is_foreign else "",
+            original_currency=doc_currency if is_foreign else "",
             exchange_rate=txn_rate if is_foreign else None,
             exchange_rate_date=(payment_date or doc_date) if is_foreign else None,
             status=JournalEntry.STATUS_POSTED,
@@ -340,7 +365,7 @@ def create_je_for_allocation(allocation):
         allocation.save(update_fields=["journal_entry"])
 
     logger.info(
-        "[AccountingTransfer] Created JE #%s for allocation %s (%s → %s, %s)",
+        "[AccountingTransfer] Created JE #%s for allocation %s (%s -> %s, %s)",
         je.id, allocation.id, debit_code, credit_code, allocation.amount,
     )
     return je

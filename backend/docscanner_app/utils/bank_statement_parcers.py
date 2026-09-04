@@ -24,6 +24,13 @@ FX_FEE_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Kortelės operacija SEB išraše:
+# "10.99 GBP(13.24 EUR + mokestis 0.35 EUR(2.65%))"
+CARD_FX_RE = re.compile(
+    r"(?P<orig>[\d.,]+)\s*(?P<cur>[A-Z]{3})\s*\(\s*(?P<eur>[\d.,]+)\s*EUR"
+    r"(?:\s*\+\s*[Mm]okes\w*\s*(?P<fee>[\d.,]+)\s*EUR)?"
+)
+
 class BaseBankParser(ABC):
     bank_name: str = ""
 
@@ -492,7 +499,18 @@ class SEBCSVParser(BaseBankParser):
             purpose = get("purpose")
             fx_m = FX_FEE_RE.search(purpose)
             fx_fee = (self._parse_amount(fx_m.group(1)) or Decimal("0")) if fx_m else Decimal("0")
-            
+
+            # Kortelės operacija užsienio valiuta:
+            # "10.99 GBP(13.25 EUR + mokestis 0.34 EUR(2.65%))"
+            card_amount_eur = None
+            card_m = CARD_FX_RE.search(purpose)
+            if card_m:
+                if not fx_fee and card_m.group("fee"):
+                    fx_fee = self._parse_amount(card_m.group("fee")) or Decimal("0")
+                # Realus banko kursas — tikslesnis nei LB kursas operacijos datai.
+                if (get("currency") or "EUR").upper() != "EUR":
+                    card_amount_eur = self._parse_amount(card_m.group("eur"))
+
             transactions.append({
                 "transaction_date": txn_date,
                 "value_date": self._parse_date(get("value_date")),
@@ -501,8 +519,9 @@ class SEBCSVParser(BaseBankParser):
                 "counterparty_name": get("counterparty_name"),
                 "counterparty_code": get("counterparty_code"),
                 "counterparty_account": get("counterparty_account"),
-                "payment_purpose": purpose,                
+                "payment_purpose": purpose,
                 "exchange_fee": fx_fee,
+                "amount_eur": card_amount_eur,
                 "reference_number": get("reference") or get("tx_code"),
                 "amount": abs(amount),
                 "currency": get("currency") or "EUR",

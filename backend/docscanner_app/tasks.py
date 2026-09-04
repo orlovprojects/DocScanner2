@@ -98,6 +98,22 @@ COST = {
     "detaliai": Decimal("1.30"),
 }
 
+REJECTED_UNASSIGNED_KINDS = ("fragment", "unreadable")
+
+UNASSIGNED_LABELS = {
+    "blank": "tusti",
+    "separator": "skirtukas",
+    "fragment": "fragmentas",
+    "unreadable": "nenuskaitomas",
+}
+
+UNASSIGNED_ERRORS = {
+    "blank": "Tušti puslapiai",
+    "separator": "Skirtuko puslapiai",
+    "fragment": "Nepilnas dokumentas — trūksta puslapių",
+    "unreadable": "Nenuskaitomi puslapiai",
+}
+
 def _doc_cost(scan_type: str) -> Decimal:
     return COST.get((scan_type or "").strip(), Decimal("1.00"))
 
@@ -4087,10 +4103,18 @@ def split_multi_doc_task(self, doc_id: int, scan_type: str, split_depth: int = 1
         total_doc_count = 0
 
         for g in groups:
+            if g.get("unassigned_kind"):
+                continue
             if g.get("multiple_on_page"):
                 total_doc_count += max(int(g.get("documents_on_page") or 1), 1)
             else:
                 total_doc_count += 1
+
+        logger.info(
+            "[MULTI-DOC] Billable docs=%d, unassigned groups=%d",
+            total_doc_count,
+            sum(1 for g in groups if g.get("unassigned_kind")),
+        )
 
         if total_doc_count <= 1:
             logger.info("[MULTI-DOC] total_doc_count<=1, processing normally")
@@ -4147,8 +4171,17 @@ def split_multi_doc_task(self, doc_id: int, scan_type: str, split_depth: int = 1
             scan_type=scan_type,
         )
 
-        all_children = [(cid, skip, is_dup) for cid, skip, is_dup in created_docs]
-        processable = [(cid, skip) for cid, skip, is_dup in created_docs if not is_dup]
+        all_children = list(created_docs)
+        processable = [
+            (cid, skip)
+            for cid, skip, is_dup, is_rejected in created_docs
+            if not is_dup and not is_rejected
+        ]
+        non_processable_ids = [
+            cid
+            for cid, skip, is_dup, is_rejected in created_docs
+            if is_dup or is_rejected
+        ]
 
         if not all_children:
             doc.status = "rejected"
@@ -4185,13 +4218,12 @@ def split_multi_doc_task(self, doc_id: int, scan_type: str, split_depth: int = 1
 
         _settle_and_finish_if_session(doc)
 
-        for child_id, _, is_dup in all_children:
-            if is_dup:
-                try:
-                    dup_doc = ScannedDocument.objects.get(pk=child_id)
-                    _settle_and_finish_if_session(dup_doc)
-                except Exception as e:
-                    logger.warning("[MULTI-DOC] Failed to settle dup child %d: %s", child_id, e)
+        for child_id in non_processable_ids:
+            try:
+                skipped_doc = ScannedDocument.objects.get(pk=child_id)
+                _settle_and_finish_if_session(skipped_doc)
+            except Exception as e:
+                logger.warning("[MULTI-DOC] Failed to settle skipped child %d: %s", child_id, e)
 
         for child_id, skip_ocr in processable:
             process_uploaded_file_task.apply_async(
@@ -4207,10 +4239,10 @@ def split_multi_doc_task(self, doc_id: int, scan_type: str, split_depth: int = 1
         _log_t("[MULTI-DOC] TOTAL", t0)
 
         logger.info(
-            "[MULTI-DOC] Done: %d children, %d processable, %d duplicates from doc_id=%d",
+            "[MULTI-DOC] Done: %d children, %d processable, %d skipped (dup/rejected) from doc_id=%d",
             len(all_children),
             len(processable),
-            len(all_children) - len(processable),
+            len(non_processable_ids),
             doc_id,
         )
 
@@ -4237,12 +4269,12 @@ def _create_children_from_groups_with_dup_check(
     pdf_path: str,
     user,
     scan_type: str,
-) -> list[tuple[int, bool, bool]]:
+) -> list[tuple[int, bool, bool, bool]]:
     """
     Создаёт дочерние ScannedDocument для каждой группы.
     Проверяет дубликаты по номеру/серии из pre-classify.
- 
-    Возвращает список [(child_doc_id, skip_ocr, is_duplicate), ...]
+
+    Возвращает список [(child_doc_id, skip_ocr, is_duplicate, is_rejected), ...]
     """
     created = []
     base_name = os.path.splitext(parent_doc.original_filename or "document")[0]
@@ -4258,6 +4290,51 @@ def _create_children_from_groups_with_dup_check(
 
         if not pages:
             logger.warning("[MULTI-DOC] Empty pages in group %s: %r", group_idx, group)
+            continue
+
+        unassigned_kind = group.get("unassigned_kind")
+
+        if unassigned_kind:
+            label = UNASSIGNED_LABELS.get(unassigned_kind, "nezinomas")
+            pages_str = f"p{pages[0]+1}" if len(pages) == 1 else f"p{pages[0]+1}-{pages[-1]+1}"
+            child_name = f"{base_name}_{pages_str}_{label}"
+            mini_pdf = extract_pages_as_pdf_bytes(pdf_path, pages)
+
+            try:
+                child = ScannedDocument.objects.create(
+                    user=user,
+                    original_filename=f"{child_name}.pdf",
+                    status="rejected",
+                    error_message=UNASSIGNED_ERRORS.get(unassigned_kind, "Apdorojimo klaida"),
+                    scan_type=scan_type,
+                    upload_session=parent_doc.upload_session,
+                    parent_document=parent_doc,
+                    is_archive_container=False,
+                    is_multi_doc_container=False,
+                    source_pages=pages,
+                    pre_extracted_ocr_text=None,
+                )
+                child.file.save(f"{child_name}.pdf", ContentFile(mini_pdf), save=True)
+
+                try:
+                    _src = fitz.open(stream=mini_pdf, filetype="pdf")
+                    _pix = _src[0].get_pixmap(dpi=150)
+                    child.file.save(f"{child_name}_preview.png", ContentFile(_pix.tobytes("png")), save=True)
+                    _src.close()
+                except Exception as e:
+                    logger.warning("[MULTI-DOC] Failed to render unassigned preview: %s", e)
+
+                child.preview_url = f"{settings.SITE_URL_BACKEND}/media/{child.file.name}"
+                child.save(update_fields=["preview_url"])
+
+                created.append((child.id, False, False, True))
+                logger.info(
+                    "[MULTI-DOC] Created unassigned child doc_id=%d: %s kind=%s pages=%s",
+                    child.id, child_name, unassigned_kind, [p + 1 for p in pages],
+                )
+            except Exception as e:
+                logger.error("[MULTI-DOC] Failed to create unassigned child %s: %s", child_name, e)
+
             continue
 
         is_multi = bool(group.get("multiple_on_page", False))
@@ -4356,7 +4433,7 @@ def _create_children_from_groups_with_dup_check(
                                 child_invoice_date,
                             )
 
-                    created.append((child.id, skip_ocr, is_dup))
+                    created.append((child.id, skip_ocr, is_dup, False))
                 except Exception as e:
                     logger.error("[MULTI-DOC] Failed to create child %s: %s", child_name, e)
  
@@ -4415,7 +4492,7 @@ def _create_children_from_groups_with_dup_check(
                             doc_invoice_date,
                         )
  
-                created.append((child.id, False, is_dup))
+                created.append((child.id, False, is_dup, False))
                 logger.info(
                     "[MULTI-DOC] Created child doc_id=%d: %s (%d pages, number=%s series=%s invoice_date=%s dup=%s)",
                     child.id,

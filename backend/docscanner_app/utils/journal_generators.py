@@ -74,69 +74,8 @@ def resolve_debeto_for_inventory(pirkimo_code, *, uses_inventory, user_override=
 
 def _get_account_name(code):
     """Возвращает название sąskaitos по коду для денормализации."""
-    ACCOUNTS = {
-        # Turtas
-        "1130": "Programinės įrangos įsigijimo savikaina",
-        "1220": "Mašinų ir įrangos įsigijimo savikaina",
-        "1230": "Transporto priemonių įsigijimo savikaina",
-        "1240": "Kitų įrenginių, prietaisų įsigijimo savikaina",
-        "2010": "Žaliavos, medžiagos ir komplektavimo detalės",
-        "2040": "Pirktos prekės, skirtos perparduoti",
-        "2080": "Sumokėti avansai tiekėjams",
-        "2410": "Pirkėjų skolų vertė",
-        "2441": "Gautinas pridėtinės vertės mokestis",
-        "271": "Sąskaitos bankuose",
-        "272": "Kasa",
-        "273": "Pinigai kelyje",
-        "291": "Ateinančių laikotarpių sąnaudos",
-
-        # Nuosavas kapitalas
-        "3010": "Įstatinis kapitalas",
-
-        # Įsipareigojimai
-        "4420": "Iš pirkėjų gauti avansai",
-        "4430": "Skolos tiekėjams už prekes ir paslaugas",
-        "4480": "Mokėtinas darbo užmokestis",
-        "4481": "Mokėtinas gyventojų pajamų mokestis",
-        "4482": "Mokėtinos socialinio draudimo įmokos",
-        "4492": "Mokėtinas pridėtinės vertės mokestis",
-        "4493": "Kiti į biudžetą mokėtini mokesčiai",
-
-        # Pajamos
-        "5000": "Parduotų prekių pajamos",
-        "5001": "Suteiktų paslaugų pajamos",
-        "509": "Nuolaidos, grąžinimas",
-        "5009": "Atsiskaitymų grynais pinigais apvalinimas",
-        "5400": "Ilgalaikio turto perleidimo pelnas",
-        "5401": "Kitos pajamos",
-        "5803": "Teigiama valiutų kursų pokyčio įtaka",
-        "5804": "Baudų ir delspinigių pajamos",
-        "5810": "Kitos finansinės ir investicinės veiklos pajamos",
-
-        # Sąnaudos
-        "6000": "Parduotų prekių savikaina",
-        "6001": "Suteiktų paslaugų savikaina",
-        "6002": "Įsigytų prekių ir paslaugų savikaina",
-        "6003": "Tiesioginės gamybos išlaidos",
-        "6004": "Netiesioginės gamybos išlaidos",
-        "6200": "Komisiniai mokesčiai pardavėjams",
-        "6202": "Paslaugų ir prekių reklamos sąnaudos",
-        "6208": "Kitos pardavimo sąnaudos",
-        "6300": "Nuomos sąnaudos",
-        "6301": "Remonto ir eksploatacijos sąnaudos",
-        "6302": "Išmokų tretiesiems asmenims sąnaudos",
-        "6303": "Draudimo sąnaudos",
-        "6304": "Darbuotojų darbo užmokestis ir su juo susijusios sąnaudos",
-        "6308": "Veiklos mokesčių sąnaudos",
-        "6311": "Baudų ir delspinigių sąnaudos",
-        "6312": "Kitos bendrosios ir administracinės sąnaudos",
-        "6401": "Kitos sąnaudos",
-        "6802": "Kitų įmonių suteiktų paskolų palūkanų sąnaudos",
-        "6803": "Neigiama valiutų kursų pokyčio įtaka",
-        "6804": "Baudų ir delspinigių sąnaudos",
-        "6810": "Kitos finansinės ir investicinės veiklos sąnaudos",
-    }
-    return ACCOUNTS.get(str(code or ""), "")
+    from .chart_of_accounts import get_account_name
+    return get_account_name(code)
 
 
 def _to_decimal(value):

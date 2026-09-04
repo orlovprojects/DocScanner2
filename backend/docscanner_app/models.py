@@ -397,6 +397,15 @@ class ScannedDocument(models.Model):
 
     site_pro_api_status = models.CharField(max_length=20, blank=True, null=True)
     site_pro_last_try_date = models.DateTimeField(blank=True, null=True)
+    epris_codes = models.JSONField(
+        "EPRIS prekių kodai",
+        blank=True,
+        null=True,
+        default=None,
+        help_text='[{"code": "1", "subcode": "1.1.2", "free_text": "", "language": ""}, ...]',
+    )
+    epris_status = models.CharField(max_length=20, blank=True, default="")
+    epris_submitted_at = models.DateTimeField(blank=True, null=True)
 
     rivile_api_status = models.CharField(
         "Rivile API statusas",
@@ -1590,6 +1599,8 @@ class AdClick(models.Model):
     user = models.ForeignKey('CustomUser', on_delete=models.SET_NULL, null=True, blank=True)
     ip_address = models.GenericIPAddressField(null=True, blank=True)
     user_agent = models.TextField(blank=True)
+    page_url = models.CharField(max_length=500, blank=True)   # где кликнули
+    referrer = models.CharField(max_length=500, blank=True)   # откуда пришёл на страницу
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
@@ -2931,7 +2942,9 @@ class Invoice(models.Model):
         self.paid_amount = total_paid
         self.last_payment_date = last_date
 
-        invoice_total = self.amount_with_vat or Decimal("0")
+        # Kreditinių sumos neigiamos, aliokacijos — teigiamos. Lyginam moduliu.
+        invoice_total = abs(self.amount_with_vat or Decimal("0"))
+        total_paid = abs(total_paid)
         tolerance = Decimal("0.009")
 
         if invoice_total > 0 and total_paid >= invoice_total - tolerance:
@@ -4076,6 +4089,7 @@ class BaseTransaction(models.Model):
         ("likely_matched", "Galimas atitikimas"),
         ("confirmed", "Patvirtinta vartotojo"),
         ("manually_matched", "Susieta rankiniu būdu"),
+        ("deferred", "Atidėta"),
         ("ignored", "Ignoruota"),
         ("classified", "Kategorizuota"),
     ]
@@ -4130,6 +4144,11 @@ class BaseTransaction(models.Model):
     match_confidence = models.DecimalField(max_digits=3, decimal_places=2, default=0)
     match_details = models.JSONField(default=dict, blank=True)
 
+    deferred_until = models.DateField(
+        "Atidėta iki", null=True, blank=True, db_index=True,
+        help_text="Kai data praeina, operacija vėl patenka į „Reikia veiksmų“",
+    )
+
     own_account_key = models.CharField(
         max_length=100,
         blank=True,
@@ -4156,7 +4175,13 @@ class BaseTransaction(models.Model):
         ("loan_payment", "Paskolos grąžinimas"),
         ("loan_received", "Gauta paskola"),
         ("refund_received", "Gautas grąžinimas"),
+        ("payment_refund", "Mokėjimo grąžinimas"),
+        ("payment_reversal", "Mokėjimo atšaukimas"),
+        ("chargeback", "Chargeback"),
+        ("paypal_card_funding", "PayPal sąskaitos papildymas"),
+        ("internal_transfer", "Vidinis pervedimas"),
         ("other_expense", "Kitos sąnaudos"),
+        ("manual_dk", "Apdorota rankiniu būdu"),
         ("other_income", "Kitos pajamos"),
         ("shopify_pardavimas", "Shopify pardavimas"),
     ]
@@ -4173,7 +4198,7 @@ class BaseTransaction(models.Model):
         max_length=20,
         blank=True,
         default="",
-        help_text="Sąskaitų plano sąskaita, pvz. 6880 (banko mokesčiai)",
+        help_text="Sąskaitų plano sąskaita, pvz. 6810 (banko mokesčiai)",
     )
     category_account_credit = models.CharField(
         "Kredito sąskaita",
@@ -4245,13 +4270,71 @@ class BaseTransaction(models.Model):
     class Meta:
         abstract = True
 
+    # Statusai, kuriuose operacija susieta su dokumentu per PaymentAllocation.
+    # Tik jiems tikrinamas likutis — classified/deferred neturi aliokacijų.
+    ALLOCATION_MATCH_STATUSES = ("auto_matched", "confirmed", "manually_matched")
+
+    @property
+    def debt_amount(self):
+        """
+        Kiek operacijos sumos realiai dengia skolą.
+        Mokesčiai (banko/PayPal, valiutos keitimo) nurašomi į 6810,
+        jie nėra „nepaskirstytas likutis".
+        """
+        from decimal import Decimal
+        amt = Decimal(str(self.amount or "0"))
+        fee = Decimal(str(getattr(self, "fee_amount", 0) or "0"))
+        fx_fee = Decimal(str(getattr(self, "exchange_fee", 0) or "0"))
+        total_fee = fee + fx_fee
+        # Įplauka: mokestis išskaičiuotas IŠ sumos → skola buvo didesnė.
+        # Išlaida: mokestis nurašytas PAPILDOMAI → skola buvo mažesnė.
+        # Mokesčiai saugomi EUR. Jei operacija kita valiuta — mokestis
+        # nurašomas atskirai (EUR), valiutinės sumos jis nekeičia.
+        if (self.currency or "EUR").upper() != "EUR":
+            return amt
+
+        incoming = getattr(self, "is_incoming", None)
+        if incoming is None:
+            incoming = self.__class__.__name__.startswith("Incoming")
+        return amt + total_fee if incoming else amt - total_fee
+
     @property
     def unallocated_amount(self):
-        return self.amount - self.allocated_amount
+        return self.debt_amount - self.allocated_amount
 
     @property
     def is_fully_allocated(self):
-        return self.allocated_amount >= self.amount
+        from decimal import Decimal
+        return self.unallocated_amount <= Decimal("0.01")
+
+    @property
+    def is_partially_allocated(self):
+        """Susieta, bet liko nepaskirstyta suma → „Dalinai apdorota"."""
+        from decimal import Decimal
+        if self.match_status not in self.ALLOCATION_MATCH_STATUSES:
+            return False
+        if not self.amount or self.amount <= Decimal("0"):
+            return False
+        return self.unallocated_amount > Decimal("0.01")
+
+    def recalc_allocation_state(self, save=True):
+        """
+        Perskaičiuoja allocated_amount iš PaymentAllocation.
+        Sumuojam operacijos valiuta (effective_amount_txn), nes
+        alloc.amount saugomas dokumento valiuta.
+        """
+        from decimal import Decimal
+
+        total = Decimal("0")
+        for a in self.allocations.filter(
+            status__in=("auto", "confirmed", "manual"),
+        ):
+            total += a.effective_amount_txn or Decimal("0")
+
+        self.allocated_amount = total
+        if save:
+            self.save(update_fields=["allocated_amount", "updated_at"])
+        return total
 
     def compute_hash(self):
         purpose = (self.payment_purpose or "")[:200].strip().lower()
@@ -4281,6 +4364,8 @@ class BaseTransaction(models.Model):
 
 class IncomingTransaction(BaseTransaction):
     """Входящий платёж — нам заплатили (кредит)."""
+
+    is_incoming = True
 
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -4324,6 +4409,8 @@ class IncomingTransaction(BaseTransaction):
 class OutgoingTransaction(BaseTransaction):
     """Исходящий платёж — мы заплатили (дебет). Потом: matching с ScannedDocument."""
 
+    is_incoming = False
+
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
@@ -4348,6 +4435,7 @@ class OutgoingTransaction(BaseTransaction):
             models.Index(fields=["user", "-transaction_date"], name="idx_out_user_date"),
             models.Index(fields=["transaction_hash"], name="idx_out_hash"),
             models.Index(fields=["company_profile", "-transaction_date"], name="idx_out_cp_date"),
+            models.Index(fields=["company_profile", "match_status"], name="idx_out_cp_match"),
         ]
 
     def __str__(self):
@@ -4387,6 +4475,12 @@ class PaymentAllocation(models.Model):
         ("manual", "Rankinis"),
     ]
 
+    KIND_CHOICES = [
+        ("document", "Dokumentas"),
+        ("advance", "Avansas"),
+        ("writeoff", "Nurašymas"),
+    ]
+
     # ── Транзакция (одна из двух или null при manual) ───
     incoming_transaction = models.ForeignKey(
         IncomingTransaction,
@@ -4415,11 +4509,52 @@ class PaymentAllocation(models.Model):
         related_name="payment_allocations",
     )
 
+    kind = models.CharField(
+        "Tipas", max_length=12, choices=KIND_CHOICES, default="document",
+    )
+
+    # ── Kontrahentas (privalomas kai kind="advance") ────
+    counterparty = models.ForeignKey(
+        "Counterparty",
+        null=True, blank=True,
+        on_delete=models.SET_NULL,
+        related_name="payment_allocations",
+    )
+    counterparty_name = models.CharField(max_length=255, blank=True, default="")
+    counterparty_code = models.CharField(max_length=100, blank=True, default="")
+
     source = models.CharField("Šaltinis", max_length=20, choices=SOURCE_CHOICES)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="proposed")
 
     amount = models.DecimalField("Paskirstyta suma", max_digits=12, decimal_places=2)
+    amount_txn = models.DecimalField(
+        "Paskirstyta suma operacijos valiuta",
+        max_digits=12, decimal_places=2,
+        null=True, blank=True,
+        help_text="Kiek nurašoma nuo operacijos likučio. Kai valiutos sutampa = amount",
+    )
+    amount_eur = models.DecimalField(
+        "Paskirstyta suma EUR (banko pusė)",
+        max_digits=12, decimal_places=2,
+        null=True, blank=True,
+        help_text="Kiek realiai judėjo banko sąskaitoje, EUR",
+    )
+    doc_rate = models.DecimalField(
+        "Dokumento valiutos kursas",
+        max_digits=12, decimal_places=6,
+        null=True, blank=True,
+        help_text="1 EUR = X dokumento valiutos, dokumento datai. Skolos pusė skaičiuojama juo.",
+    )
     payment_date = models.DateField("Mokėjimo data", null=True, blank=True)
+
+    payment_account = models.CharField(
+        "Pinigų sąskaita", max_length=20, blank=True, default="",
+        help_text="Iš kur sumokėta: 271x bankas, kasa ar kt. Tik rankiniams mokėjimams.",
+    )
+    needs_account = models.BooleanField(
+        "Trūksta pinigų sąskaitos", default=False,
+        help_text="Rankinis mokėjimas be nurodytos sąskaitos — DK įrašas dar nesukurtas.",
+    )
 
     confidence = models.DecimalField(
         "Patikimumas", max_digits=3, decimal_places=2, default=0,
@@ -4454,6 +4589,8 @@ class PaymentAllocation(models.Model):
             models.Index(fields=["incoming_transaction"], name="idx_pa_inc_txn"),
             models.Index(fields=["outgoing_transaction"], name="idx_pa_out_txn"),
             models.Index(fields=["status"], name="idx_pa_status"),
+            models.Index(fields=["kind"], name="idx_pa_kind"),
+            models.Index(fields=["needs_account"], name="idx_pa_needs_acc"),
         ]
         constraints = [
             # Одна incoming транзакция → одна invoice (не дублировать)
@@ -4474,9 +4611,13 @@ class PaymentAllocation(models.Model):
                 ),
                 name="uq_allocation_out_purch",
             ),
-            # Хотя бы один документ должен быть привязан
+            # Документ обязателен только для kind="document".
+            # advance / writeoff живут без документа.
             models.CheckConstraint(
-                condition=~models.Q(invoice__isnull=True, purchase__isnull=True),
+                condition=(
+                    ~models.Q(kind="document")
+                    | ~models.Q(invoice__isnull=True, purchase__isnull=True)
+                ),
                 name="chk_allocation_has_document",
             ),
         ]
@@ -4493,6 +4634,10 @@ class PaymentAllocation(models.Model):
             doc = f"Inv#{self.invoice_id}"
         elif self.purchase_id:
             doc = f"Purch#{self.purchase_id}"
+        elif self.kind == "advance":
+            doc = f"Avansas ({self.counterparty_name or '?'})"
+        elif self.kind == "writeoff":
+            doc = "Nurašymas"
         else:
             doc = "?"
 
@@ -4506,6 +4651,26 @@ class PaymentAllocation(models.Model):
         if self.outgoing_transaction_id:
             return "outgoing"
         return "manual"
+
+    @property
+    def effective_amount_txn(self):
+        return self.amount_txn if self.amount_txn is not None else self.amount
+
+    @property
+    def debt_eur(self):
+        """Skolos pusė EUR — dokumento kursu (B variantas)."""
+        from decimal import Decimal, ROUND_HALF_UP
+        amt = self.amount or Decimal("0")
+        if not self.doc_rate or self.doc_rate == 0:
+            return amt
+        return (amt / self.doc_rate).quantize(Decimal("0.01"), ROUND_HALF_UP)
+
+    @property
+    def fx_diff_eur(self):
+        """Banko pusė − skolos pusė. Teigiama = kurso nuostolis."""
+        from decimal import Decimal
+        bank = self.amount_eur if self.amount_eur is not None else self.effective_amount_txn
+        return (bank or Decimal("0")) - self.debt_eur
 
     @property
     def document(self):
@@ -5782,8 +5947,8 @@ class Purchase(models.Model):
     def recalc_payment_status(self):
         from decimal import Decimal
 
-        total = self.amount_with_vat or Decimal("0")
-        paid = self.paid_amount or Decimal("0")
+        total = abs(self.amount_with_vat or Decimal("0"))
+        paid = abs(self.paid_amount or Decimal("0"))
         tolerance = Decimal("0.009")
 
         if total > 0 and paid >= total - tolerance:

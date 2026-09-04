@@ -861,6 +861,12 @@ class BankImportService:
                 txn.amount_eur = raw.get("amount_eur")
                 txn.exchange_rate = raw.get("exchange_rate")
                 txn.exchange_rate_date = raw.get("exchange_rate_date")
+                # Kursą skaičiuojam iš pačios operacijos, jei bankas davė EUR sumą.
+                if txn.amount_eur and not txn.exchange_rate:
+                    txn.exchange_rate = (
+                        Decimal(str(txn.amount)) / Decimal(str(txn.amount_eur))
+                    ).quantize(Decimal("0.000001"), ROUND_HALF_UP)
+                    txn.exchange_rate_date = txn.transaction_date
                 # Фолбэк: если EUR из выписки нет — курс LB на дату операции
                 if txn.amount_eur is None:
                     from .accounting_transfer import rate_to_eur
@@ -952,7 +958,7 @@ class PaymentService:
     def __init__(self, user):
         self.user = user
 
-    def mark_paid_manual(self, invoice, amount, payment_date, note=""):
+    def mark_paid_manual(self, invoice, amount, payment_date, note="", payment_account=""):
         """
         Ручная пометка Invoice как оплаченный.
         Создаёт PaymentAllocation с source="manual", без транзакции.
@@ -973,6 +979,8 @@ class PaymentService:
             status="manual",
             amount=amount,
             payment_date=payment_date,
+            payment_account=(payment_account or "").strip(),
+            needs_account=not (payment_account or "").strip(),
             confidence=Decimal("1.00"),
             match_reasons={"manual": True},
             note=note,
@@ -1043,7 +1051,10 @@ class PaymentService:
             "incoming_transaction", "outgoing_transaction",
             "invoice", "purchase",
         ).get(
-            Q(invoice__user=self.user) | Q(purchase__user=self.user),
+            Q(invoice__user=self.user)
+            | Q(purchase__user=self.user)
+            | Q(incoming_transaction__user=self.user)
+            | Q(outgoing_transaction__user=self.user),
             id=allocation_id,
         )
         txn = alloc.transaction  # property: incoming or outgoing
@@ -1055,18 +1066,23 @@ class PaymentService:
 
         alloc.delete()
 
+        # Пересчитываем документ
+        if document:
+            if hasattr(document, "recalc_from_allocations"):
+                document.recalc_from_allocations()
+            else:
+                document.recalc_payment_status()
+
         # Пересчитываем транзакцию
         if txn:
-            new_total = (
-                txn.allocations.aggregate(t=Sum("amount"))["t"]
-                or Decimal("0")
-            )
-            txn.allocated_amount = new_total
+            txn.recalc_allocation_state(save=False)
             if not txn.allocations.exists():
                 txn.match_status = "unmatched"
                 txn.match_confidence = Decimal("0")
+                txn.matched_document_number = ""
             txn.save(update_fields=[
-                "allocated_amount", "match_status", "match_confidence", "updated_at",
+                "allocated_amount", "match_status", "match_confidence",
+                "matched_document_number", "updated_at",
             ])
             if txn.bank_statement:
                 txn.bank_statement.refresh_stats()
@@ -1101,7 +1117,10 @@ class PaymentService:
         invoice = Invoice.objects.get(id=invoice_id, user=self.user)
 
         if amount is None:
-            amount = min(txn.unallocated_amount, invoice.amount_with_vat or Decimal("0"))
+            # Kreditinių sumos neigiamos — aliokacija visada teigiama.
+            _total = abs(invoice.amount_with_vat or Decimal("0"))
+            amount = min(txn.unallocated_amount, _total)
+        amount = abs(amount)
 
         alloc, _ = PaymentAllocation.objects.update_or_create(
             incoming_transaction=txn,
@@ -1118,11 +1137,9 @@ class PaymentService:
             },
         )
 
-        txn.allocated_amount = (
-            txn.allocations.aggregate(t=Sum("amount"))["t"] or Decimal("0")
-        )
         txn.match_status = "manually_matched"
-        txn.save(update_fields=["allocated_amount", "match_status", "updated_at"])
+        txn.save(update_fields=["match_status", "updated_at"])
+        txn.recalc_allocation_state()
 
         invoice.recalc_payment_status()
 

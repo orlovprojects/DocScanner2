@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import BankStatement, IncomingTransaction, OutgoingTransaction, PaymentAllocation
+from .models import BankStatement, IncomingTransaction, OutgoingTransaction, PaymentAllocation, AdClick
 
 
 
@@ -56,3 +56,10 @@ class PaymentAllocationAdmin(admin.ModelAdmin):
     ]
     list_filter = ["source", "status"]
     raw_id_fields = ["incoming_transaction", "invoice", "confirmed_by"]
+
+
+@admin.register(AdClick)
+class AdClickAdmin(admin.ModelAdmin):
+    list_display = ("ad_name", "page_url", "user", "ip_address", "created_at")
+    list_filter = ("ad_name", "created_at")
+    search_fields = ("ad_name", "page_url", "ip_address")

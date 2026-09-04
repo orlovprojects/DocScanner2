@@ -473,6 +473,7 @@ const InvoiceListPage = () => {
 
   const [activeCategory, setActiveCategory] = useState('israsytos');
   const [israsytosSubFilter, setIsrasytosSubFilter] = useState('');
+  const [apmoketosSubFilter, setApmoketosSubFilter] = useState('');
   const [exportedFilter, setExportedFilter] = useState('');
 
   const defaultDates = useMemo(() => getDefaultDates(), []);
@@ -560,11 +561,15 @@ const InvoiceListPage = () => {
       p.category = 'juodrasciai';
     } else if (activeCategory === 'cancelled') {
       p.category = 'cancelled';
+    } else if (activeCategory === 'apmoketos') {
+      p.category = 'apmoketos';
+      if (apmoketosSubFilter === 'full') p.status = 'paid';
+      else if (apmoketosSubFilter === 'partial') p.status = 'partially_paid';
     } else if (activeCategory && activeCategory !== 'periodines') {
       p.category = activeCategory;
     }
     return p;
-  }, [activeCategory, israsytosSubFilter]);
+  }, [activeCategory, israsytosSubFilter, apmoketosSubFilter]);
 
   // ── Build common params ──
 
@@ -785,6 +790,7 @@ const InvoiceListPage = () => {
   const resetFiltersForCategory = (key) => {
     setSelectedRows([]);
     setIsrasytosSubFilter('');
+    setApmoketosSubFilter('');
     if (['juodrasciai', 'cancelled', 'periodines'].includes(key)) setExportedFilter('');
   };
 
@@ -806,6 +812,11 @@ const InvoiceListPage = () => {
 
   const handleSubFilterClick = (sub) => {
     setIsrasytosSubFilter((prev) => (prev === sub ? '' : sub));
+    setSelectedRows([]);
+  };
+
+  const handleApmoketosSubFilterClick = (sub) => {
+    setApmoketosSubFilter((prev) => (prev === sub ? '' : sub));
     setSelectedRows([]);
   };
 
@@ -1161,6 +1172,43 @@ const InvoiceListPage = () => {
                   <Box
                     sx={{ minHeight: 34, display: 'flex', alignItems: 'center', gap: 0.75, flexWrap: 'wrap' }}
                   >
+                    {key === 'apmoketos' && (
+                      <>
+                        <Chip
+                          label={`Pilnai${s.paid_count ? ` (${s.paid_count})` : ''}`}
+                          size="small"
+                          clickable
+                          variant={apmoketosSubFilter === 'full' ? 'filled' : 'outlined'}
+                          color={apmoketosSubFilter === 'full' ? 'success' : 'default'}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (activeCategory !== 'apmoketos') setActiveCategory('apmoketos');
+                            handleApmoketosSubFilterClick('full');
+                          }}
+                          sx={{
+                            height: 28, borderRadius: 2, fontWeight: 600, px: 0.5,
+                            backgroundColor: apmoketosSubFilter === 'full' ? undefined : active ? '#ffffff' : undefined,
+                          }}
+                        />
+                        <Chip
+                          label={`Dalinai${s.partial_count ? ` (${s.partial_count})` : ''}`}
+                          size="small"
+                          clickable
+                          variant={apmoketosSubFilter === 'partial' ? 'filled' : 'outlined'}
+                          color={apmoketosSubFilter === 'partial' ? 'warning' : 'default'}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (activeCategory !== 'apmoketos') setActiveCategory('apmoketos');
+                            handleApmoketosSubFilterClick('partial');
+                          }}
+                          sx={{
+                            height: 28, borderRadius: 2, fontWeight: 600, px: 0.5,
+                            backgroundColor: apmoketosSubFilter === 'partial' ? undefined : active ? '#ffffff' : undefined,
+                          }}
+                        />
+                      </>
+                    )}
+
                     {isIsrasytos && (
                       <>
                         <Chip
@@ -1223,7 +1271,7 @@ const InvoiceListPage = () => {
         </Box>
       </Box>
     );
-  }, [summary, activeCategory, israsytosSubFilter]);
+  }, [summary, activeCategory, israsytosSubFilter, apmoketosSubFilter]);
 
   // ── Export button helpers ──
 
@@ -1278,6 +1326,13 @@ const InvoiceListPage = () => {
 
   // ── renderRowActions ──
 
+  // Ar dar liko neapmokėta — nuo to priklauso „Pažymėti apmokėta" matomumas.
+  const hasRemaining = (inv) => {
+    const total = Math.abs(parseFloat(inv.amount_with_vat || 0));
+    const paid = Math.abs(parseFloat(inv.paid_amount || 0));
+    return total > 0 && paid < total - 0.01;
+  };
+
   const renderRowActions = (inv) => {
     const isLoading = actionLoading === inv.id;
     if (isLoading) return <CircularProgress size={20} />;
@@ -1304,6 +1359,8 @@ const InvoiceListPage = () => {
       a.push('edit');
       if (inv.can_create_pvm_sf) a.push('convert_sf');
       if (inv.can_create_credit) a.push('create_credit');
+      // Dalinai apmokėta — leidžiam pridėti dar vieną mokėjimą.
+      if (hasRemaining(inv)) a.push('mark_paid');
       a.push('duplicate', 'pdf', 'cancel');
     } else {
       if (inv.status === 'draft') {
@@ -1315,10 +1372,11 @@ const InvoiceListPage = () => {
         if (inv.can_create_pvm_sf) a.push('convert_sf');
         if (inv.can_create_credit) a.push('create_credit');
         a.push('send_email', 'mark_paid', 'duplicate', 'pdf', 'cancel');
-      } else if (inv.status === 'paid') {
+      } else if (['paid', 'partially_paid'].includes(inv.status)) {
         a.push('edit');
         if (inv.can_create_pvm_sf) a.push('convert_sf');
         if (inv.can_create_credit) a.push('create_credit');
+        if (hasRemaining(inv)) a.push('mark_paid');
         a.push('duplicate', 'pdf', 'cancel');
       } else if (inv.status === 'cancelled') {
         a.push('duplicate', 'pdf');
@@ -1795,7 +1853,17 @@ const InvoiceListPage = () => {
           <Typography variant="body2">{inv.buyer_name || '—'}</Typography>
           <Box sx={{ display: 'flex', justifyContent: 'space-between', mt: 1 }}>
             <Typography variant="body2" color="text.secondary">{fmtDate(inv.invoice_date)}</Typography>
-            <Typography fontWeight={700}>{fmtAmount(inv.amount_with_vat || inv.amount_wo_vat, inv.currency)}</Typography>
+            <Box sx={{ textAlign: 'right' }}>
+              <Typography fontWeight={700}>{fmtAmount(inv.amount_with_vat || inv.amount_wo_vat, inv.currency)}</Typography>
+              {inv.status === 'partially_paid' && hasRemaining(inv) && (
+                <Typography fontSize={11} sx={{ color: '#ed6c02', fontWeight: 600, lineHeight: 1.2 }}>
+                  liko {fmtAmount(
+                    Math.abs(parseFloat(inv.amount_with_vat || 0)) - Math.abs(parseFloat(inv.paid_amount || 0)),
+                    inv.currency,
+                  )}
+                </Typography>
+              )}
+            </Box>
           </Box>
           <Box sx={{ mt: 1.5, display: 'flex', justifyContent: 'flex-end' }}>{renderRowActions(inv)}</Box>
         </Box>
@@ -2233,6 +2301,14 @@ const InvoiceListPage = () => {
                     <Typography fontWeight={700} fontSize={13}>
                       {fmtAmount(inv.pvm_tipas === 'taikoma' ? inv.amount_with_vat : inv.amount_wo_vat, inv.currency)}
                     </Typography>
+                    {inv.status === 'partially_paid' && hasRemaining(inv) && (
+                      <Typography fontSize={11} sx={{ color: '#ed6c02', fontWeight: 600, lineHeight: 1.2 }}>
+                        liko {fmtAmount(
+                          Math.abs(parseFloat(inv.amount_with_vat || 0)) - Math.abs(parseFloat(inv.paid_amount || 0)),
+                          inv.currency,
+                        )}
+                      </Typography>
+                    )}
                   </TableCell>
                   <TableCell align="center">
                     {inv.exported ? (

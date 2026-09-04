@@ -19,24 +19,30 @@ import {
   ArrowDownward as IncomingIcon, ArrowUpward as OutgoingIcon,
   Edit as EditIcon, OpenInNew as OpenIcon,
   Description as DocIcon,
-  PostAdd as DKIcon,
   Warning as WarningIcon,
   HourglassEmpty as HourglassIcon,
   CheckCircle as DoneIcon,
   PriorityHigh as ExclaimIcon,
   UndoRounded as PaymentReturnedIcon,
+  PauseCircleOutline as DeferIcon,
+  VisibilityOff as IgnoredIcon,
+  ReplayRounded as RestoreIcon,
+  DonutLarge as PartialIcon,
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import { invoicingApi } from '../api/invoicingApi';
 import { useCompanyProfiles } from '../contexts/useCompanyProfiles';
-import RegisterDKDialog from '../components/RegisterDKDialog';
 import ResolveTransactionDialog from '../components/ResolveTransactionDialog';
+import TransactionInfoDialog from '../components/TransactionInfoDialog';
 
 // ── Config ──
 
 const ACTION_STATE_CFG = {
   apdorota:            { label: 'Apdorota',             bg: '#e8f5e9', fg: '#2e7d32', Icon: DoneIcon },
+  dalinai_apdorota:    { label: 'Dalinai apdorota',     bg: '#fff8e1', fg: '#e65100', Icon: PartialIcon },  
   reikia_patvirtinimo: { label: 'Reikia patvirtinimo',  bg: '#fff3e0', fg: '#ed6c02', Icon: ExclaimIcon },
+  atideta:             { label: 'Atidėta',              bg: '#ede7f6', fg: '#5e35b1', Icon: DeferIcon },
+  ignoruota:           { label: 'Ignoruojama',          bg: '#eceff1', fg: '#90a4ae', Icon: IgnoredIcon },
   laukia_dokumento:    { label: 'Laukia dokumento',     bg: '#f5f5f5', fg: '#757575', Icon: HourglassIcon },
 };
 
@@ -73,6 +79,7 @@ const CAT_CFG = {
   chargeback:          { label: 'Chargeback',                 color: '#e65100' },
   tax_customs:         { label: 'Muitinės mokestis',        color: '#5d4037' },
   paypal_card_funding: { label: 'PayPal sąskaitos papildymas', color: '#0070ba' },
+  manual_dk:           { label: 'Apdorota rankiniu būdu',     color: '#00695c' },
   other_expense:       { label: 'Kitos sąnaudos',             color: '#757575' },
   other_income:        { label: 'Kitos pajamos',              color: '#757575' },
   shopify_pardavimas:  { label: 'Shopify pardavimas',         color: '#4F7D28', bg: '#95BF4724', border: '#95BF477A' },
@@ -114,7 +121,7 @@ const BankTransactionsTab = ({ statements = [], initialStatementId = '', onClear
   // ── Table state ──
   const [txns, setTxns] = useState([]);
   const [txnTotal, setTxnTotal] = useState(0);
-  const [apiStats, setApiStats] = useState({ total: 0, apdorota: 0, reikia_veiksmu: 0 });
+  const [apiStats, setApiStats] = useState({ total: 0, apdorota: 0, reikia_veiksmu: 0, atideta: 0, dalinai: 0 });
   const [txnLoad, setTxnLoad] = useState(true);
   const [txnMore, setTxnMore] = useState(false);
   const txnOff = useRef(0), txnHas = useRef(true), txnSen = useRef(null), txnObs = useRef(null);
@@ -132,11 +139,9 @@ const BankTransactionsTab = ({ statements = [], initialStatementId = '', onClear
   const [editCatId, setEditCatId] = useState(null);
   const [catSaving, setCatSaving] = useState(null);
 
-  // ── Register DK dialog ──
-  const [dkDlg, setDkDlg] = useState({ open: false, txn: null });
-
   // ── Match dialog ──
   const [mtDlg, setMtDlg] = useState({ open: false, txn: null });
+  const [infoDlg, setInfoDlg] = useState({ open: false, txn: null });
 
   useEffect(() => { setTxnF(p => ({ ...p, statement_id: initialStatementId })); }, [initialStatementId]);
 
@@ -173,24 +178,24 @@ const BankTransactionsTab = ({ statements = [], initialStatementId = '', onClear
   }, [loadTxns, txnMore, txnLoad]);
 
   // ── Detail dialog ──
-  const openDetail = async (txn) => {
-    setDtlOpen(true);
-    setDtlTxn(txn);
-    setDtlAlloc(null);
-    setDtlLoad(true);
-    setDtlAllocLoad(false);
+  const openDetail = (txn) => {
+    // Dalinai paskirstyta — tęsiam paskirstymą, o ne rodom detales.
+    if (txn.action_state === 'dalinai_apdorota') {
+      openMt(txn, 'match');
+      return;
+    }
 
-    try {
-      const { data } = await invoicingApi.getBankTransactionDetail(txn.id, txn.direction);
-      setDtlTxn(data);
-      setDtlLoad(false);
+    const isRaw =
+      !isMatchedStatus(txn.match_status) &&
+      txn.match_status !== 'classified' &&
+      !['deferred', 'ignored'].includes(txn.match_status) &&
+      !txn.journal_entry_id;
 
-      if (data.allocations?.length > 0) {
-        setDtlAllocLoad(true);
-        try { const { data: ad } = await invoicingApi.getAllocationPreview(data.allocations[0].id); setDtlAlloc(ad); } catch {}
-        setDtlAllocLoad(false);
-      }
-    } catch { setDtlLoad(false); }
+    if (isRaw) {
+      openMt(txn, txn.transaction_category ? 'dk' : 'match');
+      return;
+    }
+    setInfoDlg({ open: true, txn });
   };
 
   const closeDetail = () => { setDtlOpen(false); setDtlTxn(null); setDtlAlloc(null); };
@@ -205,6 +210,18 @@ const BankTransactionsTab = ({ statements = [], initialStatementId = '', onClear
     setActLoad(id);
     try { await invoicingApi.rejectAllocation(id); show('Atmesta'); closeDetail(); loadTxns(true); }
     catch { show('Nepavyko', 'error'); } finally { setActLoad(null); }
+  };
+  const doRestore = async (t) => {
+    setActLoad(`r-${t.id}`);
+    try {
+      const api = t.match_status === 'ignored'
+        ? invoicingApi.ignoreTransaction
+        : invoicingApi.deferTransaction;
+      await api(t.id, { undo: true });
+      show('Grąžinta į apdorojimą');
+      loadTxns(true);
+    } catch { show('Nepavyko', 'error'); }
+    finally { setActLoad(null); }
   };
   const handleUnlink = async (allocId) => {
     try { await invoicingApi.rejectAllocation(allocId); show('Susiejimas panaikintas'); closeDetail(); loadTxns(true); }
@@ -326,6 +343,12 @@ const BankTransactionsTab = ({ statements = [], initialStatementId = '', onClear
         />
 
         {rPaymentReturn(txn)}
+
+        {txn.action_state === 'dalinai_apdorota' && txn.remaining_amount != null && (
+          <Typography fontSize={11} fontWeight={700} color="#e65100">
+            liko {fmt(txn.remaining_amount, txn.currency)}
+          </Typography>
+        )}
       </Box>
     );
   };
@@ -347,7 +370,7 @@ const BankTransactionsTab = ({ statements = [], initialStatementId = '', onClear
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, '&:hover .edit-icon': { opacity: 1 } }}>
           <Typography variant="caption" color="text.disabled">—</Typography>
           <IconButton size="small" className="edit-icon" sx={{ opacity: 0, transition: 'opacity 0.15s', p: 0.25 }}
-            onClick={e => { e.stopPropagation(); setEditCatId(t.id); }}>
+            onClick={e => { e.stopPropagation(); openMt(t, 'type'); }}>
             <EditIcon sx={{ fontSize: 14, color: '#bdbdbd' }} />
           </IconButton>
         </Box>
@@ -366,7 +389,7 @@ const BankTransactionsTab = ({ statements = [], initialStatementId = '', onClear
         }} />
         {t.match_status === 'unmatched' && (
           <IconButton size="small" className="edit-icon" sx={{ opacity: 0, transition: 'opacity 0.15s', p: 0.25 }}
-            onClick={e => { e.stopPropagation(); setEditCatId(t.id); }}>
+            onClick={e => { e.stopPropagation(); openMt(t, 'type'); }}>
             <EditIcon sx={{ fontSize: 14, color: '#bdbdbd' }} />
           </IconButton>
         )}
@@ -386,9 +409,31 @@ const BankTransactionsTab = ({ statements = [], initialStatementId = '', onClear
   };
 
   const rActs = (t) => {
+    if (['atideta', 'ignoruota'].includes(t.action_state)) {
+      return (
+        <Tooltip title="Grąžinti į apdorojimą">
+          <IconButton size="small" color="primary" disabled={actLoad === `r-${t.id}`}
+            onClick={e => { e.stopPropagation(); doRestore(t); }}>
+            {actLoad === `r-${t.id}`
+              ? <CircularProgress size={16} />
+              : <RestoreIcon fontSize="small" />}
+          </IconButton>
+        </Tooltip>
+      );
+    }
+    if (t.action_state === 'dalinai_apdorota') {
+      return (
+        <Tooltip title="Tęsti paskirstymą">
+          <IconButton size="small" sx={{ color: '#e65100' }}
+            onClick={e => { e.stopPropagation(); openMt(t, 'match'); }}>
+            <PartialIcon fontSize="small" />
+          </IconButton>
+        </Tooltip>
+      );
+    }
     if (t.match_status === 'unmatched' && !t.transaction_category) {
       return (
-        <Tooltip title="Susieti">
+        <Tooltip title="Apdoroti">
           <IconButton size="small" color="primary" onClick={e => { e.stopPropagation(); openMt(t); }}>
             <LinkIcon fontSize="small" />
           </IconButton>
@@ -417,6 +462,8 @@ const BankTransactionsTab = ({ statements = [], initialStatementId = '', onClear
           active={txnF.match_status === 'apdorota'} onClick={() => handleStatClick('apdorota')} />
         <SC icon={<WarningIcon sx={{ color: '#ed6c02' }} />} label="Reikia veiksmų" value={apiStats.reikia_veiksmu} color="#ed6c02"
           active={txnF.match_status === 'reikia_veiksmu'} onClick={() => handleStatClick('reikia_veiksmu')} />
+        <SC icon={<DeferIcon sx={{ color: '#5e35b1' }} />} label="Atidėta / ignoruota" value={apiStats.atideta || 0} color="#5e35b1"
+          active={txnF.match_status === 'atideta'} onClick={() => handleStatClick('atideta')} />
       </Box>
 
       {/* ══ FILTERS ══ */}
@@ -438,6 +485,19 @@ const BankTransactionsTab = ({ statements = [], initialStatementId = '', onClear
             <MenuItem value="">Visos</MenuItem><MenuItem value="uncategorized">Nekategorizuota</MenuItem>
             {Object.entries(CAT_CFG).map(([k, v]) => <MenuItem key={k} value={k}>{v.label}</MenuItem>)}
           </TextField>
+          {(apiStats.dalinai || 0) > 0 && (
+            <Chip
+              icon={<PartialIcon sx={{ fontSize: 15, color: '#e65100 !important' }} />}
+              label={`Dalinai paskirstyta (${apiStats.dalinai})`}
+              size="small"
+              onClick={() => handleStatClick('dalinai')}
+              variant={txnF.match_status === 'dalinai' ? 'filled' : 'outlined'}
+              sx={{
+                fontSize: 11, height: 28, fontWeight: 600,
+                color: '#e65100', borderColor: 'rgba(230,81,0,0.4)',
+                bgcolor: txnF.match_status === 'dalinai' ? 'rgba(255,152,0,0.12)' : undefined,
+              }} />
+          )}
           {txnF.statement_id && <Chip label="Rodyti visus" size="small" onDelete={() => { setTxnF(p => ({ ...p, statement_id: '' })); onClearStatementFilter?.(); }} />}
         </Box>
       </Paper>
@@ -455,8 +515,18 @@ const BankTransactionsTab = ({ statements = [], initialStatementId = '', onClear
             </TableRow></TableHead>
             <TableBody>
               {txns.map(t => (
-                <TableRow key={`${t.direction}-${t.id}`} hover sx={{ '& td': { py: 1.2 }, cursor: 'pointer',
-                  backgroundColor: t.match_status === 'unmatched' && !t.transaction_category ? 'rgba(255,152,0,0.04)' : undefined }}
+                <TableRow key={`${t.direction}-${t.id}`} hover sx={{
+                  '& td': { py: 1.2 }, cursor: 'pointer',
+                  backgroundColor: t.action_state === 'ignoruota'
+                    ? '#fafafa'
+                    : t.action_state === 'dalinai_apdorota'
+                      ? 'rgba(255,152,0,0.06)'
+                      : (t.match_status === 'unmatched' && !t.transaction_category ? 'rgba(255,152,0,0.04)' : undefined),
+                  opacity: t.action_state === 'ignoruota' ? 0.5 : 1,
+                  '& td:not(:last-child)': t.action_state === 'ignoruota'
+                    ? { filter: 'grayscale(1)' }
+                    : undefined,
+                }}
                   onClick={() => openDetail(t)}>
                   <TableCell>{rDir(t.direction)}</TableCell>
                   <TableCell><Typography fontSize={13}>{fmtD(t.transaction_date)}</Typography></TableCell>
@@ -718,13 +788,44 @@ const BankTransactionsTab = ({ statements = [], initialStatementId = '', onClear
             </Box>
 
           ) : dtlTxn && (
-            /* ═══ UNMATCHED ═══ */
+            /* ═══ UNMATCHED / DEFERRED / IGNORED ═══ */
             <Box>
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2, p: 1.5, borderRadius: 2,
-                bgcolor: 'rgba(255,152,0,0.06)', border: '1px solid rgba(255,152,0,0.2)' }}>
-                <WarningIcon sx={{ color: '#ed6c02', fontSize: 20 }} />
-                <Typography fontSize={13} color="text.secondary">Ši operacija dar neapdorota</Typography>
-              </Box>
+              {dtlTxn.match_status === 'deferred' ? (
+                <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1, mb: 2, p: 1.5, borderRadius: 2,
+                  bgcolor: 'rgba(94,53,177,0.06)', border: '1px solid rgba(94,53,177,0.2)' }}>
+                  <DeferIcon sx={{ color: '#5e35b1', fontSize: 20, mt: 0.25 }} />
+                  <Box sx={{ flex: 1 }}>
+                    <Typography fontSize={13} fontWeight={600} color="#5e35b1">
+                      Atidėta iki {fmtD(dtlTxn.deferred_until)}
+                    </Typography>
+                    {dtlTxn.match_details?.deferred?.note && (
+                      <Typography fontSize={12} color="text.secondary" sx={{ mt: 0.25 }}>
+                        {dtlTxn.match_details.deferred.note}
+                      </Typography>
+                    )}
+                  </Box>
+                  <Button size="small" startIcon={<RestoreIcon />} onClick={() => doRestore(dtlTxn)}>
+                    Grąžinti
+                  </Button>
+                </Box>
+              ) : dtlTxn.match_status === 'ignored' ? (
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2, p: 1.5, borderRadius: 2,
+                  bgcolor: '#f5f5f5', border: '1px solid #e0e0e0' }}>
+                  <IgnoredIcon sx={{ color: '#90a4ae', fontSize: 20 }} />
+                  <Typography fontSize={13} color="text.secondary" sx={{ flex: 1 }}>
+                    Operacija ignoruojama — DK įrašas nebus kuriamas
+                  </Typography>
+                  <Button size="small" startIcon={<RestoreIcon />} onClick={() => doRestore(dtlTxn)}>
+                    Grąžinti
+                  </Button>
+                </Box>
+              ) : (
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2, p: 1.5, borderRadius: 2,
+                  bgcolor: 'rgba(255,152,0,0.06)', border: '1px solid rgba(255,152,0,0.2)' }}>
+                  <WarningIcon sx={{ color: '#ed6c02', fontSize: 20 }} />
+                  <Typography fontSize={13} color="text.secondary">Ši operacija dar neapdorota</Typography>
+                </Box>
+              )}
               {dtlTxn.counterparty_account && <DR label="IBAN" value={dtlTxn.counterparty_account} />}
               {dtlTxn.doc_number && <DR label="Dok. Nr." value={dtlTxn.doc_number} />}
               {dtlTxn.reference_number && <DR label="Nuoroda" value={dtlTxn.reference_number} />}
@@ -754,27 +855,23 @@ const BankTransactionsTab = ({ statements = [], initialStatementId = '', onClear
                 }}>Atidaryti dokumentą</Button>
             </>) : dtlIsClassified ? (<>
               <Box />
-              <Button variant="outlined" size="small" onClick={() => { closeDetail(); setDkDlg({ open: true, txn: dtlTxn }); }}>Keisti tipą</Button>
+              <Button variant="outlined" size="small" onClick={() => { closeDetail(); openMt(dtlTxn, 'dk'); }}>Keisti D/K</Button>
             </>) : dtlIsUnmatched ? (
-              <Box sx={{ display: 'flex', gap: 1, width: '100%' }}>
-                <Button variant="outlined" size="small" sx={{ flex: 1 }} startIcon={<LinkIcon />}
-                  onClick={() => { closeDetail(); openMt(dtlTxn); }}>Susieti su dokumentu</Button>
-                <Button variant="outlined" size="small" sx={{ flex: 1 }} startIcon={<DKIcon />}
-                  onClick={() => { closeDetail(); setDkDlg({ open: true, txn: dtlTxn }); }}>Sukurti DK įrašą</Button>
-              </Box>
+              <Button fullWidth variant="contained" size="small" startIcon={<LinkIcon />}
+                onClick={() => { closeDetail(); openMt(dtlTxn); }}>Apdoroti operaciją</Button>
             ) : <Box />}
           </DialogActions>
         )}
       </Dialog>
 
-      {/* ══ REGISTER DK DIALOG ══ */}
+      {/* ══ REGISTER DK DIALOG ══
       <RegisterDKDialog
         open={dkDlg.open}
         txn={dkDlg.txn}
         onClose={() => setDkDlg({ open: false, txn: null })}
         onSuccess={() => loadTxns(true)}
         showSnack={show}
-      />
+      /> */}
 
       {/* ══ MATCH DIALOG ══ */}
       <ResolveTransactionDialog
@@ -785,6 +882,14 @@ const BankTransactionsTab = ({ statements = [], initialStatementId = '', onClear
         onSuccess={() => loadTxns(true)}
         showSnack={show}
         onOpenDkDialog={(t) => setDkDlg({ open: true, txn: t })}
+      />
+      <TransactionInfoDialog
+        open={infoDlg.open}
+        txn={infoDlg.txn}
+        onClose={() => setInfoDlg({ open: false, txn: null })}
+        onSuccess={() => loadTxns(true)}
+        showSnack={show}
+        onEdit={(t, tab) => openMt(t, tab)}
       />
     </>
   );

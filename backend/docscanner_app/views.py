@@ -24,6 +24,8 @@ from openpyxl import Workbook
 from rest_framework.exceptions import ValidationError
 from django.contrib.postgres.search import TrigramSimilarity
 from django.utils.html import strip_tags
+from django.db.models import F, Value
+from django.db.models.functions import Coalesce
 
 
 from django.core.files.base import ContentFile
@@ -3999,6 +4001,11 @@ def user_me_view(request):
 #     return Response(data)
 
 
+from django.views.decorators.csrf import csrf_exempt
+from django.utils.decorators import method_decorator
+
+
+@method_decorator(csrf_exempt, name="dispatch")
 class TrackAdClickView(generics.CreateAPIView):
     queryset = AdClick.objects.all()
     serializer_class = AdClickSerializer
@@ -4006,14 +4013,17 @@ class TrackAdClickView(generics.CreateAPIView):
 
     def create(self, request, *args, **kwargs):
         user = request.user if request.user.is_authenticated else None
-        ip = request.META.get("REMOTE_ADDR")
+        xff = request.META.get("HTTP_X_FORWARDED_FOR", "")
+        ip = xff.split(",")[0].strip() if xff else request.META.get("REMOTE_ADDR")
         ua = request.META.get("HTTP_USER_AGENT", "")
 
-        ad_click = AdClick.objects.create(
+        AdClick.objects.create(
             ad_name=request.data.get("ad_name", "Unknown"),
             user=user,
             ip_address=ip,
-            user_agent=ua
+            user_agent=ua,
+            page_url=(request.data.get("page_url") or "")[:500],
+            referrer=(request.META.get("HTTP_REFERER") or "")[:500],
         )
         return Response({"status": "ok"})
 
@@ -6882,6 +6892,9 @@ def invoice_list(request):
 
     elif category == "apmoketos":
         qs = qs.filter(status__in=["paid", "partially_paid"])
+        # Sub-filter: Pilnai / Dalinai
+        if status_param in ("paid", "partially_paid"):
+            qs = qs.filter(status=status_param)
 
     elif category == "juodrasciai":
         qs = qs.filter(status="draft")
@@ -7330,7 +7343,7 @@ def invoice_send(request, pk):
 def invoice_mark_paid(request, pk):
     invoice = get_object_or_404(Invoice, pk=pk, user=request.user)
 
-    if invoice.status not in ("issued", "sent", "partially_paid"):
+    if invoice.status not in ("issued", "sent", "partially_paid", "paid"):
         return Response(
             {"detail": "Galima pažymėti tik išrašytą/išsiųstą/dalinai apmokėtą sąskaitą."},
             status=status.HTTP_400_BAD_REQUEST,
@@ -7356,6 +7369,10 @@ def invoice_mark_paid(request, pk):
         )
 
     note = request.data.get("note", "")
+    payment_account = (request.data.get("payment_account") or "").strip()
+
+    # Kreditinės sumos saugomos neigiamos — aliokacijai reikia teigiamos.
+    amount = abs(amount)
 
     # Create PaymentAllocation
     from .services.payment_service import PaymentService
@@ -7365,6 +7382,7 @@ def invoice_mark_paid(request, pk):
         amount=amount,
         payment_date=payment_date,
         note=note,
+        payment_account=payment_account,
     )
 
     # Auto SF creation
@@ -7696,7 +7714,11 @@ def invoice_summary(request):
     date_from = request.query_params.get("date_from")
     date_to = request.query_params.get("date_to")
 
-    base_qs = Invoice.objects.filter(user=user).exclude(source_invoice__isnull=False)
+    # Iš išankstinės sukurta PVM SF nerodoma atskirai (kad suma nesidubliuotų),
+    # bet kreditinė yra savarankiškas dokumentas ir turi būti skaičiuojama.
+    base_qs = Invoice.objects.filter(user=user).exclude(
+        Q(source_invoice__isnull=False) & ~Q(invoice_type="kreditine")
+    )
 
     company_id = request.query_params.get("company_profile")
     if company_id:
@@ -7719,7 +7741,7 @@ def invoice_summary(request):
         status__in=["issued", "sent"], due_date__lt=today,
     )
 
-    apmoketos_qs = base_qs.filter(status="paid")
+    apmoketos_qs = base_qs.filter(status__in=["paid", "partially_paid"])
     juodrasciai_qs = base_qs.filter(status="draft")
     cancelled_qs = base_qs.filter(status="cancelled")
     exported_qs = base_qs.filter(exported=True)
@@ -7731,10 +7753,21 @@ def invoice_summary(request):
             "total": str(agg["total"] or Decimal("0.00")),
         }
 
+    def _agg_paid(qs):
+        """Apmokėtos: bendra suma + kiek dar liko iš dalinai apmokėtų."""
+        data = _agg(qs)
+        rem = qs.filter(status="partially_paid").aggregate(
+            t=Sum(F("amount_with_vat") - Coalesce(F("paid_amount"), Value(Decimal("0")))),
+        )["t"] or Decimal("0.00")
+        data["remaining"] = str(rem)
+        data["paid_count"] = qs.filter(status="paid").count()
+        data["partial_count"] = qs.filter(status="partially_paid").count()
+        return data
+
     return Response({
         "israsytos": _agg(israsytos_qs),
         "veluojancios": _agg(veluojancios_qs),
-        "apmoketos": _agg(apmoketos_qs),
+        "apmoketos": _agg_paid(apmoketos_qs),
         "juodrasciai": _agg(juodrasciai_qs),
         "cancelled": _agg(cancelled_qs),
         "exported": _agg(exported_qs),
@@ -9463,20 +9496,69 @@ PROCESSED_MATCH_STATUSES = (
 )
 
 
+DEFERRED_MATCH_STATUSES = ("deferred", "ignored")
+
+ALLOCATION_MATCH_STATUSES = ("auto_matched", "confirmed", "manually_matched")
+
+def _q_doc_from_txn(document, txn, amount_txn):
+    """Operacijos valiutos suma → dokumento valiuta (per EUR)."""
+    from decimal import Decimal, ROUND_HALF_UP
+    from .services.allocation_fx import txn_to_eur, get_doc_rate
+
+    eur = txn_to_eur(txn, amount_txn)
+    return (eur * get_doc_rate(document)).quantize(
+        Decimal("0.01"), ROUND_HALF_UP,
+    )
+
 def get_action_state(txn) -> str:
     """
     Человеческий статус обработки для UI. Чистая функция от полей txn.
-      apdorota          — DK создан или сматчено с высоким confidence
-      reikia_patvirtinimo — есть кандидат, но低 confidence (likely_matched)
-      laukia_dokumento  — нет второй стороны, ждёт действия юзера
+      apdorota            — DK создан или сматчено с высоким confidence
+      reikia_patvirtinimo — есть кандидат, но низкий confidence (likely_matched)
+      atideta             — юзер отложил (terminas dar nepraėjo) arba ignoravo
+      laukia_dokumento    — nėra antros pusės arba atidėjimo terminas praėjo
     """
+    from django.utils import timezone as _tz
+
+    if txn.is_partially_allocated:
+        return "dalinai_apdorota"
     if txn.journal_entry_id:
         return "apdorota"
     if txn.match_status in PROCESSED_MATCH_STATUSES:
         return "apdorota"
     if txn.match_status == "likely_matched":
         return "reikia_patvirtinimo"
+    if txn.match_status == "ignored":
+        return "ignoruota"
+    if txn.match_status == "deferred":
+        # Terminas praėjo — operacija grįžta į „Reikia veiksmų“.
+        if txn.deferred_until and txn.deferred_until <= _tz.now().date():
+            return "laukia_dokumento"
+        return "atideta"
     return "laukia_dokumento"
+
+def _partial_q():
+    """Q для операций, связанных частично (liko nepaskirstyta suma)."""
+    from django.db.models import F, Q
+
+    return (
+        Q(match_status__in=ALLOCATION_MATCH_STATUSES)
+        & Q(amount__gt=0)
+        & Q(allocated_amount__lt=F("amount"))
+    )
+
+
+def _deferred_q():
+    """Q для операций, которые сейчас реально скрыты (terminas dar nepraėjo)."""
+    from django.db.models import Q
+    from django.utils import timezone as _tz
+
+    today = _tz.now().date()
+    return (
+        Q(match_status="ignored")
+        | Q(match_status="deferred", deferred_until__gt=today)
+        | Q(match_status="deferred", deferred_until__isnull=True)
+    )
 
 class TransactionListView(APIView):
     """
@@ -9527,10 +9609,23 @@ class TransactionListView(APIView):
 
                 if match_status == "reikia_veiksmu":
                     qs = qs.exclude(
-                        Q(journal_entry__isnull=False)
-                        | Q(
-                            match_status__in=PROCESSED_MATCH_STATUSES
+                        (
+                            Q(journal_entry__isnull=False)
+                            | Q(
+                                match_status__in=PROCESSED_MATCH_STATUSES
+                            )
+                            | _deferred_q()
                         )
+                        & ~_partial_q()
+                    )
+
+                elif match_status == "dalinai":
+                    qs = qs.filter(_partial_q())
+
+                elif match_status == "atideta":
+                    qs = qs.filter(
+                        _deferred_q(),
+                        journal_entry__isnull=True,
                     )
 
                 elif match_status == "apdorota":
@@ -9539,7 +9634,7 @@ class TransactionListView(APIView):
                         | Q(
                             match_status__in=PROCESSED_MATCH_STATUSES
                         )
-                    )
+                    ).exclude(_partial_q())
 
                 elif match_status == "reikia_patvirtinimo":
                     qs = qs.filter(
@@ -9558,6 +9653,7 @@ class TransactionListView(APIView):
                         .exclude(
                             match_status="likely_matched"
                         )
+                        .exclude(_deferred_q())
                     )
 
                 # backward compatibility
@@ -9702,7 +9798,9 @@ class TransactionListView(APIView):
         _ORDER = {
             "reikia_patvirtinimo": 0,
             "laukia_dokumento": 1,
-            "apdorota": 2,
+            "atideta": 2,
+            "apdorota": 3,
+            "ignoruota": 4,
         }
 
         merged.sort(
@@ -9747,6 +9845,14 @@ class TransactionListView(APIView):
                 "currency": txn.currency,
                 "amount_eur": txn.amount_eur,
                 "fee_amount": txn.fee_amount,
+
+                "allocated_amount": (
+                    txn.allocated_amount or 0
+                ),
+
+                "remaining_amount": (
+                    txn.unallocated_amount
+                ),
 
                 "tx_type": get_tx_type_display(
                     txn.bank_operation_code
@@ -9852,16 +9958,23 @@ class TransactionListView(APIView):
         from django.db.models import Q
 
         def bucket_counts(qs):
+            dalinai = qs.filter(_partial_q()).count()
+
             apdorota = qs.filter(
                 Q(journal_entry__isnull=False)
                 | Q(
                     match_status__in=PROCESSED_MATCH_STATUSES
                 )
-            ).count()
+            ).exclude(_partial_q()).count()
 
             reikia = qs.filter(
                 journal_entry__isnull=True,
                 match_status="likely_matched",
+            ).count()
+
+            atideta = qs.filter(
+                _deferred_q(),
+                journal_entry__isnull=True,
             ).count()
 
             total_count = qs.count()
@@ -9869,21 +9982,25 @@ class TransactionListView(APIView):
             laukia = (
                 total_count
                 - apdorota
+                - dalinai
                 - reikia
+                - atideta
             )
 
             return (
                 apdorota,
                 reikia,
+                atideta,
                 laukia,
+                dalinai,
                 total_count,
             )
 
-        a_i, r_i, l_i, t_i = bucket_counts(
+        a_i, r_i, d_i, l_i, p_i, t_i = bucket_counts(
             inc_stats
         )
 
-        a_o, r_o, l_o, t_o = bucket_counts(
+        a_o, r_o, d_o, l_o, p_o, t_o = bucket_counts(
             out_stats
         )
 
@@ -9897,6 +10014,11 @@ class TransactionListView(APIView):
             "reikia_veiksmu": (
                 (r_i + r_o)
                 + (l_i + l_o)
+                + (p_i + p_o)
+            ),
+
+            "dalinai": (
+                p_i + p_o
             ),
 
             "reikia_patvirtinimo": (
@@ -9905,6 +10027,10 @@ class TransactionListView(APIView):
 
             "laukia_dokumento": (
                 l_i + l_o
+            ),
+
+            "atideta": (
+                d_i + d_o
             ),
         }
 
@@ -9994,6 +10120,7 @@ def _build_txn_full(txn, direction_str, allocs):
         "exchange_rate_date": txn.exchange_rate_date,
         "fee_amount": txn.fee_amount,
         "fee_amount_eur": txn.fee_amount_eur,
+        "deferred_until": txn.deferred_until,
     })
     return data
 
@@ -10615,7 +10742,10 @@ class TransactionDeferView(APIView):
             details.pop("deferred", None)
             txn.match_details = details
             txn.match_status = "unmatched"
-            txn.save(update_fields=["match_status", "match_details", "updated_at"])
+            txn.deferred_until = None
+            txn.save(update_fields=[
+                "match_status", "match_details", "deferred_until", "updated_at",
+            ])
             return Response({"status": "unmatched"})
 
         try:
@@ -10624,8 +10754,10 @@ class TransactionDeferView(APIView):
             days = 30
         days = max(1, min(days, 365))
 
+        until = timezone.now().date() + timedelta(days=days)
+
         details["deferred"] = {
-            "until": str((txn.transaction_date or timezone.now().date()) + timedelta(days=days)),
+            "until": str(until),
             "days": days,
             "reason": (request.data.get("reason") or "")[:100],
             "note": (request.data.get("note") or "")[:500],
@@ -10634,8 +10766,11 @@ class TransactionDeferView(APIView):
 
         txn.match_details = details
         txn.match_status = "deferred"
-        txn.save(update_fields=["match_status", "match_details", "updated_at"])
-        return Response({"status": "deferred", "until": details["deferred"]["until"]})
+        txn.deferred_until = until
+        txn.save(update_fields=[
+            "match_status", "match_details", "deferred_until", "updated_at",
+        ])
+        return Response({"status": "deferred", "until": str(until)})
 
 
 class TransactionIgnoreView(APIView):
@@ -10674,7 +10809,10 @@ class TransactionIgnoreView(APIView):
             details.pop("ignored", None)
             txn.match_details = details
             txn.match_status = "unmatched"
-            txn.save(update_fields=["match_status", "match_details", "updated_at"])
+            txn.deferred_until = None
+            txn.save(update_fields=[
+                "match_status", "match_details", "deferred_until", "updated_at",
+            ])
             return Response({"status": "unmatched"})
 
         details["ignored"] = {
@@ -10686,6 +10824,230 @@ class TransactionIgnoreView(APIView):
         txn.match_status = "ignored"
         txn.save(update_fields=["match_status", "match_details", "updated_at"])
         return Response({"status": "ignored"})
+
+class TransactionFullInfoView(APIView):
+    """
+    GET /api/invoicing/bank-transactions/<id>/full-info/?direction=outgoing
+
+    Viskas, ko reikia apdorotos operacijos peržiūrai:
+    dokumentas, abu DK įrašai, susiejimo kriterijai, sutikrinimas.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    DEBT_ACCOUNTS = {"invoice": "2410", "purchase": "4430"}
+
+    def get(self, request, pk):
+        from .models import (
+            IncomingTransaction, OutgoingTransaction,
+            PaymentAllocation, JournalEntry,
+        )
+        from .serializers import JournalEntrySerializer
+
+        direction = (request.query_params.get("direction") or "").strip()
+        txn, direction_str = None, direction
+
+        if direction == "incoming":
+            txn = IncomingTransaction.objects.filter(
+                id=pk, user=request.user,
+            ).select_related("bank_statement", "journal_entry").first()
+        elif direction == "outgoing":
+            txn = OutgoingTransaction.objects.filter(
+                id=pk, user=request.user,
+            ).select_related("bank_statement", "journal_entry").first()
+        else:
+            txn = OutgoingTransaction.objects.filter(
+                id=pk, user=request.user,
+            ).select_related("bank_statement", "journal_entry").first()
+            if txn:
+                direction_str = "outgoing"
+            else:
+                txn = IncomingTransaction.objects.filter(
+                    id=pk, user=request.user,
+                ).select_related("bank_statement", "journal_entry").first()
+                direction_str = "incoming"
+
+        cp = _get_active_cp(request.user)
+        if txn and cp and txn.company_profile_id != cp.id:
+            txn = None
+        if not txn:
+            return Response({"detail": "Operacija nerasta."}, status=404)
+
+        ctx = {"request": request}
+
+        # ── Allocation + dokumentas ──
+        fk = "incoming_transaction" if direction_str == "incoming" else "outgoing_transaction"
+        alloc = (
+            PaymentAllocation.objects
+            .filter(**{fk: txn})
+            .select_related(
+                "invoice", "purchase",
+                "purchase__scanned_document", "invoice__scanned_document",
+                "journal_entry",
+            )
+            .order_by("-confidence", "-created_at")
+            .first()
+        )
+
+        alloc_data = None
+        doc_data = None
+        doc_entry_data = None
+        doc_type = ""
+
+        if alloc:
+            alloc_data = {
+                "id": alloc.id,
+                "amount": str(alloc.amount),
+                "confidence": str(alloc.confidence or "0"),
+                "status": alloc.status,
+                "source": alloc.source,
+                "payment_date": alloc.payment_date,
+                "match_reasons": self._clean_reasons(alloc.match_reasons),
+            }
+
+            doc = alloc.invoice or alloc.purchase
+            doc_type = "invoice" if alloc.invoice_id else "purchase"
+
+            if doc:
+                doc_data = self._doc_dict(doc, doc_type)
+
+                src = (
+                    JournalEntry.SOURCE_SALE if doc_type == "invoice"
+                    else JournalEntry.SOURCE_PURCHASE
+                )
+                doc_entry = (
+                    JournalEntry.objects
+                    .filter(
+                        **{doc_type: doc},
+                        source_type=src,
+                    )
+                    .prefetch_related("lines")
+                    .first()
+                )
+                if doc_entry:
+                    doc_entry_data = JournalEntrySerializer(doc_entry, context=ctx).data
+
+        # ── Mokėjimo / klasifikacijos DK ──
+        pay_entry = alloc.journal_entry if (alloc and alloc.journal_entry_id) else txn.journal_entry
+        pay_entry_data = None
+        if pay_entry:
+            pay_entry = (
+                JournalEntry.objects
+                .filter(id=pay_entry.id)
+                .prefetch_related("lines")
+                .first()
+            )
+            if pay_entry:
+                pay_entry_data = JournalEntrySerializer(pay_entry, context=ctx).data
+
+        # ── Sutikrinimas pagal skolų sąskaitą ──
+        recon = None
+        if doc_type and doc_entry_data and pay_entry_data:
+            acct = self.DEBT_ACCOUNTS.get(doc_type)
+            doc_sum = self._sum_by_account(doc_entry_data["lines"], acct)
+            pay_sum = self._sum_by_account(pay_entry_data["lines"], acct)
+            recon = {
+                "account": acct,
+                "doc_amount": str(doc_sum),
+                "pay_amount": str(pay_sum),
+                "diff": str(doc_sum - pay_sum),
+                "ok": abs(doc_sum - pay_sum) <= Decimal("0.01"),
+            }
+
+        allocated = sum(
+            (Decimal(str(a.amount or 0)) for a in txn.allocations.exclude(status="proposed")),
+            Decimal("0"),
+        )
+        amount = Decimal(str(txn.amount or 0))
+
+        return Response({
+            "transaction": {
+                "id": txn.id,
+                "direction": direction_str,
+                "amount": str(amount),
+                "amount_eur": str(txn.amount_eur) if txn.amount_eur is not None else None,
+                "currency": txn.currency or "EUR",
+                "transaction_date": txn.transaction_date,
+                "counterparty_name": txn.counterparty_name or "",
+                "counterparty_code": txn.counterparty_code or "",
+                "counterparty_account": txn.counterparty_account or "",
+                "payment_purpose": txn.payment_purpose or "",
+                "doc_number": txn.doc_number or "",
+                "reference_number": txn.reference_number or "",
+                "bank_name": getattr(txn.bank_statement, "bank_name", "") or "",
+                "match_status": txn.match_status,
+                "action_state": get_action_state(txn),
+                "transaction_category": txn.transaction_category or "",
+                "category_display": (
+                    txn.get_transaction_category_display()
+                    if txn.transaction_category else ""
+                ),
+                "allocated_amount": str(allocated),
+                "remaining_amount": str(max(amount - allocated, Decimal("0"))),
+                "fee_amount": str(txn.fee_amount or 0),
+                "fee_amount_eur": str(txn.fee_amount_eur) if txn.fee_amount_eur is not None else None,
+                "exchange_fee": str(txn.exchange_fee or 0),
+                "deferred_until": txn.deferred_until,
+                "match_details": txn.match_details or {},
+            },
+            "allocation": alloc_data,
+            "document": doc_data,
+            "document_entry": doc_entry_data,
+            "payment_entry": pay_entry_data,
+            "reconciliation": recon,
+        })
+
+    # ── Helpers ──
+
+    @staticmethod
+    def _clean_reasons(reasons):
+        """Techninius raktus (signals, _*) į UI neduodam."""
+        skip = {"signals", "experimental_signal_matching", "allocation_id", "manual_match"}
+        out = {}
+        for k, v in (reasons or {}).items():
+            if k in skip or str(k).startswith("_"):
+                continue
+            out[k] = v
+        return out
+
+    @staticmethod
+    def _sum_by_account(lines, account_code):
+        total = Decimal("0")
+        for l in lines or []:
+            if str(l.get("account_code") or "").strip() == account_code:
+                total += Decimal(str(l.get("amount") or 0))
+        return total.quantize(Decimal("0.01"))
+
+    @staticmethod
+    def _doc_dict(doc, doc_type):
+        is_inv = doc_type == "invoice"
+        scan = getattr(doc, "scanned_document", None)
+
+        preview = None
+        if is_inv and getattr(doc, "pdf_file", None):
+            preview = doc.pdf_file.url
+        elif scan:
+            preview = getattr(scan, "preview_url", None)
+            if not preview and getattr(scan, "file", None):
+                preview = scan.file.url
+
+        return {
+            "type": doc_type,
+            "id": doc.id,
+            "full_number": (
+                doc.full_number if is_inv
+                else f"{doc.document_series or ''}{doc.document_number or ''}".strip()
+            ),
+            "counterparty_name": (doc.buyer_name if is_inv else doc.seller_name) or "",
+            "counterparty_code": (doc.buyer_id if is_inv else doc.seller_id) or "",
+            "invoice_date": doc.invoice_date,
+            "due_date": getattr(doc, "due_date", None),
+            "amount_wo_vat": str(doc.amount_wo_vat or 0),
+            "vat_amount": str(doc.vat_amount or 0),
+            "amount_with_vat": str(doc.amount_with_vat or 0),
+            "currency": (getattr(doc, "currency", None) or "EUR").upper(),
+            "payment_status": getattr(doc, "payment_status", "") or "",
+            "preview_url": preview,
+        }
 
 class TransactionMatchCandidatesView(APIView):
     """
@@ -10756,11 +11118,58 @@ class TransactionMatchCandidatesView(APIView):
             offset=offset,
         )
 
+        from .services.match_candidates import _preview_url
+
+        allocs = list(
+            txn.allocations
+            .exclude(status="proposed")
+            .select_related("invoice", "purchase", "journal_entry")
+            .order_by("created_at")
+        )
+
         allocated = sum(
-            (Decimal(str(a.amount or 0)) for a in txn.allocations.exclude(status="proposed")),
+            (Decimal(str(a.effective_amount_txn or 0)) for a in allocs),
             Decimal("0"),
         )
         amount = Decimal(str(txn.amount or 0))
+
+        alloc_list = []
+        for a in allocs:
+            d = a.invoice or a.purchase
+            if d is not None:
+                if a.invoice_id:
+                    number = d.full_number
+                    cp_name = d.buyer_name or ""
+                else:
+                    number = f"{d.document_series or ''}{d.document_number or ''}".strip()
+                    cp_name = d.seller_name or ""
+                doc_cur = (getattr(d, "currency", None) or "EUR").upper()
+            else:
+                number = ""
+                cp_name = a.counterparty_name or ""
+                doc_cur = txn.currency or "EUR"
+
+            alloc_list.append({
+                "id": a.id,
+                "kind": a.kind,
+                "status": a.status,
+                "type": "invoice" if a.invoice_id else ("purchase" if a.purchase_id else ""),
+                "document_id": a.invoice_id or a.purchase_id,
+                "full_number": number,
+                "counterparty_name": cp_name,
+                "amount": str(a.amount),
+                "currency": doc_cur,
+                "amount_txn": str(a.effective_amount_txn),
+                "amount_eur": str(a.amount_eur) if a.amount_eur is not None else None,
+                "doc_rate": str(a.doc_rate) if a.doc_rate else None,
+                "fx_diff": str(a.fx_diff_eur) if a.doc_rate else None,
+                "preview_url": _preview_url(d) if d is not None else None,
+                "journal_entry_id": a.journal_entry_id,
+                "confidence": str(a.confidence),
+                "match_reasons": a.match_reasons or {},
+                "alloc_status": a.status,
+                "source": a.source,
+            })
 
         data["transaction"] = {
             "id": txn.id,
@@ -10778,8 +11187,442 @@ class TransactionMatchCandidatesView(APIView):
             "bank_name": getattr(txn.bank_statement, "bank_name", "") or "",
             "allocated_amount": str(allocated),
             "remaining_amount": str(max(amount - allocated, Decimal("0"))),
+            "allocations": alloc_list,
+            "fee_amount": str(txn.fee_amount or 0),
+            "fee_amount_eur": str(txn.fee_amount_eur) if txn.fee_amount_eur is not None else None,
+            "exchange_fee": str(txn.exchange_fee or 0),
         }
         return Response(data)
+
+
+class TransactionAllocateRemainderView(APIView):
+    """
+    POST /api/invoicing/bank-transactions/<id>/allocate-remainder/
+    Body: {
+      "kind": "advance" | "writeoff",
+      "items": [
+        {"amount": "60.00", "counterparty_id": 3},
+        {"amount": "40.00", "counterparty_name": "AWS", "counterparty_code": "..."}
+      ]
+    }
+    Suma turi tiksliai sutapti su operacijos likučiu.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, pk):
+        from .models import IncomingTransaction, OutgoingTransaction, Counterparty
+        from .services.allocation_remainder import create_remainder_allocation
+
+        kind = (request.data.get("kind") or "").strip()
+        if kind not in ("advance", "writeoff"):
+            return Response({"detail": "Netinkamas tipas."},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        items = request.data.get("items") or []
+        if not items:
+            return Response({"detail": "Nenurodyta nė viena eilutė."},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        txn = None
+        try:
+            txn = OutgoingTransaction.objects.get(id=pk, user=request.user)
+        except OutgoingTransaction.DoesNotExist:
+            try:
+                txn = IncomingTransaction.objects.get(id=pk, user=request.user)
+            except IncomingTransaction.DoesNotExist:
+                return Response({"detail": "Operacija nerasta."},
+                                status=status.HTTP_404_NOT_FOUND)
+
+        cp = _get_active_cp(request.user)
+        if cp and txn.company_profile_id != cp.id:
+            return Response({"detail": "Operacija nerasta."},
+                            status=status.HTTP_404_NOT_FOUND)
+        if not cp:
+            return Response({"detail": "Nepasirinktas įmonės profilis."},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        txn.recalc_allocation_state()
+        remaining = txn.unallocated_amount
+
+        try:
+            total = sum(Decimal(str(i.get("amount") or "0").replace(",", "."))
+                        for i in items)
+        except Exception:
+            return Response({"detail": "Netinkama suma."},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        if abs(total - remaining) > Decimal("0.005"):
+            return Response(
+                {"detail": f"Paskirstyta {total}, o likutis {remaining}. "
+                           f"Sumos turi sutapti."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        created = []
+        for it in items:
+            cpty = None
+            if it.get("counterparty_id"):
+                cpty = Counterparty.objects.filter(
+                    id=it["counterparty_id"], user=request.user,
+                ).first()
+
+            name = (it.get("counterparty_name") or "").strip()
+            code = (it.get("counterparty_code") or "").strip()
+
+            if kind == "advance" and not cpty and not name:
+                return Response(
+                    {"detail": "Avansui būtina nurodyti kontrahentą."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            try:
+                alloc = create_remainder_allocation(
+                    txn=txn, user=request.user, cp=cp, kind=kind,
+                    amount_txn=Decimal(str(it["amount"]).replace(",", ".")),
+                    counterparty=cpty,
+                    counterparty_name=name, counterparty_code=code,
+                    note=(it.get("note") or ""),
+                )
+                created.append(alloc.id)
+            except Exception as e:
+                logger.exception("[AllocateRemainder] failed txn=%s: %s", txn.id, e)
+                return Response({"detail": f"Nepavyko: {e}"},
+                                status=status.HTTP_400_BAD_REQUEST)
+
+        txn.refresh_from_db(fields=["allocated_amount"])
+        if txn.bank_statement:
+            txn.bank_statement.refresh_stats()
+
+        return Response({
+            "status": "ok",
+            "allocation_ids": created,
+            "allocated_amount": str(txn.allocated_amount),
+            "remaining_amount": str(txn.unallocated_amount),
+            "action_state": get_action_state(txn),
+        })
+
+class TransactionJournalEntriesView(APIView):
+    """
+    GET /api/invoicing/bank-transactions/<id>/journal-entries/
+
+    Grąžina visus su operacija susijusius DK įrašus dviem grupėmis:
+      document_entries  — sukurti užpajamavus dokumentus (tik peržiūrai)
+      payment_entries   — sukurti susiejus operaciją (redaguojami)
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request, pk):
+        from decimal import Decimal
+        from .models import IncomingTransaction, OutgoingTransaction, JournalEntry
+
+        txn = None
+        try:
+            txn = OutgoingTransaction.objects.select_related("bank_statement").get(
+                id=pk, user=request.user,
+            )
+        except OutgoingTransaction.DoesNotExist:
+            try:
+                txn = IncomingTransaction.objects.select_related("bank_statement").get(
+                    id=pk, user=request.user,
+                )
+            except IncomingTransaction.DoesNotExist:
+                return Response({"detail": "Operacija nerasta."}, status=404)
+
+        cp = _get_active_cp(request.user)
+        if cp and txn.company_profile_id != cp.id:
+            return Response({"detail": "Operacija nerasta."}, status=404)
+
+        def _lines(entry):
+            return [
+                {
+                    "id": l.id,
+                    "side": l.side,
+                    "account_code": l.account_code,
+                    "account_name": l.account_name or "",
+                    "amount": str(l.amount),
+                    "description": l.description or "",
+                }
+                for l in entry.lines.all()
+            ]
+
+        allocs = list(
+            txn.allocations
+            .exclude(status="proposed")
+            .select_related("invoice", "purchase", "journal_entry")
+            .order_by("created_at")
+        )
+
+        # ── Dokumentų įrašai ──
+        doc_entries = []
+        seen_je = set()
+        for a in allocs:
+            d = a.invoice or a.purchase
+            if d is None:
+                continue
+            if a.invoice_id:
+                number = d.full_number
+                cp_name = d.buyer_name or ""
+                doc_type = "invoice"
+            else:
+                number = f"{d.document_series or ''}{d.document_number or ''}".strip()
+                cp_name = d.seller_name or ""
+                doc_type = "purchase"
+
+            for je in d.journal_entries.prefetch_related("lines").exclude(
+                source_type=JournalEntry.SOURCE_BANK,
+            ):
+                if je.id in seen_je:
+                    continue
+                seen_je.add(je.id)
+                doc_entries.append({
+                    "id": je.id,
+                    "label": number or f"DK #{je.id}",
+                    "sublabel": cp_name,
+                    "document_type": doc_type,
+                    "document_id": d.id,
+                    "status": je.status,
+                    "status_display": je.get_status_display(),
+                    "entry_date": je.entry_date,
+                    "currency": je.currency,
+                    "difference": str(je.difference),
+                    "lines": _lines(je),
+                })
+
+        # ── Operacijos įrašai ──
+        pay_entries = []
+        bank_prefix = ("271", "273")
+        bank_total = Decimal("0")
+
+        for a in allocs:
+            je = a.journal_entry
+            if not je:
+                continue
+            d = a.invoice or a.purchase
+            if a.kind == "advance":
+                label = "Avansas"
+                sub = a.counterparty_name or ""
+            elif a.kind == "writeoff":
+                label = "Nurašymas"
+                sub = a.counterparty_name or ""
+            else:
+                if d is not None and a.invoice_id:
+                    num = d.full_number
+                    sub = d.buyer_name or ""
+                elif d is not None:
+                    num = f"{d.document_series or ''}{d.document_number or ''}".strip()
+                    sub = d.seller_name or ""
+                else:
+                    num, sub = "", ""
+                label = f"Mokėjimas · {num}" if num else "Mokėjimas"
+
+            lines = _lines(je)
+            for l in lines:
+                if str(l["account_code"]).startswith(bank_prefix):
+                    bank_total += Decimal(l["amount"])
+
+            pay_entries.append({
+                "id": je.id,
+                "allocation_id": a.id,
+                "kind": a.kind,
+                "label": label,
+                "sublabel": sub,
+                "status": je.status,
+                "status_display": je.get_status_display(),
+                "entry_date": je.entry_date,
+                "difference": str(je.difference),
+                "editable": True,
+                "lines": lines,
+            })
+
+        # Rankiniai / kategorijų DK, pririšti tiesiai prie operacijos
+        if txn.journal_entry_id:
+            je = txn.journal_entry
+            if je.id not in {p["id"] for p in pay_entries}:
+                lines = _lines(je)
+                for l in lines:
+                    if str(l["account_code"]).startswith(bank_prefix):
+                        bank_total += Decimal(l["amount"])
+                pay_entries.append({
+                    "id": je.id,
+                    "allocation_id": None,
+                    "kind": "manual",
+                    "label": "Rankinis DK",
+                    "sublabel": je.description or "",
+                    "status": je.status,
+                    "status_display": je.get_status_display(),
+                    "entry_date": je.entry_date,
+                    "difference": str(je.difference),
+                    "editable": True,
+                    "lines": lines,
+                })
+
+        txn_eur = Decimal(str(txn.amount_eur or txn.amount or 0))
+        # Banko pusė apima ir komisinius, nurašytus papildomai
+        txn_eur += Decimal(str(txn.exchange_fee or 0))
+        txn.recalc_allocation_state(save=False)
+        remaining = txn.unallocated_amount
+        rem_eur = remaining
+        if (txn.currency or "EUR").upper() != "EUR" and txn.amount:
+            rem_eur = (remaining * txn_eur / Decimal(str(txn.amount))).quantize(
+                Decimal("0.01"),
+            )
+
+        return Response({
+            "document_entries": doc_entries,
+            "payment_entries": pay_entries,
+            "bank_total": str(bank_total),
+            "txn_amount_eur": str(txn_eur),
+            "balanced": abs(bank_total - txn_eur) < Decimal("0.01"),
+            "remaining_amount": str(remaining),
+            "remaining_eur": str(rem_eur),
+            "currency": txn.currency or "EUR",
+        })
+
+
+class JournalEntryUpdateView(APIView):
+    """
+    PATCH /api/invoicing/journal-entries/<id>/
+    Body: { description?, lines: [{side, account_code, account_name, amount}] }
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def patch(self, request, pk):
+        from decimal import Decimal
+        from .models import JournalEntry, JournalEntryLine
+        from .utils.journal_generators import finalize_journal_entry
+
+        try:
+            je = JournalEntry.objects.get(id=pk, user=request.user)
+        except JournalEntry.DoesNotExist:
+            return Response({"detail": "DK įrašas nerastas."}, status=404)
+
+        cp = _get_active_cp(request.user)
+        if cp and je.company_profile_id != cp.id:
+            return Response({"detail": "DK įrašas nerastas."}, status=404)
+
+        raw_lines = request.data.get("lines")
+        if raw_lines is None:
+            return Response({"detail": "Nenurodytos eilutės."}, status=400)
+
+        parsed = []
+        d_sum = Decimal("0")
+        k_sum = Decimal("0")
+        for i, l in enumerate(raw_lines):
+            code = str(l.get("account_code") or "").strip()
+            if not code:
+                return Response({"detail": "Visos eilutės turi turėti sąskaitos kodą."},
+                                status=400)
+            try:
+                amt = Decimal(str(l.get("amount") or "0").replace(",", "."))
+            except Exception:
+                return Response({"detail": "Netinkama suma."}, status=400)
+            if amt <= 0:
+                return Response({"detail": "Sumos turi būti teigiamos."}, status=400)
+
+            side = "D" if str(l.get("side", "")).lower() in ("d", "debit") else "K"
+            if side == "D":
+                d_sum += amt
+            else:
+                k_sum += amt
+
+            parsed.append({
+                "side": side,
+                "account_code": code,
+                "account_name": str(l.get("account_name") or "")[:255],
+                "amount": amt,
+                "description": str(l.get("description") or je.description or "")[:255],
+                "sort_order": i,
+            })
+
+        if abs(d_sum - k_sum) > Decimal("0.009"):
+            return Response(
+                {"detail": f"Debetas ({d_sum}) ir kreditas ({k_sum}) nesutampa."},
+                status=400,
+            )
+
+        with db_transaction.atomic():
+            je.lines.all().delete()
+            JournalEntryLine.objects.bulk_create([
+                JournalEntryLine(entry=je, **p) for p in parsed
+            ])
+            desc = request.data.get("description")
+            if desc is not None:
+                je.description = str(desc)[:255]
+                je.save(update_fields=["description", "updated_at"])
+            finalize_journal_entry(je)
+
+        je.refresh_from_db()
+        return Response({
+            "status": "ok",
+            "id": je.id,
+            "je_status": je.status,
+            "difference": str(je.difference),
+        })
+
+class CounterpartyOptionsView(APIView):
+    """
+    GET /api/invoicing/counterparty-options/?q=&direction=outgoing
+    Kol Purchase dar nesusietas su Counterparty, sąrašą renkam iš dviejų
+    šaltinių: справочник + dokumentuose esantys kontrahentai.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        from django.db.models import Q
+        from .models import Counterparty, Purchase, Invoice
+
+        q = (request.query_params.get("q") or "").strip()
+        direction = request.query_params.get("direction", "outgoing")
+        cp = _get_active_cp(request.user)
+
+        out = []
+        seen = set()
+
+        cq = Counterparty.objects.filter(user=request.user)
+        if cp:
+            cq = cq.filter(Q(company_profile=cp) | Q(company_profile__isnull=True))
+        if q:
+            cq = cq.filter(Q(name__icontains=q) | Q(company_code__icontains=q))
+
+        for c in cq.order_by("name")[:30]:
+            key = (c.company_code or c.name_normalized or c.name).upper()
+            seen.add(key)
+            out.append({
+                "id": c.id, "name": c.name, "code": c.company_code,
+                "in_directory": True,
+            })
+
+        if direction == "outgoing":
+            dq = Purchase.objects.filter(user=request.user)
+            if cp:
+                dq = dq.filter(company_profile=cp)
+            if q:
+                dq = dq.filter(Q(seller_name__icontains=q) | Q(seller_id__icontains=q))
+            rows = dq.values("seller_name", "seller_id").distinct()[:200]
+            pairs = [(r["seller_name"], r["seller_id"]) for r in rows]
+        else:
+            dq = Invoice.objects.filter(user=request.user)
+            if cp:
+                dq = dq.filter(company_profile=cp)
+            if q:
+                dq = dq.filter(Q(buyer_name__icontains=q) | Q(buyer_id__icontains=q))
+            rows = dq.values("buyer_name", "buyer_id").distinct()[:200]
+            pairs = [(r["buyer_name"], r["buyer_id"]) for r in rows]
+
+        for name, code in pairs:
+            if not name:
+                continue
+            key = (code or name).strip().upper()
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append({
+                "id": None, "name": name, "code": code or "",
+                "in_directory": False,
+            })
+
+        return Response({"results": out[:60]})
+    
 
 class TransactionManualMatchView(APIView):
     """
@@ -10851,11 +11694,29 @@ class TransactionManualMatchView(APIView):
         if purchase_id:
             purchase = get_object_or_404(Purchase, pk=purchase_id, user=request.user)
 
-        amount = data.get("amount") or txn.amount
+        from .services.allocation_fx import build_fx
+
+        doc = invoice or purchase
+
+        amount = data.get("amount")
+        if amount is None:
+            # Numatytoji: dengiam kiek įmanoma, dokumento valiuta
+            from .services.allocation_fx import doc_to_txn
+            doc_rem = (doc.amount_with_vat or Decimal("0")) - (
+                getattr(doc, "paid_amount", None) or Decimal("0")
+            )
+            txn_rem_doc = _q_doc_from_txn(doc, txn, txn.unallocated_amount)
+            amount = min(doc_rem, txn_rem_doc)
+
+        amount_txn = data.get("amount_txn")
+        fx = build_fx(doc, txn, amount, amount_txn)
 
         # Create allocation
         alloc_kwargs = {
-            "amount": amount,
+            "amount": fx["amount"],
+            "amount_txn": fx["amount_txn"],
+            "amount_eur": fx["amount_eur"],
+            "doc_rate": fx["doc_rate"],
             "source": "bank_import",
             "status": "manual",
             "confidence": Decimal("1.00"),
@@ -10879,9 +11740,9 @@ class TransactionManualMatchView(APIView):
             )
 
         # Update transaction
-        from django.db.models import Sum
-        total_alloc = txn.allocations.aggregate(t=Sum("amount"))["t"] or Decimal("0")
-        txn.allocated_amount = total_alloc
+        txn.refresh_from_db()
+        txn.recalc_allocation_state(save=False)
+        txn.match_status = "manually_matched"
         if invoice:
             txn.matched_document_number = invoice.full_number
         elif purchase:
@@ -10889,6 +11750,7 @@ class TransactionManualMatchView(APIView):
         txn.transaction_category = "customer_receipt" if is_incoming else "supplier_payment"
         txn.save(update_fields=[
             "allocated_amount", "match_status",
+            "matched_document_number",
             "transaction_category", "updated_at",
         ])
 
@@ -10908,9 +11770,14 @@ class TransactionManualMatchView(APIView):
         if txn.bank_statement:
             txn.bank_statement.refresh_stats()
 
+        txn.refresh_from_db(fields=["allocated_amount"])
+
         return Response({
             "status": "matched",
             "allocation_id": alloc.id,
+            "allocated_amount": str(txn.allocated_amount),
+            "remaining_amount": str(txn.unallocated_amount),
+            "action_state": get_action_state(txn),
         })
 
 
@@ -11090,6 +11957,9 @@ class TransactionRegisterDKView(APIView):
         lines = request.data.get("lines", [])
         description = request.data.get("description", "")
         category = request.data.get("category", "")
+        save_as_template = bool(request.data.get("save_as_template"))
+        template_name = (request.data.get("template_name") or "").strip()
+        template_id = request.data.get("template_id") or None
 
         cp = request.user.active_company_profile
         if not cp:
@@ -11100,15 +11970,22 @@ class TransactionRegisterDKView(APIView):
         svc = BankDKRegisterService(request.user, cp)
 
         try:
-            entry = svc.register_dk(txn, direction, lines, description)
+            entry = svc.register_dk(
+                txn, direction, lines, description,
+                save_as_template=save_as_template,
+                template_name=template_name,
+                template_id=template_id,
+            )
         except ValueError as e:
             return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Category
+        # Category — rankinei korespondencijai žymim manual_dk
+        txn.refresh_from_db()
         if category:
-            txn.refresh_from_db()
             txn.transaction_category = category
-            txn.save(update_fields=["transaction_category", "updated_at"])
+        elif not txn.transaction_category:
+            txn.transaction_category = "manual_dk"
+        txn.save(update_fields=["transaction_category", "updated_at"])
 
         # Rule
         if request.data.get("create_rule") and cp:
@@ -11124,7 +12001,7 @@ class TransactionRegisterDKView(APIView):
                 match_operator="contains",
                 match_value=(txn.counterparty_name or "")[:500],
                 direction="debit" if direction == "outgoing" else "credit",
-                category=category or "other_expense",
+                category=category or "manual_dk",
                 debit_account=debit_codes[0] if debit_codes else "",
                 credit_account=credit_codes[0] if credit_codes else "",
                 auto_create_je=True,
@@ -11132,7 +12009,7 @@ class TransactionRegisterDKView(APIView):
 
         # Apply to similar
         applied_count = 0
-        if request.data.get("apply_to_similar") and txn.counterparty_name and category:
+        if request.data.get("apply_to_similar") and txn.counterparty_name:
             from .utils.transaction_classifier import find_similar_transactions
 
             Model = OutgoingTransaction if direction == "outgoing" else IncomingTransaction
@@ -11143,7 +12020,8 @@ class TransactionRegisterDKView(APIView):
 
             for sim in similar:
                 try:
-                    svc.register_dk(sim, direction, lines, description)
+                    svc.register_dk(sim, direction, lines, description,
+                                    save_as_template=False, template_id=None)
                     if category:
                         sim.refresh_from_db()
                         sim.transaction_category = category
@@ -11214,7 +12092,7 @@ class InvoiceMarkPaidView(APIView):
 
         invoice = get_object_or_404(Invoice, pk=pk, user=request.user)
 
-        if invoice.status not in ("issued", "sent", "partially_paid"):
+        if invoice.status not in ("issued", "sent", "partially_paid", "paid"):
             return Response(
                 {"detail": "Galima pažymėti tik išrašytą/išsiųstą/dalinai apmokėtą sąskaitą."},
                 status=status.HTTP_400_BAD_REQUEST,
@@ -11226,9 +12104,11 @@ class InvoiceMarkPaidView(APIView):
         svc = PaymentService(request.user)
         alloc = svc.mark_paid_manual(
             invoice=invoice,
-            amount=ser.validated_data["amount"],
+            # Kreditinių sumos neigiamos — aliokacija visada teigiama.
+            amount=abs(ser.validated_data["amount"]),
             payment_date=ser.validated_data["payment_date"],
             note=ser.validated_data.get("note", ""),
+            payment_account=ser.validated_data.get("payment_account", ""),
         )
 
         # Auto SF creation (existing logic)
@@ -11280,7 +12160,7 @@ class MarkAsAggregatorPayoutView(APIView):
 
     def post(self, request, pk):
         from .models import IncomingTransaction, CompanyProfile
-        from .services.bank_import_service import AggregatorPayoutJournalBuilder
+        from .services.payment_service import AggregatorPayoutJournalBuilder
 
         txn = get_object_or_404(IncomingTransaction, pk=pk, user=request.user)
         provider = (request.data.get("provider") or "").strip().lower()
@@ -18837,15 +19717,15 @@ def _parse_manual_dk_payload(payload):
                 f"{index} eilutės sąskaitos kodas per ilgas.",
             )
 
-        account_name = _get_account_name(
-            account_code
-        )
+        from .utils.chart_of_accounts import is_valid_account
 
-        if not account_name:
+        if not is_valid_account(account_code):
             return (
                 None,
                 f"Nežinoma sąskaita: {account_code}.",
             )
+
+        account_name = _get_account_name(account_code)
 
         raw_amount = str(
             raw_line.get("amount") or ""
@@ -18933,6 +19813,21 @@ def _parse_manual_dk_payload(payload):
         "total_debit": total_debit,
         "total_credit": total_credit,
     }, None
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def chart_accounts_search(request):
+    """
+    GET /api/apskaita/chart-accounts/?q=nuom
+
+    Sąskaitų plano paieška pagal kodą arba pavadinimą.
+    Naudojama DK eilučių autocomplete.
+    """
+    from .utils.chart_of_accounts import search_accounts
+
+    q = (request.query_params.get("q") or "").strip()
+    return Response({"results": search_accounts(q, limit=30)})
 
 
 @api_view(["GET"])
@@ -19467,12 +20362,15 @@ def patch_dk_line(request, pk):
                     updated_at=timezone.now(),
                 )
 
-        # Banko ir rankinio DK atveju šaltinio
-        # dokumento korespondencijos neatnaujiname.
+        from .utils.chart_of_accounts import is_valid_account
 
-        new_account_name = _get_account_name(
-            new_code
-        )
+        if not is_valid_account(new_code):
+            return Response(
+                {"detail": f"Nežinoma sąskaita: {new_code}."},
+                status=400,
+            )
+
+        new_account_name = _get_account_name(new_code)
 
         updated = (
             JournalEntryLine.objects
@@ -19685,4 +20583,399 @@ def apskaita_summary_cards(request):
 
 # ═══════════════════════════════════════════════════════════
 # END - DK
+# ═══════════════════════════════════════════════════════════
+
+# ═══════════════════════════════════════════════════════════
+# EPRIS
+# ═══════════════════════════════════════════════════════════
+
+import csv
+import io
+import logging
+from collections import defaultdict
+from datetime import date
+from decimal import Decimal
+
+from django.db.models import Q
+from django.http import HttpResponse
+from django.utils import timezone
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+from rest_framework.views import APIView
+
+from .models import ScannedDocument
+from .services.epris_codes import (
+    EU_NO_LT, compute_status, country_currency, country_name, country_options,
+    country_requires_subcodes, normalize_rows, validate_document,
+)
+
+logger = logging.getLogger("docscanner_app")
+
+MIN_QUARTERLY = Decimal("400")
+MIN_ANNUAL = Decimal("50")
+FIRST_ALLOWED_DATE = date(2009, 1, 1)
+
+
+def _d(v):
+    if v is None:
+        return Decimal("0")
+    try:
+        return Decimal(str(v))
+    except Exception:
+        return Decimal("0")
+
+
+def _num(v):
+    """EPRIS desimtainis skyriklis - kablelis."""
+    return str(_d(v).quantize(Decimal("0.01"))).replace(".", ",")
+
+
+def _to_eur(amount, currency, on_date):
+    cur = (currency or "EUR").upper()
+    if cur == "EUR":
+        return _d(amount)
+    try:
+        rate = get_currency_rate(cur, on_date)
+    except Exception:
+        rate = None
+    if rate:
+        return (_d(amount) / Decimal(str(rate))).quantize(Decimal("0.01"))
+    return _d(amount)
+
+
+def _deadline_ok(year):
+    """Metinis prasymas teikiamas iki kitu metu rugsejo 30 d."""
+    return date.today() <= date(year + 1, 9, 30)
+
+
+def _base_qs(user):
+    return ScannedDocument.objects.filter(
+        user=user,
+        status__in=["completed", "exported"],
+        is_archive_container=False,
+        seller_country_iso__in=EU_NO_LT,
+        vat_amount__gt=0,
+        invoice_date__isnull=False,
+        invoice_date__gte=FIRST_ALLOWED_DATE,
+    ).exclude(
+        pirkimas_pardavimas="pardavimas"
+    ).exclude(
+        is_credit_invoice=True
+    )
+
+
+# ──────────────────────────────────────────────
+# Kodu zinynas
+# ──────────────────────────────────────────────
+
+class EprisCodeOptionsView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        country = (request.query_params.get("country") or "").strip().upper()
+        if not country:
+            return Response({"error": "Nenurodyta šalis"}, status=400)
+        return Response({
+            "country": country,
+            "country_name": country_name(country),
+            "requires_subcodes": country_requires_subcodes(country),
+            "categories": country_options(country),
+        })
+
+
+# ──────────────────────────────────────────────
+# Dokumento kodu issaugojimas
+# ──────────────────────────────────────────────
+
+class EprisDocumentCodesView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def patch(self, request, pk):
+        try:
+            doc = ScannedDocument.objects.get(pk=pk, user=request.user)
+        except ScannedDocument.DoesNotExist:
+            return Response({"error": "Dokumentas nerastas"}, status=404)
+
+        country = (doc.seller_country_iso or "").strip().upper()
+        rows = normalize_rows(request.data.get("codes"))
+        errors = validate_document(country, rows) if rows else []
+
+        doc.epris_codes = rows or None
+        doc.epris_status = compute_status(country, rows)
+        doc.save(update_fields=["epris_codes", "epris_status"])
+
+        return Response({
+            "id": doc.id,
+            "epris_codes": doc.epris_codes,
+            "epris_status": doc.epris_status,
+            "errors": errors,
+        })
+
+
+# ──────────────────────────────────────────────
+# Suvestine: salis + metai + galimi laikotarpiai
+# ──────────────────────────────────────────────
+
+class EprisOverviewView(APIView):
+    """Kiek uzsienio PVM turime, pagal salį ir metus, ir ar pasiekiamos ribos."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        include_submitted = request.query_params.get("include_submitted") == "1"
+
+        qs = _base_qs(request.user)
+        if not include_submitted:
+            qs = qs.filter(epris_submitted_at__isnull=True)
+
+        buckets = defaultdict(lambda: {
+            "vat_eur": Decimal("0"),
+            "docs": 0,
+            "ready": 0,
+            "quarters": defaultdict(lambda: Decimal("0")),
+        })
+
+        for d in qs.only(
+            "seller_country_iso", "invoice_date", "vat_amount", "currency", "epris_status",
+        ).iterator():
+            iso = (d.seller_country_iso or "").strip().upper()
+            year = d.invoice_date.year
+            q = (d.invoice_date.month - 1) // 3 + 1
+            eur = _to_eur(d.vat_amount, d.currency, d.invoice_date)
+
+            b = buckets[(iso, year)]
+            b["vat_eur"] += eur
+            b["docs"] += 1
+            b["quarters"][q] += eur
+            if d.epris_status == "tinkama":
+                b["ready"] += 1
+
+        rows = []
+        for (iso, year), b in buckets.items():
+            total = b["vat_eur"].quantize(Decimal("0.01"))
+            quarters = [
+                {
+                    "quarter": q,
+                    "vat_eur": str(b["quarters"][q].quantize(Decimal("0.01"))),
+                    "eligible": b["quarters"][q] >= MIN_QUARTERLY,
+                }
+                for q in sorted(b["quarters"])
+            ]
+            year_closed = year < date.today().year
+            rows.append({
+                "country": iso,
+                "country_name": country_name(iso),
+                "currency": country_currency(iso),
+                "year": year,
+                "vat_eur": str(total),
+                "doc_count": b["docs"],
+                "ready_count": b["ready"],
+                "annual_eligible": bool(year_closed and total >= MIN_ANNUAL),
+                "quarterly_eligible": any(q["eligible"] for q in quarters),
+                "quarters": quarters,
+                "deadline_ok": _deadline_ok(year),
+                "deadline": f"{year + 1}-09-30",
+            })
+
+        rows.sort(key=lambda r: (-r["year"], -Decimal(r["vat_eur"])))
+        return Response({
+            "rows": rows,
+            "min_quarterly": str(MIN_QUARTERLY),
+            "min_annual": str(MIN_ANNUAL),
+        })
+
+
+# ──────────────────────────────────────────────
+# Dokumentu sarasas pagal salį ir laikotarpi
+# ──────────────────────────────────────────────
+
+def _period_documents(user, country, date_from, date_to, include_submitted=False):
+    qs = _base_qs(user).filter(
+        seller_country_iso=country,
+        invoice_date__gte=date_from,
+        invoice_date__lte=date_to,
+    )
+    if not include_submitted:
+        qs = qs.filter(epris_submitted_at__isnull=True)
+    return qs.order_by("invoice_date", "id")
+
+
+def _serialize(doc, expected_currency):
+    codes = doc.epris_codes or []
+    warnings = []
+    cur = (doc.currency or "EUR").upper()
+    if cur != expected_currency:
+        warnings.append(f"Valiuta {cur}, o šaliai reikia {expected_currency}")
+    if not (doc.seller_vat_code or "").strip():
+        warnings.append("Nėra tiekėjo PVM kodo")
+    elif (doc.seller_vat_code or "").strip()[:2].upper() not in ("", doc.seller_country_iso or ""):
+        warnings.append("Tiekėjo PVM kodo prefiksas nesutampa su šalimi")
+    if doc.doc_96_str:
+        warnings.append("Atvirkštinis apmokestinimas – PVM negrąžinamas")
+
+    return {
+        "id": doc.id,
+        "invoice_date": doc.invoice_date.strftime("%Y-%m-%d"),
+        "document_number": doc.document_number or "",
+        "document_series": doc.document_series or "",
+        "seller_name": doc.seller_name or "",
+        "seller_address": doc.seller_address or "",
+        "seller_vat_code": doc.seller_vat_code or "",
+        "seller_country_iso": doc.seller_country_iso or "",
+        "currency": cur,
+        "amount_wo_vat": str(_d(doc.amount_wo_vat).quantize(Decimal("0.01"))),
+        "vat_amount": str(_d(doc.vat_amount).quantize(Decimal("0.01"))),
+        "vat_eur": str(_to_eur(doc.vat_amount, doc.currency, doc.invoice_date)),
+        "epris_codes": codes,
+        "epris_status": doc.epris_status or "tikrinti",
+        "epris_submitted_at": doc.epris_submitted_at.strftime("%Y-%m-%d %H:%M") if doc.epris_submitted_at else None,
+        "preview_url": doc.preview_url or "",
+        "warnings": warnings,
+    }
+
+
+class EprisDocumentsView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        country = (request.data.get("country") or "").strip().upper()
+        date_from = request.data.get("date_from")
+        date_to = request.data.get("date_to")
+        include_submitted = bool(request.data.get("include_submitted"))
+        offset = int(request.data.get("offset", 0))
+        limit = int(request.data.get("limit", 25))
+
+        if not country or not date_from or not date_to:
+            return Response({"error": "Nenurodyta šalis arba laikotarpis"}, status=400)
+
+        expected_currency = country_currency(country)
+        qs = _period_documents(request.user, country, date_from, date_to, include_submitted)
+
+        total_vat_eur = Decimal("0")
+        ready = 0
+        docs = list(qs)
+        for d in docs:
+            total_vat_eur += _to_eur(d.vat_amount, d.currency, d.invoice_date)
+            if d.epris_status == "tinkama":
+                ready += 1
+
+        # Ar laikotarpis tinka pagal ribas
+        y1, m1, _ = (int(x) for x in date_from.split("-"))
+        y2, m2, _ = (int(x) for x in date_to.split("-"))
+        months = (y2 - y1) * 12 + (m2 - m1) + 1
+        is_full_year = months >= 12
+        threshold = MIN_ANNUAL if is_full_year else MIN_QUARTERLY
+
+        return Response({
+            "country": country,
+            "country_name": country_name(country),
+            "currency": expected_currency,
+            "total_count": len(docs),
+            "ready_count": ready,
+            "total_vat_eur": str(total_vat_eur.quantize(Decimal("0.01"))),
+            "threshold": str(threshold),
+            "threshold_met": total_vat_eur >= threshold,
+            "same_year": y1 == y2,
+            "entries": [_serialize(d, expected_currency) for d in docs[offset:offset + limit]],
+        })
+
+
+# ──────────────────────────────────────────────
+# CSV eksportas
+# ──────────────────────────────────────────────
+
+PURCHASE_HEADER = [
+    "PARENT_ID", "VI_SEQUENCENUMBER", "VI_SIMPLIFIEDINVOICE", "VI_REFERENCENUMBER",
+    "VI_ISSUINGDATE", "VT_NAMEFREE", "VT_ADDRESSFREE", "VT_COUNTRYCODE",
+    "VT_TELEPHONENUMBER", "VT_VATIDENTIFICATIONNUMB", "VT_ISSUEDBY_VATI",
+    "VT_TAXREFERENCENUMBER", "VT_ISSUEDBY_REP", "VI_CURRENCY_TAX", "VI_TAXABLEAMOUNT",
+    "VI_CURRENCY_VAT", "VI_VATAMOUNT", "VI_DEDUCTIBLEVATAMOUNT", "VI_CURRENCY_DVAT",
+    "VI_PRORATARATE",
+]
+
+GOODS_HEADER = ["PARENT_ID", "VG_CODE", "VG_SUBCODE", "VG_LANGUAGE", "VG_FREETEXT"]
+
+
+class EprisExportView(APIView):
+    """Vienas failas = viena šalis + vienas laikotarpis."""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        country = (request.data.get("country") or "").strip().upper()
+        date_from = request.data.get("date_from")
+        date_to = request.data.get("date_to")
+        doc_ids = request.data.get("document_ids") or None
+
+        if not country or not date_from or not date_to:
+            return Response({"error": "Nenurodyta šalis arba laikotarpis"}, status=400)
+
+        qs = _period_documents(request.user, country, date_from, date_to, include_submitted=True)
+        if doc_ids:
+            qs = qs.filter(id__in=doc_ids)
+        qs = qs.filter(epris_status="tinkama")
+
+        docs = list(qs)
+        if not docs:
+            return Response({"error": "Nėra paruoštų dokumentų (visiems reikia kategorijų)"}, status=400)
+
+        buf = io.StringIO()
+        w = csv.writer(buf, delimiter=";", lineterminator="\r\n")
+
+        w.writerow(["PurchaseInformation"])
+        w.writerow(PURCHASE_HEADER)
+        for idx, d in enumerate(docs, start=1):
+            series = (d.document_series or "").strip()
+            number = (d.document_number or "").strip()
+            ref = f"{series}{number}" if series else number
+            vat_code = (d.seller_vat_code or "").strip().upper()
+            if vat_code[:2] == country:
+                vat_code = vat_code[2:]
+            vat = _d(d.vat_amount).quantize(Decimal("0.01"))
+            w.writerow([
+                idx,
+                500000 + idx,
+                "false",
+                ref,
+                d.invoice_date.strftime("%Y-%m-%d"),
+                (d.seller_name or "")[:200],
+                (d.seller_address or "")[:200],
+                (d.seller_country_iso or country).upper(),
+                "",
+                vat_code,
+                country if vat_code else "",
+                "",
+                "",
+                (d.currency or "EUR").upper(),
+                _num(d.amount_wo_vat),
+                "",
+                _num(vat),
+                _num(vat),    # DEDUCTIBLE = visas PVM
+                "",
+                "100",        # PRORATA = 100
+            ])
+
+        w.writerow([])
+        w.writerow(["PurchaseInformation_GoodsDescription"])
+        w.writerow(GOODS_HEADER)
+        for idx, d in enumerate(docs, start=1):
+            for row in (d.epris_codes or []):
+                w.writerow([
+                    idx,
+                    row.get("code", ""),
+                    row.get("subcode", ""),
+                    row.get("language", ""),
+                    row.get("free_text", ""),
+                ])
+
+        ScannedDocument.objects.filter(id__in=[d.id for d in docs]).update(
+            epris_submitted_at=timezone.now()
+        )
+
+        content = buf.getvalue().encode("utf-8")
+        response = HttpResponse(content, content_type="text/csv; charset=utf-8")
+        fname = f"EPRIS_{country}_{date_from}_{date_to}.csv"
+        response["Content-Disposition"] = f'attachment; filename="{fname}"'
+        return response
+
+# ═══════════════════════════════════════════════════════════
+# END - EPRIS
 # ═══════════════════════════════════════════════════════════

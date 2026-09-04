@@ -257,7 +257,8 @@ class BankDKRegisterService:
 
     # ── Register DK ─────────────────────────────────────
 
-    def register_dk(self, txn, direction, lines_data, description=""):
+    def register_dk(self, txn, direction, lines_data, description="",
+                    save_as_template=False, template_name="", template_id=None):
         """
         Sukurti DK įrašą iš pateiktų eilučių.
 
@@ -311,6 +312,25 @@ class BankDKRegisterService:
         if abs(total_debit - total_credit) > Decimal("0.01"):
             raise ValueError(
                 f"Debeto suma ({total_debit}) nesutampa su kredito suma ({total_credit})."
+            )
+
+        # Banko pusė turi sutapti su operacijos suma EUR.
+        bank_code, _bank_name = self._resolve_bank_account(txn)
+        txn_eur = Decimal(str(
+            txn.amount_eur if (txn.currency or "EUR").upper() != "EUR" else txn.amount
+        ) or "0")
+
+        if txn_eur <= 0:
+            raise ValueError("Nėra valiutos kurso — DK įrašo sukurti negalima.")
+
+        bank_total = sum(
+            (p["amount"] for p in parsed if p["account_code"] == bank_code),
+            Decimal("0"),
+        )
+        if abs(bank_total - txn_eur) > Decimal("0.01"):
+            raise ValueError(
+                f"Banko sąskaitos ({bank_code}) suma {bank_total} "
+                f"nesutampa su operacijos suma {txn_eur} EUR."
             )
 
         # ── Create ─────────────────────────────────────
@@ -387,8 +407,68 @@ class BankDKRegisterService:
                 entry.id, locked_txn.id, len(parsed), total_debit, total_credit,
             )
 
+            self._handle_template(
+                parsed, locked_txn, direction,
+                save_as_template, template_name, template_id,
+            )
+
             return entry
 
+    def _handle_template(self, parsed, txn, direction,
+                         save_as_template, template_name, template_id):
+        """Išsaugo naują šabloną arba pažymi panaudotą."""
+        from ..models import UserDKTemplate
+
+        if template_id:
+            try:
+                tpl = UserDKTemplate.objects.get(
+                    id=template_id, user=self.user, is_active=True,
+                )
+                tpl.mark_used()
+            except UserDKTemplate.DoesNotExist:
+                pass
+            return
+
+        if not save_as_template or not template_name.strip():
+            return
+        if not self.company_profile:
+            return
+
+        bank_code, _ = self._resolve_bank_account(txn)
+
+        name = template_name.strip()[:120]
+        if UserDKTemplate.objects.filter(
+            company_profile=self.company_profile, name=name,
+        ).exists():
+            logger.info("[BankDK] Template '%s' already exists, skipping", name)
+            return
+
+        own_lines = [
+            p for p in parsed
+            if p["account_code"] != bank_code and p["account_code"] != "6810"
+        ]
+        if not own_lines:
+            logger.info("[BankDK] Template '%s' has no own lines, skipping", name)
+            return
+
+        UserDKTemplate.objects.create(
+            user=self.user,
+            company_profile=self.company_profile,
+            name=name,
+            direction=direction or "both",
+            # Šablone saugom tik "savo" sąskaitas. Banko eilutė ir komisinis
+            # kiekvienai operacijai skiriasi — juos generuojam iš naujo.
+            lines=[{
+                "side": p["side"],
+                "code": p["account_code"],
+                "name": p["account_name"],
+                "amount_mode": "full",
+            } for p in parsed
+              if p["account_code"] != bank_code and p["account_code"] != "6810"],
+            times_used=1,
+        )
+        logger.info("[BankDK] Saved template '%s' for profile %s",
+                    name, self.company_profile_id if hasattr(self, "company_profile_id") else self.company_profile.id)
     # ── Helpers ──────────────────────────────────────────
 
     def _resolve_bank_account(self, txn):

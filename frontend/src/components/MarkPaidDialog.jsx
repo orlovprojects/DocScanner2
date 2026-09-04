@@ -11,24 +11,68 @@ import {
   Alert,
   InputAdornment,
   CircularProgress,
+  MenuItem,
 } from '@mui/material';
 import DateField from './DateField';
+import { api } from '../api/endpoints';
+
+const fmtNum = (n) => (Number(n) || 0).toFixed(2).replace('.', ',');
+
+// Vartotojas gali vesti ir tašką, ir kablelį — rodom visada kablelį.
+const normalizeAmountInput = (raw) => {
+  let s = String(raw).replace(/[^\d.,]/g, '').replace(/\./g, ',');
+  const first = s.indexOf(',');
+  if (first !== -1) {
+    s = s.slice(0, first + 1) + s.slice(first + 1).replace(/,/g, '');
+  }
+  const [int, dec] = s.split(',');
+  if (dec !== undefined) s = `${int},${dec.slice(0, 2)}`;
+  return s;
+};
+
+const parseAmount = (raw) => parseFloat(String(raw).replace(',', '.')) || 0;
 
 const MarkPaidDialog = ({ open, onClose, invoice, onConfirm }) => {
   const [loading, setLoading] = useState(false);
   const [paymentDate, setPaymentDate] = useState('');
   const [amount, setAmount] = useState('');
   const [note, setNote] = useState('');
+  const [accounts, setAccounts] = useState([]);
+  const [paymentAccount, setPaymentAccount] = useState('');
+  const [customAccount, setCustomAccount] = useState('');
 
+  // „Kita sąskaita…" — imam ranka įvestą kodą.
+  const effectiveAccount =
+    paymentAccount === '__other__' ? customAccount.trim() : paymentAccount;
+
+  const isCredit = !!invoice?.is_credit_invoice;
+
+  // Kreditinių sumos saugomos neigiamos — dialoge rodom moduliu.
   const invoiceTotal = useMemo(() => {
     if (!invoice) return 0;
-    return parseFloat(invoice.amount_with_vat || 0);
+    return Math.abs(parseFloat(invoice.amount_with_vat || 0));
   }, [invoice]);
 
   const paidAlready = useMemo(() => {
     if (!invoice) return 0;
-    return parseFloat(invoice.paid_amount || 0);
+    return Math.abs(parseFloat(invoice.paid_amount || 0));
   }, [invoice]);
+
+  // Užkrauti banko sąskaitas
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    api.get('invoicing/bank-accounts/')
+      .then((r) => {
+        if (cancelled) return;
+        const list = Array.isArray(r.data) ? r.data : [];
+        setAccounts(list);
+        // Vienintelė sąskaita — parenkam iš karto.
+        if (list.length === 1) setPaymentAccount(list[0].account || '');
+      })
+      .catch(() => { if (!cancelled) setAccounts([]); });
+    return () => { cancelled = true; };
+  }, [open]);
 
   const remaining = useMemo(() => {
     return Math.max(invoiceTotal - paidAlready, 0);
@@ -37,13 +81,15 @@ const MarkPaidDialog = ({ open, onClose, invoice, onConfirm }) => {
   useEffect(() => {
     if (open && invoice) {
       setPaymentDate(new Date().toISOString().split('T')[0]);
-      setAmount(remaining.toFixed(2));
+      setAmount(fmtNum(remaining));
       setNote('');
+      setPaymentAccount('');
+      setCustomAccount('');
       setLoading(false);
     }
   }, [open, invoice, remaining]);
 
-  const parsedAmount = parseFloat(amount) || 0;
+  const parsedAmount = parseAmount(amount);
   const isPartial = parsedAmount > 0 && parsedAmount < remaining - 0.01;
   const isOverpay = parsedAmount > remaining + 0.05;
   const isValid = parsedAmount > 0 && paymentDate && !isOverpay;
@@ -56,6 +102,7 @@ const MarkPaidDialog = ({ open, onClose, invoice, onConfirm }) => {
         amount: parsedAmount.toFixed(2),
         payment_date: paymentDate,
         note: note.trim(),
+        payment_account: effectiveAccount,
       });
       onClose();
     } catch {
@@ -73,10 +120,15 @@ const MarkPaidDialog = ({ open, onClose, invoice, onConfirm }) => {
 
       <DialogContent>
         <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-          {invoice.full_number || 'Sąskaita'} · Suma: {remaining.toFixed(2)} €
+          {invoice.full_number || 'Sąskaita'} · Suma: {fmtNum(invoiceTotal)} €
+          {remaining !== invoiceTotal && (
+            <Typography component="span" variant="body2" color="text.secondary">
+              {' '}· liko {fmtNum(remaining)} €
+            </Typography>
+          )}
           {paidAlready > 0 && (
             <Typography component="span" variant="body2" color="text.secondary">
-              {' '}(jau apmokėta: {paidAlready.toFixed(2)} €)
+              {' '}(jau apmokėta: {fmtNum(paidAlready)} €)
             </Typography>
           )}
         </Typography>
@@ -94,12 +146,12 @@ const MarkPaidDialog = ({ open, onClose, invoice, onConfirm }) => {
               fullWidth
               size="small"
               label="Suma"
-              type="number"
               value={amount}
-              onChange={(e) => setAmount(e.target.value)}
+              onChange={(e) => setAmount(normalizeAmountInput(e.target.value))}
+              onBlur={() => setAmount(amount ? fmtNum(parseAmount(amount)) : '')}
               InputProps={{
                 endAdornment: <InputAdornment position="end">€</InputAdornment>,
-                inputProps: { min: 0, step: 0.01 },
+                inputProps: { inputMode: 'decimal' },
               }}
             />
 
@@ -110,20 +162,60 @@ const MarkPaidDialog = ({ open, onClose, invoice, onConfirm }) => {
                 </Alert>
                 <Button
                   size="small"
-                  onClick={() => setAmount(remaining.toFixed(2))}
+                  onClick={() => setAmount(fmtNum(remaining))}
                   sx={{ mt: 0.5, fontSize: 12 }}
                 >
-                  Visa suma: {remaining.toFixed(2)} €
+                  Visa suma: {fmtNum(remaining)} €
                 </Button>
               </Box>
             )}
 
             {isOverpay && (
               <Alert severity="warning" sx={{ mt: 1, py: 0.25, fontSize: 13 }}>
-                Suma viršija likutį ({remaining.toFixed(2)} €)
+                Suma viršija likutį ({fmtNum(remaining)} €)
               </Alert>
             )}
           </Box>
+
+          <TextField
+            select
+            fullWidth
+            size="small"
+            label={isCredit ? 'Iš kur grąžinta' : 'Iš kur sumokėta'}
+            value={paymentAccount}
+            onChange={(e) => setPaymentAccount(e.target.value)}
+            helperText={
+              effectiveAccount
+                ? ' '
+                : 'Nenurodžius — DK įrašas nebus sukurtas, nurodysite vėliau'
+            }
+            SelectProps={{ MenuProps: { disableScrollLock: true } }}
+          >
+            <MenuItem value="">
+              <em>Nenurodyta</em>
+            </MenuItem>
+            {accounts.map((a) => (
+              <MenuItem key={a.key} value={a.account}>
+                {`${a.account} · ${a.label || a.bank || a.iban || a.key}`}
+                {a.currency && a.currency !== 'EUR' ? ` (${a.currency})` : ''}
+              </MenuItem>
+            ))}
+            <MenuItem value="2721">2721 · Kasa</MenuItem>
+            <MenuItem value="__other__">Kita sąskaita…</MenuItem>
+          </TextField>
+
+          {paymentAccount === '__other__' && (
+            <TextField
+              fullWidth
+              size="small"
+              autoFocus
+              label="Korespondencinė sąskaita"
+              value={customAccount}
+              onChange={(e) => setCustomAccount(e.target.value.replace(/[^\d]/g, '').slice(0, 10))}
+              placeholder="pvz. 2712"
+              InputProps={{ inputProps: { inputMode: 'numeric' } }}
+            />
+          )}
 
           <TextField
             fullWidth

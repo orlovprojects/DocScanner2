@@ -836,12 +836,36 @@ class PurchaseMatchingEngine:
             txn.transaction_category = "supplier_payment"
             total_allocated = Decimal("0")
 
+            from ..models import Purchase as _P
+            from ..services.allocation_fx import build_fx, doc_to_txn, txn_debt_amount
+
+            _txn_debt = txn_debt_amount(txn, is_incoming=False)
+            _single = len(r.allocations) == 1
+
             for prop in r.allocations:
+                try:
+                    _doc = _P.objects.get(id=prop.purchase_id)
+                except _P.DoesNotExist:
+                    continue
+
+                # Viena aliokacija dengia visą operaciją — banko pusę imam
+                # iš pačios operacijos (realus banko kursas), ne iš LB.
+                _amt_txn = None
+                if _single:
+                    _calc = doc_to_txn(_doc, txn, prop.amount)
+                    if _calc > 0 and abs(_calc - _txn_debt) / _calc <= Decimal("0.05"):
+                        _amt_txn = _txn_debt
+
+                fx = build_fx(_doc, txn, prop.amount, _amt_txn)
+
                 PaymentAllocation.objects.update_or_create(
                     outgoing_transaction=txn,
                     purchase_id=prop.purchase_id,
                     defaults={
-                        "amount": prop.amount,
+                        "amount": fx["amount"],
+                        "amount_txn": fx["amount_txn"],
+                        "amount_eur": fx["amount_eur"],
+                        "doc_rate": fx["doc_rate"],
                         "confidence": prop.confidence,
                         "match_reasons": prop.reasons,
                         "status": prop.status,
@@ -849,7 +873,7 @@ class PurchaseMatchingEngine:
                         "payment_date": txn.transaction_date,
                     },
                 )
-                total_allocated += prop.amount
+                total_allocated += (fx["amount_txn"] or fx["amount"])
 
             first_alloc = r.allocations[0] if r.allocations else None
             if first_alloc:

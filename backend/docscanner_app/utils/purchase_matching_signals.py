@@ -100,18 +100,62 @@ class SignalPurchaseMatchingEngine:
 
                 alloc_status = "auto" if r.status == "auto_matched" else "proposed"
 
+                # ── FX: dokumento valiuta ≠ operacijos valiuta ──
+                # settled_amount signaluose — reali banko nurašyta suma
+                # (tikslesnė nei LB kursas operacijos datai).
+                from ..services.allocation_fx import build_fx, doc_to_txn
+
+                _sig = r.signals or {}
+                _settled = _sig.get("settled_amount")
+                _amt_txn = None
+                if _sig.get("is_cross_currency") and _settled:
+                    try:
+                        _amt_txn = Decimal(str(_settled))
+                    except Exception:
+                        _amt_txn = None
+
+                _purchase = Purchase.objects.filter(id=r.purchase_id).first()
+
+                # Kai operacija pilnai dengia dokumentą, o valiutos skiriasi,
+                # banko pusę imam iš operacijos, o ne perskaičiuotą kursu.
+                # Skirtumas tarp dokumento ir mokėjimo kurso → 5803/6803,
+                # kitaip jis liktų kaboti kaip „nepaskirstytas likutis".
+                if _purchase and _amt_txn is None:
+                    _doc_cur = (_purchase.currency or "EUR").upper()
+                    _txn_cur = (txn.currency or "EUR").upper()
+                    if _doc_cur != _txn_cur:
+                        _rem = (_purchase.amount_with_vat or Decimal("0")) - (
+                            _purchase.paid_amount or Decimal("0")
+                        )
+                        _debt = txn.debt_amount
+                        _calc = doc_to_txn(_purchase, txn, r.amount)
+                        _full = r.amount >= _rem - Decimal("0.01")
+                        _sane = _calc > 0 and abs(_calc - _debt) / _calc <= Decimal("0.05")
+                        if _full and _sane:
+                            _amt_txn = _debt
+
+                if _purchase:
+                    _fx = build_fx(_purchase, txn, r.amount, _amt_txn)
+                else:
+                    _fx = {
+                        "amount": r.amount, "amount_txn": r.amount,
+                        "amount_eur": None, "doc_rate": None,
+                    }
+
                 alloc, _ = PaymentAllocation.objects.update_or_create(
                     outgoing_transaction=txn,
                     purchase_id=r.purchase_id,
                     defaults={
                         "source": "bank_import",
                         "status": alloc_status,
-                        "amount": r.amount,
+                        "amount": _fx["amount"],
+                        "amount_txn": _fx["amount_txn"],
+                        "amount_eur": _fx["amount_eur"],
+                        "doc_rate": _fx["doc_rate"],
                         "payment_date": txn.transaction_date,
                         "confidence": r.confidence,
                         "match_reasons": {
                             **(r.reasons or {}),
-                            "signals": r.signals or {},
                             "experimental_signal_matching": True,
                         },
                     },
@@ -140,7 +184,8 @@ class SignalPurchaseMatchingEngine:
                 })
                 txn.match_details = existing_details
                 txn.matched_document_number = r.matched_document_number or ""
-                txn.allocated_amount = r.amount
+                # Skaičiuojam operacijos valiuta — alloc.amount yra dokumento valiuta.
+                txn.recalc_allocation_state(save=False)
 
                 # Если classifier не нашёл более специфичную категорию,
                 # успешный Purchase matching = mokėjimas tiekėjui.

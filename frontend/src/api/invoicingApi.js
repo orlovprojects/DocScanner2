@@ -271,11 +271,20 @@ export const invoicingApi = {
   matchTransaction: (id, data) =>
     api.post(`/invoicing/bank-transactions/${id}/match/`, data, { withCredentials: true }),
 
+  allocateRemainder: (txnId, payload) =>
+    api.post(`/invoicing/bank-transactions/${txnId}/allocate-remainder/`, payload),
+
+  getCounterpartyOptions: (params) =>
+    api.get('/invoicing/counterparty-options/', { params }),
+
   getMatchCandidates: (id, params, config) =>
     api.get(`/invoicing/bank-transactions/${id}/match-candidates/`, {
       params, withCredentials: true, ...config,
     }),
-
+  getTransactionFullInfo: (id, direction) =>
+    api.get(`/invoicing/bank-transactions/${id}/full-info/`, {
+      params: { direction }, withCredentials: true,
+    }),
   getUserDKTemplates: (params) =>
     api.get('/invoicing/dk-templates/', { params, withCredentials: true }),
 
@@ -290,6 +299,12 @@ export const invoicingApi = {
 
   ignoreTransaction: (id, data) =>
     api.post(`/invoicing/bank-transactions/${id}/ignore/`, data, { withCredentials: true }),
+
+  getTransactionJournalEntries: (txnId) =>
+    api.get(`/invoicing/bank-transactions/${txnId}/journal-entries/`),
+
+  updateJournalEntry: (jeId, payload) =>
+    api.patch(`/invoicing/journal-entries/${jeId}/`, payload),
 
   getDKTemplates: (txnId) => api.get(`/transactions/${txnId}/dk-templates/`),
   registerDK: (txnId, data) => api.post(`/transactions/${txnId}/register-dk/`, data),

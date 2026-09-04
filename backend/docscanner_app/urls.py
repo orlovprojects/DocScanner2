@@ -117,6 +117,7 @@ from .views import (
     onboarding_company_search,
     MarkAsAggregatorPayoutView,
     AggregatorAccountMappingView,
+    chart_accounts_search,
 )
 from .views import (
     counterparty_list_create,
@@ -184,7 +185,12 @@ from .views import (
     TransactionListView,
     TransactionClassifyView,
     TransactionManualMatchView,
+    CounterpartyOptionsView,
+    TransactionAllocateRemainderView,
     TransactionMatchCandidatesView,
+    TransactionFullInfoView,
+    TransactionJournalEntriesView,
+    JournalEntryUpdateView,
     UserDKTemplateView,
     TransactionDeferView,
     TransactionIgnoreView,
@@ -196,6 +202,11 @@ from .views import (
     manual_dk_collection,
     manual_dk_detail,
     manual_dk_company_search,
+    EprisCodeOptionsView,
+    EprisDocumentCodesView,
+    EprisDocumentsView,
+    EprisExportView,
+    EprisOverviewView,
 )
 from . import cloud_views
 from . import views
@@ -526,7 +537,11 @@ urlpatterns = [
     path('invoicing/bank-transactions/<int:pk>/', TransactionDetailView.as_view(), name='bank-transaction-detail'),
     path('invoicing/bank-transactions/<int:pk>/classify/', TransactionClassifyView.as_view(), name='bank-transaction-classify'),
     path('invoicing/bank-transactions/<int:pk>/match/', TransactionManualMatchView.as_view(), name='bank-transaction-match'),
+    path("invoicing/bank-transactions/<int:pk>/allocate-remainder/",TransactionAllocateRemainderView.as_view(),name="txn-allocate-remainder"),
+    path("invoicing/counterparty-options/",CounterpartyOptionsView.as_view(),name="counterparty-options"),
+    
     path("invoicing/bank-transactions/<int:pk>/match-candidates/", TransactionMatchCandidatesView.as_view(), name="bank-txn-match-candidates"),    
+    path("invoicing/bank-transactions/<int:pk>/full-info/", TransactionFullInfoView.as_view(), name="bank-txn-full-info"),
     path("invoicing/dk-templates/", UserDKTemplateView.as_view(), name="dk-templates"),
     path("invoicing/bank-transactions/<int:pk>/defer/", TransactionDeferView.as_view(), name="bank-txn-defer"),
     path("invoicing/bank-transactions/<int:pk>/ignore/", TransactionIgnoreView.as_view(), name="bank-txn-ignore"),   
@@ -536,9 +551,13 @@ urlpatterns = [
     path("apskaita/rankiniai-dk/", manual_dk_collection, name="manual-dk-collection"),
     path("apskaita/rankiniai-dk/<int:pk>/", manual_dk_detail, name="manual-dk-detail"),
     path("apskaita/rankiniai-dk/company-search/", manual_dk_company_search, name="manual-dk-company-search"),
+    path("apskaita/chart-accounts/", chart_accounts_search, name="chart-accounts"),
 
     path('invoicing/bank-rules/', BankTransactionRuleListView.as_view(), name='bank-rules-list'),
     path('invoicing/bank-rules/<int:pk>/', BankTransactionRuleDetailView.as_view(), name='bank-rules-detail'),
+    path("invoicing/bank-transactions/<int:pk>/journal-entries/", TransactionJournalEntriesView.as_view(), name="txn-journal-entries"),
+    path("invoicing/journal-entries/<int:pk>/", JournalEntryUpdateView.as_view(), name="journal-entry-update"),
+
 
     path('invoicing/invoices/<int:pk>/payments/', InvoicePaymentDetailsView.as_view(), name='invoice-payments'),
     path('invoicing/invoices/<int:pk>/remove-payment/<int:alloc_id>/', RemoveManualPaymentView.as_view(), name='remove-payment'),
@@ -620,5 +639,11 @@ urlpatterns = [
     path("purchases/<int:purchase_id>/inline/", PurchaseInlineDocUpdateView.as_view()),
     path("purchases/<int:purchase_id>/line-items/<int:line_id>/inline/", PurchaseInlineLineUpdateView.as_view()),
     path("purchases/search/", PurchaseSearchView.as_view()),
+
+    path("epris/code-options/", EprisCodeOptionsView.as_view()),
+    path("epris/documents/<int:pk>/codes/", EprisDocumentCodesView.as_view()),
+    path("epris/overview/", EprisOverviewView.as_view()),
+    path("epris/documents/", EprisDocumentsView.as_view()),
+    path("epris/export/", EprisExportView.as_view()),
 
 ]

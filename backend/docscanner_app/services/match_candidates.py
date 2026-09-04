@@ -17,6 +17,7 @@ from django.db.models.functions import Coalesce
 
 from ..models import normalize_name
 from ..utils.transaction_signals import extract_signals, score_with_signals
+from .allocation_fx import get_doc_rate, doc_to_txn
 
 logger = logging.getLogger("docscanner_app")
 
@@ -139,7 +140,7 @@ ALLOC_SUM = Coalesce(
 )
 
 
-def _build_doc_info(doc, is_invoice):
+def _build_doc_info(doc, is_invoice, txn=None):
     total = abs(_dec(doc.amount_with_vat))
     allocated = abs(_dec(getattr(doc, "_allocated", 0)))
     remaining = total - allocated
@@ -176,6 +177,10 @@ def _build_doc_info(doc, is_invoice):
         "amount_with_vat": total,
         "allocated_amount": allocated,
         "remaining_amount": remaining,
+        "doc_rate": str(get_doc_rate(doc)),
+        "remaining_txn": (
+            str(doc_to_txn(doc, txn, remaining)) if txn else str(remaining)
+        ),
         "payment_status": pay_status,
         "currency": (getattr(doc, "currency", None) or "EUR").upper(),
         "preview_url": _preview_url(doc),
@@ -262,7 +267,7 @@ def get_match_candidates(
 
     scored = []
     for doc in docs:
-        info = _build_doc_info(doc, is_invoice)
+        info = _build_doc_info(doc, is_invoice, txn)
 
         if status in ("unpaid", "partial", "open") and info["remaining_amount"] <= Decimal("0.01"):
             continue

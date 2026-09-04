@@ -1,0 +1,3450 @@
+{
+  "_generated_for": "DokSkenas EPRIS modulis",
+  "_sources": {
+    "codes": "Komisijos igyvendinimo reglamentas (ES) Nr. 79/2012, III priedas (02012R0079-20200101). LT pavadinimai oficialus; EN pavadinimai is Reg. 1174/2009 priedo (numeracija identiska).",
+    "country_matrix": "EC 'Member States making use of the Article 9(2) sub-codes', information-document_en.pdf, nuoroda is taxation-customs.ec.europa.eu/taxation/vat/vat-directive/vat-refunds_en. Dokumente nurodyta *Updated May 2011 - naujesnio EK neskelbia.",
+    "live_check": "https://ec.europa.eu/taxation_customs/tic/#/ticVatRef/features/msFeatures"
+  },
+  "_rules": {
+    "kategorija": "privaloma visada, reiksmes 1-10",
+    "subkodas": "privalomas tik salims, kuriu requires_subcodes=true; leidziamos tik allowed_subcodes reiksmes",
+    "lygis": "priklauso nuo salies - vienos reikalauja 2 lygio (pvz. DK 1.1), kitos 3 lygio (pvz. FR 1.1.1), kai kurios abieju (pvz. PL 3.1 ir 3.1.1). Validuoti per nariste allowed_subcodes, ne per lygi.",
+    "min_suma": {
+      "ketvirtinis_ar_ilgesnis": 400,
+      "metinis_ar_metu_likutis": 50,
+      "valiuta": "EUR arba ekvivalentas"
+    },
+    "terminas": "iki kitu metu rugsejo 30 d."
+  },
+  "_counts": {
+    "salys": 27,
+    "salys_reikalaujancios_subkodu": 21,
+    "kategorijos": 10,
+    "subkodai_2lygio": 92,
+    "subkodai_3lygio": 107
+  },
+  "countries": {
+    "AT": {
+      "name_lt": "Austrija",
+      "name_en": "Austria",
+      "requires_subcodes": true,
+      "allowed_subcodes": [
+        "1.1",
+        "1.2.6",
+        "1.2.7",
+        "1.3",
+        "1.5",
+        "1.6",
+        "1.9",
+        "1.10",
+        "1.11",
+        "2.1",
+        "2.2.3",
+        "2.2.4",
+        "2.3",
+        "3.1.1",
+        "3.1.2",
+        "3.1.3",
+        "3.1.4",
+        "3.1.5",
+        "3.2.1",
+        "3.2.2",
+        "3.2.3",
+        "3.2.4",
+        "3.2.5",
+        "3.2.6",
+        "3.2.7",
+        "3.3.1",
+        "3.3.2",
+        "3.3.3",
+        "3.3.4",
+        "3.3.5",
+        "3.4.1",
+        "3.4.2",
+        "4.1",
+        "4.2",
+        "4.3",
+        "5.1",
+        "5.2",
+        "6.1",
+        "6.2",
+        "7.1.1",
+        "7.1.2",
+        "8.1",
+        "8.2",
+        "9.3",
+        "9.5",
+        "10.9.1",
+        "10.9.2"
+      ],
+      "note": ""
+    },
+    "BE": {
+      "name_lt": "Belgija",
+      "name_en": "Belgium",
+      "requires_subcodes": true,
+      "allowed_subcodes": [
+        "1.6",
+        "1.13",
+        "1.14",
+        "2.10",
+        "2.11",
+        "3.13",
+        "3.14",
+        "6.5",
+        "6.6",
+        "6.7",
+        "7.2",
+        "7.3",
+        "7.4",
+        "7.5",
+        "9.1",
+        "9.2",
+        "9.3.1",
+        "9.3.2",
+        "9.7",
+        "10.2",
+        "10.4.1",
+        "10.4.2",
+        "10.4.3",
+        "10.6",
+        "10.7",
+        "10.8",
+        "10.9.1",
+        "10.9.2",
+        "10.9.3",
+        "10.9.4",
+        "10.14",
+        "10.15"
+      ],
+      "note": ""
+    },
+    "BG": {
+      "name_lt": "Bulgarija",
+      "name_en": "Bulgaria",
+      "requires_subcodes": true,
+      "allowed_subcodes": [
+        "1.1",
+        "1.1.1",
+        "1.1.2",
+        "1.1.3",
+        "1.1.4",
+        "1.1.5",
+        "1.10",
+        "1.10.1",
+        "1.10.2",
+        "1.10.3",
+        "1.10.4",
+        "1.10.5",
+        "1.11",
+        "1.11.1",
+        "1.11.2",
+        "1.11.3",
+        "1.11.4",
+        "1.11.5",
+        "1.12",
+        "1.13",
+        "1.14",
+        "1.2",
+        "1.2.1",
+        "1.2.2",
+        "1.2.3",
+        "1.2.4",
+        "1.2.5",
+        "1.2.6",
+        "1.2.7",
+        "1.3",
+        "1.3.1",
+        "1.3.2",
+        "1.3.3",
+        "1.3.4",
+        "1.3.5",
+        "1.4",
+        "1.5",
+        "1.6",
+        "1.7",
+        "1.8",
+        "1.8.1",
+        "1.8.2",
+        "1.8.3",
+        "1.9",
+        "1.9.1",
+        "1.9.2",
+        "10.1",
+        "10.10",
+        "10.11",
+        "10.12",
+        "10.13",
+        "10.14",
+        "10.15",
+        "10.16",
+        "10.16.1",
+        "10.16.2",
+        "10.16.3",
+        "10.16.4",
+        "10.17",
+        "10.17.1",
+        "10.17.2",
+        "10.2",
+        "10.3",
+        "10.4",
+        "10.4.1",
+        "10.4.2",
+        "10.4.3",
+        "10.5",
+        "10.5.1",
+        "10.5.2",
+        "10.5.3",
+        "10.5.4",
+        "10.6",
+        "10.7",
+        "10.8",
+        "10.9",
+        "10.9.1",
+        "10.9.2",
+        "10.9.3",
+        "10.9.4",
+        "2.1",
+        "2.10",
+        "2.11",
+        "2.12",
+        "2.2",
+        "2.2.1",
+        "2.2.2",
+        "2.2.3",
+        "2.2.4",
+        "2.3",
+        "2.3.1",
+        "2.3.2",
+        "2.4",
+        "2.5",
+        "2.5.1",
+        "2.5.2",
+        "2.5.3",
+        "2.6",
+        "2.6.1",
+        "2.6.2",
+        "2.7",
+        "2.8",
+        "2.9",
+        "2.9.1",
+        "2.9.2",
+        "3.1",
+        "3.1.1",
+        "3.1.2",
+        "3.1.3",
+        "3.1.4",
+        "3.1.5",
+        "3.10",
+        "3.11",
+        "3.12",
+        "3.13",
+        "3.14",
+        "3.15",
+        "3.16",
+        "3.17",
+        "3.2",
+        "3.2.1",
+        "3.2.2",
+        "3.2.3",
+        "3.2.4",
+        "3.2.5",
+        "3.2.6",
+        "3.2.7",
+        "3.3",
+        "3.3.1",
+        "3.3.2",
+        "3.3.3",
+        "3.3.4",
+        "3.3.5",
+        "3.4",
+        "3.4.1",
+        "3.4.2",
+        "3.4.3",
+        "3.4.4",
+        "3.5",
+        "3.5.1",
+        "3.5.2",
+        "3.5.3",
+        "3.6",
+        "3.6.1",
+        "3.6.2",
+        "3.7",
+        "3.7.1",
+        "3.7.2",
+        "3.7.3",
+        "3.8",
+        "3.8.1",
+        "3.8.2",
+        "3.9",
+        "4.1",
+        "4.2",
+        "4.2.1",
+        "4.2.2",
+        "4.3",
+        "4.4",
+        "4.5",
+        "4.6",
+        "4.7",
+        "4.8",
+        "4.8.1",
+        "4.8.2",
+        "5.1",
+        "5.2",
+        "5.3",
+        "5.3.1",
+        "5.3.2",
+        "6.1",
+        "6.2",
+        "6.3",
+        "6.4",
+        "6.4.1",
+        "6.4.2",
+        "6.5",
+        "6.6",
+        "6.7",
+        "7.1",
+        "7.1.1",
+        "7.1.2",
+        "7.2",
+        "7.2.1",
+        "7.2.2",
+        "7.3",
+        "7.4",
+        "7.5",
+        "8.1",
+        "8.2",
+        "9.1",
+        "9.2",
+        "9.3",
+        "9.3.1",
+        "9.3.2",
+        "9.4",
+        "9.5",
+        "9.6",
+        "9.7"
+      ],
+      "note": "reikalauja visu subkodu"
+    },
+    "CY": {
+      "name_lt": "Kipras",
+      "name_en": "Cyprus",
+      "requires_subcodes": false,
+      "allowed_subcodes": [],
+      "note": "dokumente nenurodyta - uztenka kategorijos 1-10"
+    },
+    "CZ": {
+      "name_lt": "Čekija",
+      "name_en": "Czechia",
+      "requires_subcodes": false,
+      "allowed_subcodes": [],
+      "note": "dokumente nenurodyta - uztenka kategorijos 1-10"
+    },
+    "DE": {
+      "name_lt": "Vokietija",
+      "name_en": "Germany",
+      "requires_subcodes": false,
+      "allowed_subcodes": [],
+      "note": "dokumente nenurodyta - uztenka kategorijos 1-10"
+    },
+    "DK": {
+      "name_lt": "Danija",
+      "name_en": "Denmark",
+      "requires_subcodes": true,
+      "allowed_subcodes": [
+        "1.1",
+        "1.2",
+        "1.3",
+        "2.1",
+        "2.2.1",
+        "2.2.2",
+        "2.3.1",
+        "2.3.2",
+        "3.2",
+        "4.4",
+        "4.5",
+        "5.1",
+        "5.2",
+        "6.1",
+        "6.2",
+        "7.1.1",
+        "7.1.2",
+        "9.3"
+      ],
+      "note": ""
+    },
+    "EE": {
+      "name_lt": "Estija",
+      "name_en": "Estonia",
+      "requires_subcodes": true,
+      "allowed_subcodes": [
+        "6.1",
+        "6.2",
+        "6.3",
+        "7.1.1",
+        "7.1.2",
+        "9.3"
+      ],
+      "note": ""
+    },
+    "ES": {
+      "name_lt": "Ispanija",
+      "name_en": "Spain",
+      "requires_subcodes": true,
+      "allowed_subcodes": [
+        "1.3",
+        "1.14",
+        "2.3",
+        "2.11",
+        "3.3",
+        "3.14",
+        "10.2",
+        "10.3",
+        "10.4",
+        "10.4.1",
+        "10.4.2",
+        "10.4.3",
+        "10.5",
+        "10.5.1",
+        "10.5.2",
+        "10.5.4",
+        "10.7",
+        "10.13"
+      ],
+      "note": ""
+    },
+    "FI": {
+      "name_lt": "Suomija",
+      "name_en": "Finland",
+      "requires_subcodes": true,
+      "allowed_subcodes": [
+        "1.4",
+        "1.6",
+        "1.7",
+        "1.8.1",
+        "1.8.2",
+        "1.8.3",
+        "1.9.1",
+        "1.9.2",
+        "1.12",
+        "2.4",
+        "2.5.1",
+        "2.5.2",
+        "2.5.3",
+        "2.6.1",
+        "2.6.2",
+        "2.12",
+        "3.4.1",
+        "3.4.2",
+        "3.4.3",
+        "3.4.4",
+        "3.5.1",
+        "3.5.2",
+        "3.5.3",
+        "3.6.1",
+        "3.6.2",
+        "3.7.1",
+        "3.7.2",
+        "3.7.3",
+        "3.8.1",
+        "3.8.2",
+        "3.15",
+        "3.16",
+        "3.17",
+        "5.1",
+        "5.2",
+        "6.1",
+        "6.2",
+        "6.6",
+        "7.1.1",
+        "7.1.2",
+        "7.4",
+        "8.1",
+        "8.2",
+        "9.1",
+        "9.2",
+        "9.3.1",
+        "9.3.2",
+        "9.5",
+        "10.2",
+        "10.3",
+        "10.4.1",
+        "10.4.2",
+        "10.4.3",
+        "10.5.1",
+        "10.5.2",
+        "10.5.3",
+        "10.5.4",
+        "10.8",
+        "10.9.1",
+        "10.9.2",
+        "10.9.3",
+        "10.9.4",
+        "10.11",
+        "10.12",
+        "10.13",
+        "10.14",
+        "10.15",
+        "10.16.1",
+        "10.16.2",
+        "10.16.3",
+        "10.16.4",
+        "10.17.1",
+        "10.17.2"
+      ],
+      "note": ""
+    },
+    "FR": {
+      "name_lt": "Prancūzija",
+      "name_en": "France",
+      "requires_subcodes": true,
+      "allowed_subcodes": [
+        "1.1.1",
+        "1.1.2",
+        "1.1.3",
+        "1.1.4",
+        "1.1.5",
+        "1.2.1",
+        "1.2.2",
+        "1.2.3",
+        "1.2.4",
+        "1.2.5",
+        "1.3.1",
+        "1.3.2",
+        "1.3.3",
+        "1.3.4",
+        "1.3.5",
+        "1.4",
+        "1.5",
+        "1.7",
+        "1.10",
+        "2.1",
+        "2.2",
+        "2.3",
+        "2.4",
+        "2.5",
+        "3.1",
+        "3.2",
+        "3.3",
+        "3.4",
+        "3.5",
+        "3.7",
+        "5.1",
+        "5.2",
+        "6.1",
+        "6.2",
+        "7.1.1",
+        "7.1.2",
+        "9.3",
+        "9.4",
+        "9.5"
+      ],
+      "note": ""
+    },
+    "GR": {
+      "name_lt": "Graikija",
+      "name_en": "Greece",
+      "requires_subcodes": true,
+      "allowed_subcodes": [
+        "1.1.2",
+        "1.1.4",
+        "1.1.5",
+        "1.2.2",
+        "1.2.4",
+        "1.2.5",
+        "1.5",
+        "2.1",
+        "2.2",
+        "3.1.2",
+        "3.1.3",
+        "3.1.4",
+        "3.1.5",
+        "3.2.2",
+        "3.2.3",
+        "3.2.4",
+        "3.2.5",
+        "4.1",
+        "4.2",
+        "10.2",
+        "10.9.1",
+        "10.9.2"
+      ],
+      "note": ""
+    },
+    "HR": {
+      "name_lt": "Kroatija",
+      "name_en": "Croatia",
+      "requires_subcodes": false,
+      "allowed_subcodes": [],
+      "note": "dokumente nenurodyta - uztenka kategorijos 1-10"
+    },
+    "HU": {
+      "name_lt": "Vengrija",
+      "name_en": "Hungary",
+      "requires_subcodes": true,
+      "allowed_subcodes": [
+        "1.1.1",
+        "1.1.2",
+        "1.1.3",
+        "1.1.4",
+        "1.1.5",
+        "1.2.1",
+        "1.2.2",
+        "1.2.3",
+        "1.2.4",
+        "1.2.5",
+        "1.3.1",
+        "1.3.2",
+        "1.3.3",
+        "1.3.4",
+        "1.3.5",
+        "1.5",
+        "1.6",
+        "1.7",
+        "1.8",
+        "1.9",
+        "1.10.1",
+        "1.10.2",
+        "1.10.3",
+        "1.10.4",
+        "1.10.5",
+        "1.11.1",
+        "1.11.2",
+        "1.11.3",
+        "1.11.4",
+        "1.11.5",
+        "1.12",
+        "1.13",
+        "1.14",
+        "2.1",
+        "2.2.3",
+        "2.2.4",
+        "2.3",
+        "2.4",
+        "2.5",
+        "2.6",
+        "2.8",
+        "2.9",
+        "2.10",
+        "2.11",
+        "2.12",
+        "3.1.1",
+        "3.1.2",
+        "3.1.3",
+        "3.1.4",
+        "3.1.5",
+        "3.2.1",
+        "3.2.2",
+        "3.2.3",
+        "3.2.4",
+        "3.2.5",
+        "3.2.6",
+        "3.2.7",
+        "3.3.1",
+        "3.3.2",
+        "3.3.3",
+        "3.3.4",
+        "3.3.5",
+        "3.4.1",
+        "3.4.2",
+        "3.4.3",
+        "3.4.4",
+        "3.5",
+        "3.6",
+        "3.7",
+        "3.8",
+        "3.11",
+        "3.12",
+        "3.13",
+        "3.14",
+        "3.15",
+        "3.16",
+        "3.17",
+        "4.1",
+        "4.2",
+        "4.6",
+        "4.7",
+        "7.4",
+        "9.3",
+        "10.4.1",
+        "10.4.2",
+        "10.4.3",
+        "10.5.1",
+        "10.5.2",
+        "10.5.3",
+        "10.5.4",
+        "10.12",
+        "10.13",
+        "10.14",
+        "10.16.1",
+        "10.16.2",
+        "10.16.3",
+        "10.16.4",
+        "10.17.1",
+        "10.17.2"
+      ],
+      "note": ""
+    },
+    "IE": {
+      "name_lt": "Airija",
+      "name_en": "Ireland",
+      "requires_subcodes": true,
+      "allowed_subcodes": [
+        "1.1.2",
+        "1.1.3",
+        "1.1.4",
+        "1.1.5",
+        "1.2.2",
+        "1.2.3",
+        "1.2.4",
+        "1.2.5",
+        "1.2.6",
+        "1.2.7",
+        "1.3.2",
+        "1.3.3",
+        "1.3.4",
+        "1.3.5",
+        "1.4",
+        "1.5",
+        "1.7",
+        "1.8.1",
+        "1.8.2",
+        "1.8.3",
+        "1.9.1",
+        "1.9.2",
+        "1.10.2",
+        "1.10.3",
+        "1.10.4",
+        "1.10.5",
+        "1.11.2",
+        "1.11.3",
+        "1.11.4",
+        "1.11.5",
+        "1.13",
+        "1.14",
+        "2.1",
+        "2.2.1",
+        "2.2.2",
+        "2.2.3",
+        "2.2.4",
+        "2.3.1",
+        "2.3.2",
+        "2.4",
+        "2.5.1",
+        "2.5.2",
+        "2.5.3",
+        "2.6.1",
+        "2.6.2",
+        "2.7",
+        "2.8",
+        "2.9.1",
+        "2.9.2",
+        "2.10",
+        "2.11",
+        "2.12",
+        "3.1.2",
+        "3.1.3",
+        "3.1.4",
+        "3.1.5",
+        "3.2.2",
+        "3.2.3",
+        "3.2.4",
+        "3.2.5",
+        "3.2.6",
+        "3.2.7",
+        "3.4.2",
+        "3.4.3",
+        "3.4.4",
+        "3.5.2",
+        "3.5.3",
+        "3.6.1",
+        "3.6.2",
+        "3.7.1",
+        "3.7.2",
+        "3.7.3",
+        "3.8.1",
+        "3.8.2",
+        "3.13",
+        "3.14",
+        "3.15",
+        "3.16",
+        "3.17",
+        "4.1",
+        "4.2.1",
+        "4.2.2",
+        "4.3",
+        "4.6",
+        "4.7",
+        "4.8.1",
+        "4.8.2",
+        "5.3.2",
+        "6.3",
+        "6.4.2",
+        "6.6",
+        "6.7",
+        "7.4",
+        "8.1",
+        "8.2",
+        "9.3.1",
+        "9.3.2",
+        "10.1",
+        "10.2",
+        "10.4.1",
+        "10.4.3",
+        "10.5.1",
+        "10.5.4",
+        "10.7",
+        "10.9.1",
+        "10.9.2",
+        "10.10",
+        "10.11",
+        "10.12",
+        "10.13",
+        "10.14",
+        "10.16.2",
+        "10.16.3",
+        "10.16.4",
+        "10.17.2"
+      ],
+      "note": ""
+    },
+    "IT": {
+      "name_lt": "Italija",
+      "name_en": "Italy",
+      "requires_subcodes": true,
+      "allowed_subcodes": [
+        "1.1.1",
+        "1.1.2",
+        "1.1.3",
+        "1.1.4",
+        "1.1.5",
+        "1.2.1",
+        "1.2.2",
+        "1.2.3",
+        "1.2.4",
+        "1.2.5",
+        "1.3.1",
+        "1.3.2",
+        "1.3.3",
+        "1.3.4",
+        "1.3.5",
+        "2.1",
+        "2.2",
+        "2.3",
+        "3.1.1",
+        "3.2.1",
+        "3.3.1",
+        "6.1",
+        "6.2",
+        "7.1.1",
+        "7.1.2"
+      ],
+      "note": ""
+    },
+    "LT": {
+      "name_lt": "Lietuva",
+      "name_en": "Lithuania",
+      "requires_subcodes": true,
+      "allowed_subcodes": [
+        "2.8",
+        "2.9",
+        "3.11",
+        "3.12",
+        "5.1",
+        "5.2",
+        "6.1",
+        "6.2",
+        "6.3",
+        "6.4",
+        "6.4.1",
+        "6.4.2",
+        "6.6",
+        "6.7",
+        "7.1",
+        "7.1.1",
+        "7.1.2",
+        "7.2",
+        "7.2.1",
+        "7.2.2",
+        "7.3",
+        "7.4",
+        "7.5",
+        "8.1",
+        "8.2",
+        "9.1",
+        "9.2",
+        "9.3.1",
+        "9.3.2",
+        "9.4",
+        "9.5",
+        "9.6",
+        "9.7"
+      ],
+      "note": ""
+    },
+    "LU": {
+      "name_lt": "Liuksemburgas",
+      "name_en": "Luxembourg",
+      "requires_subcodes": false,
+      "allowed_subcodes": [],
+      "note": "dokumente nenurodyta - uztenka kategorijos 1-10"
+    },
+    "LV": {
+      "name_lt": "Latvija",
+      "name_en": "Latvia",
+      "requires_subcodes": true,
+      "allowed_subcodes": [
+        "2.1",
+        "2.2",
+        "2.3",
+        "3.1.1",
+        "3.1.2",
+        "3.1.3",
+        "3.1.4",
+        "3.1.5",
+        "3.2.1",
+        "3.2.3",
+        "3.2.4",
+        "3.2.5",
+        "3.3.1",
+        "3.3.2",
+        "3.3.3",
+        "3.3.4",
+        "3.3.5",
+        "5.1",
+        "5.2",
+        "5.3",
+        "6.1",
+        "6.2",
+        "6.3",
+        "6.4",
+        "7.1",
+        "7.2",
+        "8.1",
+        "8.2",
+        "10.1",
+        "10.2",
+        "10.3",
+        "10.4.1",
+        "10.4.2",
+        "10.4.3",
+        "10.5.1",
+        "10.5.2",
+        "10.5.3",
+        "10.6",
+        "10.7",
+        "10.8",
+        "10.9.1",
+        "10.9.2",
+        "10.9.3",
+        "10.9.4",
+        "10.11",
+        "10.12",
+        "10.13",
+        "10.16.1",
+        "10.16.2",
+        "10.16.3",
+        "10.16.4",
+        "10.17.1",
+        "10.17.2"
+      ],
+      "note": ""
+    },
+    "MT": {
+      "name_lt": "Malta",
+      "name_en": "Malta",
+      "requires_subcodes": true,
+      "allowed_subcodes": [
+        "1.1",
+        "1.2",
+        "1.3",
+        "1.7",
+        "1.8",
+        "1.9",
+        "1.11",
+        "1.12",
+        "2.1",
+        "2.2",
+        "2.3",
+        "2.4",
+        "2.5",
+        "2.6.1",
+        "2.6.2",
+        "2.8",
+        "2.9.1",
+        "2.9.2",
+        "3.1.1",
+        "3.1.2",
+        "3.1.3",
+        "3.1.4",
+        "3.1.5",
+        "3.2.1",
+        "3.2.3",
+        "3.2.4",
+        "3.2.5",
+        "3.3.1",
+        "3.3.2",
+        "3.3.3",
+        "3.3.4",
+        "3.3.5",
+        "3.4",
+        "3.5.1",
+        "3.5.2",
+        "3.5.3",
+        "3.6.1",
+        "3.6.2",
+        "3.7.1",
+        "3.7.2",
+        "3.7.3",
+        "3.8",
+        "3.12",
+        "5.1",
+        "5.2",
+        "6.1",
+        "6.2",
+        "6.3",
+        "6.6",
+        "7.1.1",
+        "7.1.2",
+        "7.4",
+        "9.1",
+        "9.2",
+        "9.3.1",
+        "9.3.2",
+        "9.4",
+        "9.5",
+        "9.6",
+        "10.4.1",
+        "10.4.2",
+        "10.4.3",
+        "10.6",
+        "10.13",
+        "10.14"
+      ],
+      "note": ""
+    },
+    "NL": {
+      "name_lt": "Nyderlandai",
+      "name_en": "Netherlands",
+      "requires_subcodes": false,
+      "allowed_subcodes": [],
+      "note": "dokumente nenurodyta - uztenka kategorijos 1-10"
+    },
+    "PL": {
+      "name_lt": "Lenkija",
+      "name_en": "Poland",
+      "requires_subcodes": true,
+      "allowed_subcodes": [
+        "1.1.1",
+        "1.1.2",
+        "1.1.3",
+        "1.1.4",
+        "1.1.5",
+        "1.4",
+        "1.5",
+        "1.6",
+        "1.10.1",
+        "1.10.2",
+        "1.10.3",
+        "1.10.4",
+        "1.10.5",
+        "1.12",
+        "1.13",
+        "2.1",
+        "2.8",
+        "2.10",
+        "2.11",
+        "2.12",
+        "3.1",
+        "3.1.1",
+        "3.1.2",
+        "3.1.3",
+        "3.1.4",
+        "3.1.5",
+        "3.2.2",
+        "3.2.4",
+        "3.2.5",
+        "3.3.2",
+        "3.3.4",
+        "3.3.5",
+        "3.4.2",
+        "3.4.3",
+        "3.5.1",
+        "3.5.2",
+        "3.5.3",
+        "3.10",
+        "3.11",
+        "3.12",
+        "3.13",
+        "3.14",
+        "3.15",
+        "3.16",
+        "3.17",
+        "4.1",
+        "4.2",
+        "4.2.1",
+        "4.2.2",
+        "4.3",
+        "4.6",
+        "4.7",
+        "4.8",
+        "4.8.1",
+        "4.8.2",
+        "5.1",
+        "5.2",
+        "5.3",
+        "5.3.1",
+        "5.3.2",
+        "8.1",
+        "8.2",
+        "10.1",
+        "10.2",
+        "10.3",
+        "10.4",
+        "10.4.1",
+        "10.4.2",
+        "10.4.3",
+        "10.5",
+        "10.5.1",
+        "10.5.2",
+        "10.5.3",
+        "10.5.4",
+        "10.6",
+        "10.7",
+        "10.8",
+        "10.9",
+        "10.9.1",
+        "10.9.2",
+        "10.9.3",
+        "10.9.4",
+        "10.10",
+        "10.11",
+        "10.12",
+        "10.13",
+        "10.14",
+        "10.15",
+        "10.16",
+        "10.16.1",
+        "10.16.2",
+        "10.16.3",
+        "10.16.4",
+        "10.17",
+        "10.17.1",
+        "10.17.2"
+      ],
+      "note": ""
+    },
+    "PT": {
+      "name_lt": "Portugalija",
+      "name_en": "Portugal",
+      "requires_subcodes": true,
+      "allowed_subcodes": [
+        "1.1.1",
+        "1.1.2",
+        "1.1.3",
+        "1.1.4",
+        "1.1.5",
+        "1.2.1",
+        "1.2.2",
+        "1.2.3",
+        "1.2.4",
+        "1.2.5",
+        "1.3.1",
+        "1.3.2",
+        "1.3.3",
+        "1.3.4",
+        "1.3.5",
+        "1.10.2",
+        "1.10.3",
+        "1.10.4",
+        "1.10.5",
+        "1.11.2",
+        "1.11.3",
+        "1.11.4",
+        "1.11.5",
+        "2.4",
+        "2.6",
+        "2.8",
+        "2.9.1",
+        "3.6",
+        "3.8",
+        "3.11",
+        "3.12",
+        "4.1",
+        "4.2",
+        "4.6",
+        "4.7",
+        "4.8.1",
+        "4.8.2",
+        "5.3.1",
+        "5.3.2",
+        "6.4.1",
+        "6.4.2",
+        "7.2.1",
+        "7.2.2"
+      ],
+      "note": ""
+    },
+    "RO": {
+      "name_lt": "Rumunija",
+      "name_en": "Romania",
+      "requires_subcodes": true,
+      "allowed_subcodes": [
+        "6.1",
+        "6.2",
+        "6.3",
+        "7.1",
+        "9.1",
+        "9.2"
+      ],
+      "note": ""
+    },
+    "SE": {
+      "name_lt": "Švedija",
+      "name_en": "Sweden",
+      "requires_subcodes": true,
+      "allowed_subcodes": [
+        "2.1",
+        "2.2",
+        "2.3",
+        "3.1.1",
+        "3.2.1",
+        "3.3.1",
+        "4.5",
+        "9.3",
+        "10.4.1",
+        "10.4.2",
+        "10.5.2",
+        "10.13"
+      ],
+      "note": ""
+    },
+    "SI": {
+      "name_lt": "Slovėnija",
+      "name_en": "Slovenia",
+      "requires_subcodes": true,
+      "allowed_subcodes": [
+        "1.1",
+        "1.2",
+        "1.3",
+        "2.1",
+        "2.2",
+        "3.1",
+        "3.2",
+        "3.2.5",
+        "4.1",
+        "4.2",
+        "4.3",
+        "9.2",
+        "10.1",
+        "10.2",
+        "10.3",
+        "10.4",
+        "10.4.1",
+        "10.4.3",
+        "10.5",
+        "10.5.1",
+        "10.5.4",
+        "10.9",
+        "10.9.1",
+        "10.9.2",
+        "10.10"
+      ],
+      "note": ""
+    },
+    "SK": {
+      "name_lt": "Slovakija",
+      "name_en": "Slovakia",
+      "requires_subcodes": true,
+      "allowed_subcodes": [
+        "9.1",
+        "9.2",
+        "9.3.1",
+        "9.3.2",
+        "9.4",
+        "9.5",
+        "9.6",
+        "9.7"
+      ],
+      "note": ""
+    }
+  },
+  "codes": {
+    "1": {
+      "name_lt": "Kuras",
+      "name_en": "Fuel",
+      "sub": {
+        "1.1": {
+          "name_lt": "Transporto priemonėms, kurių masė didesnė kaip 3 500 kg, išskyrus už atlygį keleivius vežančias transporto priemones, skirtas kuras",
+          "name_en": "Fuel for means of transport with a mass greater than 3 500 kg, other than means of transport for paying passengers",
+          "sub": {
+            "1.1.1": {
+              "name_lt": "Benzinas",
+              "name_en": "Petrol"
+            },
+            "1.1.2": {
+              "name_lt": "Dyzelinas",
+              "name_en": "Diesel"
+            },
+            "1.1.3": {
+              "name_lt": "Suskystintos naftos dujos",
+              "name_en": "LPG"
+            },
+            "1.1.4": {
+              "name_lt": "Gamtinės dujos",
+              "name_en": "Natural gas"
+            },
+            "1.1.5": {
+              "name_lt": "Biokuras",
+              "name_en": "Bio fuel"
+            }
+          }
+        },
+        "1.2": {
+          "name_lt": "Transporto priemonėms, kurių masė ne didesnė kaip 3 500 kg, išskyrus už atlygį keleivius vežančias transporto priemones, skirtas kuras",
+          "name_en": "Fuel for means of transport with a mass less than or equal to 3 500 kg other than means of transport for paying passengers",
+          "sub": {
+            "1.2.1": {
+              "name_lt": "Benzinas",
+              "name_en": "Petrol"
+            },
+            "1.2.2": {
+              "name_lt": "Dyzelinas",
+              "name_en": "Diesel"
+            },
+            "1.2.3": {
+              "name_lt": "Suskystintos naftos dujos",
+              "name_en": "LPG"
+            },
+            "1.2.4": {
+              "name_lt": "Gamtinės dujos",
+              "name_en": "Natural gas"
+            },
+            "1.2.5": {
+              "name_lt": "Biokuras",
+              "name_en": "Bio fuel"
+            },
+            "1.2.6": {
+              "name_lt": "Lengvieji automobiliai",
+              "name_en": "Passenger cars (PKW)"
+            },
+            "1.2.7": {
+              "name_lt": "Sunkvežimiai",
+              "name_en": "Goods vehicles (LKW)"
+            }
+          }
+        },
+        "1.3": {
+          "name_lt": "Už atlygį keleivius vežančioms transporto priemonėms skirtas kuras",
+          "name_en": "Fuel for means of transport for paying passengers",
+          "sub": {
+            "1.3.1": {
+              "name_lt": "Benzinas",
+              "name_en": "Petrol"
+            },
+            "1.3.2": {
+              "name_lt": "Dyzelinas",
+              "name_en": "Diesel"
+            },
+            "1.3.3": {
+              "name_lt": "Suskystintos naftos dujos",
+              "name_en": "LPG"
+            },
+            "1.3.4": {
+              "name_lt": "Gamtinės dujos",
+              "name_en": "Natural gas"
+            },
+            "1.3.5": {
+              "name_lt": "Biokuras",
+              "name_en": "Bio fuel"
+            }
+          }
+        },
+        "1.4": {
+          "name_lt": "Specialiai bandomosioms transporto priemonėms skirtas kuras",
+          "name_en": "Fuel used specifically for test vehicles"
+        },
+        "1.5": {
+          "name_lt": "Naftos produktai, naudojami transporto priemonėms arba varikliams tepti",
+          "name_en": "Petroleum products used for lubrication of means of transport or engines"
+        },
+        "1.6": {
+          "name_lt": "Perparduoti įsigytas kuras",
+          "name_en": "Fuel purchased for resale"
+        },
+        "1.7": {
+          "name_lt": "Krovininių transporto priemonių kuras",
+          "name_en": "Fuel for means of goods transport"
+        },
+        "1.8": {
+          "name_lt": "Keleivinių ir universaliųjų automobilių kuras",
+          "name_en": "Fuel for passenger and multipurpose cars",
+          "sub": {
+            "1.8.1": {
+              "name_lt": "Naudojami tik komerciniais tikslais",
+              "name_en": "Used exclusively for business purposes"
+            },
+            "1.8.2": {
+              "name_lt": "Iš dalies naudojami komerciniam keleivių vežimui, mokymui vairuoti ar nuomai",
+              "name_en": "Used partly for commercial passenger transport, driving instruction or rental purposes"
+            },
+            "1.8.3": {
+              "name_lt": "Iš dalies naudojamas kitais nei 1.8.2 nurodytais tikslais",
+              "name_en": "Used partly for other than 1.8.2 purposes"
+            }
+          }
+        },
+        "1.9": {
+          "name_lt": "Motociklams, priekabiniams nameliams ir pramoginiams arba sportiniams laivams, taip pat orlaiviams, kurių masė mažesnė kaip 1 550 kg, skirtas kuras",
+          "name_en": "Fuel for motorcycles, caravans and vessels for recreational or sports purposes, and aircraft with a mass less than 1 550 kg",
+          "sub": {
+            "1.9.1": {
+              "name_lt": "Naudojamas komerciniam keleivių vežimui, mokymui vairuoti ar nuomai",
+              "name_en": "Used for commercial passenger transport, driving instruction or rental purposes"
+            },
+            "1.9.2": {
+              "name_lt": "Naudojamas komerciniais tikslais",
+              "name_en": "Used for business purposes"
+            }
+          }
+        },
+        "1.10": {
+          "name_lt": "Mašinoms ir žemės ūkio traktoriams skirtas kuras",
+          "name_en": "Fuel for machines and agriculture tractors",
+          "sub": {
+            "1.10.1": {
+              "name_lt": "Benzinas",
+              "name_en": "Petrol"
+            },
+            "1.10.2": {
+              "name_lt": "Dyzelinas",
+              "name_en": "Diesel"
+            },
+            "1.10.3": {
+              "name_lt": "Suskystintos naftos dujos",
+              "name_en": "LPG"
+            },
+            "1.10.4": {
+              "name_lt": "Gamtinės dujos",
+              "name_en": "Natural gas"
+            },
+            "1.10.5": {
+              "name_lt": "Biokuras",
+              "name_en": "Bio fuel"
+            }
+          }
+        },
+        "1.11": {
+          "name_lt": "Mažiau kaip 9 vietų keleivinėms transporto priemonėms arba nuomojamiems automobiliams skirtas kuras",
+          "name_en": "Fuel for means of passenger transport with less than 9 spaces or a rental car",
+          "sub": {
+            "1.11.1": {
+              "name_lt": "Benzinas",
+              "name_en": "Petrol"
+            },
+            "1.11.2": {
+              "name_lt": "Dyzelinas",
+              "name_en": "Diesel"
+            },
+            "1.11.3": {
+              "name_lt": "Suskystintos naftos dujos",
+              "name_en": "LPG"
+            },
+            "1.11.4": {
+              "name_lt": "Gamtinės dujos",
+              "name_en": "Natural gas"
+            },
+            "1.11.5": {
+              "name_lt": "Biokuras",
+              "name_en": "Bio fuel"
+            }
+          }
+        },
+        "1.12": {
+          "name_lt": "Keleivinėms transporto priemonėms, išskyrus 1.8 ir 1.9 nurodytas transporto priemones, skirtas kuras",
+          "name_en": "Fuel for means of passenger transport other than 1.8 and 1.9"
+        },
+        "1.13": {
+          "name_lt": "Transporto priemonėms, kurioms netaikomi teisės į atskaitą apribojimai, skirtas kuras",
+          "name_en": "Fuel for means of transport for which there exists no restriction on the right to deduct"
+        },
+        "1.14": {
+          "name_lt": "Transporto priemonėms, kurioms taikomi teisės į atskaitą apribojimai, skirtas kuras",
+          "name_en": "Fuel for means of transport for which there exists a restriction on the right to deduct"
+        }
+      }
+    },
+    "2": {
+      "name_lt": "Transporto priemonių nuoma",
+      "name_en": "Hiring of means of transport",
+      "sub": {
+        "2.1": {
+          "name_lt": "Transporto priemonių, kurių masė didesnė kaip 3 500 kg, išskyrus už atlygį keleivius vežančias transporto priemones, nuoma",
+          "name_en": "Hiring of means of transport with a mass greater than 3 500 kg other than means of transport for paying passengers"
+        },
+        "2.2": {
+          "name_lt": "Transporto priemonių, kurių masė ne didesnė kaip 3 500 kg, išskyrus už atlygį keleivius vežančias transporto priemones, nuoma",
+          "name_en": "Hiring of means of transport with a mass less than or equal to 3 500 kg other than means of transport for paying passengers",
+          "sub": {
+            "2.2.1": {
+              "name_lt": "Ilgesniam nei 6 mėnesių laikotarpiui be pertraukų",
+              "name_en": "For a continuous period exceeding 6 months"
+            },
+            "2.2.2": {
+              "name_lt": "Ne ilgesniam kaip 6 mėnesių laikotarpiui be pertraukų",
+              "name_en": "For a continuous period equal to or not exceeding 6 months"
+            },
+            "2.2.3": {
+              "name_lt": "Lengvieji automobiliai",
+              "name_en": "Passenger cars (PKW)"
+            },
+            "2.2.4": {
+              "name_lt": "Sunkvežimiai",
+              "name_en": "Goods vehicles (LKW)"
+            }
+          }
+        },
+        "2.3": {
+          "name_lt": "Už atlygį keleivius vežančių transporto priemonių nuoma",
+          "name_en": "Hiring of means of transport for paying passengers",
+          "sub": {
+            "2.3.1": {
+              "name_lt": "Ilgesniam nei 6 mėnesių laikotarpiui be pertraukų",
+              "name_en": "For a continuous period exceeding 6 months"
+            },
+            "2.3.2": {
+              "name_lt": "Ne ilgesniam kaip 6 mėnesių laikotarpiui be pertraukų",
+              "name_en": "For a continuous period equal to or not exceeding 6 months"
+            }
+          }
+        },
+        "2.4": {
+          "name_lt": "Krovininių transporto priemonių nuoma",
+          "name_en": "Hiring of means of goods transport"
+        },
+        "2.5": {
+          "name_lt": "Keleivinių ir universaliųjų automobilių nuoma",
+          "name_en": "Hiring of passenger and multipurpose cars",
+          "sub": {
+            "2.5.1": {
+              "name_lt": "Naudojami tik komerciniais tikslais",
+              "name_en": "Used exclusively for business purposes"
+            },
+            "2.5.2": {
+              "name_lt": "Iš dalies naudojamos komerciniam keleivių vežimui arba mokymui vairuoti",
+              "name_en": "Used partly for commercial passenger transport or driving instruction"
+            },
+            "2.5.3": {
+              "name_lt": "Iš dalies naudojamas kitais nei 2.5.2 nurodytais tikslais",
+              "name_en": "Used partly for other than 2.5.2 purposes"
+            }
+          }
+        },
+        "2.6": {
+          "name_lt": "Motociklų, priekabinių namelių ir pramoginių arba sportinių laivų, taip pat orlaivių, kurių masė mažesnė kaip 1 550 kg, nuoma",
+          "name_en": "Hiring of motorcycles, caravans and vessels for recreational or sports purposes, and aircraft with a mass less than 1 550 kg",
+          "sub": {
+            "2.6.1": {
+              "name_lt": "Naudojami komerciniam keleivių vežimui arba mokymui vairuoti",
+              "name_en": "Used for commercial passenger transport or driving instruction"
+            },
+            "2.6.2": {
+              "name_lt": "Naudojami kitais komerciniais tikslais",
+              "name_en": "Used for other business purposes"
+            }
+          }
+        },
+        "2.7": {
+          "name_lt": "M1 klasės keleivinių automobilių nuoma",
+          "name_en": "Hiring of passenger cars of the M1 category"
+        },
+        "2.8": {
+          "name_lt": "Daugiau kaip 9 vietų keleivinių transporto priemonių nuoma",
+          "name_en": "Hiring of means of passenger transport with more than 9 spaces"
+        },
+        "2.9": {
+          "name_lt": "Mažiau kaip 9 vietų keleivinių transporto priemonių nuoma",
+          "name_en": "Hiring of means of passenger transport with less than 9 spaces",
+          "sub": {
+            "2.9.1": {
+              "name_lt": "Naudojamos komerciniam vežimui",
+              "name_en": "Used for commercial operations"
+            },
+            "2.9.2": {
+              "name_lt": "Naudojamos ne komerciniam vežimui",
+              "name_en": "Used for other than commercial operations"
+            }
+          }
+        },
+        "2.10": {
+          "name_lt": "Transporto priemonių, kurioms netaikomi teisės į atskaitą apribojimai, nuoma",
+          "name_en": "Hiring of means of transport for which there exists no restriction on the right to deduct"
+        },
+        "2.11": {
+          "name_lt": "Transporto priemonių, kurioms taikomi teisės į atskaitą apribojimai, nuoma",
+          "name_en": "Hiring of a means of transport for which there exists a restriction on the right to deduct"
+        },
+        "2.12": {
+          "name_lt": "Transporto priemonių, išskyrus 2.5 ir 2.6 nurodytas transporto priemones, nuoma",
+          "name_en": "Hiring of means of transport other than 2.5 and 2.6"
+        }
+      }
+    },
+    "3": {
+      "name_lt": "Su transporto priemonėmis susijusios išlaidos (išskyrus prie 1 ir 2 kodų nurodytas prekes ir paslaugas)",
+      "name_en": "Expenditure relating to means of transport (other than goods and services referred to under codes 1 and 2)",
+      "sub": {
+        "3.1": {
+          "name_lt": "Išlaidos, susijusios su transporto priemonėmis, kurių masė didesnė kaip 3 500 kg, išskyrus už atlygį keleivius vežančias transporto priemones",
+          "name_en": "Expenditure relating to means of transport with a mass greater than 3 500 kg other than means of transport for paying passengers",
+          "sub": {
+            "3.1.1": {
+              "name_lt": "Transporto priemonių (>3 500 kg) įsigijimas",
+              "name_en": "Purchase"
+            },
+            "3.1.2": {
+              "name_lt": "Transporto priemonių (>3 500 kg) techninė priežiūra",
+              "name_en": "Maintenance"
+            },
+            "3.1.3": {
+              "name_lt": "Transporto priemonių (>3 500 kg) priedų pirkimas ir įrengimas",
+              "name_en": "Purchase and installation of accessories"
+            },
+            "3.1.4": {
+              "name_lt": "Transporto priemonių (>3 500 kg) laikymas garaže arba automobilių stovėjimo vietose",
+              "name_en": "Garaging or parking"
+            },
+            "3.1.5": {
+              "name_lt": "Kitos išlaidos, susijusios su transporto priemonėmis (>3 500 kg)",
+              "name_en": "Other expenditure"
+            }
+          }
+        },
+        "3.2": {
+          "name_lt": "Išlaidos, susijusios su transporto priemonėmis, kurių masė ne didesnė kaip 3 500 kg, išskyrus už atlygį keleivius vežančias transporto priemones",
+          "name_en": "Expenditure relating to means of transport with a mass less than or equal to 3 500 kg other than means of transport for paying passengers",
+          "sub": {
+            "3.2.1": {
+              "name_lt": "Transporto priemonių (<=3 500 kg) įsigijimas",
+              "name_en": "Purchase"
+            },
+            "3.2.2": {
+              "name_lt": "Transporto priemonių (<=3 500 kg) techninė priežiūra",
+              "name_en": "Maintenance"
+            },
+            "3.2.3": {
+              "name_lt": "Transporto priemonių (<=3 500 kg) priedų pirkimas ir įrengimas",
+              "name_en": "Purchase and installation of accessories"
+            },
+            "3.2.4": {
+              "name_lt": "Transporto priemonių (<=3 500 kg) laikymas garaže arba automobilių stovėjimo vietose",
+              "name_en": "Garaging or parking"
+            },
+            "3.2.5": {
+              "name_lt": "Kitos išlaidos, susijusios su transporto priemonėmis (<=3 500 kg)",
+              "name_en": "Other expenditure"
+            },
+            "3.2.6": {
+              "name_lt": "Lengvieji automobiliai",
+              "name_en": "Passenger cars (PKW)"
+            },
+            "3.2.7": {
+              "name_lt": "Sunkvežimiai",
+              "name_en": "Goods vehicles (LKW)"
+            }
+          }
+        },
+        "3.3": {
+          "name_lt": "Išlaidos, susijusios su už atlygį keleivius vežančiomis transporto priemonėmis",
+          "name_en": "Expenditure relating to means of transport for paying passengers",
+          "sub": {
+            "3.3.1": {
+              "name_lt": "Už atlygį keleivius vežančių transporto priemonių įsigijimas",
+              "name_en": "Purchase of a means of transport for paying passengers"
+            },
+            "3.3.2": {
+              "name_lt": "Už atlygį keleivius vežančių transporto priemonių techninė priežiūra",
+              "name_en": "Maintenance of a means of transport for paying passengers"
+            },
+            "3.3.3": {
+              "name_lt": "Už atlygį keleivius vežančių transporto priemonių priedų pirkimas ir įrengimas",
+              "name_en": "Purchase and installation of accessories for a means of transport for paying passengers"
+            },
+            "3.3.4": {
+              "name_lt": "Už atlygį keleivius vežančių transporto priemonių laikymas garaže arba automobilių stovėjimo vietose",
+              "name_en": "Garaging or parking of a means of transport for paying passengers"
+            },
+            "3.3.5": {
+              "name_lt": "Išlaidos, susijusios su už atlygį keleivius vežančiomis transporto priemonėmis",
+              "name_en": "Other expenditure relating to a means of transport for paying passengers"
+            }
+          }
+        },
+        "3.4": {
+          "name_lt": "Su krovininėmis transporto priemonėmis susijusios išlaidos",
+          "name_en": "Expenditure relating to means of goods transport",
+          "sub": {
+            "3.4.1": {
+              "name_lt": "Krovininių transporto priemonių įsigijimas",
+              "name_en": "Purchase of a means of goods transport"
+            },
+            "3.4.2": {
+              "name_lt": "Krovininių transporto priemonių techninė priežiūra",
+              "name_en": "Maintenance of a means of goods transport"
+            },
+            "3.4.3": {
+              "name_lt": "Krovininių transporto priemonių laikymas garaže arba automobilių stovėjimo vietose",
+              "name_en": "Garaging or parking of a means of goods transport"
+            },
+            "3.4.4": {
+              "name_lt": "Išlaidos, susijusios su krovininėmis transporto priemonėmis, išskyrus 3.4.1, 3.4.2 ir 3.4.3",
+              "name_en": "Expenditure relating to means of goods transport other than 3.4.1, 3.4.2 and 3.4.3"
+            }
+          }
+        },
+        "3.5": {
+          "name_lt": "Keleivinių ir universaliųjų automobilių techninė priežiūra",
+          "name_en": "Maintenance of passenger and multipurpose cars",
+          "sub": {
+            "3.5.1": {
+              "name_lt": "Naudojami tik komerciniais tikslais",
+              "name_en": "Used exclusively for business purposes"
+            },
+            "3.5.2": {
+              "name_lt": "Iš dalies naudojamos komerciniam keleivių vežimui, mokymui vairuoti ar nuomai",
+              "name_en": "Used partly for commercial passenger transport, driving instruction, or rental purposes"
+            },
+            "3.5.3": {
+              "name_lt": "Iš dalies naudojamos kitais nei 3.5.2 nurodytais verslo tikslais",
+              "name_en": "Used partly for business purposes other than 3.5.2"
+            }
+          }
+        },
+        "3.6": {
+          "name_lt": "Motociklų, priekabinių namelių ir pramoginių bei sportinių laivų, taip pat orlaivių, kurių masė didesnė kaip 1 550 kg, techninė priežiūra",
+          "name_en": "Maintenance of motorcycles, caravans and vessels for recreational and sports purposes, and aircrafts with a mass greater than 1 550 kg",
+          "sub": {
+            "3.6.1": {
+              "name_lt": "Naudojami komerciniam keleivių vežimui, mokymui vairuoti, nuomai",
+              "name_en": "Used for commercial passenger transport, driving instruction, rental purposes"
+            },
+            "3.6.2": {
+              "name_lt": "Naudojami kitais komerciniais tikslais",
+              "name_en": "Used for other business purposes"
+            }
+          }
+        },
+        "3.7": {
+          "name_lt": "Išlaidos, išskyrus techninės priežiūros, laikymo garaže ir stovėjimo aikštelėse išlaidas, susijusios su keleiviniais ir universaliaisiais automobiliais",
+          "name_en": "Expenditure, other than maintenance, garaging and parking relating to passenger and multipurpose cars",
+          "sub": {
+            "3.7.1": {
+              "name_lt": "Naudojami tik komerciniais tikslais",
+              "name_en": "Used exclusively for business purposes"
+            },
+            "3.7.2": {
+              "name_lt": "Iš dalies naudojamos komerciniam keleivių vežimui, mokymui vairuoti ar nuomai",
+              "name_en": "Used partly for commercial passenger transport, driving instruction or rental purposes"
+            },
+            "3.7.3": {
+              "name_lt": "Iš dalies naudojami kitais nei 3.7.2 nurodytais verslo tikslais",
+              "name_en": "Used partly for purposes other than 3.7.2"
+            }
+          }
+        },
+        "3.8": {
+          "name_lt": "Išlaidos, išskyrus techninės priežiūros, laikymo garaže ir automobilių stovėjimo aikštelėse išlaidas, susijusios su motociklais, priekabiniais nameliais ir pramoginiais bei sportiniais laivais, taip pat orlaiviais, kurių masė didesnė kaip 1 550 kg",
+          "name_en": "Expenditure, other than maintenance, garaging and parking relating to motorcycles, caravans and vessels for recreational and sports purposes, and aircrafts with a mass greater than 1 550 kg",
+          "sub": {
+            "3.8.1": {
+              "name_lt": "Naudojami komerciniam keleivių vežimui, mokymui vairuoti, nuomai ar perpardavimui",
+              "name_en": "Used for commercial passenger transport, driving instruction, rental purposes or resale"
+            },
+            "3.8.2": {
+              "name_lt": "Naudojami kitais komerciniais tikslais",
+              "name_en": "Used for other business purposes"
+            }
+          }
+        },
+        "3.9": {
+          "name_lt": "M1 klasės keleivinių automobilių įsigijimas",
+          "name_en": "Purchase of passenger car of M1 category"
+        },
+        "3.10": {
+          "name_lt": "M1 klasės keleivinių automobilių priedų įsigijimas, įskaitant jų surinkimą ir įrengimą",
+          "name_en": "Purchase of accessories for passenger cars of M1 category, including their assembly and installation"
+        },
+        "3.11": {
+          "name_lt": "Išlaidos, susijusios su daugiau kaip 9 vietų keleivinėmis transporto priemonėmis arba su krovininėmis transporto priemonėmis",
+          "name_en": "Expenditure relating to means of passenger transport with more than 9 places, or to means of goods transport"
+        },
+        "3.12": {
+          "name_lt": "Išlaidos, susijusios su mažiau kaip 9 vietų komerciniam vežimui naudojamomis keleivinėmis transporto priemonėmis",
+          "name_en": "Expenditure relating to means of passenger transport with less than 9 places used for commercial operations"
+        },
+        "3.13": {
+          "name_lt": "Išlaidos, susijusios su transporto priemonėmis, kurioms netaikomi teisės į atskaitą apribojimai",
+          "name_en": "Expenditure relating to means of transport for which there exists no restriction on the right to deduct"
+        },
+        "3.14": {
+          "name_lt": "Išlaidos, susijusios su transporto priemonėmis, kurioms taikomi teisės į atskaitą apribojimai",
+          "name_en": "Expenditure relating to means of transport for which there exists a restriction on the right to deduct"
+        },
+        "3.15": {
+          "name_lt": "Keleivinių transporto priemonių, išskyrus keleivinius ir universaliuosius automobilius, motociklus, priekabinius namelius ir pramoginius bei sportinius laivus, taip pat orlaivius, kurių masė didesnė kaip 1 550 kg, techninė priežiūra",
+          "name_en": "Maintenance of means of passenger transport other than passenger and multipurpose cars, motorcycles, caravans and vessels for recreational and sports purposes, and aircraft with a mass greater than 1 550 kg"
+        },
+        "3.16": {
+          "name_lt": "Keleivinių transporto priemonių laikymas garaže arba automobilių stovėjimo vietose",
+          "name_en": "Garaging or parking of a means of passenger transport"
+        },
+        "3.17": {
+          "name_lt": "Išlaidos, išskyrus techninės priežiūros, laikymo garaže ir automobilių stovėjimo vietose išlaidas, susijusios su transporto priemonėmis, išskyrus keleivinius ir universaliuosius automobilius, motociklus, priekabinius namelius ir pramoginius bei sportinius laivus, taip pat orlaivius, kurių masė didesnė kaip 1 550 kg",
+          "name_en": "Expenditure, other than maintenance, garaging or parking relating to means of transport other than passenger and multipurpose cars, motorcycles, caravans and vessels for recreational and sports purposes, and aircraft with a mass greater than 1 550 kg"
+        }
+      }
+    },
+    "4": {
+      "name_lt": "Kelių rinkliavos ir mokesčiai",
+      "name_en": "Road tolls and road user charge",
+      "sub": {
+        "4.1": {
+          "name_lt": "Kelių rinkliavos, taikomos transporto priemonėms, kurių masė didesnė kaip 3 500 kg, išskyrus už atlygį keleivius vežančias transporto priemones",
+          "name_en": "Road tolls for means of transport with a mass greater than 3 500 kg other than means of transport for paying passengers"
+        },
+        "4.2": {
+          "name_lt": "Kelių rinkliavos, taikomos transporto priemonėms, kurių masė ne didesnė kaip 3 500 kg, išskyrus už atlygį keleivius vežančias transporto priemones",
+          "name_en": "Road tolls for vehicles with a mass less than or equal to 3 500 kg other than means of transport for paying passengers",
+          "sub": {
+            "4.2.1": {
+              "name_lt": "Lengvieji automobiliai",
+              "name_en": "Passenger cars (PKW)"
+            },
+            "4.2.2": {
+              "name_lt": "Sunkvežimiai",
+              "name_en": "Goods vehicles (LKW)"
+            }
+          }
+        },
+        "4.3": {
+          "name_lt": "Kelių rinkliavos, taikomos už atlygį keleivius vežančioms transporto priemonėms",
+          "name_en": "Road tolls for means of transport for paying passengers"
+        },
+        "4.4": {
+          "name_lt": "Kelių rinkliavos, taikomos visoms per Didžiojo Belto tiltą važiuojančioms transporto priemonėms",
+          "name_en": "Road tolls for any means of transport across the Great Belt Bridge"
+        },
+        "4.5": {
+          "name_lt": "Kelių rinkliavos, taikomos visoms per Zundo tiltą važiuojančioms transporto priemonėms",
+          "name_en": "Road tolls for any means of transport across the Oresund Bridge"
+        },
+        "4.6": {
+          "name_lt": "Kelių rinkliavos, taikomos daugiau kaip 9 vietų už atlygį keleivius vežančioms keleivinėms transporto priemonėms",
+          "name_en": "Road tolls for means of transport for paying passengers with more than 9 places"
+        },
+        "4.7": {
+          "name_lt": "Kelių rinkliavos, taikomos mažiau kaip 9 vietų už atlygį keleivius vežančioms keleivinėms transporto priemonėms",
+          "name_en": "Road tolls for means of transport for paying passengers with less than 9 places"
+        },
+        "4.8": {
+          "name_lt": "Kelių rinkliavos, taikomos transporto priemonėms, naudojamoms per konferenciją, mugę, parodą ar kongresą",
+          "name_en": "Road tolls for vehicles used in the context of a conference, fair, exhibition or congress",
+          "sub": {
+            "4.8.1": {
+              "name_lt": "Renginio organizatoriaus",
+              "name_en": "For the organiser of the event"
+            },
+            "4.8.2": {
+              "name_lt": "Renginio dalyvio, kai sąskaitą tiesiogiai pateikia organizatorius",
+              "name_en": "For a participant in the event, where the expenditure is directly charged by the organiser"
+            }
+          }
+        }
+      }
+    },
+    "5": {
+      "name_lt": "Kelionės išlaidos, pavyzdžiui, taksi ir viešojo transporto išlaidos",
+      "name_en": "Travel expenses, such as taxi fares, public transport fares",
+      "sub": {
+        "5.1": {
+          "name_lt": "Apmokestinamojo asmens arba apmokestinamojo asmens darbuotojo",
+          "name_en": "For the taxable person or an employee of the taxable person"
+        },
+        "5.2": {
+          "name_lt": "Ne apmokestinamojo asmens ir ne apmokestinamojo asmens darbuotojo",
+          "name_en": "For someone other than the taxable person, or an employee of the taxable person"
+        },
+        "5.3": {
+          "name_lt": "Apmokestinamojo asmens arba apmokestinamojo asmens darbuotojo per konferenciją, mugę, parodą ar kongresą",
+          "name_en": "For the taxable person or an employee of the taxable person in the context of a conference, fair, exhibition or congress",
+          "sub": {
+            "5.3.1": {
+              "name_lt": "Renginio organizatoriaus",
+              "name_en": "For the organiser of the event"
+            },
+            "5.3.2": {
+              "name_lt": "Renginio dalyvio, kai sąskaitą tiesiogiai pateikia organizatorius",
+              "name_en": "For a participant in the event, where the expenditure is directly charged by the organiser"
+            }
+          }
+        }
+      }
+    },
+    "6": {
+      "name_lt": "Apgyvendinimas",
+      "name_en": "Accommodation",
+      "sub": {
+        "6.1": {
+          "name_lt": "Apmokestinamojo asmens arba apmokestinamojo asmens darbuotojo apgyvendinimo išlaidos",
+          "name_en": "Expenditure on lodging and accommodation for the taxable person, or an employee of the taxable person"
+        },
+        "6.2": {
+          "name_lt": "Ne apmokestinamojo asmens ir ne apmokestinamojo asmens darbuotojo apgyvendinimo išlaidos",
+          "name_en": "Expenditure on lodging and accommodation for someone other than the taxable person or an employee of the taxable person"
+        },
+        "6.3": {
+          "name_lt": "Kvalifikacijos kėlimo konferencijose dalyvaujančio apmokestinamojo asmens arba apmokestinamojo asmens darbuotojo apgyvendinimo išlaidos",
+          "name_en": "Expenditure on lodging and accommodation for the taxable person or an employee of the taxable person attending qualifying conferences"
+        },
+        "6.4": {
+          "name_lt": "Konferencijoje, mugėje, parodoje ar kongrese dalyvaujančio apmokestinamojo asmens arba apmokestinamojo asmens darbuotojo apgyvendinimo išlaidos",
+          "name_en": "Expenditure on lodging and accommodation for the taxable person or an employee of the taxable person in the context of a conference, fair, exhibition or congress",
+          "sub": {
+            "6.4.1": {
+              "name_lt": "Renginio organizatoriaus",
+              "name_en": "For the organiser of the event"
+            },
+            "6.4.2": {
+              "name_lt": "Renginio dalyvio, kai sąskaitą tiesiogiai pateikia organizatorius",
+              "name_en": "For a participant in the event, where the expenditure is directly charged by the organiser"
+            }
+          }
+        },
+        "6.5": {
+          "name_lt": "Prekes arba paslaugas tiekiančio (teikiančio) apmokestinamojo asmens darbuotojo apgyvendinimo išlaidos",
+          "name_en": "Expenditure on lodging and accommodation for an employee of the taxable person effecting supplies of goods or services"
+        },
+        "6.6": {
+          "name_lt": "Apgyvendinimo subrangos pagrindu išlaidos",
+          "name_en": "Expenditure on lodging and accommodation for onward supply"
+        },
+        "6.7": {
+          "name_lt": "Apgyvendinimo išlaidos, išskyrus 6.5 arba 6.6 nurodytas išlaidas",
+          "name_en": "Expenditure on lodging other than 6.5 or 6.6"
+        }
+      }
+    },
+    "7": {
+      "name_lt": "Maistas, gėrimai ir maitinimo paslaugos",
+      "name_en": "Food, drink and restaurant services",
+      "sub": {
+        "7.1": {
+          "name_lt": "Viešbučių, barų, restoranų ir pensionų tiekiamas maistas ir gėrimai, įskaitant pusryčius",
+          "name_en": "Food and drink provided by hotels, bars, restaurants and boarding houses, including breakfast",
+          "sub": {
+            "7.1.1": {
+              "name_lt": "Apmokestinamojo asmens arba apmokestinamojo asmens darbuotojo",
+              "name_en": "For the taxable person or an employee of the taxable person"
+            },
+            "7.1.2": {
+              "name_lt": "Ne apmokestinamajam asmeniui ir ne apmokestinamojo asmens darbuotojui",
+              "name_en": "For someone other than the taxable person or an employee of the taxable person"
+            }
+          }
+        },
+        "7.2": {
+          "name_lt": "Konferencijose, mugėse, parodose ar kongresuose tiekiamas maistas ir gėrimai",
+          "name_en": "Food and drink provided in the context of a conference, fair, exhibition or congress",
+          "sub": {
+            "7.2.1": {
+              "name_lt": "Renginio organizatoriaus",
+              "name_en": "For the organiser of the event"
+            },
+            "7.2.2": {
+              "name_lt": "Renginio dalyvio, kai sąskaitą tiesiogiai pateikia organizatorius",
+              "name_en": "For a participant in the event, where the expenditure is directly charged by the organiser"
+            }
+          }
+        },
+        "7.3": {
+          "name_lt": "Prekes arba paslaugas tiekiančio (teikiančio) apmokestinamojo asmens darbuotojo maisto ir gėrimų išlaidos",
+          "name_en": "Food and drink for an employee of the taxable person effecting supplies of goods or services"
+        },
+        "7.4": {
+          "name_lt": "Tolesniam tiekimui įsigyjamos maitinimo paslaugos",
+          "name_en": "Restaurant services purchased for onward supply"
+        },
+        "7.5": {
+          "name_lt": "Maisto, gėrimų arba maitinimo paslaugų, išskyrus 7.2, 7.3 ir 7.4 nurodytas paslaugas, įsigijimas",
+          "name_en": "Purchase of food, drink or restaurant services other than 7.2, 7.3 and 7.4"
+        }
+      }
+    },
+    "8": {
+      "name_lt": "Leidimas patekti į muges ir parodas",
+      "name_en": "Admissions to fairs and exhibitions",
+      "sub": {
+        "8.1": {
+          "name_lt": "Apmokestinamajam asmeniui arba apmokestinamojo asmens darbuotojui",
+          "name_en": "For the taxable person or an employee of the taxable person"
+        },
+        "8.2": {
+          "name_lt": "Ne apmokestinamajam asmeniui ir ne apmokestinamojo asmens darbuotojui",
+          "name_en": "For someone other than the taxable person or an employee of the taxable person"
+        }
+      }
+    },
+    "9": {
+      "name_lt": "Išlaidos prabangos prekėms, pramogoms ir pasilinksminimams",
+      "name_en": "Expenditure on luxuries, amusements and entertainment",
+      "sub": {
+        "9.1": {
+          "name_lt": "Alkoholio įsigijimas",
+          "name_en": "Purchase of alcohol"
+        },
+        "9.2": {
+          "name_lt": "Tabako gaminių įsigijimas",
+          "name_en": "Purchase of manufactured tobacco"
+        },
+        "9.3": {
+          "name_lt": "Išlaidos priėmimams ir pasilinksminimams",
+          "name_en": "Expenditure on receptions and entertainment",
+          "sub": {
+            "9.3.1": {
+              "name_lt": "Reklamos tikslais",
+              "name_en": "For publicity purposes"
+            },
+            "9.3.2": {
+              "name_lt": "Ne reklamos tikslais",
+              "name_en": "Not for publicity purposes"
+            }
+          }
+        },
+        "9.4": {
+          "name_lt": "Pramoginių laivų techninės priežiūros išlaidos",
+          "name_en": "Expenditure on maintenance of pleasure craft"
+        },
+        "9.5": {
+          "name_lt": "Išlaidos meno kūriniams, kolekcionavimo objektams ir antikvariniams daiktams",
+          "name_en": "Expenditure on works of art, collectors items and antiques"
+        },
+        "9.6": {
+          "name_lt": "Reklamos išlaidos prabangos prekėms, pramogoms ir pasilinksminimams",
+          "name_en": "Expenditure on luxuries, amusements and entertainment for advertising"
+        },
+        "9.7": {
+          "name_lt": "Išlaidos prabangos prekėms, pramogoms ir pasilinksminimams, išskyrus 9.1, 9.2 ir 9.3 nurodytas išlaidas",
+          "name_en": "Expenditure on luxuries, amusements and entertainment other than 9.1, 9.2 and 9.3"
+        }
+      }
+    },
+    "10": {
+      "name_lt": "Kita",
+      "name_en": "Other",
+      "sub": {
+        "10.1": {
+          "name_lt": "Įrankiai",
+          "name_en": "Tools"
+        },
+        "10.2": {
+          "name_lt": "Garantinis taisymas",
+          "name_en": "Repairs within a warranty period"
+        },
+        "10.3": {
+          "name_lt": "Su švietimu susijusios paslaugos",
+          "name_en": "Services connected with education"
+        },
+        "10.4": {
+          "name_lt": "Su turtu susiję darbai",
+          "name_en": "Work on property",
+          "sub": {
+            "10.4.1": {
+              "name_lt": "Su nekilnojamuoju turtu susiję darbai",
+              "name_en": "Work on immoveable property"
+            },
+            "10.4.2": {
+              "name_lt": "Su nekilnojamuoju turtu, kuris naudojamas kaip gyvenamoji vieta, susiję darbai",
+              "name_en": "Work on immoveable property used as a dwelling"
+            },
+            "10.4.3": {
+              "name_lt": "Su kilnojamuoju turtu susiję darbai, išskyrus kodu 3 žymimus darbus",
+              "name_en": "Work on moveable property other than code 3"
+            }
+          }
+        },
+        "10.5": {
+          "name_lt": "Turto įsigijimas arba nuoma",
+          "name_en": "Purchase or hiring of property",
+          "sub": {
+            "10.5.1": {
+              "name_lt": "Nekilnojamojo turto pirkimas arba nuoma",
+              "name_en": "Purchase or hiring of immoveable property"
+            },
+            "10.5.2": {
+              "name_lt": "Nekilnojamojo turto, kuris naudojamas kaip gyvenamoji, pasilinksminimo ar poilsio vieta, įsigijimas arba nuoma",
+              "name_en": "Purchase or hiring of immoveable property used as a dwelling, or for recreational or leisure use"
+            },
+            "10.5.3": {
+              "name_lt": "Kilnojamojo turto, kuris naudojamas kaip gyvenamoji, pasilinksminimo ar poilsio vieta, įsigijimas arba nuoma",
+              "name_en": "Purchase or hiring of moveable property connected with or used in immoveable property used as a dwelling, or for recreational or leisure use"
+            },
+            "10.5.4": {
+              "name_lt": "Kilnojamojo turto, išskyrus kodu 2 žymimą kilnojamąjį turtą, įsigijimas arba nuoma",
+              "name_en": "Purchase or hiring of moveable property other than code 2"
+            }
+          }
+        },
+        "10.6": {
+          "name_lt": "Vandens, dujų arba elektros tiekimas per skirstymo tinklą",
+          "name_en": "Provision of water, gas or electricity through a distribution network"
+        },
+        "10.7": {
+          "name_lt": "Mažos vertės dovanos",
+          "name_en": "Gifts of a small value"
+        },
+        "10.8": {
+          "name_lt": "Biuro išlaidos",
+          "name_en": "Office expenses"
+        },
+        "10.9": {
+          "name_lt": "Dalyvavimas mugėse ir seminaruose, švietimas ir mokymas",
+          "name_en": "Participation in fairs and seminars, education or training",
+          "sub": {
+            "10.9.1": {
+              "name_lt": "Mugės",
+              "name_en": "Fairs"
+            },
+            "10.9.2": {
+              "name_lt": "Seminarai",
+              "name_en": "Seminars"
+            },
+            "10.9.3": {
+              "name_lt": "Švietimas",
+              "name_en": "Education"
+            },
+            "10.9.4": {
+              "name_lt": "Mokymas",
+              "name_en": "Training"
+            }
+          }
+        },
+        "10.10": {
+          "name_lt": "Papildomos vienodo dydžio sumos už ūkinius gyvūnus ir žemės ūkio produkciją",
+          "name_en": "Flat rate additions on livestock and agricultural produce"
+        },
+        "10.11": {
+          "name_lt": "Pašto siuntų siuntimo į ne ES valstybes išlaidos",
+          "name_en": "Expenditure on postage of mail to countries outside the EU"
+        },
+        "10.12": {
+          "name_lt": "Su apgyvendinimu susijusios fakso ir telefono išlaidos",
+          "name_en": "Expenditure on fax and phone in connection with accommodation"
+        },
+        "10.13": {
+          "name_lt": "Kelionių organizatoriaus įsigytos prekės ir paslaugos, skirtos tiesiogiai keliautojui",
+          "name_en": "Goods and services acquired by a travel organiser for the direct benefit of the traveller"
+        },
+        "10.14": {
+          "name_lt": "Perparduoti įsigytos prekės, išskyrus 1.6 nurodytas prekes",
+          "name_en": "Goods purchased for resale other than 1.6"
+        },
+        "10.15": {
+          "name_lt": "Perparduoti įsigytos paslaugos, išskyrus 6.6 ir 7.4 nurodytas paslaugas",
+          "name_en": "Services purchased for resale other than 6.6 and 7.4"
+        },
+        "10.16": {
+          "name_lt": "Su turtu susiję darbai",
+          "name_en": "Work on property",
+          "sub": {
+            "10.16.1": {
+              "name_lt": "Su nekilnojamuoju turtu, kuris naudojamas kaip gyvenamoji, pramogų arba poilsio vieta, susiję darbai",
+              "name_en": "Work on immoveable property used as a residence, recreational or leisure facility"
+            },
+            "10.16.2": {
+              "name_lt": "Su nekilnojamuoju turtu, išskyrus 10.16.1 nurodytą turtą, susiję darbai",
+              "name_en": "Work on immoveable property other than 10.16.1"
+            },
+            "10.16.3": {
+              "name_lt": "Darbai, susiję su kilnojamuoju turtu, susijusiu su 10.16.1 nurodytu nekilnojamuoju turtu",
+              "name_en": "Work on moveable property connected with or use of an immoveable property in 10.16.1"
+            },
+            "10.16.4": {
+              "name_lt": "Su kilnojamuoju turtu, išskyrus 10.16.3 nurodytą turtą, susiję darbai",
+              "name_en": "Work on moveable property other than 10.16.3"
+            }
+          }
+        },
+        "10.17": {
+          "name_lt": "Turto išlaidos",
+          "name_en": "Expenditure on property",
+          "sub": {
+            "10.17.1": {
+              "name_lt": "Nekilnojamojo turto, kuris naudojamas kaip gyvenamoji, pasilinksminimo ar poilsio vieta, išlaidos",
+              "name_en": "Expenditure on immoveable property used as a dwelling, or for recreational or leisure use"
+            },
+            "10.17.2": {
+              "name_lt": "Nekilnojamojo turto, išskyrus 10.17.1 nurodytą turtą, išlaidos",
+              "name_en": "Expenditure on immoveable property other than 10.17.1"
+            }
+          }
+        }
+      }
+    }
+  },
+  "flat": [
+    {
+      "code": "1",
+      "level": 1,
+      "name_lt": "Kuras",
+      "name_en": "Fuel"
+    },
+    {
+      "code": "1.1",
+      "level": 2,
+      "name_lt": "Transporto priemonėms, kurių masė didesnė kaip 3 500 kg, išskyrus už atlygį keleivius vežančias transporto priemones, skirtas kuras",
+      "name_en": "Fuel for means of transport with a mass greater than 3 500 kg, other than means of transport for paying passengers"
+    },
+    {
+      "code": "1.1.1",
+      "level": 3,
+      "name_lt": "Benzinas",
+      "name_en": "Petrol"
+    },
+    {
+      "code": "1.1.2",
+      "level": 3,
+      "name_lt": "Dyzelinas",
+      "name_en": "Diesel"
+    },
+    {
+      "code": "1.1.3",
+      "level": 3,
+      "name_lt": "Suskystintos naftos dujos",
+      "name_en": "LPG"
+    },
+    {
+      "code": "1.1.4",
+      "level": 3,
+      "name_lt": "Gamtinės dujos",
+      "name_en": "Natural gas"
+    },
+    {
+      "code": "1.1.5",
+      "level": 3,
+      "name_lt": "Biokuras",
+      "name_en": "Bio fuel"
+    },
+    {
+      "code": "1.2",
+      "level": 2,
+      "name_lt": "Transporto priemonėms, kurių masė ne didesnė kaip 3 500 kg, išskyrus už atlygį keleivius vežančias transporto priemones, skirtas kuras",
+      "name_en": "Fuel for means of transport with a mass less than or equal to 3 500 kg other than means of transport for paying passengers"
+    },
+    {
+      "code": "1.2.1",
+      "level": 3,
+      "name_lt": "Benzinas",
+      "name_en": "Petrol"
+    },
+    {
+      "code": "1.2.2",
+      "level": 3,
+      "name_lt": "Dyzelinas",
+      "name_en": "Diesel"
+    },
+    {
+      "code": "1.2.3",
+      "level": 3,
+      "name_lt": "Suskystintos naftos dujos",
+      "name_en": "LPG"
+    },
+    {
+      "code": "1.2.4",
+      "level": 3,
+      "name_lt": "Gamtinės dujos",
+      "name_en": "Natural gas"
+    },
+    {
+      "code": "1.2.5",
+      "level": 3,
+      "name_lt": "Biokuras",
+      "name_en": "Bio fuel"
+    },
+    {
+      "code": "1.2.6",
+      "level": 3,
+      "name_lt": "Lengvieji automobiliai",
+      "name_en": "Passenger cars (PKW)"
+    },
+    {
+      "code": "1.2.7",
+      "level": 3,
+      "name_lt": "Sunkvežimiai",
+      "name_en": "Goods vehicles (LKW)"
+    },
+    {
+      "code": "1.3",
+      "level": 2,
+      "name_lt": "Už atlygį keleivius vežančioms transporto priemonėms skirtas kuras",
+      "name_en": "Fuel for means of transport for paying passengers"
+    },
+    {
+      "code": "1.3.1",
+      "level": 3,
+      "name_lt": "Benzinas",
+      "name_en": "Petrol"
+    },
+    {
+      "code": "1.3.2",
+      "level": 3,
+      "name_lt": "Dyzelinas",
+      "name_en": "Diesel"
+    },
+    {
+      "code": "1.3.3",
+      "level": 3,
+      "name_lt": "Suskystintos naftos dujos",
+      "name_en": "LPG"
+    },
+    {
+      "code": "1.3.4",
+      "level": 3,
+      "name_lt": "Gamtinės dujos",
+      "name_en": "Natural gas"
+    },
+    {
+      "code": "1.3.5",
+      "level": 3,
+      "name_lt": "Biokuras",
+      "name_en": "Bio fuel"
+    },
+    {
+      "code": "1.4",
+      "level": 2,
+      "name_lt": "Specialiai bandomosioms transporto priemonėms skirtas kuras",
+      "name_en": "Fuel used specifically for test vehicles"
+    },
+    {
+      "code": "1.5",
+      "level": 2,
+      "name_lt": "Naftos produktai, naudojami transporto priemonėms arba varikliams tepti",
+      "name_en": "Petroleum products used for lubrication of means of transport or engines"
+    },
+    {
+      "code": "1.6",
+      "level": 2,
+      "name_lt": "Perparduoti įsigytas kuras",
+      "name_en": "Fuel purchased for resale"
+    },
+    {
+      "code": "1.7",
+      "level": 2,
+      "name_lt": "Krovininių transporto priemonių kuras",
+      "name_en": "Fuel for means of goods transport"
+    },
+    {
+      "code": "1.8",
+      "level": 2,
+      "name_lt": "Keleivinių ir universaliųjų automobilių kuras",
+      "name_en": "Fuel for passenger and multipurpose cars"
+    },
+    {
+      "code": "1.8.1",
+      "level": 3,
+      "name_lt": "Naudojami tik komerciniais tikslais",
+      "name_en": "Used exclusively for business purposes"
+    },
+    {
+      "code": "1.8.2",
+      "level": 3,
+      "name_lt": "Iš dalies naudojami komerciniam keleivių vežimui, mokymui vairuoti ar nuomai",
+      "name_en": "Used partly for commercial passenger transport, driving instruction or rental purposes"
+    },
+    {
+      "code": "1.8.3",
+      "level": 3,
+      "name_lt": "Iš dalies naudojamas kitais nei 1.8.2 nurodytais tikslais",
+      "name_en": "Used partly for other than 1.8.2 purposes"
+    },
+    {
+      "code": "1.9",
+      "level": 2,
+      "name_lt": "Motociklams, priekabiniams nameliams ir pramoginiams arba sportiniams laivams, taip pat orlaiviams, kurių masė mažesnė kaip 1 550 kg, skirtas kuras",
+      "name_en": "Fuel for motorcycles, caravans and vessels for recreational or sports purposes, and aircraft with a mass less than 1 550 kg"
+    },
+    {
+      "code": "1.9.1",
+      "level": 3,
+      "name_lt": "Naudojamas komerciniam keleivių vežimui, mokymui vairuoti ar nuomai",
+      "name_en": "Used for commercial passenger transport, driving instruction or rental purposes"
+    },
+    {
+      "code": "1.9.2",
+      "level": 3,
+      "name_lt": "Naudojamas komerciniais tikslais",
+      "name_en": "Used for business purposes"
+    },
+    {
+      "code": "1.10",
+      "level": 2,
+      "name_lt": "Mašinoms ir žemės ūkio traktoriams skirtas kuras",
+      "name_en": "Fuel for machines and agriculture tractors"
+    },
+    {
+      "code": "1.10.1",
+      "level": 3,
+      "name_lt": "Benzinas",
+      "name_en": "Petrol"
+    },
+    {
+      "code": "1.10.2",
+      "level": 3,
+      "name_lt": "Dyzelinas",
+      "name_en": "Diesel"
+    },
+    {
+      "code": "1.10.3",
+      "level": 3,
+      "name_lt": "Suskystintos naftos dujos",
+      "name_en": "LPG"
+    },
+    {
+      "code": "1.10.4",
+      "level": 3,
+      "name_lt": "Gamtinės dujos",
+      "name_en": "Natural gas"
+    },
+    {
+      "code": "1.10.5",
+      "level": 3,
+      "name_lt": "Biokuras",
+      "name_en": "Bio fuel"
+    },
+    {
+      "code": "1.11",
+      "level": 2,
+      "name_lt": "Mažiau kaip 9 vietų keleivinėms transporto priemonėms arba nuomojamiems automobiliams skirtas kuras",
+      "name_en": "Fuel for means of passenger transport with less than 9 spaces or a rental car"
+    },
+    {
+      "code": "1.11.1",
+      "level": 3,
+      "name_lt": "Benzinas",
+      "name_en": "Petrol"
+    },
+    {
+      "code": "1.11.2",
+      "level": 3,
+      "name_lt": "Dyzelinas",
+      "name_en": "Diesel"
+    },
+    {
+      "code": "1.11.3",
+      "level": 3,
+      "name_lt": "Suskystintos naftos dujos",
+      "name_en": "LPG"
+    },
+    {
+      "code": "1.11.4",
+      "level": 3,
+      "name_lt": "Gamtinės dujos",
+      "name_en": "Natural gas"
+    },
+    {
+      "code": "1.11.5",
+      "level": 3,
+      "name_lt": "Biokuras",
+      "name_en": "Bio fuel"
+    },
+    {
+      "code": "1.12",
+      "level": 2,
+      "name_lt": "Keleivinėms transporto priemonėms, išskyrus 1.8 ir 1.9 nurodytas transporto priemones, skirtas kuras",
+      "name_en": "Fuel for means of passenger transport other than 1.8 and 1.9"
+    },
+    {
+      "code": "1.13",
+      "level": 2,
+      "name_lt": "Transporto priemonėms, kurioms netaikomi teisės į atskaitą apribojimai, skirtas kuras",
+      "name_en": "Fuel for means of transport for which there exists no restriction on the right to deduct"
+    },
+    {
+      "code": "1.14",
+      "level": 2,
+      "name_lt": "Transporto priemonėms, kurioms taikomi teisės į atskaitą apribojimai, skirtas kuras",
+      "name_en": "Fuel for means of transport for which there exists a restriction on the right to deduct"
+    },
+    {
+      "code": "2",
+      "level": 1,
+      "name_lt": "Transporto priemonių nuoma",
+      "name_en": "Hiring of means of transport"
+    },
+    {
+      "code": "2.1",
+      "level": 2,
+      "name_lt": "Transporto priemonių, kurių masė didesnė kaip 3 500 kg, išskyrus už atlygį keleivius vežančias transporto priemones, nuoma",
+      "name_en": "Hiring of means of transport with a mass greater than 3 500 kg other than means of transport for paying passengers"
+    },
+    {
+      "code": "2.2",
+      "level": 2,
+      "name_lt": "Transporto priemonių, kurių masė ne didesnė kaip 3 500 kg, išskyrus už atlygį keleivius vežančias transporto priemones, nuoma",
+      "name_en": "Hiring of means of transport with a mass less than or equal to 3 500 kg other than means of transport for paying passengers"
+    },
+    {
+      "code": "2.2.1",
+      "level": 3,
+      "name_lt": "Ilgesniam nei 6 mėnesių laikotarpiui be pertraukų",
+      "name_en": "For a continuous period exceeding 6 months"
+    },
+    {
+      "code": "2.2.2",
+      "level": 3,
+      "name_lt": "Ne ilgesniam kaip 6 mėnesių laikotarpiui be pertraukų",
+      "name_en": "For a continuous period equal to or not exceeding 6 months"
+    },
+    {
+      "code": "2.2.3",
+      "level": 3,
+      "name_lt": "Lengvieji automobiliai",
+      "name_en": "Passenger cars (PKW)"
+    },
+    {
+      "code": "2.2.4",
+      "level": 3,
+      "name_lt": "Sunkvežimiai",
+      "name_en": "Goods vehicles (LKW)"
+    },
+    {
+      "code": "2.3",
+      "level": 2,
+      "name_lt": "Už atlygį keleivius vežančių transporto priemonių nuoma",
+      "name_en": "Hiring of means of transport for paying passengers"
+    },
+    {
+      "code": "2.3.1",
+      "level": 3,
+      "name_lt": "Ilgesniam nei 6 mėnesių laikotarpiui be pertraukų",
+      "name_en": "For a continuous period exceeding 6 months"
+    },
+    {
+      "code": "2.3.2",
+      "level": 3,
+      "name_lt": "Ne ilgesniam kaip 6 mėnesių laikotarpiui be pertraukų",
+      "name_en": "For a continuous period equal to or not exceeding 6 months"
+    },
+    {
+      "code": "2.4",
+      "level": 2,
+      "name_lt": "Krovininių transporto priemonių nuoma",
+      "name_en": "Hiring of means of goods transport"
+    },
+    {
+      "code": "2.5",
+      "level": 2,
+      "name_lt": "Keleivinių ir universaliųjų automobilių nuoma",
+      "name_en": "Hiring of passenger and multipurpose cars"
+    },
+    {
+      "code": "2.5.1",
+      "level": 3,
+      "name_lt": "Naudojami tik komerciniais tikslais",
+      "name_en": "Used exclusively for business purposes"
+    },
+    {
+      "code": "2.5.2",
+      "level": 3,
+      "name_lt": "Iš dalies naudojamos komerciniam keleivių vežimui arba mokymui vairuoti",
+      "name_en": "Used partly for commercial passenger transport or driving instruction"
+    },
+    {
+      "code": "2.5.3",
+      "level": 3,
+      "name_lt": "Iš dalies naudojamas kitais nei 2.5.2 nurodytais tikslais",
+      "name_en": "Used partly for other than 2.5.2 purposes"
+    },
+    {
+      "code": "2.6",
+      "level": 2,
+      "name_lt": "Motociklų, priekabinių namelių ir pramoginių arba sportinių laivų, taip pat orlaivių, kurių masė mažesnė kaip 1 550 kg, nuoma",
+      "name_en": "Hiring of motorcycles, caravans and vessels for recreational or sports purposes, and aircraft with a mass less than 1 550 kg"
+    },
+    {
+      "code": "2.6.1",
+      "level": 3,
+      "name_lt": "Naudojami komerciniam keleivių vežimui arba mokymui vairuoti",
+      "name_en": "Used for commercial passenger transport or driving instruction"
+    },
+    {
+      "code": "2.6.2",
+      "level": 3,
+      "name_lt": "Naudojami kitais komerciniais tikslais",
+      "name_en": "Used for other business purposes"
+    },
+    {
+      "code": "2.7",
+      "level": 2,
+      "name_lt": "M1 klasės keleivinių automobilių nuoma",
+      "name_en": "Hiring of passenger cars of the M1 category"
+    },
+    {
+      "code": "2.8",
+      "level": 2,
+      "name_lt": "Daugiau kaip 9 vietų keleivinių transporto priemonių nuoma",
+      "name_en": "Hiring of means of passenger transport with more than 9 spaces"
+    },
+    {
+      "code": "2.9",
+      "level": 2,
+      "name_lt": "Mažiau kaip 9 vietų keleivinių transporto priemonių nuoma",
+      "name_en": "Hiring of means of passenger transport with less than 9 spaces"
+    },
+    {
+      "code": "2.9.1",
+      "level": 3,
+      "name_lt": "Naudojamos komerciniam vežimui",
+      "name_en": "Used for commercial operations"
+    },
+    {
+      "code": "2.9.2",
+      "level": 3,
+      "name_lt": "Naudojamos ne komerciniam vežimui",
+      "name_en": "Used for other than commercial operations"
+    },
+    {
+      "code": "2.10",
+      "level": 2,
+      "name_lt": "Transporto priemonių, kurioms netaikomi teisės į atskaitą apribojimai, nuoma",
+      "name_en": "Hiring of means of transport for which there exists no restriction on the right to deduct"
+    },
+    {
+      "code": "2.11",
+      "level": 2,
+      "name_lt": "Transporto priemonių, kurioms taikomi teisės į atskaitą apribojimai, nuoma",
+      "name_en": "Hiring of a means of transport for which there exists a restriction on the right to deduct"
+    },
+    {
+      "code": "2.12",
+      "level": 2,
+      "name_lt": "Transporto priemonių, išskyrus 2.5 ir 2.6 nurodytas transporto priemones, nuoma",
+      "name_en": "Hiring of means of transport other than 2.5 and 2.6"
+    },
+    {
+      "code": "3",
+      "level": 1,
+      "name_lt": "Su transporto priemonėmis susijusios išlaidos (išskyrus prie 1 ir 2 kodų nurodytas prekes ir paslaugas)",
+      "name_en": "Expenditure relating to means of transport (other than goods and services referred to under codes 1 and 2)"
+    },
+    {
+      "code": "3.1",
+      "level": 2,
+      "name_lt": "Išlaidos, susijusios su transporto priemonėmis, kurių masė didesnė kaip 3 500 kg, išskyrus už atlygį keleivius vežančias transporto priemones",
+      "name_en": "Expenditure relating to means of transport with a mass greater than 3 500 kg other than means of transport for paying passengers"
+    },
+    {
+      "code": "3.1.1",
+      "level": 3,
+      "name_lt": "Transporto priemonių (>3 500 kg) įsigijimas",
+      "name_en": "Purchase"
+    },
+    {
+      "code": "3.1.2",
+      "level": 3,
+      "name_lt": "Transporto priemonių (>3 500 kg) techninė priežiūra",
+      "name_en": "Maintenance"
+    },
+    {
+      "code": "3.1.3",
+      "level": 3,
+      "name_lt": "Transporto priemonių (>3 500 kg) priedų pirkimas ir įrengimas",
+      "name_en": "Purchase and installation of accessories"
+    },
+    {
+      "code": "3.1.4",
+      "level": 3,
+      "name_lt": "Transporto priemonių (>3 500 kg) laikymas garaže arba automobilių stovėjimo vietose",
+      "name_en": "Garaging or parking"
+    },
+    {
+      "code": "3.1.5",
+      "level": 3,
+      "name_lt": "Kitos išlaidos, susijusios su transporto priemonėmis (>3 500 kg)",
+      "name_en": "Other expenditure"
+    },
+    {
+      "code": "3.2",
+      "level": 2,
+      "name_lt": "Išlaidos, susijusios su transporto priemonėmis, kurių masė ne didesnė kaip 3 500 kg, išskyrus už atlygį keleivius vežančias transporto priemones",
+      "name_en": "Expenditure relating to means of transport with a mass less than or equal to 3 500 kg other than means of transport for paying passengers"
+    },
+    {
+      "code": "3.2.1",
+      "level": 3,
+      "name_lt": "Transporto priemonių (<=3 500 kg) įsigijimas",
+      "name_en": "Purchase"
+    },
+    {
+      "code": "3.2.2",
+      "level": 3,
+      "name_lt": "Transporto priemonių (<=3 500 kg) techninė priežiūra",
+      "name_en": "Maintenance"
+    },
+    {
+      "code": "3.2.3",
+      "level": 3,
+      "name_lt": "Transporto priemonių (<=3 500 kg) priedų pirkimas ir įrengimas",
+      "name_en": "Purchase and installation of accessories"
+    },
+    {
+      "code": "3.2.4",
+      "level": 3,
+      "name_lt": "Transporto priemonių (<=3 500 kg) laikymas garaže arba automobilių stovėjimo vietose",
+      "name_en": "Garaging or parking"
+    },
+    {
+      "code": "3.2.5",
+      "level": 3,
+      "name_lt": "Kitos išlaidos, susijusios su transporto priemonėmis (<=3 500 kg)",
+      "name_en": "Other expenditure"
+    },
+    {
+      "code": "3.2.6",
+      "level": 3,
+      "name_lt": "Lengvieji automobiliai",
+      "name_en": "Passenger cars (PKW)"
+    },
+    {
+      "code": "3.2.7",
+      "level": 3,
+      "name_lt": "Sunkvežimiai",
+      "name_en": "Goods vehicles (LKW)"
+    },
+    {
+      "code": "3.3",
+      "level": 2,
+      "name_lt": "Išlaidos, susijusios su už atlygį keleivius vežančiomis transporto priemonėmis",
+      "name_en": "Expenditure relating to means of transport for paying passengers"
+    },
+    {
+      "code": "3.3.1",
+      "level": 3,
+      "name_lt": "Už atlygį keleivius vežančių transporto priemonių įsigijimas",
+      "name_en": "Purchase of a means of transport for paying passengers"
+    },
+    {
+      "code": "3.3.2",
+      "level": 3,
+      "name_lt": "Už atlygį keleivius vežančių transporto priemonių techninė priežiūra",
+      "name_en": "Maintenance of a means of transport for paying passengers"
+    },
+    {
+      "code": "3.3.3",
+      "level": 3,
+      "name_lt": "Už atlygį keleivius vežančių transporto priemonių priedų pirkimas ir įrengimas",
+      "name_en": "Purchase and installation of accessories for a means of transport for paying passengers"
+    },
+    {
+      "code": "3.3.4",
+      "level": 3,
+      "name_lt": "Už atlygį keleivius vežančių transporto priemonių laikymas garaže arba automobilių stovėjimo vietose",
+      "name_en": "Garaging or parking of a means of transport for paying passengers"
+    },
+    {
+      "code": "3.3.5",
+      "level": 3,
+      "name_lt": "Išlaidos, susijusios su už atlygį keleivius vežančiomis transporto priemonėmis",
+      "name_en": "Other expenditure relating to a means of transport for paying passengers"
+    },
+    {
+      "code": "3.4",
+      "level": 2,
+      "name_lt": "Su krovininėmis transporto priemonėmis susijusios išlaidos",
+      "name_en": "Expenditure relating to means of goods transport"
+    },
+    {
+      "code": "3.4.1",
+      "level": 3,
+      "name_lt": "Krovininių transporto priemonių įsigijimas",
+      "name_en": "Purchase of a means of goods transport"
+    },
+    {
+      "code": "3.4.2",
+      "level": 3,
+      "name_lt": "Krovininių transporto priemonių techninė priežiūra",
+      "name_en": "Maintenance of a means of goods transport"
+    },
+    {
+      "code": "3.4.3",
+      "level": 3,
+      "name_lt": "Krovininių transporto priemonių laikymas garaže arba automobilių stovėjimo vietose",
+      "name_en": "Garaging or parking of a means of goods transport"
+    },
+    {
+      "code": "3.4.4",
+      "level": 3,
+      "name_lt": "Išlaidos, susijusios su krovininėmis transporto priemonėmis, išskyrus 3.4.1, 3.4.2 ir 3.4.3",
+      "name_en": "Expenditure relating to means of goods transport other than 3.4.1, 3.4.2 and 3.4.3"
+    },
+    {
+      "code": "3.5",
+      "level": 2,
+      "name_lt": "Keleivinių ir universaliųjų automobilių techninė priežiūra",
+      "name_en": "Maintenance of passenger and multipurpose cars"
+    },
+    {
+      "code": "3.5.1",
+      "level": 3,
+      "name_lt": "Naudojami tik komerciniais tikslais",
+      "name_en": "Used exclusively for business purposes"
+    },
+    {
+      "code": "3.5.2",
+      "level": 3,
+      "name_lt": "Iš dalies naudojamos komerciniam keleivių vežimui, mokymui vairuoti ar nuomai",
+      "name_en": "Used partly for commercial passenger transport, driving instruction, or rental purposes"
+    },
+    {
+      "code": "3.5.3",
+      "level": 3,
+      "name_lt": "Iš dalies naudojamos kitais nei 3.5.2 nurodytais verslo tikslais",
+      "name_en": "Used partly for business purposes other than 3.5.2"
+    },
+    {
+      "code": "3.6",
+      "level": 2,
+      "name_lt": "Motociklų, priekabinių namelių ir pramoginių bei sportinių laivų, taip pat orlaivių, kurių masė didesnė kaip 1 550 kg, techninė priežiūra",
+      "name_en": "Maintenance of motorcycles, caravans and vessels for recreational and sports purposes, and aircrafts with a mass greater than 1 550 kg"
+    },
+    {
+      "code": "3.6.1",
+      "level": 3,
+      "name_lt": "Naudojami komerciniam keleivių vežimui, mokymui vairuoti, nuomai",
+      "name_en": "Used for commercial passenger transport, driving instruction, rental purposes"
+    },
+    {
+      "code": "3.6.2",
+      "level": 3,
+      "name_lt": "Naudojami kitais komerciniais tikslais",
+      "name_en": "Used for other business purposes"
+    },
+    {
+      "code": "3.7",
+      "level": 2,
+      "name_lt": "Išlaidos, išskyrus techninės priežiūros, laikymo garaže ir stovėjimo aikštelėse išlaidas, susijusios su keleiviniais ir universaliaisiais automobiliais",
+      "name_en": "Expenditure, other than maintenance, garaging and parking relating to passenger and multipurpose cars"
+    },
+    {
+      "code": "3.7.1",
+      "level": 3,
+      "name_lt": "Naudojami tik komerciniais tikslais",
+      "name_en": "Used exclusively for business purposes"
+    },
+    {
+      "code": "3.7.2",
+      "level": 3,
+      "name_lt": "Iš dalies naudojamos komerciniam keleivių vežimui, mokymui vairuoti ar nuomai",
+      "name_en": "Used partly for commercial passenger transport, driving instruction or rental purposes"
+    },
+    {
+      "code": "3.7.3",
+      "level": 3,
+      "name_lt": "Iš dalies naudojami kitais nei 3.7.2 nurodytais verslo tikslais",
+      "name_en": "Used partly for purposes other than 3.7.2"
+    },
+    {
+      "code": "3.8",
+      "level": 2,
+      "name_lt": "Išlaidos, išskyrus techninės priežiūros, laikymo garaže ir automobilių stovėjimo aikštelėse išlaidas, susijusios su motociklais, priekabiniais nameliais ir pramoginiais bei sportiniais laivais, taip pat orlaiviais, kurių masė didesnė kaip 1 550 kg",
+      "name_en": "Expenditure, other than maintenance, garaging and parking relating to motorcycles, caravans and vessels for recreational and sports purposes, and aircrafts with a mass greater than 1 550 kg"
+    },
+    {
+      "code": "3.8.1",
+      "level": 3,
+      "name_lt": "Naudojami komerciniam keleivių vežimui, mokymui vairuoti, nuomai ar perpardavimui",
+      "name_en": "Used for commercial passenger transport, driving instruction, rental purposes or resale"
+    },
+    {
+      "code": "3.8.2",
+      "level": 3,
+      "name_lt": "Naudojami kitais komerciniais tikslais",
+      "name_en": "Used for other business purposes"
+    },
+    {
+      "code": "3.9",
+      "level": 2,
+      "name_lt": "M1 klasės keleivinių automobilių įsigijimas",
+      "name_en": "Purchase of passenger car of M1 category"
+    },
+    {
+      "code": "3.10",
+      "level": 2,
+      "name_lt": "M1 klasės keleivinių automobilių priedų įsigijimas, įskaitant jų surinkimą ir įrengimą",
+      "name_en": "Purchase of accessories for passenger cars of M1 category, including their assembly and installation"
+    },
+    {
+      "code": "3.11",
+      "level": 2,
+      "name_lt": "Išlaidos, susijusios su daugiau kaip 9 vietų keleivinėmis transporto priemonėmis arba su krovininėmis transporto priemonėmis",
+      "name_en": "Expenditure relating to means of passenger transport with more than 9 places, or to means of goods transport"
+    },
+    {
+      "code": "3.12",
+      "level": 2,
+      "name_lt": "Išlaidos, susijusios su mažiau kaip 9 vietų komerciniam vežimui naudojamomis keleivinėmis transporto priemonėmis",
+      "name_en": "Expenditure relating to means of passenger transport with less than 9 places used for commercial operations"
+    },
+    {
+      "code": "3.13",
+      "level": 2,
+      "name_lt": "Išlaidos, susijusios su transporto priemonėmis, kurioms netaikomi teisės į atskaitą apribojimai",
+      "name_en": "Expenditure relating to means of transport for which there exists no restriction on the right to deduct"
+    },
+    {
+      "code": "3.14",
+      "level": 2,
+      "name_lt": "Išlaidos, susijusios su transporto priemonėmis, kurioms taikomi teisės į atskaitą apribojimai",
+      "name_en": "Expenditure relating to means of transport for which there exists a restriction on the right to deduct"
+    },
+    {
+      "code": "3.15",
+      "level": 2,
+      "name_lt": "Keleivinių transporto priemonių, išskyrus keleivinius ir universaliuosius automobilius, motociklus, priekabinius namelius ir pramoginius bei sportinius laivus, taip pat orlaivius, kurių masė didesnė kaip 1 550 kg, techninė priežiūra",
+      "name_en": "Maintenance of means of passenger transport other than passenger and multipurpose cars, motorcycles, caravans and vessels for recreational and sports purposes, and aircraft with a mass greater than 1 550 kg"
+    },
+    {
+      "code": "3.16",
+      "level": 2,
+      "name_lt": "Keleivinių transporto priemonių laikymas garaže arba automobilių stovėjimo vietose",
+      "name_en": "Garaging or parking of a means of passenger transport"
+    },
+    {
+      "code": "3.17",
+      "level": 2,
+      "name_lt": "Išlaidos, išskyrus techninės priežiūros, laikymo garaže ir automobilių stovėjimo vietose išlaidas, susijusios su transporto priemonėmis, išskyrus keleivinius ir universaliuosius automobilius, motociklus, priekabinius namelius ir pramoginius bei sportinius laivus, taip pat orlaivius, kurių masė didesnė kaip 1 550 kg",
+      "name_en": "Expenditure, other than maintenance, garaging or parking relating to means of transport other than passenger and multipurpose cars, motorcycles, caravans and vessels for recreational and sports purposes, and aircraft with a mass greater than 1 550 kg"
+    },
+    {
+      "code": "4",
+      "level": 1,
+      "name_lt": "Kelių rinkliavos ir mokesčiai",
+      "name_en": "Road tolls and road user charge"
+    },
+    {
+      "code": "4.1",
+      "level": 2,
+      "name_lt": "Kelių rinkliavos, taikomos transporto priemonėms, kurių masė didesnė kaip 3 500 kg, išskyrus už atlygį keleivius vežančias transporto priemones",
+      "name_en": "Road tolls for means of transport with a mass greater than 3 500 kg other than means of transport for paying passengers"
+    },
+    {
+      "code": "4.2",
+      "level": 2,
+      "name_lt": "Kelių rinkliavos, taikomos transporto priemonėms, kurių masė ne didesnė kaip 3 500 kg, išskyrus už atlygį keleivius vežančias transporto priemones",
+      "name_en": "Road tolls for vehicles with a mass less than or equal to 3 500 kg other than means of transport for paying passengers"
+    },
+    {
+      "code": "4.2.1",
+      "level": 3,
+      "name_lt": "Lengvieji automobiliai",
+      "name_en": "Passenger cars (PKW)"
+    },
+    {
+      "code": "4.2.2",
+      "level": 3,
+      "name_lt": "Sunkvežimiai",
+      "name_en": "Goods vehicles (LKW)"
+    },
+    {
+      "code": "4.3",
+      "level": 2,
+      "name_lt": "Kelių rinkliavos, taikomos už atlygį keleivius vežančioms transporto priemonėms",
+      "name_en": "Road tolls for means of transport for paying passengers"
+    },
+    {
+      "code": "4.4",
+      "level": 2,
+      "name_lt": "Kelių rinkliavos, taikomos visoms per Didžiojo Belto tiltą važiuojančioms transporto priemonėms",
+      "name_en": "Road tolls for any means of transport across the Great Belt Bridge"
+    },
+    {
+      "code": "4.5",
+      "level": 2,
+      "name_lt": "Kelių rinkliavos, taikomos visoms per Zundo tiltą važiuojančioms transporto priemonėms",
+      "name_en": "Road tolls for any means of transport across the Oresund Bridge"
+    },
+    {
+      "code": "4.6",
+      "level": 2,
+      "name_lt": "Kelių rinkliavos, taikomos daugiau kaip 9 vietų už atlygį keleivius vežančioms keleivinėms transporto priemonėms",
+      "name_en": "Road tolls for means of transport for paying passengers with more than 9 places"
+    },
+    {
+      "code": "4.7",
+      "level": 2,
+      "name_lt": "Kelių rinkliavos, taikomos mažiau kaip 9 vietų už atlygį keleivius vežančioms keleivinėms transporto priemonėms",
+      "name_en": "Road tolls for means of transport for paying passengers with less than 9 places"
+    },
+    {
+      "code": "4.8",
+      "level": 2,
+      "name_lt": "Kelių rinkliavos, taikomos transporto priemonėms, naudojamoms per konferenciją, mugę, parodą ar kongresą",
+      "name_en": "Road tolls for vehicles used in the context of a conference, fair, exhibition or congress"
+    },
+    {
+      "code": "4.8.1",
+      "level": 3,
+      "name_lt": "Renginio organizatoriaus",
+      "name_en": "For the organiser of the event"
+    },
+    {
+      "code": "4.8.2",
+      "level": 3,
+      "name_lt": "Renginio dalyvio, kai sąskaitą tiesiogiai pateikia organizatorius",
+      "name_en": "For a participant in the event, where the expenditure is directly charged by the organiser"
+    },
+    {
+      "code": "5",
+      "level": 1,
+      "name_lt": "Kelionės išlaidos, pavyzdžiui, taksi ir viešojo transporto išlaidos",
+      "name_en": "Travel expenses, such as taxi fares, public transport fares"
+    },
+    {
+      "code": "5.1",
+      "level": 2,
+      "name_lt": "Apmokestinamojo asmens arba apmokestinamojo asmens darbuotojo",
+      "name_en": "For the taxable person or an employee of the taxable person"
+    },
+    {
+      "code": "5.2",
+      "level": 2,
+      "name_lt": "Ne apmokestinamojo asmens ir ne apmokestinamojo asmens darbuotojo",
+      "name_en": "For someone other than the taxable person, or an employee of the taxable person"
+    },
+    {
+      "code": "5.3",
+      "level": 2,
+      "name_lt": "Apmokestinamojo asmens arba apmokestinamojo asmens darbuotojo per konferenciją, mugę, parodą ar kongresą",
+      "name_en": "For the taxable person or an employee of the taxable person in the context of a conference, fair, exhibition or congress"
+    },
+    {
+      "code": "5.3.1",
+      "level": 3,
+      "name_lt": "Renginio organizatoriaus",
+      "name_en": "For the organiser of the event"
+    },
+    {
+      "code": "5.3.2",
+      "level": 3,
+      "name_lt": "Renginio dalyvio, kai sąskaitą tiesiogiai pateikia organizatorius",
+      "name_en": "For a participant in the event, where the expenditure is directly charged by the organiser"
+    },
+    {
+      "code": "6",
+      "level": 1,
+      "name_lt": "Apgyvendinimas",
+      "name_en": "Accommodation"
+    },
+    {
+      "code": "6.1",
+      "level": 2,
+      "name_lt": "Apmokestinamojo asmens arba apmokestinamojo asmens darbuotojo apgyvendinimo išlaidos",
+      "name_en": "Expenditure on lodging and accommodation for the taxable person, or an employee of the taxable person"
+    },
+    {
+      "code": "6.2",
+      "level": 2,
+      "name_lt": "Ne apmokestinamojo asmens ir ne apmokestinamojo asmens darbuotojo apgyvendinimo išlaidos",
+      "name_en": "Expenditure on lodging and accommodation for someone other than the taxable person or an employee of the taxable person"
+    },
+    {
+      "code": "6.3",
+      "level": 2,
+      "name_lt": "Kvalifikacijos kėlimo konferencijose dalyvaujančio apmokestinamojo asmens arba apmokestinamojo asmens darbuotojo apgyvendinimo išlaidos",
+      "name_en": "Expenditure on lodging and accommodation for the taxable person or an employee of the taxable person attending qualifying conferences"
+    },
+    {
+      "code": "6.4",
+      "level": 2,
+      "name_lt": "Konferencijoje, mugėje, parodoje ar kongrese dalyvaujančio apmokestinamojo asmens arba apmokestinamojo asmens darbuotojo apgyvendinimo išlaidos",
+      "name_en": "Expenditure on lodging and accommodation for the taxable person or an employee of the taxable person in the context of a conference, fair, exhibition or congress"
+    },
+    {
+      "code": "6.4.1",
+      "level": 3,
+      "name_lt": "Renginio organizatoriaus",
+      "name_en": "For the organiser of the event"
+    },
+    {
+      "code": "6.4.2",
+      "level": 3,
+      "name_lt": "Renginio dalyvio, kai sąskaitą tiesiogiai pateikia organizatorius",
+      "name_en": "For a participant in the event, where the expenditure is directly charged by the organiser"
+    },
+    {
+      "code": "6.5",
+      "level": 2,
+      "name_lt": "Prekes arba paslaugas tiekiančio (teikiančio) apmokestinamojo asmens darbuotojo apgyvendinimo išlaidos",
+      "name_en": "Expenditure on lodging and accommodation for an employee of the taxable person effecting supplies of goods or services"
+    },
+    {
+      "code": "6.6",
+      "level": 2,
+      "name_lt": "Apgyvendinimo subrangos pagrindu išlaidos",
+      "name_en": "Expenditure on lodging and accommodation for onward supply"
+    },
+    {
+      "code": "6.7",
+      "level": 2,
+      "name_lt": "Apgyvendinimo išlaidos, išskyrus 6.5 arba 6.6 nurodytas išlaidas",
+      "name_en": "Expenditure on lodging other than 6.5 or 6.6"
+    },
+    {
+      "code": "7",
+      "level": 1,
+      "name_lt": "Maistas, gėrimai ir maitinimo paslaugos",
+      "name_en": "Food, drink and restaurant services"
+    },
+    {
+      "code": "7.1",
+      "level": 2,
+      "name_lt": "Viešbučių, barų, restoranų ir pensionų tiekiamas maistas ir gėrimai, įskaitant pusryčius",
+      "name_en": "Food and drink provided by hotels, bars, restaurants and boarding houses, including breakfast"
+    },
+    {
+      "code": "7.1.1",
+      "level": 3,
+      "name_lt": "Apmokestinamojo asmens arba apmokestinamojo asmens darbuotojo",
+      "name_en": "For the taxable person or an employee of the taxable person"
+    },
+    {
+      "code": "7.1.2",
+      "level": 3,
+      "name_lt": "Ne apmokestinamajam asmeniui ir ne apmokestinamojo asmens darbuotojui",
+      "name_en": "For someone other than the taxable person or an employee of the taxable person"
+    },
+    {
+      "code": "7.2",
+      "level": 2,
+      "name_lt": "Konferencijose, mugėse, parodose ar kongresuose tiekiamas maistas ir gėrimai",
+      "name_en": "Food and drink provided in the context of a conference, fair, exhibition or congress"
+    },
+    {
+      "code": "7.2.1",
+      "level": 3,
+      "name_lt": "Renginio organizatoriaus",
+      "name_en": "For the organiser of the event"
+    },
+    {
+      "code": "7.2.2",
+      "level": 3,
+      "name_lt": "Renginio dalyvio, kai sąskaitą tiesiogiai pateikia organizatorius",
+      "name_en": "For a participant in the event, where the expenditure is directly charged by the organiser"
+    },
+    {
+      "code": "7.3",
+      "level": 2,
+      "name_lt": "Prekes arba paslaugas tiekiančio (teikiančio) apmokestinamojo asmens darbuotojo maisto ir gėrimų išlaidos",
+      "name_en": "Food and drink for an employee of the taxable person effecting supplies of goods or services"
+    },
+    {
+      "code": "7.4",
+      "level": 2,
+      "name_lt": "Tolesniam tiekimui įsigyjamos maitinimo paslaugos",
+      "name_en": "Restaurant services purchased for onward supply"
+    },
+    {
+      "code": "7.5",
+      "level": 2,
+      "name_lt": "Maisto, gėrimų arba maitinimo paslaugų, išskyrus 7.2, 7.3 ir 7.4 nurodytas paslaugas, įsigijimas",
+      "name_en": "Purchase of food, drink or restaurant services other than 7.2, 7.3 and 7.4"
+    },
+    {
+      "code": "8",
+      "level": 1,
+      "name_lt": "Leidimas patekti į muges ir parodas",
+      "name_en": "Admissions to fairs and exhibitions"
+    },
+    {
+      "code": "8.1",
+      "level": 2,
+      "name_lt": "Apmokestinamajam asmeniui arba apmokestinamojo asmens darbuotojui",
+      "name_en": "For the taxable person or an employee of the taxable person"
+    },
+    {
+      "code": "8.2",
+      "level": 2,
+      "name_lt": "Ne apmokestinamajam asmeniui ir ne apmokestinamojo asmens darbuotojui",
+      "name_en": "For someone other than the taxable person or an employee of the taxable person"
+    },
+    {
+      "code": "9",
+      "level": 1,
+      "name_lt": "Išlaidos prabangos prekėms, pramogoms ir pasilinksminimams",
+      "name_en": "Expenditure on luxuries, amusements and entertainment"
+    },
+    {
+      "code": "9.1",
+      "level": 2,
+      "name_lt": "Alkoholio įsigijimas",
+      "name_en": "Purchase of alcohol"
+    },
+    {
+      "code": "9.2",
+      "level": 2,
+      "name_lt": "Tabako gaminių įsigijimas",
+      "name_en": "Purchase of manufactured tobacco"
+    },
+    {
+      "code": "9.3",
+      "level": 2,
+      "name_lt": "Išlaidos priėmimams ir pasilinksminimams",
+      "name_en": "Expenditure on receptions and entertainment"
+    },
+    {
+      "code": "9.3.1",
+      "level": 3,
+      "name_lt": "Reklamos tikslais",
+      "name_en": "For publicity purposes"
+    },
+    {
+      "code": "9.3.2",
+      "level": 3,
+      "name_lt": "Ne reklamos tikslais",
+      "name_en": "Not for publicity purposes"
+    },
+    {
+      "code": "9.4",
+      "level": 2,
+      "name_lt": "Pramoginių laivų techninės priežiūros išlaidos",
+      "name_en": "Expenditure on maintenance of pleasure craft"
+    },
+    {
+      "code": "9.5",
+      "level": 2,
+      "name_lt": "Išlaidos meno kūriniams, kolekcionavimo objektams ir antikvariniams daiktams",
+      "name_en": "Expenditure on works of art, collectors items and antiques"
+    },
+    {
+      "code": "9.6",
+      "level": 2,
+      "name_lt": "Reklamos išlaidos prabangos prekėms, pramogoms ir pasilinksminimams",
+      "name_en": "Expenditure on luxuries, amusements and entertainment for advertising"
+    },
+    {
+      "code": "9.7",
+      "level": 2,
+      "name_lt": "Išlaidos prabangos prekėms, pramogoms ir pasilinksminimams, išskyrus 9.1, 9.2 ir 9.3 nurodytas išlaidas",
+      "name_en": "Expenditure on luxuries, amusements and entertainment other than 9.1, 9.2 and 9.3"
+    },
+    {
+      "code": "10",
+      "level": 1,
+      "name_lt": "Kita",
+      "name_en": "Other"
+    },
+    {
+      "code": "10.1",
+      "level": 2,
+      "name_lt": "Įrankiai",
+      "name_en": "Tools"
+    },
+    {
+      "code": "10.2",
+      "level": 2,
+      "name_lt": "Garantinis taisymas",
+      "name_en": "Repairs within a warranty period"
+    },
+    {
+      "code": "10.3",
+      "level": 2,
+      "name_lt": "Su švietimu susijusios paslaugos",
+      "name_en": "Services connected with education"
+    },
+    {
+      "code": "10.4",
+      "level": 2,
+      "name_lt": "Su turtu susiję darbai",
+      "name_en": "Work on property"
+    },
+    {
+      "code": "10.4.1",
+      "level": 3,
+      "name_lt": "Su nekilnojamuoju turtu susiję darbai",
+      "name_en": "Work on immoveable property"
+    },
+    {
+      "code": "10.4.2",
+      "level": 3,
+      "name_lt": "Su nekilnojamuoju turtu, kuris naudojamas kaip gyvenamoji vieta, susiję darbai",
+      "name_en": "Work on immoveable property used as a dwelling"
+    },
+    {
+      "code": "10.4.3",
+      "level": 3,
+      "name_lt": "Su kilnojamuoju turtu susiję darbai, išskyrus kodu 3 žymimus darbus",
+      "name_en": "Work on moveable property other than code 3"
+    },
+    {
+      "code": "10.5",
+      "level": 2,
+      "name_lt": "Turto įsigijimas arba nuoma",
+      "name_en": "Purchase or hiring of property"
+    },
+    {
+      "code": "10.5.1",
+      "level": 3,
+      "name_lt": "Nekilnojamojo turto pirkimas arba nuoma",
+      "name_en": "Purchase or hiring of immoveable property"
+    },
+    {
+      "code": "10.5.2",
+      "level": 3,
+      "name_lt": "Nekilnojamojo turto, kuris naudojamas kaip gyvenamoji, pasilinksminimo ar poilsio vieta, įsigijimas arba nuoma",
+      "name_en": "Purchase or hiring of immoveable property used as a dwelling, or for recreational or leisure use"
+    },
+    {
+      "code": "10.5.3",
+      "level": 3,
+      "name_lt": "Kilnojamojo turto, kuris naudojamas kaip gyvenamoji, pasilinksminimo ar poilsio vieta, įsigijimas arba nuoma",
+      "name_en": "Purchase or hiring of moveable property connected with or used in immoveable property used as a dwelling, or for recreational or leisure use"
+    },
+    {
+      "code": "10.5.4",
+      "level": 3,
+      "name_lt": "Kilnojamojo turto, išskyrus kodu 2 žymimą kilnojamąjį turtą, įsigijimas arba nuoma",
+      "name_en": "Purchase or hiring of moveable property other than code 2"
+    },
+    {
+      "code": "10.6",
+      "level": 2,
+      "name_lt": "Vandens, dujų arba elektros tiekimas per skirstymo tinklą",
+      "name_en": "Provision of water, gas or electricity through a distribution network"
+    },
+    {
+      "code": "10.7",
+      "level": 2,
+      "name_lt": "Mažos vertės dovanos",
+      "name_en": "Gifts of a small value"
+    },
+    {
+      "code": "10.8",
+      "level": 2,
+      "name_lt": "Biuro išlaidos",
+      "name_en": "Office expenses"
+    },
+    {
+      "code": "10.9",
+      "level": 2,
+      "name_lt": "Dalyvavimas mugėse ir seminaruose, švietimas ir mokymas",
+      "name_en": "Participation in fairs and seminars, education or training"
+    },
+    {
+      "code": "10.9.1",
+      "level": 3,
+      "name_lt": "Mugės",
+      "name_en": "Fairs"
+    },
+    {
+      "code": "10.9.2",
+      "level": 3,
+      "name_lt": "Seminarai",
+      "name_en": "Seminars"
+    },
+    {
+      "code": "10.9.3",
+      "level": 3,
+      "name_lt": "Švietimas",
+      "name_en": "Education"
+    },
+    {
+      "code": "10.9.4",
+      "level": 3,
+      "name_lt": "Mokymas",
+      "name_en": "Training"
+    },
+    {
+      "code": "10.10",
+      "level": 2,
+      "name_lt": "Papildomos vienodo dydžio sumos už ūkinius gyvūnus ir žemės ūkio produkciją",
+      "name_en": "Flat rate additions on livestock and agricultural produce"
+    },
+    {
+      "code": "10.11",
+      "level": 2,
+      "name_lt": "Pašto siuntų siuntimo į ne ES valstybes išlaidos",
+      "name_en": "Expenditure on postage of mail to countries outside the EU"
+    },
+    {
+      "code": "10.12",
+      "level": 2,
+      "name_lt": "Su apgyvendinimu susijusios fakso ir telefono išlaidos",
+      "name_en": "Expenditure on fax and phone in connection with accommodation"
+    },
+    {
+      "code": "10.13",
+      "level": 2,
+      "name_lt": "Kelionių organizatoriaus įsigytos prekės ir paslaugos, skirtos tiesiogiai keliautojui",
+      "name_en": "Goods and services acquired by a travel organiser for the direct benefit of the traveller"
+    },
+    {
+      "code": "10.14",
+      "level": 2,
+      "name_lt": "Perparduoti įsigytos prekės, išskyrus 1.6 nurodytas prekes",
+      "name_en": "Goods purchased for resale other than 1.6"
+    },
+    {
+      "code": "10.15",
+      "level": 2,
+      "name_lt": "Perparduoti įsigytos paslaugos, išskyrus 6.6 ir 7.4 nurodytas paslaugas",
+      "name_en": "Services purchased for resale other than 6.6 and 7.4"
+    },
+    {
+      "code": "10.16",
+      "level": 2,
+      "name_lt": "Su turtu susiję darbai",
+      "name_en": "Work on property"
+    },
+    {
+      "code": "10.16.1",
+      "level": 3,
+      "name_lt": "Su nekilnojamuoju turtu, kuris naudojamas kaip gyvenamoji, pramogų arba poilsio vieta, susiję darbai",
+      "name_en": "Work on immoveable property used as a residence, recreational or leisure facility"
+    },
+    {
+      "code": "10.16.2",
+      "level": 3,
+      "name_lt": "Su nekilnojamuoju turtu, išskyrus 10.16.1 nurodytą turtą, susiję darbai",
+      "name_en": "Work on immoveable property other than 10.16.1"
+    },
+    {
+      "code": "10.16.3",
+      "level": 3,
+      "name_lt": "Darbai, susiję su kilnojamuoju turtu, susijusiu su 10.16.1 nurodytu nekilnojamuoju turtu",
+      "name_en": "Work on moveable property connected with or use of an immoveable property in 10.16.1"
+    },
+    {
+      "code": "10.16.4",
+      "level": 3,
+      "name_lt": "Su kilnojamuoju turtu, išskyrus 10.16.3 nurodytą turtą, susiję darbai",
+      "name_en": "Work on moveable property other than 10.16.3"
+    },
+    {
+      "code": "10.17",
+      "level": 2,
+      "name_lt": "Turto išlaidos",
+      "name_en": "Expenditure on property"
+    },
+    {
+      "code": "10.17.1",
+      "level": 3,
+      "name_lt": "Nekilnojamojo turto, kuris naudojamas kaip gyvenamoji, pasilinksminimo ar poilsio vieta, išlaidos",
+      "name_en": "Expenditure on immoveable property used as a dwelling, or for recreational or leisure use"
+    },
+    {
+      "code": "10.17.2",
+      "level": 3,
+      "name_lt": "Nekilnojamojo turto, išskyrus 10.17.1 nurodytą turtą, išlaidos",
+      "name_en": "Expenditure on immoveable property other than 10.17.1"
+    }
+  ]
+}

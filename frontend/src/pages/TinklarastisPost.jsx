@@ -65,6 +65,26 @@ const FOLLOW_DOMAINS = ["dokskenas.lt", "dokskenas", "atlyginimoskaiciuokle.com"
 // ===== CTA баннера =====
 const PROMO_URL = "https://atlyginimoskaiciuokle.com/saskaitu-skaitmenizavimas-dokskenas";
 
+function trackAdClick(adName) {
+  try {
+    const url = `${API_BASE}/api/track-click/`;
+    const body = JSON.stringify({
+      ad_name: adName,
+      page_url: typeof window !== "undefined" ? window.location.pathname : "",
+    });
+    if (navigator.sendBeacon) {
+      navigator.sendBeacon(url, new Blob([body], { type: "application/json" }));
+    } else {
+      fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body,
+        keepalive: true,
+      }).catch(() => {});
+    }
+  } catch {}
+}
+
 function uniqueId(base, seen) {
   const b = base || "section";
   let id = b;
@@ -329,6 +349,15 @@ function DownloadButton({ label, fileUrl }) {
 }
 
 function DokSkenasPromo({ mobile = false, sticky = false }) {
+  const handlePromoClick = () => {
+    trackAdClick(mobile ? "blog_banner_mobile" : "blog_banner_sidebar");
+    if (typeof window !== "undefined" && typeof window.gtag === "function") {
+      window.gtag("event", "promo_click", {
+        event_label: mobile ? "banner_mobile" : "banner_sidebar",
+      });
+    }
+  };
+
   const items = [
     { icon: <AccessTimeIcon sx={{ fontSize: 17, color: "#7fe0a8", flexShrink: 0 }} />, text: "nuskaito per 30s" },
     { icon: <CalculateOutlinedIcon sx={{ fontSize: 17, color: "#7fe0a8", flexShrink: 0 }} />, text: "sumiškai arba kiekybiškai" },
@@ -371,6 +400,7 @@ function DokSkenasPromo({ mobile = false, sticky = false }) {
         <Box
           component="a"
           href={PROMO_URL}
+          onClick={handlePromoClick}
           sx={{
             display: "flex",
             alignItems: "center",

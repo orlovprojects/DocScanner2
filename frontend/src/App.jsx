@@ -98,7 +98,9 @@ const VeiklosZurnalasPage = lazy(() => import('./pages/VeiklosZurnalasPage'));
 const OSSReportPage = lazy(() => import('./pages/Ossreportpage'));
 const SVSReportPage = lazy(() => import('./pages/SVSReportPage'));
 const PurchasesPage = lazy(() => import('./pages/PurchasesPage'));
-const ApskaitosCentrasPage = lazy(() => import('./pages/ApskaitosCentrasPage'));
+const ApskaitosCentrasPage = lazy(() => import('./pages/ApskaitosCentrasPage')); 
+const EprisPage = lazy(() => import('./pages/EprisPage')); 
+
 
 // ─── Sidebar - Toolbar ───
 function SidebarRailWrapper() {
@@ -269,6 +271,7 @@ function App() {
                 <Route path="/veiklos-zurnalas" element={<PrivateRoute><VeiklosZurnalasPage /></PrivateRoute>} />
                 <Route path="/oss-zurnalas" element={<PrivateRoute><OSSReportPage /></PrivateRoute>} />
                 <Route path="/svs-deklaravimas" element={<PrivateRoute><SVSReportPage /></PrivateRoute>} />
+                <Route path="/epris" element={<PrivateRoute><EprisPage /></PrivateRoute>} />
                 <Route path="/papildyti" element={<Subscribe />} />
                 <Route path="/susisiekti" element={<Contact />} />
                 <Route path="/nustatymai" element={<PrivateRoute><NustatymaiPage /></PrivateRoute>} />
