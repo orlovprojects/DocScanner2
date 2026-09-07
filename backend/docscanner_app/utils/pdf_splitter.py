@@ -482,6 +482,12 @@ DOWNSCALE_DPI = 150
 # 3+ подряд выносим отдельным rejected-документом.
 MAX_GLUED_BLANK_RUN = 2
 
+# При падении батча делим диапазон пополам и пробуем снова,
+# вместо того чтобы сваливать все страницы в один документ.
+MIN_BATCH_SIZE = 5
+MAX_BATCH_RETRY_DEPTH = 3
+BATCH_PAUSE_SECONDS = 2
+
 UNASSIGNED_KINDS = ("blank", "fragment", "separator", "unreadable")
 REJECTED_KINDS = ("fragment", "unreadable")
 
@@ -1318,6 +1324,90 @@ def _classify_batch(
 # ─── Main split logic ─────────────────────────────────────────────────────────
 
 
+def _classify_range_with_fallback(
+    pdf_path: str,
+    page_start: int,
+    page_end: int,
+    total_pages: int,
+    is_first_batch: bool,
+    depth: int = 0,
+) -> tuple[list[dict], list[dict]]:
+    """
+    Классифицирует диапазон страниц.
+    При ошибке делит диапазон пополам и пробует снова.
+    В крайнем случае разбивает по одной странице — лучше лишние документы,
+    чем один мега-PDF, который downstream отклонит целиком.
+    """
+    try:
+        result = _classify_batch(
+            pdf_path=pdf_path,
+            page_start=page_start,
+            page_end=page_end,
+            total_pages=total_pages,
+            is_first_batch=is_first_batch,
+        )
+        docs = result.get("documents") or []
+        unassigned = result.get("unassigned_pages") or []
+
+        if docs:
+            return [_clean_group(d) for d in docs], unassigned
+
+        logger.warning(
+            "[PDF-SPLIT] Batch pages %d-%d returned no documents",
+            page_start + 1, page_end,
+        )
+    except Exception as e:
+        logger.warning(
+            "[PDF-SPLIT] Batch classification failed for pages %d-%d (depth=%d): %s",
+            page_start + 1, page_end, depth, e,
+        )
+
+    size = page_end - page_start
+
+    if size > MIN_BATCH_SIZE and depth < MAX_BATCH_RETRY_DEPTH:
+        mid = page_start + size // 2
+
+        logger.warning(
+            "[PDF-SPLIT] Retrying pages %d-%d as two halves: %d-%d and %d-%d",
+            page_start + 1, page_end, page_start + 1, mid, mid + 1, page_end,
+        )
+
+        time.sleep(BATCH_PAUSE_SECONDS)
+        left_groups, left_un = _classify_range_with_fallback(
+            pdf_path, page_start, mid, total_pages, is_first_batch, depth + 1,
+        )
+
+        time.sleep(BATCH_PAUSE_SECONDS)
+        right_groups, right_un = _classify_range_with_fallback(
+            pdf_path, mid, page_end, total_pages, False, depth + 1,
+        )
+
+        return left_groups + right_groups, left_un + right_un
+
+    logger.error(
+        "[PDF-SPLIT] Giving up on pages %d-%d, splitting page by page",
+        page_start + 1, page_end,
+    )
+
+    groups = []
+    for p in range(page_start, page_end):
+        groups.append({
+            "pages": [p],
+            "number": None,
+            "series": None,
+            "invoice_date": None,
+            "numbers": [],
+            "multiple_on_page": False,
+            "documents_on_page": 0,
+            "complete": True,
+            "continues_previous": False,
+            "confidence": "low",
+            "method": "batch_fallback_page",
+        })
+
+    return groups, []
+
+
 def classify_pdf_pages(pdf_path: str, total_pages: int) -> list[dict]:
     """
     Определяет группировку страниц PDF по документам.
@@ -1357,42 +1447,19 @@ def classify_pdf_pages(pdf_path: str, total_pages: int) -> list[dict]:
             batch_size,
         )
 
-        try:
-            result = _classify_batch(
-                pdf_path=pdf_path,
-                page_start=page_start,
-                page_end=page_end,
-                total_pages=total_pages,
-                is_first_batch=(batch_index == 1),
-            )
-            batch_docs = result.get("documents", [])
-            all_unassigned.extend(result.get("unassigned_pages") or [])
-        except Exception as e:
-            logger.warning(
-                "[PDF-SPLIT] Batch classification failed for pages %d-%d: %s",
-                page_start + 1,
-                page_end,
-                e,
-            )
-            batch_docs = []
+        if batch_index > 1:
+            time.sleep(BATCH_PAUSE_SECONDS)
 
-        if not batch_docs:
-            fallback_group = {
-                "pages": list(range(page_start, page_end)),
-                "number": None,
-                "series": None,
-                "multiple_on_page": False,
-                "documents_on_page": 0,
-                "complete": True,
-                "continues_previous": False,
-                "confidence": "low",
-                "method": "batch_fallback",
-            }
-            groups.append(fallback_group)
-            continue
+        batch_groups, batch_unassigned = _classify_range_with_fallback(
+            pdf_path=pdf_path,
+            page_start=page_start,
+            page_end=page_end,
+            total_pages=total_pages,
+            is_first_batch=(batch_index == 1),
+        )
 
-        for item in batch_docs:
-            groups.append(_clean_group(item))
+        groups.extend(batch_groups)
+        all_unassigned.extend(batch_unassigned)
 
     groups = _apply_unassigned_pages(groups, all_unassigned, total_pages)
 
@@ -1696,6 +1763,12 @@ you can identify, and set "kind":
 
 Do NOT put a page into "unassigned_pages" just because it is a continuation page
 of a document that IS present here — such pages belong to that document.
+
+DUPLEX SCANS — IMPORTANT:
+These files are often duplex scans where every second page is the empty back side
+of the previous sheet. An empty back side is NEVER its own document: put it into
+"unassigned_pages" with kind "blank". Be consistent across the whole fragment —
+if you group pages into front/back pairs at the start, keep doing it to the end.
 
 {continuation_note}
 
