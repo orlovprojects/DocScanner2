@@ -248,6 +248,9 @@ def _is_credit_doc(doc) -> bool:
         or invoice_type == "kreditine"
     )
 
+def _is_person(doc, side: str) -> bool:
+    """side = 'seller' | 'buyer'. Физлицо только по явному флагу из БД."""
+    return getattr(doc, f"{side}_is_person", None) is True
 
 def _ensure_credit_sign(value, doc):
     """
@@ -590,8 +593,14 @@ def _build_agnum_customer_from_doc(doc) -> tuple[str, dict]:
     country = _s(getattr(doc, "seller_country_iso", "")).upper()
     country_name = country_name_lt(country)
     seller_iban = _s(getattr(doc, "seller_iban", ""))
-    rkod = _s(getattr(doc, "seller_id", "")) or _s(getattr(doc, "seller_vat_code", ""))
+    rkod = (
+        _s(getattr(doc, "seller_id", ""))
+        or _s(getattr(doc, "seller_vat_code", ""))
+        or _s(getattr(doc, "seller_id_programoje", ""))
+        or kod
+    )[:15]
     pvmkod = _s(getattr(doc, "seller_vat_code", ""))
+    fiz_asm = "Y" if _is_person(doc, "seller") else "N"
     currency = _s(getattr(doc, "currency", "EUR")).upper() or "EUR"
 
     attrs = {
@@ -610,7 +619,7 @@ def _build_agnum_customer_from_doc(doc) -> tuple[str, dict]:
         "KRD": "Y", "DEB": "N", "AKTYVUS": "Y",
         "POZYMIAI": _agnum_pozymiai_100(),
         "KOD_IS": "", "DEFAULT_CURR": currency or "EUR",
-        "FIZ_ASM": "N", "VEZEJAS": "N", "KNGR": "4",
+        "FIZ_ASM": fiz_asm, "VEZEJAS": "N", "KNGR": "4",
     }
     return kod, attrs
 
@@ -637,8 +646,14 @@ def _build_agnum_customer_from_buyer(doc) -> tuple[str, dict]:
     country = _s(getattr(doc, "buyer_country_iso", "")).upper()
     country_name = country_name_lt(country)
     buyer_iban = _s(getattr(doc, "buyer_iban", ""))
-    rkod = _s(getattr(doc, "buyer_id", "")) or _s(getattr(doc, "buyer_vat_code", ""))
+    rkod = (
+        _s(getattr(doc, "buyer_id", ""))
+        or _s(getattr(doc, "buyer_vat_code", ""))
+        or _s(getattr(doc, "buyer_id_programoje", ""))
+        or kod
+    )[:15]
     pvmkod = _s(getattr(doc, "buyer_vat_code", ""))
+    fiz_asm = "Y" if _is_person(doc, "buyer") else "N"
     currency = _s(getattr(doc, "currency", "EUR")).upper() or "EUR"
 
     attrs = {
@@ -657,7 +672,7 @@ def _build_agnum_customer_from_buyer(doc) -> tuple[str, dict]:
         "KRD": "N", "DEB": "Y", "AKTYVUS": "Y",
         "POZYMIAI": _agnum_pozymiai_100(),
         "KOD_IS": "", "DEFAULT_CURR": currency or "EUR",
-        "FIZ_ASM": "N", "VEZEJAS": "N", "KNGR": "4",
+        "FIZ_ASM": fiz_asm, "VEZEJAS": "N", "KNGR": "4",
     }
     return kod, attrs
 

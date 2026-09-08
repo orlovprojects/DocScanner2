@@ -43,8 +43,37 @@ from ..utils.lineitem_rules_applier import apply_lineitem_rules_for_detaliai
 logger = logging.getLogger("docscanner_app")
 
 
-def _gen_program_id7() -> str:
-    """7-значный код без ведущего нуля (для *_id_programoje)."""
+def _gen_program_id7(model_class=None, user=None, extra_used=()) -> str:
+    """
+    7-значный код без ведущего нуля (для *_id_programoje).
+
+    Если переданы model_class и user — проверяем, что код не занят
+    другим контрагентом этого пользователя (в Agnum RKOD должен быть
+    уникален, иначе два разных человека склеятся в одного клиента).
+    extra_used — коды, выданные в этом же документе, но ещё не сохранённые.
+    """
+    if model_class is None or user is None:
+        return str(random.randint(1_000_000, 9_999_999))
+
+    from django.db.models import Q
+
+    extra = {str(c).strip() for c in (extra_used or ()) if c and str(c).strip()}
+
+    for _ in range(50):
+        code = str(random.randint(1_000_000, 9_999_999))
+        if code in extra:
+            continue
+        try:
+            taken = model_class.objects.filter(user=user).filter(
+                Q(seller_id_programoje=code) | Q(buyer_id_programoje=code)
+            ).exists()
+        except Exception as e:
+            logger.warning("id_programoje uniqueness check failed: %s", e)
+            return code
+        if not taken:
+            return code
+
+    logger.warning("id_programoje: no free 7-digit code found after 50 tries")
     return str(random.randint(1_000_000, 9_999_999))
 
 
@@ -261,7 +290,7 @@ def _apply_top_level_fields(
             
             # Если всё ещё нет id_programoje — генерируем
             if not str(getattr(db_doc, "seller_id_programoje", "") or "").strip():
-                db_doc.seller_id_programoje = _gen_program_id7()
+                db_doc.seller_id_programoje = _gen_program_id7(db_doc.__class__, user)
                 logger.info("seller_id_programoje generated: %s (name: %s)", db_doc.seller_id_programoje, db_doc.seller_name)
     except Exception as e:
         logger.warning("failed to set seller data: %s", e)
@@ -289,7 +318,11 @@ def _apply_top_level_fields(
             
             # Если всё ещё нет id_programoje — генерируем
             if not str(getattr(db_doc, "buyer_id_programoje", "") or "").strip():
-                db_doc.buyer_id_programoje = _gen_program_id7()
+                db_doc.buyer_id_programoje = _gen_program_id7(
+                    db_doc.__class__,
+                    user,
+                    extra_used=(db_doc.seller_id_programoje,),
+                )
                 logger.info("buyer_id_programoje generated: %s (name: %s)", db_doc.buyer_id_programoje, db_doc.buyer_name)
     except Exception as e:
         logger.warning("failed to set buyer data: %s", e)
