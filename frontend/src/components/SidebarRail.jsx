@@ -129,12 +129,13 @@ const SECTIONS = [
     label: "Apsk.",
     fullLabel: "Apskaita",
     icon: DvrIcon,
-    pathPrefix: ["/apskaitos-centras", "/veiklos-zurnalas", "/oss-zurnalas", "/svs-deklaravimas"],
+    pathPrefix: ["/apskaitos-centras", "/veiklos-zurnalas", "/oss-zurnalas", "/svs-deklaravimas", "/epris"],
     items: () => [
       // { icon: ListAltIcon, text: "Apskaitos centras", path: "/apskaitos-centras" },
       { icon: ListAltIcon, text: "IV žurnalas", path: "/veiklos-zurnalas" },
       { icon: ListAltIcon, text: "OSS žurnalas", path: "/oss-zurnalas" },
       { icon: ListAltIcon, text: "SVS žurnalas", path: "/svs-deklaravimas" },
+      { icon: ListAltIcon, text: "PVM grąžinimas (EPRIS)", path: "/epris" },
     ],
   },
 ];

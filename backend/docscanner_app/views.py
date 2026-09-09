@@ -7340,6 +7340,71 @@ def invoice_send(request, pk):
 
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
+def purchase_mark_paid(request, pk):
+    from .models import Purchase
+
+    purchase = get_object_or_404(Purchase, pk=pk, user=request.user)
+
+    amount = request.data.get("amount")
+    payment_date = request.data.get("payment_date")
+
+    if not amount or not payment_date:
+        return Response(
+            {"detail": "Privalomi laukai: amount, payment_date."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    from decimal import Decimal, InvalidOperation
+    try:
+        amount = abs(Decimal(str(amount)))
+    except (InvalidOperation, ValueError):
+        return Response(
+            {"detail": "Neteisinga suma."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    if isinstance(payment_date, str):
+        from django.utils.dateparse import parse_date
+        _pd = parse_date(payment_date)
+        if not _pd:
+            return Response(
+                {"detail": "Neteisinga mokėjimo data."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        payment_date = _pd
+
+    _amount_eur = request.data.get("amount_eur")
+    if _amount_eur not in (None, ""):
+        try:
+            _amount_eur = abs(Decimal(str(_amount_eur)))
+        except (InvalidOperation, ValueError):
+            return Response(
+                {"detail": "Neteisinga EUR suma."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+    else:
+        _amount_eur = None
+
+    from .services.payment_service import PaymentService
+    svc = PaymentService(request.user)
+    alloc = svc.mark_paid_manual_purchase(
+        purchase=purchase,
+        amount=amount,
+        payment_date=payment_date,
+        note=request.data.get("note", ""),
+        payment_account=(request.data.get("payment_account") or "").strip(),
+        amount_eur=_amount_eur,
+    )
+
+    purchase.refresh_from_db()
+    from .serializers import PurchaseSerializer
+    data = PurchaseSerializer(purchase, context={"request": request}).data
+    data["allocation_id"] = alloc.id
+    return Response(data)
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
 def invoice_mark_paid(request, pk):
     invoice = get_object_or_404(Invoice, pk=pk, user=request.user)
 
@@ -7371,18 +7436,42 @@ def invoice_mark_paid(request, pk):
     note = request.data.get("note", "")
     payment_account = (request.data.get("payment_account") or "").strip()
 
+    # JSON atsiunčia datą kaip str — DK generatoriui reikia date objekto.
+    if isinstance(payment_date, str):
+        from django.utils.dateparse import parse_date
+        parsed = parse_date(payment_date)
+        if not parsed:
+            return Response(
+                {"detail": "Neteisinga mokėjimo data."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        payment_date = parsed
+
     # Kreditinės sumos saugomos neigiamos — aliokacijai reikia teigiamos.
     amount = abs(amount)
 
     # Create PaymentAllocation
     from .services.payment_service import PaymentService
     svc = PaymentService(request.user)
+    _amount_eur = request.data.get("amount_eur")
+    if _amount_eur not in (None, ""):
+        try:
+            _amount_eur = abs(Decimal(str(_amount_eur)))
+        except (InvalidOperation, ValueError):
+            return Response(
+                {"detail": "Neteisinga EUR suma."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+    else:
+        _amount_eur = None
+
     svc.mark_paid_manual(
         invoice=invoice,
         amount=amount,
         payment_date=payment_date,
         note=note,
         payment_account=payment_account,
+        amount_eur=_amount_eur,
     )
 
     # Auto SF creation
@@ -19177,6 +19266,98 @@ class PurchaseLineItemsListView(APIView):
             "count": count,
             "results": serializer.data,
         })
+
+
+class PurchasePaymentDetailsView(APIView):
+    """GET /api/purchases/<pk>/payments/ — mokėjimų istorija."""
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request, pk):
+        from .models import Purchase
+        from decimal import Decimal
+
+        purchase = get_object_or_404(Purchase, pk=pk, user=request.user)
+
+        allocs = (
+            purchase.payment_allocations
+            .select_related("outgoing_transaction", "outgoing_transaction__bank_statement", "journal_entry")
+            .order_by("-created_at")
+        )
+
+        items = []
+        for a in allocs:
+            txn = a.outgoing_transaction
+            items.append({
+                "id": a.id,
+                "source": a.source,
+                "source_display": a.get_source_display(),
+                "status": a.status,
+                "amount": a.amount,
+                "amount_eur": a.amount_eur,
+                "payment_date": a.effective_payment_date,
+                "payment_account": a.payment_account,
+                "needs_account": a.needs_account,
+                "note": a.note,
+                "journal_entry_id": a.journal_entry_id,
+                "is_manual": a.source == "manual",
+                "transaction": None if not txn else {
+                    "id": txn.id,
+                    "transaction_date": txn.transaction_date,
+                    "counterparty_name": txn.counterparty_name,
+                    "payment_purpose": txn.payment_purpose,
+                    "amount": txn.amount,
+                    "currency": txn.currency,
+                    "bank_name": (
+                        txn.bank_statement.get_bank_name_display()
+                        if txn.bank_statement else ""
+                    ),
+                },
+            })
+
+        total = abs(purchase.amount_with_vat or Decimal("0"))
+        paid = abs(purchase.paid_amount or Decimal("0"))
+
+        return Response({
+            "purchase_id": purchase.id,
+            "document_number": f"{purchase.document_series or ''}{purchase.document_number or ''}".strip(),
+            "currency": purchase.currency or "EUR",
+            "total": total,
+            "paid_amount": paid,
+            "remaining": max(total - paid, Decimal("0")),
+            "payment_status": purchase.payment_status,
+            "allocations": items,
+        })
+
+
+class SetPaymentAccountView(APIView):
+    """POST /api/payments/<pk>/set-account/  Body: { payment_account }"""
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, pk):
+        from .services.payment_service import PaymentService
+        from .models import PaymentAllocation
+
+        code = (request.data.get("payment_account") or "").strip()
+        if not code:
+            return Response(
+                {"detail": "Nenurodyta pinigų sąskaita."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        svc = PaymentService(request.user)
+        try:
+            alloc = svc.set_payment_account(pk, code)
+        except PaymentAllocation.DoesNotExist:
+            return Response({"detail": "Mokėjimas nerastas."}, status=status.HTTP_404_NOT_FOUND)
+        except ValueError as e:
+            return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+        return Response({
+            "id": alloc.id,
+            "payment_account": alloc.payment_account,
+            "needs_account": alloc.needs_account,
+            "journal_entry_id": alloc.journal_entry_id,
+        })
  
 # ────────────────────────────────────────────────────────────
 # END ─── Pirkimai ───
@@ -20586,396 +20767,37 @@ def apskaita_summary_cards(request):
 # ═══════════════════════════════════════════════════════════
 
 # ═══════════════════════════════════════════════════════════
-# EPRIS
-# ═══════════════════════════════════════════════════════════
-
-import csv
-import io
-import logging
-from collections import defaultdict
-from datetime import date
-from decimal import Decimal
-
-from django.db.models import Q
-from django.http import HttpResponse
-from django.utils import timezone
-from rest_framework.permissions import IsAuthenticated
-from rest_framework.response import Response
-from rest_framework.views import APIView
-
-from .models import ScannedDocument
-from .services.epris_codes import (
-    EU_NO_LT, compute_status, country_currency, country_name, country_options,
-    country_requires_subcodes, normalize_rows, validate_document,
+# EPRIS views are isolated so report helpers cannot shadow OSS helpers.
+from .epris_views import (
+    EprisCodeOptionsView, EprisDocumentCodesView, EprisOverviewView,
+    EprisDocumentsView, EprisExportView,
 )
 
-logger = logging.getLogger("docscanner_app")
-
-MIN_QUARTERLY = Decimal("400")
-MIN_ANNUAL = Decimal("50")
-FIRST_ALLOWED_DATE = date(2009, 1, 1)
 
 
-def _d(v):
-    if v is None:
-        return Decimal("0")
-    try:
-        return Decimal(str(v))
-    except Exception:
-        return Decimal("0")
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def currency_rate(request):
+    """
+    GET /api/currency-rate/?currency=USD&date=2026-09-06
+    Grąžina LB kursą: kiek valiutos vienetų už 1 EUR.
+    """
+    from datetime import date as _date
+    from django.utils.dateparse import parse_date
+    from .services.accounting_transfer import rate_to_eur
 
+    cur = (request.GET.get("currency") or "EUR").strip().upper()
+    d = parse_date(request.GET.get("date") or "") or _date.today()
 
-def _num(v):
-    """EPRIS desimtainis skyriklis - kablelis."""
-    return str(_d(v).quantize(Decimal("0.01"))).replace(".", ",")
-
-
-def _to_eur(amount, currency, on_date):
-    cur = (currency or "EUR").upper()
     if cur == "EUR":
-        return _d(amount)
+        return Response({"currency": "EUR", "date": d, "rate": "1.0000"})
+
     try:
-        rate = get_currency_rate(cur, on_date)
-    except Exception:
-        rate = None
-    if rate:
-        return (_d(amount) / Decimal(str(rate))).quantize(Decimal("0.01"))
-    return _d(amount)
-
-
-def _deadline_ok(year):
-    """Metinis prasymas teikiamas iki kitu metu rugsejo 30 d."""
-    return date.today() <= date(year + 1, 9, 30)
-
-
-def _base_qs(user):
-    return ScannedDocument.objects.filter(
-        user=user,
-        status__in=["completed", "exported"],
-        is_archive_container=False,
-        seller_country_iso__in=EU_NO_LT,
-        vat_amount__gt=0,
-        invoice_date__isnull=False,
-        invoice_date__gte=FIRST_ALLOWED_DATE,
-    ).exclude(
-        pirkimas_pardavimas="pardavimas"
-    ).exclude(
-        is_credit_invoice=True
-    )
-
-
-# ──────────────────────────────────────────────
-# Kodu zinynas
-# ──────────────────────────────────────────────
-
-class EprisCodeOptionsView(APIView):
-    permission_classes = [IsAuthenticated]
-
-    def get(self, request):
-        country = (request.query_params.get("country") or "").strip().upper()
-        if not country:
-            return Response({"error": "Nenurodyta šalis"}, status=400)
-        return Response({
-            "country": country,
-            "country_name": country_name(country),
-            "requires_subcodes": country_requires_subcodes(country),
-            "categories": country_options(country),
-        })
-
-
-# ──────────────────────────────────────────────
-# Dokumento kodu issaugojimas
-# ──────────────────────────────────────────────
-
-class EprisDocumentCodesView(APIView):
-    permission_classes = [IsAuthenticated]
-
-    def patch(self, request, pk):
-        try:
-            doc = ScannedDocument.objects.get(pk=pk, user=request.user)
-        except ScannedDocument.DoesNotExist:
-            return Response({"error": "Dokumentas nerastas"}, status=404)
-
-        country = (doc.seller_country_iso or "").strip().upper()
-        rows = normalize_rows(request.data.get("codes"))
-        errors = validate_document(country, rows) if rows else []
-
-        doc.epris_codes = rows or None
-        doc.epris_status = compute_status(country, rows)
-        doc.save(update_fields=["epris_codes", "epris_status"])
-
-        return Response({
-            "id": doc.id,
-            "epris_codes": doc.epris_codes,
-            "epris_status": doc.epris_status,
-            "errors": errors,
-        })
-
-
-# ──────────────────────────────────────────────
-# Suvestine: salis + metai + galimi laikotarpiai
-# ──────────────────────────────────────────────
-
-class EprisOverviewView(APIView):
-    """Kiek uzsienio PVM turime, pagal salį ir metus, ir ar pasiekiamos ribos."""
-    permission_classes = [IsAuthenticated]
-
-    def get(self, request):
-        include_submitted = request.query_params.get("include_submitted") == "1"
-
-        qs = _base_qs(request.user)
-        if not include_submitted:
-            qs = qs.filter(epris_submitted_at__isnull=True)
-
-        buckets = defaultdict(lambda: {
-            "vat_eur": Decimal("0"),
-            "docs": 0,
-            "ready": 0,
-            "quarters": defaultdict(lambda: Decimal("0")),
-        })
-
-        for d in qs.only(
-            "seller_country_iso", "invoice_date", "vat_amount", "currency", "epris_status",
-        ).iterator():
-            iso = (d.seller_country_iso or "").strip().upper()
-            year = d.invoice_date.year
-            q = (d.invoice_date.month - 1) // 3 + 1
-            eur = _to_eur(d.vat_amount, d.currency, d.invoice_date)
-
-            b = buckets[(iso, year)]
-            b["vat_eur"] += eur
-            b["docs"] += 1
-            b["quarters"][q] += eur
-            if d.epris_status == "tinkama":
-                b["ready"] += 1
-
-        rows = []
-        for (iso, year), b in buckets.items():
-            total = b["vat_eur"].quantize(Decimal("0.01"))
-            quarters = [
-                {
-                    "quarter": q,
-                    "vat_eur": str(b["quarters"][q].quantize(Decimal("0.01"))),
-                    "eligible": b["quarters"][q] >= MIN_QUARTERLY,
-                }
-                for q in sorted(b["quarters"])
-            ]
-            year_closed = year < date.today().year
-            rows.append({
-                "country": iso,
-                "country_name": country_name(iso),
-                "currency": country_currency(iso),
-                "year": year,
-                "vat_eur": str(total),
-                "doc_count": b["docs"],
-                "ready_count": b["ready"],
-                "annual_eligible": bool(year_closed and total >= MIN_ANNUAL),
-                "quarterly_eligible": any(q["eligible"] for q in quarters),
-                "quarters": quarters,
-                "deadline_ok": _deadline_ok(year),
-                "deadline": f"{year + 1}-09-30",
-            })
-
-        rows.sort(key=lambda r: (-r["year"], -Decimal(r["vat_eur"])))
-        return Response({
-            "rows": rows,
-            "min_quarterly": str(MIN_QUARTERLY),
-            "min_annual": str(MIN_ANNUAL),
-        })
-
-
-# ──────────────────────────────────────────────
-# Dokumentu sarasas pagal salį ir laikotarpi
-# ──────────────────────────────────────────────
-
-def _period_documents(user, country, date_from, date_to, include_submitted=False):
-    qs = _base_qs(user).filter(
-        seller_country_iso=country,
-        invoice_date__gte=date_from,
-        invoice_date__lte=date_to,
-    )
-    if not include_submitted:
-        qs = qs.filter(epris_submitted_at__isnull=True)
-    return qs.order_by("invoice_date", "id")
-
-
-def _serialize(doc, expected_currency):
-    codes = doc.epris_codes or []
-    warnings = []
-    cur = (doc.currency or "EUR").upper()
-    if cur != expected_currency:
-        warnings.append(f"Valiuta {cur}, o šaliai reikia {expected_currency}")
-    if not (doc.seller_vat_code or "").strip():
-        warnings.append("Nėra tiekėjo PVM kodo")
-    elif (doc.seller_vat_code or "").strip()[:2].upper() not in ("", doc.seller_country_iso or ""):
-        warnings.append("Tiekėjo PVM kodo prefiksas nesutampa su šalimi")
-    if doc.doc_96_str:
-        warnings.append("Atvirkštinis apmokestinimas – PVM negrąžinamas")
-
-    return {
-        "id": doc.id,
-        "invoice_date": doc.invoice_date.strftime("%Y-%m-%d"),
-        "document_number": doc.document_number or "",
-        "document_series": doc.document_series or "",
-        "seller_name": doc.seller_name or "",
-        "seller_address": doc.seller_address or "",
-        "seller_vat_code": doc.seller_vat_code or "",
-        "seller_country_iso": doc.seller_country_iso or "",
-        "currency": cur,
-        "amount_wo_vat": str(_d(doc.amount_wo_vat).quantize(Decimal("0.01"))),
-        "vat_amount": str(_d(doc.vat_amount).quantize(Decimal("0.01"))),
-        "vat_eur": str(_to_eur(doc.vat_amount, doc.currency, doc.invoice_date)),
-        "epris_codes": codes,
-        "epris_status": doc.epris_status or "tikrinti",
-        "epris_submitted_at": doc.epris_submitted_at.strftime("%Y-%m-%d %H:%M") if doc.epris_submitted_at else None,
-        "preview_url": doc.preview_url or "",
-        "warnings": warnings,
-    }
-
-
-class EprisDocumentsView(APIView):
-    permission_classes = [IsAuthenticated]
-
-    def post(self, request):
-        country = (request.data.get("country") or "").strip().upper()
-        date_from = request.data.get("date_from")
-        date_to = request.data.get("date_to")
-        include_submitted = bool(request.data.get("include_submitted"))
-        offset = int(request.data.get("offset", 0))
-        limit = int(request.data.get("limit", 25))
-
-        if not country or not date_from or not date_to:
-            return Response({"error": "Nenurodyta šalis arba laikotarpis"}, status=400)
-
-        expected_currency = country_currency(country)
-        qs = _period_documents(request.user, country, date_from, date_to, include_submitted)
-
-        total_vat_eur = Decimal("0")
-        ready = 0
-        docs = list(qs)
-        for d in docs:
-            total_vat_eur += _to_eur(d.vat_amount, d.currency, d.invoice_date)
-            if d.epris_status == "tinkama":
-                ready += 1
-
-        # Ar laikotarpis tinka pagal ribas
-        y1, m1, _ = (int(x) for x in date_from.split("-"))
-        y2, m2, _ = (int(x) for x in date_to.split("-"))
-        months = (y2 - y1) * 12 + (m2 - m1) + 1
-        is_full_year = months >= 12
-        threshold = MIN_ANNUAL if is_full_year else MIN_QUARTERLY
-
-        return Response({
-            "country": country,
-            "country_name": country_name(country),
-            "currency": expected_currency,
-            "total_count": len(docs),
-            "ready_count": ready,
-            "total_vat_eur": str(total_vat_eur.quantize(Decimal("0.01"))),
-            "threshold": str(threshold),
-            "threshold_met": total_vat_eur >= threshold,
-            "same_year": y1 == y2,
-            "entries": [_serialize(d, expected_currency) for d in docs[offset:offset + limit]],
-        })
-
-
-# ──────────────────────────────────────────────
-# CSV eksportas
-# ──────────────────────────────────────────────
-
-PURCHASE_HEADER = [
-    "PARENT_ID", "VI_SEQUENCENUMBER", "VI_SIMPLIFIEDINVOICE", "VI_REFERENCENUMBER",
-    "VI_ISSUINGDATE", "VT_NAMEFREE", "VT_ADDRESSFREE", "VT_COUNTRYCODE",
-    "VT_TELEPHONENUMBER", "VT_VATIDENTIFICATIONNUMB", "VT_ISSUEDBY_VATI",
-    "VT_TAXREFERENCENUMBER", "VT_ISSUEDBY_REP", "VI_CURRENCY_TAX", "VI_TAXABLEAMOUNT",
-    "VI_CURRENCY_VAT", "VI_VATAMOUNT", "VI_DEDUCTIBLEVATAMOUNT", "VI_CURRENCY_DVAT",
-    "VI_PRORATARATE",
-]
-
-GOODS_HEADER = ["PARENT_ID", "VG_CODE", "VG_SUBCODE", "VG_LANGUAGE", "VG_FREETEXT"]
-
-
-class EprisExportView(APIView):
-    """Vienas failas = viena šalis + vienas laikotarpis."""
-    permission_classes = [IsAuthenticated]
-
-    def post(self, request):
-        country = (request.data.get("country") or "").strip().upper()
-        date_from = request.data.get("date_from")
-        date_to = request.data.get("date_to")
-        doc_ids = request.data.get("document_ids") or None
-
-        if not country or not date_from or not date_to:
-            return Response({"error": "Nenurodyta šalis arba laikotarpis"}, status=400)
-
-        qs = _period_documents(request.user, country, date_from, date_to, include_submitted=True)
-        if doc_ids:
-            qs = qs.filter(id__in=doc_ids)
-        qs = qs.filter(epris_status="tinkama")
-
-        docs = list(qs)
-        if not docs:
-            return Response({"error": "Nėra paruoštų dokumentų (visiems reikia kategorijų)"}, status=400)
-
-        buf = io.StringIO()
-        w = csv.writer(buf, delimiter=";", lineterminator="\r\n")
-
-        w.writerow(["PurchaseInformation"])
-        w.writerow(PURCHASE_HEADER)
-        for idx, d in enumerate(docs, start=1):
-            series = (d.document_series or "").strip()
-            number = (d.document_number or "").strip()
-            ref = f"{series}{number}" if series else number
-            vat_code = (d.seller_vat_code or "").strip().upper()
-            if vat_code[:2] == country:
-                vat_code = vat_code[2:]
-            vat = _d(d.vat_amount).quantize(Decimal("0.01"))
-            w.writerow([
-                idx,
-                500000 + idx,
-                "false",
-                ref,
-                d.invoice_date.strftime("%Y-%m-%d"),
-                (d.seller_name or "")[:200],
-                (d.seller_address or "")[:200],
-                (d.seller_country_iso or country).upper(),
-                "",
-                vat_code,
-                country if vat_code else "",
-                "",
-                "",
-                (d.currency or "EUR").upper(),
-                _num(d.amount_wo_vat),
-                "",
-                _num(vat),
-                _num(vat),    # DEDUCTIBLE = visas PVM
-                "",
-                "100",        # PRORATA = 100
-            ])
-
-        w.writerow([])
-        w.writerow(["PurchaseInformation_GoodsDescription"])
-        w.writerow(GOODS_HEADER)
-        for idx, d in enumerate(docs, start=1):
-            for row in (d.epris_codes or []):
-                w.writerow([
-                    idx,
-                    row.get("code", ""),
-                    row.get("subcode", ""),
-                    row.get("language", ""),
-                    row.get("free_text", ""),
-                ])
-
-        ScannedDocument.objects.filter(id__in=[d.id for d in docs]).update(
-            epris_submitted_at=timezone.now()
+        rate = rate_to_eur(cur, d)
+    except Exception as e:
+        return Response(
+            {"detail": f"Kursas nerastas: {e}"},
+            status=status.HTTP_404_NOT_FOUND,
         )
 
-        content = buf.getvalue().encode("utf-8")
-        response = HttpResponse(content, content_type="text/csv; charset=utf-8")
-        fname = f"EPRIS_{country}_{date_from}_{date_to}.csv"
-        response["Content-Disposition"] = f'attachment; filename="{fname}"'
-        return response
-
-# ═══════════════════════════════════════════════════════════
-# END - EPRIS
-# ═══════════════════════════════════════════════════════════
+    return Response({"currency": cur, "date": d, "rate": str(rate)})

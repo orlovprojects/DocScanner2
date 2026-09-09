@@ -907,7 +907,7 @@ def _verify_boundary_context(
         context=f"{context_start + 1}-{context_end}",
     )
 
-    logger.info("[PDF-SPLIT] Boundary verifier raw response: %s", raw[:2000])
+    logger.debug("[PDF-SPLIT] Boundary verifier raw response: %s", raw[:2000])
 
     result = _parse_split_json(raw)
 
@@ -1278,7 +1278,7 @@ def _classify_batch(
         total_pages=total_pages,
     )
 
-    logger.info("[PDF-SPLIT] Raw batch response: %s", raw[:2000])
+    logger.debug("[PDF-SPLIT] Raw batch response: %s", raw[:2000])
 
     result = _parse_split_json(raw)
     docs = result.get("documents", [])

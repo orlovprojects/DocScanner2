@@ -565,6 +565,13 @@ def generate_invoice_journal_entry(invoice):
 
     document_number = invoice.full_number
 
+    # ── Valiuta → EUR pagal LB kursą dokumento datai ──
+    from ..services.accounting_transfer import rate_to_eur
+
+    doc_currency = (invoice.currency or "EUR").upper()
+    is_foreign = doc_currency != "EUR"
+    doc_rate = rate_to_eur(doc_currency, entry_date) if is_foreign else Decimal("1")
+
     entry = JournalEntry.objects.create(
         user=invoice.user,
         company_profile=invoice.company_profile,
@@ -576,16 +583,21 @@ def generate_invoice_journal_entry(invoice):
         counterparty_name=invoice.buyer_name or "",
         counterparty_code=invoice.buyer_id or "",
         description=f"Pardavimas: {invoice.buyer_name or ''}".strip(),
-        currency=invoice.currency or "EUR",
+        currency="EUR",
+        original_amount=_to_decimal(invoice.amount_with_vat) if is_foreign else None,
+        original_currency=doc_currency if is_foreign else "",
+        exchange_rate=doc_rate if is_foreign else None,
+        exchange_rate_date=entry_date if is_foreign else None,
         status=JournalEntry.STATUS_DRAFT,
     )
 
     lines = []
     sort_order = 0
 
-    amount_wo_vat = _to_decimal(invoice.amount_wo_vat)
-    vat_amount = _to_decimal(invoice.vat_amount)
-    amount_with_vat = _to_decimal(invoice.amount_with_vat)
+    amount_wo_vat = _to_eur_amount(invoice.amount_wo_vat, doc_rate)
+    vat_amount = _to_eur_amount(invoice.vat_amount, doc_rate)
+    # Skaičiuojame iš dedamųjų, kad D ir K sutaptų iki cento po apvalinimo
+    amount_with_vat = amount_wo_vat + vat_amount
 
     debeto_code = invoice.debeto_saskaita or "2410"
     pvm_code = invoice.pvm_saskaita or "4492"

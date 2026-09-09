@@ -34,6 +34,8 @@ import {
 } from "@mui/material";
 import { alpha } from "@mui/material/styles";
 import PurchasePreviewDialog from "../page_elements/PurchasePreviewDialog";
+import MarkPaidDialog from "../components/MarkPaidDialog";
+import PurchasePaymentsDialog from "../components/PurchasePaymentsDialog";
 
 import MoreVertIcon from "@mui/icons-material/MoreVert";
 import DeleteOutlineIcon from "@mui/icons-material/DeleteOutline";
@@ -50,6 +52,7 @@ import BalanceIcon from "@mui/icons-material/Balance";
 import LockIcon from "@mui/icons-material/Lock";
 import SearchIcon from "@mui/icons-material/Search";
 import FiberManualRecordIcon from "@mui/icons-material/FiberManualRecord";
+import PaidOutlinedIcon from "@mui/icons-material/PaidOutlined";
 
 import { api } from "../api/endpoints";
 import { useCompanyProfiles } from "../contexts/useCompanyProfiles";
@@ -161,6 +164,19 @@ export default function PurchasesPage() {
   // Preview
   const [previewOpen, setPreviewOpen] = useState(false);
   const [selectedPurchaseId, setSelectedPurchaseId] = useState(null);
+
+  // Mark paid
+  const [markPaidOpen, setMarkPaidOpen] = useState(false);
+  const [markPaidPurchase, setMarkPaidPurchase] = useState(null);
+
+  // Payments history
+  const [paymentsOpen, setPaymentsOpen] = useState(false);
+  const [paymentsPurchaseId, setPaymentsPurchaseId] = useState(null);
+
+  const handlePaymentsOpen = (id) => {
+    setPaymentsPurchaseId(id);
+    setPaymentsOpen(true);
+  };
 
   const scrollSentinelRef = useRef(null);
 
@@ -387,10 +403,31 @@ export default function PurchasesPage() {
     ],
   );
 
+  /* ── Mark paid ── */
+
+  const handleMarkPaidOpen = (id) => {
+    handleMenuClose();
+    const p = purchases.find((x) => x.id === id);
+    if (!p) return;
+    setMarkPaidPurchase(p);
+    setMarkPaidOpen(true);
+  };
+
+  const handleMarkPaidConfirm = async (payload) => {
+    if (!markPaidPurchase) return;
+    const { data } = await api.post(
+      `/purchases/${markPaidPurchase.id}/mark-paid/`,
+      payload,
+      { withCredentials: true },
+    );
+    setPurchases((prev) =>
+      prev.map((p) => (p.id === markPaidPurchase.id ? { ...p, ...data } : p)),
+    );
+  };
+
   /* ── Delete ── */
 
   const handleDeleteClick = (id) => {
-    handleMenuClose();
     setDeletingIds([id]);
     setDeleteDialogOpen(true);
   };
@@ -970,7 +1007,9 @@ export default function PurchasesPage() {
             <TableCell sx={{ fontWeight: 600, bgcolor: "#f3f4f6", width: 100 }} />
             <TableCell sx={{ fontWeight: 600, bgcolor: "#f3f4f6" }}>Statusas</TableCell>
             <TableCell sx={{ fontWeight: 600, bgcolor: "#f3f4f6" }}>Mokėjimas</TableCell>
-            <TableCell sx={{ bgcolor: "#f3f4f6", width: 40 }} />
+            <TableCell sx={{ fontWeight: 600, bgcolor: "#f3f4f6", width: 90 }} align="center">
+              Veiksmai
+            </TableCell>
           </TableRow>
         </TableHead>
 
@@ -1057,13 +1096,37 @@ export default function PurchasesPage() {
                     color={payCfg.color}
                     size="small"
                     variant={p.payment_status === "unpaid" ? "outlined" : "filled"}
+                    clickable={p.payment_status !== "unpaid"}
+                    onClick={
+                      p.payment_status !== "unpaid"
+                        ? () => handlePaymentsOpen(p.id)
+                        : undefined
+                    }
+                    sx={p.payment_status !== "unpaid" ? { cursor: "pointer" } : undefined}
                   />
                 </TableCell>
 
-                <TableCell align="right">
-                  <IconButton size="small" onClick={(e) => handleMenuOpen(e, p.id)}>
-                    <MoreVertIcon fontSize="small" />
-                  </IconButton>
+                <TableCell align="center" sx={{ whiteSpace: "nowrap" }}>
+                  <Tooltip title="Pažymėti kaip apmokėtą">
+                    <span>
+                      <IconButton
+                        size="small"
+                        onClick={() => handleMarkPaidOpen(p.id)}
+                        disabled={p.payment_status === "paid"}
+                      >
+                        <PaidOutlinedIcon fontSize="small" />
+                      </IconButton>
+                    </span>
+                  </Tooltip>
+                  <Tooltip title="Pašalinti iš apskaitos">
+                    <IconButton
+                      size="small"
+                      onClick={() => handleDeleteClick(p.id)}
+                      sx={{ color: "error.main" }}
+                    >
+                      <DeleteOutlineIcon fontSize="small" />
+                    </IconButton>
+                  </Tooltip>
                 </TableCell>
               </TableRow>
             );
@@ -1178,6 +1241,15 @@ export default function PurchasesPage() {
           Peržiūrėti
         </MenuItem>
         <MenuItem
+          onClick={() => handleMarkPaidOpen(menuPurchaseId)}
+          disabled={
+            purchases.find((p) => p.id === menuPurchaseId)?.payment_status === "paid"
+          }
+        >
+          <PaidOutlinedIcon sx={{ fontSize: 18, mr: 1 }} />
+          Pažymėti kaip apmokėtą
+        </MenuItem>
+        <MenuItem
           onClick={() => handleDeleteClick(menuPurchaseId)}
           sx={{ color: "error.main" }}
         >
@@ -1193,6 +1265,25 @@ export default function PurchasesPage() {
         purchaseId={selectedPurchaseId}
         activeProfileId={activeProfileId}
         onUpdated={handlePurchaseUpdated}
+      />
+
+      {/* Mark paid dialog */}
+      <MarkPaidDialog
+        open={markPaidOpen}
+        onClose={() => {
+          setMarkPaidOpen(false);
+          setMarkPaidPurchase(null);
+        }}
+        purchase={markPaidPurchase}
+        onConfirm={handleMarkPaidConfirm}
+      />
+
+      {/* Payments dialog */}
+      <PurchasePaymentsDialog
+        open={paymentsOpen}
+        onClose={() => { setPaymentsOpen(false); setPaymentsPurchaseId(null); }}
+        purchaseId={paymentsPurchaseId}
+        onChanged={() => handlePurchaseUpdated(paymentsPurchaseId)}
       />
 
       {/* Delete dialog */}

@@ -1,5 +1,6 @@
 import json
 import os
+from datetime import date
 from functools import lru_cache
 
 from django.conf import settings
@@ -30,6 +31,18 @@ def _flat():
     return {r["code"]: r for r in _ref()["flat"]}
 
 
+def category_labels(rows):
+    flat = _flat()
+    labels = []
+    for row in rows or []:
+        for code in (row.get("code"), row.get("subcode")):
+            if code:
+                label = f"{code} - {flat[code]['name_lt']}" if code in flat else code
+                if label not in labels:
+                    labels.append(label)
+    return labels
+
+
 def _name(code):
     flat = _flat()
     parts = code.split(".")
@@ -46,8 +59,14 @@ def country_name(iso):
     return c["name_lt"] if c else (iso or "")
 
 
-def country_currency(iso):
-    return COUNTRY_CURRENCY.get((iso or "").strip().upper(), "EUR")
+def country_currency(iso, on_date=None):
+    iso = (iso or "").strip().upper()
+    on_date = on_date or date.today()
+    if iso == "BG" and on_date >= date(2026, 1, 1):
+        return "EUR"
+    if iso == "HR" and on_date < date(2023, 1, 1):
+        return "HRK"
+    return COUNTRY_CURRENCY.get(iso, "EUR")
 
 
 def country_requires_subcodes(iso):
@@ -89,6 +108,8 @@ def country_options(iso):
 
 
 def normalize_rows(rows):
+    if not isinstance(rows, list) or len(rows) > 30 or any(not isinstance(r, dict) for r in rows):
+        raise ValueError("Kategorijos turi būti sąrašas (iki 30 eilučių)")
     out, seen = [], set()
     for r in rows or []:
         code = str(r.get("code") or "").strip()
@@ -136,8 +157,8 @@ def validate_code(iso, code, subcode="", free_text=""):
     elif subcode:
         return f"{iso} kategorijoje {code} subkodai nenaudojami"
 
-    if code == "10" and not subcode and not free_text:
-        return "10 kategorijai butinas subkodas arba laisvas aprasymas"
+    if code == "10" and not free_text:
+        return "10 kategorijai būtinas prekių / paslaugų aprašymas"
 
     return None
 
@@ -150,6 +171,8 @@ def validate_document(iso, rows):
         err = validate_code(iso, r.get("code"), r.get("subcode"), r.get("free_text"))
         if err:
             errors.append(err)
+        if r.get("free_text") and r.get("language") not in {"BG", "CS", "DA", "DE", "EL", "EN", "ES", "ET", "FI", "FR", "GA", "HR", "HU", "IT", "LT", "LV", "MT", "NL", "PL", "PT", "RO", "SK", "SL", "SV"}:
+            errors.append("Nurodykite galiojančią aprašymo kalbą")
     return errors
 
 

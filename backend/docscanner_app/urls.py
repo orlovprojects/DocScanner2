@@ -1,4 +1,5 @@
 from django.urls import path, include
+from .epris_views import EprisContractorSearchView
 from .views import logout, CustomTokenObtainPairView, CustomRefreshTokenView, is_authenticated, register, subscription_status, process_image
 from .stripe.subs_views   import StripeCreditCheckoutView, inv_subscribe_checkout, inv_payment_history
 from .stripe.webhooks    import StripeWebhookView
@@ -118,6 +119,9 @@ from .views import (
     MarkAsAggregatorPayoutView,
     AggregatorAccountMappingView,
     chart_accounts_search,
+    purchase_mark_paid,
+    PurchasePaymentDetailsView,
+    SetPaymentAccountView,
 )
 from .views import (
     counterparty_list_create,
@@ -165,6 +169,7 @@ from .views import (
     RejectAllocationView,
     ImportStatsView,
     generate_payment_link,
+    currency_rate,
     available_payment_providers,
     payment_webhook,
     connect_payment_provider,
@@ -568,6 +573,11 @@ urlpatterns = [
 
     path('invoicing/payments/stats/', ImportStatsView.as_view(), name='payment-stats'),
     path('invoicing/bank-accounts/', BankAccountMappingView.as_view()),
+    path('currency-rate/', currency_rate, name='currency_rate'),
+    path('purchases/<int:pk>/mark-paid/', purchase_mark_paid, name='purchase_mark_paid'),
+    path('purchases/<int:pk>/payments/', PurchasePaymentDetailsView.as_view(), name='purchase-payments'),
+    path('payments/<int:pk>/set-account/', SetPaymentAccountView.as_view(), name='payment-set-account'),
+    path('purchases/<int:pk>/remove-payment/<int:alloc_id>/', RemoveManualPaymentView.as_view(), name='purchase-remove-payment'),
     path("invoicing/bank-matching-debug/", BankMatchingDebugView.as_view(), name="bank-matching-debug"),
 
     path('transactions/<int:pk>/dk-templates/', TransactionDKTemplatesView.as_view()),
@@ -640,6 +650,7 @@ urlpatterns = [
     path("purchases/<int:purchase_id>/line-items/<int:line_id>/inline/", PurchaseInlineLineUpdateView.as_view()),
     path("purchases/search/", PurchaseSearchView.as_view()),
 
+    path("epris/contractors/", EprisContractorSearchView.as_view()),
     path("epris/code-options/", EprisCodeOptionsView.as_view()),
     path("epris/documents/<int:pk>/codes/", EprisDocumentCodesView.as_view()),
     path("epris/overview/", EprisOverviewView.as_view()),

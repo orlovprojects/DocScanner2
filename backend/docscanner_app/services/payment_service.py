@@ -958,7 +958,8 @@ class PaymentService:
     def __init__(self, user):
         self.user = user
 
-    def mark_paid_manual(self, invoice, amount, payment_date, note="", payment_account=""):
+    def mark_paid_manual(self, invoice, amount, payment_date, note="",
+                         payment_account="", amount_eur=None):
         """
         Ручная пометка Invoice как оплаченный.
         Создаёт PaymentAllocation с source="manual", без транзакции.
@@ -972,12 +973,37 @@ class PaymentService:
         Returns:
             PaymentAllocation instance
         """
+        # JSON atsiunčia datą kaip str — DK generatoriui reikia date objekto.
+        if isinstance(payment_date, str):
+            from django.utils.dateparse import parse_date
+            payment_date = parse_date(payment_date) or payment_date
+
+        # ── FX ──
+        # amount      — dokumento valiuta, gesina skolą (lemia partial/full)
+        # amount_eur  — realiai gauta/sumokėta EUR, eina į banko koją
+        # skirtumas   — kursų skirtumas (5803/6803)
+        from .allocation_fx import get_doc_rate
+        _cur = (invoice.currency or "EUR").upper()
+        _doc_rate = get_doc_rate(invoice)
+
+        if _cur == "EUR":
+            _amount_eur = amount
+        elif amount_eur is not None:
+            _amount_eur = Decimal(str(amount_eur)).quantize(Decimal("0.01"))
+        else:
+            # Nenurodyta — imam LB kursą mokėjimo dienai.
+            from .accounting_transfer import rate_to_eur
+            _amount_eur = (amount / rate_to_eur(_cur, payment_date)).quantize(Decimal("0.01"))
+
         alloc = PaymentAllocation.objects.create(
             incoming_transaction=None,
             invoice=invoice,
             source="manual",
             status="manual",
             amount=amount,
+            amount_txn=amount,
+            amount_eur=_amount_eur,
+            doc_rate=_doc_rate,
             payment_date=payment_date,
             payment_account=(payment_account or "").strip(),
             needs_account=not (payment_account or "").strip(),
@@ -995,7 +1021,55 @@ class PaymentService:
         try:
             create_je_for_allocation(alloc)
         except Exception as e:
-            logger.warning("[MarkPaid] Auto JE failed for alloc %s: %s", alloc.id, e)
+            logger.exception("[MarkPaid] Auto JE failed for alloc %s: %s", alloc.id, e)
+
+        return alloc
+
+    def mark_paid_manual_purchase(self, purchase, amount, payment_date, note="",
+                                  payment_account="", amount_eur=None):
+        """Rankinis pirkimo dokumento apmokėjimas (be banko operacijos)."""
+        if isinstance(payment_date, str):
+            from django.utils.dateparse import parse_date
+            payment_date = parse_date(payment_date) or payment_date
+
+        from .allocation_fx import get_doc_rate
+        _cur = (purchase.currency or "EUR").upper()
+        _doc_rate = get_doc_rate(purchase)
+
+        if _cur == "EUR":
+            _amount_eur = amount
+        elif amount_eur is not None:
+            _amount_eur = Decimal(str(amount_eur)).quantize(Decimal("0.01"))
+        else:
+            from .accounting_transfer import rate_to_eur
+            _amount_eur = (amount / rate_to_eur(_cur, payment_date)).quantize(Decimal("0.01"))
+
+        alloc = PaymentAllocation.objects.create(
+            outgoing_transaction=None,
+            purchase=purchase,
+            source="manual",
+            status="manual",
+            amount=amount,
+            amount_txn=amount,
+            amount_eur=_amount_eur,
+            doc_rate=_doc_rate,
+            payment_date=payment_date,
+            payment_account=(payment_account or "").strip(),
+            needs_account=not (payment_account or "").strip(),
+            confidence=Decimal("1.00"),
+            match_reasons={"manual": True},
+            note=note,
+            confirmed_at=timezone.now(),
+            confirmed_by=self.user,
+        )
+
+        purchase.recalc_from_allocations()
+
+        from .accounting_transfer import create_je_for_allocation
+        try:
+            create_je_for_allocation(alloc)
+        except Exception as e:
+            logger.exception("[MarkPaid] Purchase JE failed for alloc %s: %s", alloc.id, e)
 
         return alloc
 
@@ -1086,6 +1160,33 @@ class PaymentService:
             ])
             if txn.bank_statement:
                 txn.bank_statement.refresh_stats()
+
+    def set_payment_account(self, allocation_id, payment_account):
+        """Nurodyti pinigų sąskaitą rankiniam mokėjimui ir sukurti DK įrašą."""
+        from django.db.models import Q
+
+        alloc = PaymentAllocation.objects.get(
+            Q(invoice__user=self.user) | Q(purchase__user=self.user),
+            id=allocation_id,
+            source="manual",
+        )
+
+        code = (payment_account or "").strip()
+        if not code:
+            raise ValueError("Nenurodyta pinigų sąskaita.")
+
+        alloc.payment_account = code
+        alloc.needs_account = False
+        alloc.save(update_fields=["payment_account", "needs_account"])
+
+        from .accounting_transfer import create_je_for_allocation
+        try:
+            create_je_for_allocation(alloc)
+        except Exception as e:
+            logger.exception("[SetAccount] JE failed for alloc %s: %s", alloc.id, e)
+
+        alloc.refresh_from_db()
+        return alloc
 
     def remove_manual_payment(self, allocation_id):
         """Удаление ручной пометки оплаты."""

@@ -1668,7 +1668,18 @@ def _reconcile_li_subtotal(li: Dict[str, Any]) -> Dict[str, Any]:
         li["_subtotal_rule"] = "derived"
         return li
 
-    # 5) Ничего не сошлось — помечаем
+    # 5) Разница объяснима округлением unit price до 4 знаков?
+    pq_tol = _price_qty_tolerance(qty, subtotal_in)
+    if _approx(pq, subtotal_in, tol=pq_tol):
+        li["_subtotal_rule"] = "pq-matches-subtotal-rounding"
+        li.pop("_price_mismatch", None)
+        (li.setdefault("_li_calc_log", [])).append(
+            f"price-check: price×qty differs from subtotal only by unit-price "
+            f"rounding ({pq} ≈ {subtotal_in}, tolerance={pq_tol}) → kept as-is"
+        )
+        return li
+
+    # 6) Ничего не сошлось — помечаем
     li["_price_mismatch"] = True
     li["_subtotal_rule"] = "as-is-mismatch"
     return li
@@ -1964,21 +1975,37 @@ def _normalize_unit_price_from_net(doc: Dict[str, Any]) -> None:
             continue
         
         # ✅ Вариант B: price × qty ≈ subtotal? (без скидок)
-        if _approx(pq, net, tol=Decimal("0.02")):
-            # Price правильный (нетто), скидка информационная или уже учтена
-            (li.setdefault("_li_calc_log", [])).append(
-                f"price-check: price×qty ≈ subtotal ({pq} ≈ {net}) → price is net price"
-            )
-            continue
-        
-        # ❌ Если ничего не сошлось — пересчитываем price из subtotal
-        li["_orig_price"] = float(price)
-        li["price"] = Q4(net / qty)  # ← Q4 правильно (price всегда 4 знака)
-        li["_price_adjusted"] = True
-        (li.setdefault("_li_calc_log", [])).append(
-            f"normalize-price: price := subtotal/quantity (was {price}, now {li['price']})"
-        )
+        pq_tol = _price_qty_tolerance(qty, net)
 
+        if _approx(pq, net, tol=pq_tol):
+            if _approx(pq, net, tol=Decimal("0.02")):
+                (li.setdefault("_li_calc_log", [])).append(
+                    f"price-check: price×qty ≈ subtotal ({pq} ≈ {net}) → price is net price"
+                )
+            else:
+                (li.setdefault("_li_calc_log", [])).append(
+                    f"price-check: price×qty differs from subtotal only by unit-price "
+                    f"rounding ({pq} ≈ {net}, tolerance={pq_tol}) → price kept as-is"
+                )
+            li.pop("_price_mismatch", None)
+            continue
+
+        # ❌ Настоящая несостыковка — пересчитываем price из subtotal
+        new_price = Q4(net / qty)
+
+        if new_price != price:
+            li["_orig_price"] = float(price)
+            li["price"] = new_price
+            li["_price_adjusted"] = True
+            (li.setdefault("_li_calc_log", [])).append(
+                f"normalize-price: price := subtotal/quantity (was {price}, now {new_price})"
+            )
+        else:
+            (li.setdefault("_li_calc_log", [])).append(
+                f"normalize-price: subtotal/quantity={net / qty}, but Q4 gives "
+                f"same price={price}; kept as-is"
+            )
+        
 
 def _aggregate_lines(doc: Dict[str, Any]) -> Tuple[Decimal, Decimal, Decimal]:
     """Суммирует строки и округляет до 2 знаков."""
@@ -2051,6 +2078,27 @@ def _fill_missing_line_fields(doc: Dict[str, Any]) -> None:
 
 
 _ADJ_TOL = Decimal("0.02")  # денежный допуск
+
+# price хранится с 4 знаками → реальная цена может отличаться до 0.00005
+_PRICE_STEP = Decimal("0.0001")
+_PRICE_QTY_REL = Decimal("0.01")  # предохранитель: не больше 1% от subtotal
+
+
+def _price_qty_tolerance(qty: Decimal, subtotal: Decimal = Decimal("0")) -> Decimal:
+    """
+    Допуск между price*quantity и subtotal, объяснимый ТОЛЬКО округлением
+    unit price до 4 знаков (price=0.0223, qty=4000, subtotal=89.26).
+    Ограничен 1% от subtotal, чтобы не пропускать настоящие ошибки.
+    """
+    qty = qty.copy_abs()
+
+    tol = qty * (_PRICE_STEP / Decimal("2")) + Decimal("0.01")
+
+    if subtotal != 0:
+        cap = max(_ADJ_TOL, subtotal.copy_abs() * _PRICE_QTY_REL)
+        tol = min(tol, cap)
+
+    return max(_ADJ_TOL, tol)
 
 def _prepass_fix_price_from_total(doc: Dict[str, Any]) -> None:
     """
@@ -2509,41 +2557,6 @@ def _check_against_doc(doc: Dict[str, Any], sum_wo: Decimal, sum_vat: Decimal, s
             append_log(doc, f"lines discount-aware check: scenario {'A' if coreA else 'B'} applied "
                             f"(exp_wo={exp_wo}, exp_vat={exp_vat}, exp_with={exp_with})")
 
-    # inv_wo = d(doc.get("invoice_discount_wo_vat"), 2)      # ← 2 знака
-    # inv_w  = d(doc.get("invoice_discount_with_vat"), 2)    # ← 2 знака
-
-    # # 1) Базовые сравнения "как есть" (без каких-либо поправок)
-    # match_wo   = _approx(sum_wo,   doc_wo)
-    # match_with = _approx(sum_with, doc_with)
-    # match_vat  = (None if separate_vat else _approx(sum_vat, doc_vat))
-
-    # # 2) Если есть документные скидки и базовые сравнения не прошли — пробуем скидочную сверку
-    # if (inv_wo != 0 or inv_w != 0) and (not match_wo or not match_with or (match_vat is False)):
-    #     # Проверяем тождества документа (как в _final_checks):
-    #     # A: wo - inv_wo + vat ≈ with  (скидка по нетто)
-    #     coreA = _approx(Q2(doc_wo - inv_wo + doc_vat), doc_with) if inv_wo != 0 else False  # ← Q2 вместо Q4
-    #     # B: wo + vat ≈ with - inv_w   (скидка по брутто)
-    #     coreB = _approx(Q2(doc_wo + doc_vat), Q2(doc_with - inv_w)) if inv_w != 0 else False  # ← Q2 вместо Q4
-
-    #     if coreA:
-    #         # Строки, скорее всего, "доскидочные" по нетто:
-    #         # тогда with для строк должен совпасть с (док.with + inv_wo)
-    #         exp_wo, exp_with, exp_vat = doc_wo, Q2(doc_with + inv_wo), doc_vat  # ← Q2 вместо Q4
-    #         match_wo   = _approx(sum_wo,   exp_wo)
-    #         match_with = _approx(sum_with, exp_with)
-    #         if not separate_vat:
-    #             match_vat = _approx(sum_vat, exp_vat)
-    #         append_log(doc, "lines discount-aware check: scenario A (doc-level WO discount) applied")
-        elif coreB:
-            # Строки "доскидочные" по брутто:
-            # тогда with для строк должен совпасть с (док.with + inv_w)
-            exp_wo, exp_with, exp_vat = doc_wo, Q2(doc_with + inv_w), doc_vat  # ← Q2 вместо Q4
-            match_wo   = _approx(sum_wo,   exp_wo)
-            match_with = _approx(sum_with, exp_with)
-            if not separate_vat:
-                match_vat = _approx(sum_vat, exp_vat)
-            append_log(doc, "lines discount-aware check: scenario B (doc-level WITH discount) applied")
-        # иначе — оставляем базовые сравнения, ничего не корректируем
 
     # 3) Записываем флаги
     doc["_lines_sum_matches_wo"]   = bool(match_wo)
@@ -2571,46 +2584,6 @@ def _check_against_doc(doc: Dict[str, Any], sum_wo: Decimal, sum_vat: Decimal, s
         f"ar_sutapo={doc['ar_sutapo']}"
     )
     return doc
-
-
-# def _check_against_doc(doc: Dict[str, Any], sum_wo: Decimal, sum_vat: Decimal, sum_with: Decimal) -> Dict[str, Any]:
-#     """Сверка агрегатов строк с документом (без документных скидок). Ставит флаги в doc."""
-#     doc_wo   = d(doc.get("amount_wo_vat"), 4)
-#     doc_vat  = d(doc.get("vat_amount"), 4)
-#     doc_with = d(doc.get("amount_with_vat"), 4)
-#     separate_vat = bool(doc.get("separate_vat"))
-#     inv_wo = d(doc.get("invoice_discount_wo_vat"), 4)
-#     inv_w  = d(doc.get("invoice_discount_with_vat"), 4)
-
-#     # Сравнения с учётом документных скидок (если они > 0)
-#     adj_sum_wo   = Q4(sum_wo   - inv_wo) if inv_wo != 0 else sum_wo
-#     adj_sum_with = Q4(sum_with - inv_w ) if inv_w  != 0 else sum_with
-#     adj_sum_vat  = Q4(sum_vat  - (inv_w - inv_wo)) if (inv_w != 0 or inv_wo != 0) else sum_vat
-
-
-#     # Базовые проверки
-#     doc["_lines_sum_matches_wo"]   = bool(_approx(adj_sum_wo,   doc_wo))
-#     doc["_lines_sum_matches_with"] = bool(_approx(adj_sum_with, doc_with))
-#     doc["_lines_sum_matches_vat"]  = bool(_approx(adj_sum_vat,  doc_vat)) if not separate_vat else None
-
-#     # Дополнительно: wo+vat == with (агрегатно), только как sanity
-#     doc["_lines_core_wo_plus_vat_eq_with"] = bool(_approx(Q4(sum_wo + sum_vat), sum_with))
-
-#     # Итог
-#     if separate_vat:
-#         ok = bool(doc["_lines_sum_matches_wo"]) and bool(doc["_lines_sum_matches_with"])
-#     else:
-#         ok = bool(doc["_lines_sum_matches_wo"]) and bool(doc["_lines_sum_matches_vat"]) and bool(doc["_lines_sum_matches_with"])
-
-#     doc["ar_sutapo"] = bool(ok)
-#     append_log(doc, f"lines aggregate: sum_wo={sum_wo}, sum_vat={sum_vat}, sum_with={sum_with}")
-#     append_log(doc, f"lines vs doc: wo={doc['_lines_sum_matches_wo']}, vat={doc.get('_lines_sum_matches_vat')}, with={doc['_lines_sum_matches_with']}, core={doc['_lines_core_wo_plus_vat_eq_with']}, ar_sutapo={doc['ar_sutapo']}")
-#     return doc
-
-
-# Добавить после _check_against_doc
-
-
 
 
 def _try_single_pass_reconciliation(doc: Dict[str, Any]) -> None:
@@ -2809,7 +2782,7 @@ def _try_zero_informational_line_discounts(doc: Dict[str, Any]) -> None:
             price_new4 = Q4(subtotal2 / qty)  # price хранится/ведётся с 4 знаками
 
             pq_old2 = Q2(price_old4 * qty)
-            if not _approx(pq_old2, subtotal2, tol=Decimal("0.02")):
+            if not _approx(pq_old2, subtotal2, tol=_price_qty_tolerance(qty, subtotal2)):
                 li["_orig_price"] = float(price_old4)
                 li["price"] = price_new4
                 li["_price_adjusted"] = True
@@ -2922,6 +2895,7 @@ def _final_math_validation(doc: Dict[str, Any]) -> Dict[str, Any]:
     
     line_errors = 0
     max_rounding_error = Decimal("0.0000")
+    rounding_only_notes: List[str] = []
     
     # ========== ПРОВЕРКА КАЖДОЙ СТРОКИ ==========
     for idx, li in enumerate(items):
@@ -2944,23 +2918,37 @@ def _final_math_validation(doc: Dict[str, Any]) -> Dict[str, Any]:
         if price != 0 and qty != 0:
             pq = Q2(price * qty)
             delta_pq = Q2(pq - subtotal)
-            match_pq = _approx(pq, subtotal, tol=TOLERANCE)
-            
+
+            # unit price хранится с 4 знаками → допуск зависит от quantity
+            pq_tolerance = _price_qty_tolerance(qty, subtotal)
+            match_pq = _approx(pq, subtotal, tol=pq_tolerance)
+
             line_check["checks"]["price_x_qty"] = {
                 "expected": float(pq),
                 "actual": float(subtotal),
                 "delta": float(delta_pq),
-                "match": match_pq
+                "match": match_pq,
+                "tolerance": float(pq_tolerance),
+                "rounding_only": bool(match_pq and delta_pq.copy_abs() > TOLERANCE)
             }
-            
+
             if not match_pq:
                 line_check["errors"].append(
-                    f"price×qty mismatch: {pq} ≠ {subtotal} (Δ={delta_pq})"
+                    f"price×qty mismatch: {pq} ≠ {subtotal} "
+                    f"(Δ={delta_pq}, tolerance={pq_tolerance})"
                 )
                 line_errors += 1
-            
-            if delta_pq.copy_abs() > max_rounding_error:
-                max_rounding_error = delta_pq.copy_abs()
+
+                if delta_pq.copy_abs() > max_rounding_error:
+                    max_rounding_error = delta_pq.copy_abs()
+
+            elif delta_pq.copy_abs() > TOLERANCE:
+                # прошло только за счёт округления unit price до 4 знаков
+                rounding_only_notes.append(
+                    f"Line {line_id}: price×qty {pq} vs subtotal {subtotal} "
+                    f"(Δ={delta_pq}, tol={pq_tolerance}, price={price}, qty={qty}) "
+                    f"→ accepted as unit-price rounding"
+                )
         
         # CHECK 2: subtotal + vat = total
         if subtotal != 0 or vat != 0:
@@ -3128,6 +3116,8 @@ def _final_math_validation(doc: Dict[str, Any]) -> Dict[str, Any]:
         (separate_vat or validation_report["aggregate_checks"]["sum_vat"]["status"] == "PASS")
     )
     
+    validation_report["rounding_only_lines"] = rounding_only_notes
+
     validation_report["summary"] = {
         "total_lines": len(items),
         "lines_with_errors": line_errors,
@@ -3144,7 +3134,6 @@ def _final_math_validation(doc: Dict[str, Any]) -> Dict[str, Any]:
     append_log(doc, "FINAL MATH VALIDATION")
     append_log(doc, "=" * 60)
     
-    # Логи по строкам
     if line_errors > 0:
         append_log(doc, f"LINE ITEMS: {line_errors}/{len(items)} lines with errors")
         for lc in validation_report["line_checks"]:
@@ -3152,6 +3141,13 @@ def _final_math_validation(doc: Dict[str, Any]) -> Dict[str, Any]:
                 append_log(doc, f"  Line {lc['line_id']}: {'; '.join(lc['errors'])}")
     else:
         append_log(doc, f"LINE ITEMS: All {len(items)} lines PASS ✓")
+
+    if rounding_only_notes:
+        append_log(doc, "")
+        append_log(doc, f"UNIT-PRICE ROUNDING: {len(rounding_only_notes)} line(s) "
+                        f"passed only via quantity-scaled tolerance (Δ > {TOLERANCE})")
+        for note in rounding_only_notes:
+            append_log(doc, f"  {note}")
     
     # Логи по агрегатам
     append_log(doc, "")

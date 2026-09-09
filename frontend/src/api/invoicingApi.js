@@ -227,6 +227,12 @@ export const invoicingApi = {
   getBankAccounts: () =>
     api.get('/invoicing/bank-accounts/', { withCredentials: true }),
 
+  getCurrencyRate: (currency, date) =>
+    api.get('/currency-rate/', {
+      params: { currency, date },
+      withCredentials: true,
+    }),
+
   updateBankAccount: (data) =>
     api.post('/invoicing/bank-accounts/', data, { withCredentials: true }),
 

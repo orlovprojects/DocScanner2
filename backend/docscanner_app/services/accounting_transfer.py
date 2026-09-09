@@ -183,7 +183,15 @@ def create_je_for_allocation(allocation):
             counterparty = allocation.invoice.buyer_name or ""
             counterparty_code = allocation.invoice.buyer_id or ""
             doc_number = allocation.invoice.full_number
-            desc = f"Mokėjimas už {doc_number}"
+            desc = f"{desc_prefix} {doc_number}"
+
+            # Skolos pusė — dokumento kursu, banko pusė — realiai gauta EUR.
+            if allocation.doc_rate:
+                _debt_eur = (allocation.amount / allocation.doc_rate).quantize(Decimal("0.01"))
+            else:
+                _debt_eur = allocation.amount
+            _bank_eur = allocation.amount_eur or _debt_eur
+            fx_manual = (_bank_eur - _debt_eur).quantize(Decimal("0.01"))
 
         elif direction == "outgoing" and allocation.purchase:
             # Мы заплатили → Dr. кредиторка, Cr. банк
@@ -219,18 +227,28 @@ def create_je_for_allocation(allocation):
             desc = f"{desc_prefix} {doc_number}"
 
         elif direction == "manual" and allocation.purchase:
-            # Ручная пометка purchase → Dr. кредиторка, Cr. банк
-            debit_code = "4430"
-            debit_name = "Skolos tiekėjams už prekes ir paslaugas"
-            credit_code = bank_account
-            credit_name = "Banko sąskaita"
+            # Kreditinė — pinigus grąžina MUMS, tad kojos apverstos.
+            _pcredit = allocation.purchase.is_credit_invoice is True
+            if _pcredit:
+                debit_code = bank_account
+                debit_name = "Banko sąskaita"
+                credit_code = "4430"
+                credit_name = "Skolos tiekėjams už prekes ir paslaugas"
+            else:
+                debit_code = "4430"
+                debit_name = "Skolos tiekėjams už prekes ir paslaugas"
+                credit_code = bank_account
+                credit_name = "Banko sąskaita"
             counterparty = allocation.purchase.seller_name or ""
             counterparty_code = allocation.purchase.seller_id or ""
             doc_number = (
                 f"{allocation.purchase.document_series or ''}"
                 f"{allocation.purchase.document_number or ''}"
             ).strip()
-            desc = f"Rankinis mokėjimas tiekėjui už {doc_number}"
+            desc = (
+                f"Grąžinimas iš tiekėjo už {doc_number}" if _pcredit
+                else f"Rankinis mokėjimas tiekėjui už {doc_number}"
+            )
 
         else:
             logger.warning(
@@ -286,7 +304,22 @@ def create_je_for_allocation(allocation):
         if txn and txn.exchange_fee:
             fee_eur += Decimal(str(txn.exchange_fee))
 
-        is_incoming_side = allocation.invoice_id is not None
+        # Kreditinė rankiniu būdu — kojos apverstos (skola debete, bankas kredite),
+        # tad sumos ir kurso skirtumas skaičiuojami kaip išeinančiam mokėjimui.
+        _credit_manual = (
+            direction == "manual"
+            and allocation.invoice_id is not None
+            and debit_code == "2410"
+        )
+        # Kreditinis pirkimas — pinigai ateina, tad skaičiuojam kaip įplauką.
+        _credit_purchase = (
+            direction == "manual"
+            and allocation.purchase_id is not None
+            and debit_code == bank_account
+        )
+        is_incoming_side = (
+            allocation.invoice_id is not None and not _credit_manual
+        ) or _credit_purchase
         if is_incoming_side:
             # нам заплатили: на банк падает нетто (за вычетом комиссии)
             debit_eur, credit_eur = bank_eur - fee_eur, doc_eur

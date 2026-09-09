@@ -1,736 +1,529 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+/* eslint-disable react/prop-types -- Document payloads are validated by the EPRIS API. */
+import { useEffect, useState, useCallback } from "react";
 import {
-    Box, Typography, Button, Table, TableHead, TableBody, TableRow, TableCell,
-    TableContainer, Paper, CircularProgress, Stack, Alert, Chip, Tooltip,
-    MenuItem, Select, InputLabel, FormControl, Checkbox, FormControlLabel,
-    IconButton, Dialog, DialogTitle, DialogContent, DialogActions, TextField,
-} from '@mui/material';
-import DownloadIcon from '@mui/icons-material/Download';
-import PlayArrowIcon from '@mui/icons-material/PlayArrow';
-import WarningAmberIcon from '@mui/icons-material/WarningAmber';
-import EditIcon from '@mui/icons-material/Edit';
-import CheckCircleIcon from '@mui/icons-material/CheckCircle';
-import AddIcon from '@mui/icons-material/Add';
-import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
-import { api } from '../api/endpoints';
+  Alert, Box, Button, Checkbox, Chip,
+  CircularProgress, Dialog, DialogContent, FormControl, FormHelperText,
+  FormControlLabel, IconButton, InputLabel, MenuItem, Select, Stack,
+  TextField,
+  Typography, useMediaQuery, useTheme,
+} from "@mui/material";
+import CloseIcon from "@mui/icons-material/Close";
+import DeleteIcon from "@mui/icons-material/Delete";
+import AddIcon from "@mui/icons-material/Add";
+import EprisWorkspace from "../components/EprisWorkspace";
+import ZoomableImage from "./ZoomableImage";
+import { api } from "../api/endpoints";
+import { amountFromPercent, decimalInput, decimalNumber, fixedInput, linkedDeduction, vatRateLabel } from "../components/eprisAmounts";
+import { documentErrors, notificationText } from "../components/eprisFeedback";
 
-const LANGUAGES = ['LT', 'EN', 'DE', 'PL', 'FR'];
+const LANGUAGES = ["LT", "EN", "DE", "PL", "FR", "BG", "CS", "DA", "EL", "ES", "ET", "FI", "GA", "HR", "HU", "IT", "LV", "MT", "NL", "PT", "RO", "SK", "SL", "SV"];
 
-const QUARTER_LABELS = {
-    1: 'I ketv. (Sausis – Kovas)',
-    2: 'II ketv. (Balandis – Birželis)',
-    3: 'III ketv. (Liepa – Rugsėjis)',
-    4: 'IV ketv. (Spalis – Gruodis)',
-};
+const fmt = (v) =>
+  parseFloat(v || 0).toLocaleString("lt-LT", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
 
-function quarterDates(year, q) {
-    const startMonth = (q - 1) * 3 + 1;
-    const endMonth = q * 3;
-    const lastDay = new Date(year, endMonth, 0).getDate();
-    return {
-        date_from: `${year}-${String(startMonth).padStart(2, '0')}-01`,
-        date_to: `${year}-${String(endMonth).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`,
-    };
-}
+/* ═══════════════════════════════════════════════════════════
+   Kategorijų dialogas
+   ═══════════════════════════════════════════════════════════ */
 
-// ──────────────────────────────────────────────
-// Kategorijų dialogas
-// ──────────────────────────────────────────────
+function EprisCodesDialog({ open, onClose, doc, onSaved, contractorKeys }) {
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down("md"));
 
-function EprisCodesDialog({ open, onClose, doc, onSaved }) {
-    const [categories, setCategories] = useState([]);
-    const [requiresSubcodes, setRequiresSubcodes] = useState(false);
-    const [rows, setRows] = useState([]);
-    const [loading, setLoading] = useState(false);
-    const [saving, setSaving] = useState(false);
-    const [errors, setErrors] = useState([]);
+  const [categories, setCategories] = useState([]);
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [errors, setErrors] = useState([]);
+  const [previewFullscreen, setPreviewFullscreen] = useState(false);
 
-    const country = (doc?.seller_country_iso || '').toUpperCase();
+  const [details, setDetails] = useState({});
+  const [amountError, setAmountError] = useState("");
+  const country = details.refund_country || doc?.epris_details?.refund_country || doc?.seller_country_iso || "";
 
-    useEffect(() => {
-        if (!open || !country) return;
-        setLoading(true);
-        api.get('/epris/code-options/', { params: { country } })
-            .then((res) => {
-                setCategories(res.data.categories);
-                setRequiresSubcodes(res.data.requires_subcodes);
-            })
-            .catch(() => setCategories([]))
-            .finally(() => setLoading(false));
-    }, [open, country]);
+  useEffect(() => {
+    if (!open || !country) return;
+    const controller = new AbortController();
+    setCategories([]);
+    setLoading(true);
+    api
+      .get("/epris/code-options/", { params: { country }, signal: controller.signal })
+      .then((res) => {
+        setCategories(res.data.categories);
+      })
+      .catch(() => { if (!controller.signal.aborted) setErrors(["Nepavyko įkelti kategorijų. Bandykite dar kartą."]); })
+      .finally(() => { if (!controller.signal.aborted) setLoading(false); });
+    return () => controller.abort();
+  }, [open, country]);
 
-    useEffect(() => {
-        if (!open) return;
-        const existing = doc?.epris_codes;
-        setRows(existing?.length
-            ? existing.map((r) => ({ ...r }))
-            : [{ code: '', subcode: '', free_text: '', language: '' }]);
-        setErrors([]);
-    }, [open, doc]);
-
-    const catByCode = useCallback(
-        (code) => categories.find((c) => c.code === code) || null,
-        [categories],
+  useEffect(() => {
+    if (!open) {
+      setPreviewFullscreen(false);
+      return;
+    }
+    setDetails({ ...doc?.epris_details,
+      deduction_percent: decimalInput(doc?.epris_details?.deduction_percent ?? "100"),
+      deductible_vat: decimalInput(doc?.epris_details?.deductible_vat ?? doc?.vat_amount ?? ""),
+      prorata_rate: decimalInput(doc?.epris_details?.prorata_rate ?? "100"),
+    });
+    setAmountError("");
+    const existing = doc?.epris_codes;
+    setRows(
+      existing?.length
+        ? existing.map((r) => ({ ...r }))
+        : [{ code: "", subcode: "", free_text: "", language: "EN" }],
     );
+    setErrors([]);
+  }, [open, doc]);
 
-    const updateRow = (idx, patch) => {
-        setRows((prev) => prev.map((r, i) => (i === idx ? { ...r, ...patch } : r)));
-    };
+  const catByCode = useCallback(
+    (code) => categories.find((c) => c.code === code) || null,
+    [categories],
+  );
 
-    const handleCategoryChange = (idx, code) => {
-        updateRow(idx, { code, subcode: '', free_text: '', language: '' });
-    };
+  const updateRow = (idx, patch) => {
+    setRows((prev) => prev.map((r, i) => (i === idx ? { ...r, ...patch } : r)));
+  };
 
-    const rowError = (row) => {
-        if (!row.code) return 'Pasirinkite kategoriją';
-        const cat = catByCode(row.code);
-        if (!cat) return null;
-        if (cat.subcode_required && !row.subcode) {
-            if (row.code === '10' && row.free_text) return null;
-            return `${country} reikalauja subkodo`;
-        }
-        if (row.code === '10' && !row.subcode && !row.free_text) {
-            return 'Būtinas subkodas arba aprašymas';
-        }
-        if (row.free_text && !row.language) return 'Nurodykite kalbą';
-        return null;
-    };
+  const handleCategoryChange = (idx, code) => {
+    updateRow(idx, { code, subcode: "", free_text: "", language: "EN" });
+  };
 
-    const localErrors = rows.map(rowError);
-    const canSave = rows.length > 0 && localErrors.every((e) => !e);
+  const rowError = (row) => {
+    if (!row.code) return "Pasirinkite kategoriją";
+    const cat = catByCode(row.code);
+    if (!cat) return null;
+    if (cat.subcode_required && !row.subcode) {
+      if (row.code === "10" && row.free_text) return null;
+      return `${country} reikalauja subkodo`;
+    }
+    if (row.code === "10" && !row.free_text) {
+      return "Būtinas prekių / paslaugų aprašymas";
+    }
+    if (row.free_text && !row.language) return "Nurodykite kalbą";
+    return null;
+  };
 
-    const handleSave = async () => {
-        setSaving(true);
-        setErrors([]);
-        try {
-            const res = await api.patch(`/epris/documents/${doc.id}/codes/`, { codes: rows });
-            if (res.data.errors?.length) {
-                setErrors(res.data.errors);
-            } else {
-                onSaved?.(res.data);
-                onClose();
-            }
-        } catch (err) {
-            setErrors([err.response?.data?.error || 'Klaida išsaugant']);
-        } finally {
-            setSaving(false);
-        }
-    };
+  const localErrors = rows.map(rowError);
+  const subcodePending = rows.some(row => {
+    const cat = catByCode(row.code);
+    if (!row.code) return true;
+    return !!cat?.subcode_required && !row.subcode && !(row.code === "10" && row.free_text);
+  });
+  const activityRate = decimalNumber(details.prorata_rate ?? 100);
+  const validAmounts = decimalNumber(details.deductible_vat) > 0 && details.deduction_percent !== "" && details.deduction_percent !== "," &&
+    decimalNumber(details.deduction_percent) >= 0 && Number.isInteger(activityRate) && activityRate > 0 && activityRate <= 100;
+  const canSave = !loading && categories.length > 0 && rows.length > 0 && localErrors.every((e) => !e) && validAmounts && !amountError;
+  const visibleErrors = [...new Set([...documentErrors(doc), ...errors, ...(amountError ? [amountError] : [])])];
 
-    return (
-        <Dialog open={open} onClose={onClose} maxWidth="lg" fullWidth disableScrollLock>
-            <DialogTitle sx={{ pb: 1 }}>
-                <Typography variant="h6" fontWeight={700}>
-                    EPRIS kategorijos
-                </Typography>
-                <Typography variant="body2" color="text.secondary">
-                    {doc?.seller_name} · {country} · {doc?.document_series}{doc?.document_number}
-                </Typography>
-            </DialogTitle>
+  const changeDeduction = (field, value) => {
+    const next = linkedDeduction(details, field, value, doc?.vat_amount);
+    if (!next) {
+      setAmountError(`Grąžintinas PVM negali viršyti ${fmt(amountFromPercent(doc?.vat_amount || 0, details.prorata_rate ?? 100))} ${doc?.currency || ""}. Įveskite teigiamą skaičių, iki 2 skaitmenų po kablelio.`);
+      return;
+    }
+    setAmountError("");
+    setDetails(next);
+  };
 
-            <DialogContent dividers>
-                <Stack direction={{ xs: 'column', md: 'row' }} spacing={2}>
-                    {/* Peržiūra */}
-                    <Paper
-                        variant="outlined"
-                        sx={{
-                            width: { xs: '100%', md: 380 },
-                            flexShrink: 0,
-                            height: 480,
-                            overflow: 'hidden',
-                            bgcolor: 'grey.50',
-                        }}
+  const formatDeduction = field => {
+    if (details[field] !== "" && details[field] !== "," && Number.isFinite(decimalNumber(details[field]))) {
+      setDetails(prev => ({ ...prev, [field]: fixedInput(decimalNumber(prev[field])) }));
+    }
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    setErrors([]);
+    try {
+      const res = await api.patch(`/epris/documents/${doc.id}/codes/`, {
+        codes: rows, details, contractor_keys: contractorKeys,
+      });
+      if (res.data.errors?.length) {
+        setErrors(res.data.errors);
+      } else {
+        onSaved?.(res.data);
+        onClose();
+      }
+    } catch (err) {
+      setErrors([err.response?.data?.error || "Klaida išsaugant"]);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const renderCodes = () => (
+    <>
+      <Typography fontWeight={600}>{doc?.seller_name}</Typography>
+      <Box component="dl" sx={{ display: "grid", gridTemplateColumns: "minmax(120px, 1fr) minmax(0, 1.5fr)", gap: "5px 16px", mt: 1.5, mb: 2.5, fontSize: 13,
+        "& dt": { color: "text.secondary", fontWeight: 700 }, "& dd": { m: 0, overflowWrap: "anywhere" } }}>
+        {[
+          ["Sąskaitos numeris", `${doc?.document_series || ""}${doc?.document_number || ""}`],
+          ["Sąskaitos data", doc?.invoice_date],
+          ["Tiekėjo kodas", doc?.seller_id],
+          ["Tiekėjo PVM kodas", doc?.seller_vat_code],
+          ["Tiekėjo adresas", doc?.seller_address],
+          ["Tiekėjo šalis", doc?.seller_country_iso],
+          ["Suma be PVM", `${fmt(doc?.amount_wo_vat)} ${doc?.currency || ""}`],
+          ["PVM %", vatRateLabel(doc)],
+          ["Sąskaitos PVM", `${fmt(doc?.vat_amount)} ${doc?.currency || ""}`],
+        ].map(([label, value]) => <Box key={label} sx={{ display: "contents" }}><Box component="dt">{label}</Box><Box component="dd">{value || "—"}</Box></Box>)}
+      </Box>
+      {doc?.supplier_country_notice && <Alert severity="warning" sx={{ mb: 2 }}>{notificationText(doc.supplier_country_notice)}</Alert>}
+      {categories.some(category => category.subcode_required) && subcodePending && <Alert severity="warning" sx={{ mb: 2 }}>
+        Ši šalis reikalauja ir subkategorijų. Pasirinkus kategoriją, privalomi laukai rodomi žemiau
+      </Alert>}
+
+      <Stack spacing={2}>
+        {rows.map((row, idx) => {
+          const cat = catByCode(row.code);
+
+          return (
+            <Box
+              key={idx}
+              sx={{
+                p: 1.5,
+                border: "1px solid",
+                borderColor: "divider",
+                borderRadius: 2,
+                bgcolor: "#fff",
+              }}
+            >
+              <Stack spacing={1.5}>
+                <Stack direction="row" spacing={1} alignItems="flex-start">
+                  <FormControl size="small" fullWidth>
+                    <InputLabel id={`epris-category-${idx}`}>Kategorija</InputLabel>
+                    <Select
+                      labelId={`epris-category-${idx}`}
+                      value={row.code}
+                      label="Kategorija"
+                      onChange={(e) => handleCategoryChange(idx, e.target.value)}
+                      MenuProps={{ disableScrollLock: true }}
                     >
-                        {doc?.preview_url ? (
-                            <Box
-                                component="iframe"
-                                src={doc.preview_url}
-                                title="Dokumentas"
-                                sx={{ width: '100%', height: '100%', border: 0 }}
-                            />
-                        ) : (
-                            <Box sx={{ p: 3, textAlign: 'center' }}>
-                                <Typography variant="body2" color="text.secondary">
-                                    Peržiūra nepasiekiama
-                                </Typography>
-                            </Box>
-                        )}
-                    </Paper>
-
-                    {/* Kodai */}
-                    <Box sx={{ flex: 1, minWidth: 0 }}>
-                        {loading ? (
-                            <Box sx={{ display: 'flex', justifyContent: 'center', py: 6 }}>
-                                <CircularProgress size={28} />
-                            </Box>
-                        ) : (
-                            <Stack spacing={2}>
-                                <Chip
-                                    size="small"
-                                    variant="outlined"
-                                    color={requiresSubcodes ? 'warning' : 'success'}
-                                    label={requiresSubcodes
-                                        ? `${country}: kai kurioms kategorijoms reikia subkodų`
-                                        : `${country}: subkodų nereikia`}
-                                    sx={{ alignSelf: 'flex-start' }}
-                                />
-
-                                {rows.map((row, idx) => {
-                                    const cat = catByCode(row.code);
-                                    const err = localErrors[idx];
-
-                                    return (
-                                        <Paper key={idx} variant="outlined" sx={{ p: 1.5 }}>
-                                            <Stack spacing={1.5}>
-                                                <Stack direction="row" spacing={1} alignItems="flex-start">
-                                                    <FormControl size="small" fullWidth>
-                                                        <InputLabel>Kategorija</InputLabel>
-                                                        <Select
-                                                            value={row.code}
-                                                            label="Kategorija"
-                                                            onChange={(e) => handleCategoryChange(idx, e.target.value)}
-                                                            MenuProps={{ disableScrollLock: true }}
-                                                        >
-                                                            {categories.map((c) => (
-                                                                <MenuItem key={c.code} value={c.code}>
-                                                                    {c.label}
-                                                                </MenuItem>
-                                                            ))}
-                                                        </Select>
-                                                    </FormControl>
-                                                    <IconButton
-                                                        size="small"
-                                                        onClick={() => setRows((p) => p.filter((_, i) => i !== idx))}
-                                                        disabled={rows.length === 1}
-                                                    >
-                                                        <DeleteOutlineIcon fontSize="small" />
-                                                    </IconButton>
-                                                </Stack>
-
-                                                {cat?.subcode_required && (
-                                                    <FormControl size="small" fullWidth error={!!err && !row.subcode}>
-                                                        <InputLabel>Subkodas *</InputLabel>
-                                                        <Select
-                                                            value={row.subcode}
-                                                            label="Subkodas *"
-                                                            onChange={(e) => updateRow(idx, { subcode: e.target.value })}
-                                                            MenuProps={{ disableScrollLock: true, sx: { maxHeight: 420 } }}
-                                                        >
-                                                            {cat.options.map((o) => (
-                                                                <MenuItem
-                                                                    key={o.value}
-                                                                    value={o.value}
-                                                                    sx={{ pl: 1 + (o.level - 2) * 2, whiteSpace: 'normal' }}
-                                                                >
-                                                                    <Box>
-                                                                        <Typography variant="body2">{o.label}</Typography>
-                                                                        <Typography variant="caption" color="text.secondary">
-                                                                            {o.path}
-                                                                        </Typography>
-                                                                    </Box>
-                                                                </MenuItem>
-                                                            ))}
-                                                        </Select>
-                                                    </FormControl>
-                                                )}
-
-                                                {row.code === '10' && (
-                                                    <Stack direction="row" spacing={1}>
-                                                        <TextField
-                                                            size="small"
-                                                            fullWidth
-                                                            label={cat?.subcode_required
-                                                                ? 'Aprašymas (vietoj subkodo)'
-                                                                : 'Aprašymas *'}
-                                                            value={row.free_text}
-                                                            onChange={(e) => updateRow(idx, { free_text: e.target.value })}
-                                                        />
-                                                        <FormControl size="small" sx={{ width: 110 }}>
-                                                            <InputLabel>Kalba</InputLabel>
-                                                            <Select
-                                                                value={row.language}
-                                                                label="Kalba"
-                                                                onChange={(e) => updateRow(idx, { language: e.target.value })}
-                                                                MenuProps={{ disableScrollLock: true }}
-                                                            >
-                                                                {LANGUAGES.map((l) => (
-                                                                    <MenuItem key={l} value={l}>{l}</MenuItem>
-                                                                ))}
-                                                            </Select>
-                                                        </FormControl>
-                                                    </Stack>
-                                                )}
-
-                                                {err && (
-                                                    <Typography variant="caption" color="error">
-                                                        {err}
-                                                    </Typography>
-                                                )}
-                                            </Stack>
-                                        </Paper>
-                                    );
-                                })}
-
-                                <Button
-                                    size="small"
-                                    startIcon={<AddIcon fontSize="small" />}
-                                    onClick={() => setRows((p) => [
-                                        ...p,
-                                        { code: '', subcode: '', free_text: '', language: '' },
-                                    ])}
-                                    sx={{ alignSelf: 'flex-start' }}
-                                >
-                                    Pridėti kategoriją
-                                </Button>
-
-                                {errors.length > 0 && (
-                                    <Alert severity="error">
-                                        {errors.map((e, i) => <div key={i}>{e}</div>)}
-                                    </Alert>
-                                )}
-                            </Stack>
-                        )}
-                    </Box>
-                </Stack>
-            </DialogContent>
-
-            <DialogActions>
-                <Button onClick={onClose} size="small">Atšaukti</Button>
-                <Button
-                    variant="contained"
+                      {categories.map((c) => (
+                        <MenuItem key={c.code} value={c.code}>
+                          {c.label}
+                        </MenuItem>
+                      ))}
+                    </Select>
+                  </FormControl>
+                  <IconButton
                     size="small"
-                    onClick={handleSave}
-                    disabled={!canSave || saving}
-                    startIcon={saving ? <CircularProgress size={16} color="inherit" /> : null}
-                >
-                    Išsaugoti
-                </Button>
-            </DialogActions>
-        </Dialog>
-    );
+                    onClick={() => { setRows((p) => p.filter((_, i) => i !== idx)); }}
+                    disabled={rows.length === 1}
+                    sx={{ color: "text.secondary" }}
+                  >
+                    <DeleteIcon fontSize="small" />
+                  </IconButton>
+                </Stack>
+
+                {cat?.subcode_required && (
+                  <FormControl size="small" fullWidth required={!(row.code === "10" && row.free_text)}>
+                    <InputLabel id={`epris-subcategory-${idx}`}>Subkategorija</InputLabel>
+                    <Select
+                      labelId={`epris-subcategory-${idx}`}
+                      value={row.subcode}
+                      label="Subkategorija"
+                      onChange={(e) => updateRow(idx, { subcode: e.target.value })}
+                      MenuProps={{ disableScrollLock: true, sx: { maxHeight: 420 } }}
+                    >
+                      {cat.options.map((o) => (
+                        <MenuItem
+                          key={o.value}
+                          value={o.value}
+                          sx={{ pl: 1 + (o.level - 2) * 2, whiteSpace: "normal" }}
+                        >
+                          <Typography sx={{ fontSize: 13 }}>{o.label}</Typography>
+                        </MenuItem>
+                      ))}
+                    </Select>
+                    <FormHelperText>{row.code === "10"
+                      ? "Pasirinkite subkategoriją arba įrašykite prekių / paslaugų aprašymą"
+                      : `${country} šalyje šiai kategorijai būtina subkategorija`}</FormHelperText>
+                  </FormControl>
+                )}
+
+                {row.code === "10" && (
+                  <Stack direction="row" spacing={1}>
+                    <TextField
+                      size="small"
+                      fullWidth
+                      label="Prekių / paslaugų aprašymas *"
+                      value={row.free_text}
+                      onChange={(e) => updateRow(idx, { free_text: e.target.value })}
+                    />
+                    <FormControl size="small" sx={{ width: 110 }}>
+                      <InputLabel>Kalba</InputLabel>
+                      <Select
+                        value={row.language}
+                        label="Kalba"
+                        onChange={(e) => updateRow(idx, { language: e.target.value })}
+                        MenuProps={{ disableScrollLock: true }}
+                      >
+                        {LANGUAGES.map((l) => (
+                          <MenuItem key={l} value={l}>{l}</MenuItem>
+                        ))}
+                      </Select>
+                    </FormControl>
+                  </Stack>
+                )}
+
+              </Stack>
+            </Box>
+          );
+        })}
+
+        <Button
+          size="small"
+          startIcon={<AddIcon fontSize="small" />}
+          onClick={() => {
+            setRows((p) => [...p, { code: "", subcode: "", free_text: "", language: "EN" }]);
+          }}
+          sx={{ alignSelf: "flex-start", textTransform: "none" }}
+        >
+          Pridėti kategoriją
+        </Button>
+
+        <Box component="details" sx={{ pt: 1 }}>
+          <Box component="summary" sx={{ cursor: "pointer", color: "text.secondary", fontSize: 14 }}>Papildomai</Box>
+          <Stack spacing={2} sx={{ pt: 2 }}>
+            <TextField select size="small" label="Grąžinimo šalis" value={country}
+              onChange={e => { setDetails(prev => ({ ...prev, refund_country: e.target.value })); setRows([{ code: "", subcode: "", free_text: "", language: "EN" }]); }}>
+              {["AT", "BE", "BG", "HR", "CY", "CZ", "DK", "EE", "FI", "FR", "DE", "GR", "HU", "IE", "IT", "LV", "LU", "MT", "NL", "PL", "PT", "RO", "SK", "SI", "ES", "SE"].map(c => <MenuItem key={c} value={c}>{c}</MenuItem>)}
+            </TextField>
+            <TextField size="small" label="Atskaita (%)" value={details.deduction_percent ?? "100"}
+              onChange={e => changeDeduction("deduction_percent", e.target.value)} onBlur={() => formatDeduction("deduction_percent")} inputProps={{ inputMode: "decimal" }} />
+            <TextField size="small" label={`Grąžintinas PVM (${doc?.currency || ""})`} value={details.deductible_vat ?? doc?.vat_amount ?? ""}
+              onChange={e => changeDeduction("deductible_vat", e.target.value)} onBlur={() => formatDeduction("deductible_vat")} error={!!amountError} helperText={notificationText(amountError) || undefined} inputProps={{ inputMode: "decimal" }} />
+            <FormControlLabel control={<Checkbox checked={details.simplified_invoice === true} onChange={e => setDetails(prev => ({ ...prev, simplified_invoice: e.target.checked }))} />} label="Supaprastinta sąskaita" />
+          </Stack>
+        </Box>
+
+      </Stack>
+    </>
+  );
+
+  return (
+    <>
+      <Dialog
+        open={open}
+        onClose={onClose}
+        fullWidth
+        maxWidth={doc?.preview_url ? "xl" : "sm"}
+        fullScreen={isMobile}
+        disableScrollLock
+        TransitionProps={{ timeout: 0.1 }}
+        PaperProps={{
+          sx: isMobile
+            ? { m: 0, height: "100dvh", borderRadius: 0, display: "flex", flexDirection: "column" }
+            : { borderRadius: "14px", overflowX: "hidden", height: doc?.preview_url ? "85vh" : "auto", display: "flex", flexDirection: "column" },
+        }}
+      >
+        <Box
+          sx={{
+            px: 2.5,
+            py: 1.4,
+            bgcolor: "#EEF3FF",
+            borderBottom: "1px solid #C9D8F5",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: 2,
+            flexShrink: 0,
+          }}
+        >
+          <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+            <Typography sx={{ fontSize: 16, fontWeight: 700 }}>
+              Sąskaitos peržiūra
+            </Typography>
+            <Chip
+              label={country}
+              size="small"
+              sx={{
+                bgcolor: "#C9D8F5",
+                color: "#22407A",
+                fontWeight: 700,
+                border: "1px solid #B0C6EE",
+              }}
+            />
+          </Box>
+          <IconButton onClick={onClose}>
+            <CloseIcon />
+          </IconButton>
+        </Box>
+
+        <DialogContent sx={{ p: 0, overflow: "hidden", flex: 1, display: "flex", flexDirection: "column" }}>
+          {!!visibleErrors.length && <Alert severity="error" sx={{ m: 2, mb: 0, flexShrink: 0, maxHeight: "30vh", overflowY: "auto" }}>
+            <Typography component="div" fontWeight={600}>Sąskaitos eksportuoti negalima</Typography>
+            {visibleErrors.map(message => <div key={message}>{notificationText(message)}</div>)}
+          </Alert>}
+          {loading ? (
+            <Box sx={{ display: "flex", justifyContent: "center", alignItems: "center", flex: 1 }}>
+              <CircularProgress size={32} />
+            </Box>
+          ) : isMobile ? (
+            <Box sx={{ display: "flex", flexDirection: "column", flex: 1, overflow: "hidden" }}>
+              <Box
+                sx={{
+                  flexShrink: 0,
+                  height: doc?.preview_url ? 120 : 0,
+                  minHeight: doc?.preview_url ? 120 : 0,
+                  bgcolor: "#f8f8f8",
+                  borderBottom: "1px solid #eee",
+                  p: doc?.preview_url ? 1 : 0,
+                  display: doc?.preview_url ? "flex" : "none",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  cursor: "pointer",
+                }}
+                onClick={() => setPreviewFullscreen(true)}
+              >
+                {doc?.preview_url ? (
+                  <Box sx={{ position: "relative", width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                    <img
+                      src={doc.preview_url}
+                      alt="Preview"
+                      style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain" }}
+                    />
+                    <Typography
+                      sx={{
+                        position: "absolute",
+                        bottom: 4,
+                        right: 4,
+                        bgcolor: "rgba(0,0,0,0.55)",
+                        color: "white",
+                        px: 1,
+                        py: 0.5,
+                        borderRadius: 1,
+                        fontSize: "0.7rem",
+                      }}
+                    >
+                      Paspauskite, kad padidintumėte
+                    </Typography>
+                  </Box>
+                ) : (
+                  <Typography color="text.secondary">Peržiūra negalima</Typography>
+                )}
+              </Box>
+              <Box sx={{ flex: 1, overflowY: "auto", overflowX: "hidden", px: 2, py: 1.5, WebkitOverflowScrolling: "touch" }}>
+                {renderCodes()}
+              </Box>
+            </Box>
+          ) : (
+            <Box sx={{ display: "flex", gap: 3, p: 3, overflowY: "auto", overflowX: "hidden", flex: 1, scrollbarGutter: "stable" }}>
+              <Box
+                sx={{
+                  width: "50%",
+                  display: doc?.preview_url ? "block" : "none",
+                  flexShrink: 0,
+                  position: "sticky",
+                  top: 0,
+                  alignSelf: "flex-start",
+                  maxHeight: "calc(85vh - 120px)",
+                  minHeight: 300,
+                  minWidth: 0,
+                }}
+              >
+                {doc?.preview_url ? (
+                  <ZoomableImage
+                    src={doc.preview_url}
+                    buttonSize={36}
+                    maxHeight="calc(80vh - 120px)"
+                    fitOnLoad
+                    fitRatio={0.8}
+                  />
+                ) : (
+                  <Box
+                    sx={{
+                      height: "100%",
+                      minHeight: 300,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      bgcolor: "#fafafa",
+                      borderRadius: 2,
+                      border: "1px dashed",
+                      borderColor: "divider",
+                    }}
+                  >
+                    <Typography sx={{ color: "text.secondary" }}>Peržiūra negalima</Typography>
+                  </Box>
+                )}
+              </Box>
+              <Box sx={{ flex: 1, minWidth: 0, overflowX: "hidden" }}>
+                {renderCodes()}
+              </Box>
+            </Box>
+          )}
+        </DialogContent>
+
+        <Box
+          sx={{
+            px: 2.5,
+            py: 1.5,
+            borderTop: "1px solid",
+            borderColor: "divider",
+            display: "flex",
+            justifyContent: "flex-end",
+            gap: 1,
+            flexShrink: 0,
+          }}
+        >
+          <Button onClick={onClose} size="small" sx={{ textTransform: "none" }}>
+            Atšaukti
+          </Button>
+          <Button
+            variant="contained"
+            size="small"
+            onClick={handleSave}
+            disabled={!canSave || saving}
+            startIcon={saving ? <CircularProgress size={16} color="inherit" /> : null}
+            sx={{ textTransform: "none" }}
+          >
+            Išsaugoti
+          </Button>
+        </Box>
+      </Dialog>
+
+      <Dialog
+        open={previewFullscreen}
+        onClose={() => setPreviewFullscreen(false)}
+        fullScreen
+        disableScrollLock
+        PaperProps={{ sx: { bgcolor: "#000" } }}
+      >
+        <IconButton
+          onClick={() => setPreviewFullscreen(false)}
+          sx={{
+            position: "absolute",
+            top: 8,
+            right: 8,
+            zIndex: 10,
+            color: "white",
+            bgcolor: "rgba(0,0,0,0.5)",
+            "&:hover": { bgcolor: "rgba(0,0,0,0.7)" },
+            width: 48,
+            height: 48,
+          }}
+        >
+          <CloseIcon sx={{ fontSize: 28 }} />
+        </IconButton>
+        <Box sx={{ width: "100%", height: "100%", p: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          {doc?.preview_url && (
+            <ZoomableImage src={doc.preview_url} buttonSize={48} maxHeight="calc(100vh - 100px)" fitOnLoad fitRatio={1} />
+          )}
+        </Box>
+      </Dialog>
+    </>
+  );
 }
 
-// ──────────────────────────────────────────────
-// Puslapis
-// ──────────────────────────────────────────────
+/* ═══════════════════════════════════════════════════════════
+   Puslapis
+   ═══════════════════════════════════════════════════════════ */
 
 export default function EprisPage() {
-    const [overview, setOverview] = useState([]);
-    const [loadingOverview, setLoadingOverview] = useState(true);
-    const [includeSubmitted, setIncludeSubmitted] = useState(false);
-
-    const [selected, setSelected] = useState(null);
-    const [periodValue, setPeriodValue] = useState('');
-
-    const [data, setData] = useState(null);
-    const [loadingDocs, setLoadingDocs] = useState(false);
-    const [downloading, setDownloading] = useState(false);
-    const [error, setError] = useState('');
-
-    const [dialogDoc, setDialogDoc] = useState(null);
-
-    const loadOverview = useCallback(async () => {
-        setLoadingOverview(true);
-        try {
-            const res = await api.get('/epris/overview/', {
-                params: includeSubmitted ? { include_submitted: 1 } : {},
-            });
-            setOverview(res.data.rows);
-        } catch (err) {
-            setError('Klaida gaunant suvestinę');
-        } finally {
-            setLoadingOverview(false);
-        }
-    }, [includeSubmitted]);
-
-    useEffect(() => { loadOverview(); }, [loadOverview]);
-
-    const periodOptions = useMemo(() => {
-        if (!selected) return [];
-        const row = overview.find(
-            (r) => r.country === selected.country && r.year === selected.year,
-        );
-        if (!row) return [];
-        const opts = [];
-        if (row.annual_eligible) {
-            opts.push({
-                value: 'year',
-                label: `${row.year} m. (metinis, min. 50 €)`,
-                date_from: `${row.year}-01-01`,
-                date_to: `${row.year}-12-31`,
-            });
-        }
-        row.quarters.forEach((q) => {
-            if (!q.eligible) return;
-            opts.push({
-                value: `Q${q.quarter}`,
-                label: `${row.year} m. ${QUARTER_LABELS[q.quarter]} — ${q.vat_eur} €`,
-                ...quarterDates(row.year, q.quarter),
-            });
-        });
-        return opts;
-    }, [selected, overview]);
-
-    const resolvedPeriod = useMemo(
-        () => periodOptions.find((o) => o.value === periodValue) || null,
-        [periodOptions, periodValue],
-    );
-
-    const loadDocuments = useCallback(async () => {
-        if (!selected || !resolvedPeriod) return;
-        setLoadingDocs(true);
-        setError('');
-        try {
-            const res = await api.post('/epris/documents/', {
-                country: selected.country,
-                date_from: resolvedPeriod.date_from,
-                date_to: resolvedPeriod.date_to,
-                include_submitted: includeSubmitted,
-                offset: 0,
-                limit: 200,
-            });
-            setData(res.data);
-        } catch (err) {
-            setError(err.response?.data?.error || 'Klaida gaunant dokumentus');
-        } finally {
-            setLoadingDocs(false);
-        }
-    }, [selected, resolvedPeriod, includeSubmitted]);
-
-    const handleSelectCountry = (row) => {
-        setSelected({ country: row.country, year: row.year });
-        setPeriodValue('');
-        setData(null);
-    };
-
-    const handleDownload = async () => {
-        if (!selected || !resolvedPeriod) return;
-        setDownloading(true);
-        try {
-            const res = await api.post('/epris/export/', {
-                country: selected.country,
-                date_from: resolvedPeriod.date_from,
-                date_to: resolvedPeriod.date_to,
-            }, { responseType: 'blob' });
-            const url = window.URL.createObjectURL(new Blob([res.data]));
-            const link = document.createElement('a');
-            link.href = url;
-            link.setAttribute(
-                'download',
-                `EPRIS_${selected.country}_${resolvedPeriod.date_from}_${resolvedPeriod.date_to}.csv`,
-            );
-            document.body.appendChild(link);
-            link.click();
-            link.remove();
-            window.URL.revokeObjectURL(url);
-            await loadDocuments();
-            await loadOverview();
-        } catch (err) {
-            setError('Klaida generuojant failą');
-        } finally {
-            setDownloading(false);
-        }
-    };
-
-    const handleCodesSaved = (payload) => {
-        setData((prev) => {
-            if (!prev) return prev;
-            const entries = prev.entries.map((e) =>
-                e.id === payload.id
-                    ? { ...e, epris_codes: payload.epris_codes, epris_status: payload.epris_status }
-                    : e,
-            );
-            return {
-                ...prev,
-                entries,
-                ready_count: entries.filter((e) => e.epris_status === 'tinkama').length,
-            };
-        });
-    };
-
-    const fmt = (v) => parseFloat(v || 0).toLocaleString('lt-LT', {
-        minimumFractionDigits: 2, maximumFractionDigits: 2,
-    });
-
-    const allReady = data && data.total_count > 0 && data.ready_count === data.total_count;
-
-    return (
-        <Box sx={{ maxWidth: 1200, mx: 'auto', py: 3, px: 2 }}>
-            <Typography variant="h5" fontWeight={700} gutterBottom>
-                Užsienio PVM grąžinimas (EPRIS)
-            </Typography>
-            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                Vienas failas – viena šalis ir vienas laikotarpis
-            </Typography>
-
-            {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
-
-            {/* Suvestinė */}
-            <Paper sx={{ p: 2.5, mb: 3 }}>
-                <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1.5 }}>
-                    <Typography variant="subtitle1" fontWeight={700}>
-                        Galimai grąžintinas PVM
-                    </Typography>
-                    <FormControlLabel
-                        control={
-                            <Checkbox
-                                size="small"
-                                checked={includeSubmitted}
-                                onChange={(e) => setIncludeSubmitted(e.target.checked)}
-                            />
-                        }
-                        label={<Typography variant="body2">Rodyti jau eksportuotus</Typography>}
-                    />
-                </Stack>
-
-                {loadingOverview ? (
-                    <Box sx={{ display: 'flex', justifyContent: 'center', py: 3 }}>
-                        <CircularProgress size={24} />
-                    </Box>
-                ) : (
-                    <TableContainer>
-                        <Table size="small">
-                            <TableHead>
-                                <TableRow>
-                                    <TableCell sx={{ fontWeight: 700 }}>Šalis</TableCell>
-                                    <TableCell sx={{ fontWeight: 700 }}>Metai</TableCell>
-                                    <TableCell sx={{ fontWeight: 700 }} align="center">Dok.</TableCell>
-                                    <TableCell sx={{ fontWeight: 700 }} align="center">Paruošta</TableCell>
-                                    <TableCell sx={{ fontWeight: 700 }} align="right">PVM (EUR)</TableCell>
-                                    <TableCell sx={{ fontWeight: 700 }}>Galimas prašymas</TableCell>
-                                    <TableCell sx={{ fontWeight: 700 }}>Terminas</TableCell>
-                                    <TableCell />
-                                </TableRow>
-                            </TableHead>
-                            <TableBody>
-                                {overview.map((row) => {
-                                    const isSel = selected?.country === row.country && selected?.year === row.year;
-                                    const eligible = row.annual_eligible || row.quarterly_eligible;
-                                    return (
-                                        <TableRow
-                                            key={`${row.country}-${row.year}`}
-                                            hover
-                                            selected={isSel}
-                                            sx={{ opacity: row.deadline_ok ? 1 : 0.45 }}
-                                        >
-                                            <TableCell>{row.country_name}</TableCell>
-                                            <TableCell>{row.year}</TableCell>
-                                            <TableCell align="center">{row.doc_count}</TableCell>
-                                            <TableCell align="center">{row.ready_count}</TableCell>
-                                            <TableCell align="right">{fmt(row.vat_eur)}</TableCell>
-                                            <TableCell>
-                                                <Stack direction="row" spacing={0.5} sx={{ flexWrap: 'wrap', gap: 0.5 }}>
-                                                    {row.annual_eligible && (
-                                                        <Chip size="small" label="Metinis" color="success" variant="outlined" />
-                                                    )}
-                                                    {row.quarterly_eligible && (
-                                                        <Chip size="small" label="Ketvirtinis" color="primary" variant="outlined" />
-                                                    )}
-                                                    {!eligible && (
-                                                        <Chip size="small" label="Nesiekia ribos" variant="outlined" />
-                                                    )}
-                                                </Stack>
-                                            </TableCell>
-                                            <TableCell>
-                                                <Typography
-                                                    variant="caption"
-                                                    color={row.deadline_ok ? 'text.secondary' : 'error'}
-                                                >
-                                                    {row.deadline}
-                                                </Typography>
-                                            </TableCell>
-                                            <TableCell align="right">
-                                                <Button
-                                                    size="small"
-                                                    variant={isSel ? 'contained' : 'outlined'}
-                                                    disabled={!eligible || !row.deadline_ok}
-                                                    onClick={() => handleSelectCountry(row)}
-                                                    sx={{ fontSize: '0.75rem' }}
-                                                >
-                                                    Pasirinkti
-                                                </Button>
-                                            </TableCell>
-                                        </TableRow>
-                                    );
-                                })}
-                                {overview.length === 0 && (
-                                    <TableRow>
-                                        <TableCell colSpan={8} align="center" sx={{ py: 4 }}>
-                                            <Typography color="text.secondary">
-                                                Nėra dokumentų su užsienio ES PVM
-                                            </Typography>
-                                        </TableCell>
-                                    </TableRow>
-                                )}
-                            </TableBody>
-                        </Table>
-                    </TableContainer>
-                )}
-            </Paper>
-
-            {/* Laikotarpis */}
-            {selected && (
-                <Paper sx={{ p: 2.5, mb: 3 }}>
-                    <Stack spacing={2}>
-                        <FormControl size="small" sx={{ width: { xs: '100%', sm: 400 } }}>
-                            <InputLabel>Laikotarpis</InputLabel>
-                            <Select
-                                value={periodValue}
-                                label="Laikotarpis"
-                                onChange={(e) => { setPeriodValue(e.target.value); setData(null); }}
-                                MenuProps={{ disableScrollLock: true }}
-                            >
-                                {periodOptions.map((o) => (
-                                    <MenuItem key={o.value} value={o.value}>{o.label}</MenuItem>
-                                ))}
-                            </Select>
-                        </FormControl>
-
-                        <Stack direction="row" spacing={1.5} sx={{ flexWrap: 'wrap', gap: 1 }}>
-                            <Button
-                                variant="contained"
-                                size="small"
-                                startIcon={loadingDocs
-                                    ? <CircularProgress size={16} color="inherit" />
-                                    : <PlayArrowIcon fontSize="small" />}
-                                onClick={loadDocuments}
-                                disabled={!resolvedPeriod || loadingDocs}
-                            >
-                                Rodyti dokumentus
-                            </Button>
-                            {data && (
-                                <Button
-                                    variant="outlined"
-                                    size="small"
-                                    startIcon={downloading
-                                        ? <CircularProgress size={16} />
-                                        : <DownloadIcon fontSize="small" />}
-                                    onClick={handleDownload}
-                                    disabled={downloading || !allReady || !data.threshold_met}
-                                >
-                                    Generuoti EPRIS failą
-                                </Button>
-                            )}
-                        </Stack>
-                    </Stack>
-                </Paper>
-            )}
-
-            {/* Dokumentai */}
-            {data && (
-                <Box>
-                    <Stack direction="row" spacing={1} sx={{ mb: 1.5, flexWrap: 'wrap', gap: 1 }}>
-                        <Chip
-                            label={`Viso: ${fmt(data.total_vat_eur)} €`}
-                            color={data.threshold_met ? 'success' : 'default'}
-                        />
-                        <Chip label={`Paruošta: ${data.ready_count} / ${data.total_count}`} variant="outlined" />
-                        <Chip label={`Valiuta: ${data.currency}`} variant="outlined" />
-                    </Stack>
-
-                    {!data.threshold_met && (
-                        <Alert severity="warning" sx={{ mb: 2 }}>
-                            Suma nesiekia {fmt(data.threshold)} € ribos šiam laikotarpiui
-                        </Alert>
-                    )}
-                    {data.threshold_met && !allReady && (
-                        <Alert severity="info" sx={{ mb: 2 }}>
-                            Priskirkite kategorijas visiems dokumentams, kad galėtumėte generuoti failą
-                        </Alert>
-                    )}
-
-                    <TableContainer component={Paper} variant="outlined" sx={{ overflowX: 'auto' }}>
-                        <Table size="small" stickyHeader>
-                            <TableHead>
-                                <TableRow>
-                                    <TableCell sx={{ fontWeight: 700, width: 50 }}>Nr.</TableCell>
-                                    <TableCell sx={{ fontWeight: 700 }}>Data</TableCell>
-                                    <TableCell sx={{ fontWeight: 700 }}>Dokumentas</TableCell>
-                                    <TableCell sx={{ fontWeight: 700 }}>Tiekėjas</TableCell>
-                                    <TableCell sx={{ fontWeight: 700 }}>PVM kodas</TableCell>
-                                    <TableCell sx={{ fontWeight: 700 }} align="right">Be PVM</TableCell>
-                                    <TableCell sx={{ fontWeight: 700 }} align="right">PVM</TableCell>
-                                    <TableCell sx={{ fontWeight: 700 }}>Kategorijos</TableCell>
-                                    <TableCell sx={{ fontWeight: 700, width: 70 }} />
-                                </TableRow>
-                            </TableHead>
-                            <TableBody>
-                                {data.entries.map((e, idx) => (
-                                    <TableRow
-                                        key={e.id}
-                                        hover
-                                        sx={{ bgcolor: e.warnings.length ? 'warning.50' : 'inherit' }}
-                                    >
-                                        <TableCell>{idx + 1}</TableCell>
-                                        <TableCell>{e.invoice_date}</TableCell>
-                                        <TableCell>{`${e.document_series}${e.document_number}`}</TableCell>
-                                        <TableCell
-                                            sx={{
-                                                maxWidth: 180,
-                                                overflow: 'hidden',
-                                                textOverflow: 'ellipsis',
-                                                whiteSpace: 'nowrap',
-                                            }}
-                                        >
-                                            {e.seller_name}
-                                        </TableCell>
-                                        <TableCell>{e.seller_vat_code}</TableCell>
-                                        <TableCell align="right">{fmt(e.amount_wo_vat)}</TableCell>
-                                        <TableCell align="right">{fmt(e.vat_amount)}</TableCell>
-                                        <TableCell>
-                                            <Stack direction="row" spacing={0.5} sx={{ flexWrap: 'wrap', gap: 0.5 }}>
-                                                {(e.epris_codes || []).map((c, i) => (
-                                                    <Chip
-                                                        key={i}
-                                                        size="small"
-                                                        label={c.subcode || c.code}
-                                                        color="primary"
-                                                        variant="outlined"
-                                                    />
-                                                ))}
-                                                {!e.epris_codes?.length && (
-                                                    <Chip size="small" label="Nepriskirta" color="warning" />
-                                                )}
-                                            </Stack>
-                                        </TableCell>
-                                        <TableCell>
-                                            <Stack direction="row" alignItems="center" spacing={0.5}>
-                                                <IconButton size="small" onClick={() => setDialogDoc(e)}>
-                                                    <EditIcon fontSize="small" />
-                                                </IconButton>
-                                                {e.epris_status === 'tinkama' && (
-                                                    <CheckCircleIcon sx={{ fontSize: 16, color: 'success.main' }} />
-                                                )}
-                                                {e.warnings.length > 0 && (
-                                                    <Tooltip title={e.warnings.join('; ')} arrow>
-                                                        <WarningAmberIcon sx={{ fontSize: 16, color: 'warning.main' }} />
-                                                    </Tooltip>
-                                                )}
-                                            </Stack>
-                                        </TableCell>
-                                    </TableRow>
-                                ))}
-                                {data.entries.length === 0 && (
-                                    <TableRow>
-                                        <TableCell colSpan={9} align="center" sx={{ py: 4 }}>
-                                            <Typography color="text.secondary">
-                                                Nėra dokumentų šiam laikotarpiui
-                                            </Typography>
-                                        </TableCell>
-                                    </TableRow>
-                                )}
-                            </TableBody>
-                        </Table>
-                    </TableContainer>
-                </Box>
-            )}
-
-            <EprisCodesDialog
-                open={!!dialogDoc}
-                doc={dialogDoc}
-                onClose={() => setDialogDoc(null)}
-                onSaved={handleCodesSaved}
-            />
-        </Box>
-    );
+  return <EprisWorkspace CodesDialog={EprisCodesDialog} />;
 }

@@ -15,6 +15,21 @@ AGGREGATE_TOLERANCE = Decimal("0.20")  # для агрегатов (допуст
 
 Q2 = lambda x: Decimal(str(x)).quantize(Decimal("1.00"), rounding=ROUND_HALF_UP)
 
+PRICE_STEP = Decimal("0.0001")
+PRICE_QTY_REL = Decimal("0.01")
+
+
+def _price_qty_tolerance(qty: Decimal, subtotal: Decimal = Decimal("0")) -> Decimal:
+    qty = qty.copy_abs()
+
+    tol = qty * (PRICE_STEP / Decimal("2")) + Decimal("0.01")
+
+    if subtotal != 0:
+        cap = max(LINE_TOLERANCE, subtotal.copy_abs() * PRICE_QTY_REL)
+        tol = min(tol, cap)
+
+    return max(LINE_TOLERANCE, tol)
+
 def validate_document_math_for_export(db_doc) -> Tuple[bool, Dict[str, Any]]:
     """
     Математическая валидация документа для экспорта.
@@ -188,16 +203,22 @@ def _validate_line_items(line_items, separate_vat: bool, report: Dict[str, Any])
         if price != 0 and qty != 0:
             expected_subtotal = Q2(price * qty)
             delta = (expected_subtotal - subtotal).copy_abs()
-            match = delta <= LINE_TOLERANCE
+
+            price_qty_tolerance = _price_qty_tolerance(qty, subtotal)
+            match = delta <= price_qty_tolerance
+
             line_check["checks"]["price_x_qty"] = {
                 "expected": float(expected_subtotal),
                 "actual": float(subtotal),
                 "delta": float(delta),
                 "match": match,
+                "tolerance": float(price_qty_tolerance),
+                "rounding_only": bool(match and delta > LINE_TOLERANCE),
             }
             if not match:
                 line_check["errors"].append(
-                    f"price×qty: {expected_subtotal:.2f} ≠ {subtotal:.2f} (Δ={delta:.4f})"
+                    f"price×qty: {expected_subtotal:.2f} ≠ {subtotal:.2f} "
+                    f"(Δ={delta:.4f}, tol={price_qty_tolerance:.4f})"
                 )
 
         # CHECK 2

@@ -405,6 +405,7 @@ class ScannedDocument(models.Model):
         help_text='[{"code": "1", "subcode": "1.1.2", "free_text": "", "language": ""}, ...]',
     )
     epris_status = models.CharField(max_length=20, blank=True, default="")
+    epris_details = models.JSONField(default=dict, blank=True)
     epris_submitted_at = models.DateTimeField(blank=True, null=True)
 
     rivile_api_status = models.CharField(
@@ -5962,6 +5963,14 @@ class Purchase(models.Model):
             "payment_status", "paid_amount",
             "last_payment_date", "updated_at",
         ])
+
+    @property
+    def remaining_doc_currency(self):
+        """Likutis dokumento valiuta (skolą gesinam valiuta, ne eurais)."""
+        from decimal import Decimal
+        total = abs(self.amount_with_vat or Decimal("0"))
+        paid = abs(self.paid_amount or Decimal("0"))
+        return max(total - paid, Decimal("0"))
 
     def recalc_from_allocations(self):
         """Perskaičiuoti paid_amount iš PaymentAllocation."""
