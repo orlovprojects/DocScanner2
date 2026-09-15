@@ -894,7 +894,7 @@ const usePrintInvoice = (printRef, invoice) => {
 // Preview Dialog — uses PaginatedInvoice
 // ═══════════════════════════════════════════════════════════
 
-const InvoicePreviewDialog = ({ open, onClose, invoiceId, invoiceData }) => {
+const InvoicePreviewDialog = ({ open, onClose, invoiceId, invoiceData, showKor = true }) => {
   const printRef = useRef(null);
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
@@ -1249,12 +1249,14 @@ const InvoicePreviewDialog = ({ open, onClose, invoiceId, invoiceData }) => {
                       transformOrigin: 'top left',
                     }}
                   >
-                    <Box sx={{ width: PAGE_W, mb: 1.5 }}>
-                      <InvoiceKorAccordion
-                        invoice={invoice}
-                        onUpdate={setInvoice}
-                      />
-                    </Box>
+                    {showKor && (
+                      <Box sx={{ width: PAGE_W, mb: 1.5 }}>
+                        <InvoiceKorAccordion
+                          invoice={invoice}
+                          onUpdate={setInvoice}
+                        />
+                      </Box>
+                    )}
                     <PaginatedInvoice ref={printRef} invoice={invoice} logoUrl={logoUrl} watermark={watermark} />
                   </Box>
                 </Box>
@@ -1280,12 +1282,14 @@ const InvoicePreviewDialog = ({ open, onClose, invoiceId, invoiceData }) => {
             {invoice && !loading && (
               <Box sx={{ width: '100%', display: 'flex', justifyContent: 'center', alignItems: 'flex-start', py: 2 }}>
                 <Box sx={{ width: PAGE_W }}>
-                  <Box sx={{ width: PAGE_W, mb: 1.5 }}>
-                    <InvoiceKorAccordion
-                      invoice={invoice}
-                      onUpdate={setInvoice}
-                    />
-                  </Box>
+                    {showKor && (
+                      <Box sx={{ width: PAGE_W, mb: 1.5 }}>
+                        <InvoiceKorAccordion
+                          invoice={invoice}
+                          onUpdate={setInvoice}
+                        />
+                      </Box>
+                    )}
                   <PaginatedInvoice ref={printRef} invoice={invoice} logoUrl={logoUrl} watermark={watermark} />
                 </Box>
               </Box>

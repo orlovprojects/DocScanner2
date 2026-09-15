@@ -354,7 +354,7 @@ def finalize_journal_entry(entry):
     return entry
 
 
-def _add_line(lines, *, entry, side, account_code, amount, description, sort_order):
+def _add_line(lines, *, entry, side, account_code, amount, description, sort_order, counterparty_id=None):
     amount = _to_decimal(amount)
 
     if amount == Decimal("0"):
@@ -375,6 +375,7 @@ def _add_line(lines, *, entry, side, account_code, amount, description, sort_ord
         amount=amount,
         description=description or "",
         sort_order=sort_order,
+        counterparty_id=counterparty_id,
     ))
 
     return sort_order + 1
@@ -517,6 +518,7 @@ def generate_purchase_journal_entry(purchase):
         amount=amount_with_vat,
         description=f"Skola tiekėjui {purchase.seller_name or ''}".strip(),
         sort_order=sort_order,
+        counterparty_id=purchase.seller_counterparty_id,
     )
 
     JournalEntryLine.objects.bulk_create(lines)
@@ -610,6 +612,7 @@ def generate_invoice_journal_entry(invoice):
         amount=amount_with_vat,
         description=f"Pardavimas {invoice.buyer_name or ''}".strip(),
         sort_order=sort_order,
+        counterparty_id=invoice.buyer_counterparty_id,
     )
 
     has_lines = invoice.line_items.exists()
@@ -769,6 +772,13 @@ def generate_invoice_journal_entry(invoice):
 # ═══════════════════════════════════════════════════════════
 
 def can_post_to_dk(obj):
+    # Dokumentai iki perėjimo datos jau įskaičiuoti į pradinius likučius
+    from ..opening_balances.services import is_before_cutover
+
+    doc_date = getattr(obj, "invoice_date", None) or getattr(obj, "operation_date", None)
+    if is_before_cutover(getattr(obj, "company_profile_id", None), doc_date):
+        return False
+
     if isinstance(obj, Invoice):
         if obj.invoice_type == "isankstine":
             return False
@@ -796,6 +806,15 @@ def delete_purchase_journal_entry(purchase):
     if not purchase:
         return 0
 
+    from ..ilgalaikis_turtas.services import FixedAssetError
+    from ..models import FixedAsset
+
+    if FixedAsset.objects.filter(purchase=purchase).exists():
+        raise FixedAssetError(
+            "Iš šio pirkimo sukurtas ilgalaikis turtas - "
+            "pirmiausia ištrinkite turtą"
+        )
+
     deleted, _ = JournalEntry.objects.filter(
         purchase=purchase,
         source_type=JournalEntry.SOURCE_PURCHASE,
@@ -820,6 +839,10 @@ def sync_purchase_journal_entry(purchase):
     if not purchase:
         return None
 
+    # IT apsauga: FixedAssetError, jei pirkimas nebeatitinka sukurto turto
+    from ..ilgalaikis_turtas.services import validate_purchase_fixed_assets
+    validate_purchase_fixed_assets(purchase)
+
     if can_post_to_dk(purchase):
         return generate_purchase_journal_entry(purchase)
 
@@ -827,12 +850,19 @@ def sync_purchase_journal_entry(purchase):
     return None
 
 
+@transaction.atomic
 def sync_invoice_journal_entry(invoice):
     if not invoice:
         return None
 
-    if can_post_to_dk(invoice):
-        return generate_invoice_journal_entry(invoice)
+    # IT apsauga: tikrinam po perkūrimo, kai sumos jau perskaičiuotos
+    from ..ilgalaikis_turtas.disposal import validate_invoice_fixed_assets
 
+    if can_post_to_dk(invoice):
+        entry = generate_invoice_journal_entry(invoice)
+        validate_invoice_fixed_assets(invoice)
+        return entry
+
+    validate_invoice_fixed_assets(invoice)
     delete_invoice_journal_entry(invoice)
     return None

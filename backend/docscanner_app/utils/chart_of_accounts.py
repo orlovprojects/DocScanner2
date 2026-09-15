@@ -376,6 +376,7 @@ CLASS_3 = {
     "3424": "Ankstesnių metų esminių klaidų taisymo pelnas (nuostoliai)",
 
     "390": "Bendra sąskaitų suvestinė",
+    "999": "Pradinių likučių tarpinė sąskaita",
 }
 
 # ════════════════════════════════════════════════════════════

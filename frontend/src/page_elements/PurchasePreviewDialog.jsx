@@ -28,9 +28,12 @@ import DeleteIcon from "@mui/icons-material/Delete";
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 import ErrorIcon from "@mui/icons-material/Error";
 import HourglassEmptyIcon from "@mui/icons-material/HourglassEmpty";
+import WeekendIcon from "@mui/icons-material/Weekend";
 import ZoomableImage from "../pages/ZoomableImage";
 import EditableCell from "../components/EditableCell";
 import EditableAutoCell from "../components/EditableAutoCell";
+import IltBanner from "../components/IltBanner";
+import FixedAssetCreateDialog from "../components/FixedAssetCreateDialog";
 import { api } from "../api/endpoints";
 import { EXTRA_FIELDS_CONFIG } from "../pages/extraFieldsConfig";
 import {
@@ -230,8 +233,6 @@ function groupByAccount(lines, field, amountField, fallback) {
   const groups = {};
 
   for (const line of lines || []) {
-    // Korespondencijoje suma visada rodoma teigiama.
-    // Kreditinės kryptis valdoma per D/K, o ne minuso ženklu.
     const amount = Math.abs(
       Number(line?.[amountField] || 0)
     );
@@ -272,17 +273,6 @@ function buildKorLines(purchase, loadedLineItems) {
   const isCredit =
     purchase.is_credit_invoice === true;
 
-  /*
-   * Įprastas pirkimas:
-   * D sąnaudos
-   * D gautinas PVM
-   * K skola tiekėjui
-   *
-   * Kreditinis pirkimas:
-   * K sąnaudos
-   * K gautinas PVM
-   * D skola tiekėjui
-   */
   const debitAccountSide = isCredit ? "K" : "D";
   const creditAccountSide = isCredit ? "D" : "K";
 
@@ -645,6 +635,9 @@ export default function PurchasePreviewDialog({
   const [lineItemsLoading, setLineItemsLoading] = useState(false);
   const [lineItemsLoadingMore, setLineItemsLoadingMore] = useState(false);
 
+  const [itDialog, setItDialog] = useState({ open: false, lineId: null, suggestedCategory: "" });
+  const [fixedAssets, setFixedAssets] = useState([]);
+
   const lineItemsContainerRef = useRef(null);
   const accordionRef = useRef(null);
   const lineItemsReqLockRef = useRef(false);
@@ -746,8 +739,32 @@ export default function PurchasePreviewDialog({
       setLineItemsLoaded([]);
       setLineItemsOffset(0);
       setLineItemsTotal(0);
+      setFixedAssets([]);
     }
   }, [open, loadPurchase]);
+
+  /* ── Load fixed assets for this purchase ── */
+
+  const loadFixedAssets = useCallback(async () => {
+    if (!open || !purchaseId) return;
+    try {
+      const { data } = await api.get("/fixed-assets/", {
+        withCredentials: true,
+        params: {
+          purchase: purchaseId,
+          ...(activeProfileId ? { company_profile: activeProfileId } : {}),
+        },
+      });
+      const list = Array.isArray(data) ? data : (data?.results || []);
+      setFixedAssets(list);
+    } catch (e) {
+      console.error("Failed to load fixed assets:", e);
+    }
+  }, [open, purchaseId, activeProfileId]);
+
+  useEffect(() => {
+    loadFixedAssets();
+  }, [loadFixedAssets]);
 
   /* ── Line items lazy loading ── */
 
@@ -851,7 +868,6 @@ export default function PurchasePreviewDialog({
         { withCredentials: true },
       );
 
-      // Обновляем изменённую строку внутри preview
       setLineItemsLoaded((prev) =>
         prev.map((li) =>
           String(li.id) === String(lineId)
@@ -863,7 +879,6 @@ export default function PurchasePreviewDialog({
         ),
       );
 
-      // Обновляем в preview статусы, если backend их вернул
       if (
         data.math_validation_passed !== undefined ||
         data.ready_for_export !== undefined ||
@@ -891,7 +906,6 @@ export default function PurchasePreviewDialog({
         }));
       }
 
-      // Обновляем строку документа в основной таблице
       await onUpdated?.(purchase.id);
     } catch (e) {
       console.error("Failed to save line field:", e);
@@ -965,7 +979,6 @@ export default function PurchasePreviewDialog({
         line_items_count: (prev.line_items_count || 0) + 1,
       }));
 
-      // Обновляем основную таблицу
       await onUpdated?.(purchase.id);
 
       setTimeout(() => {
@@ -1020,7 +1033,6 @@ export default function PurchasePreviewDialog({
         ),
       }));
 
-      // Обновляем основную таблицу
       await onUpdated?.(purchase.id);
     } catch (e) {
       console.error("Failed to delete line:", e);
@@ -1182,6 +1194,96 @@ export default function PurchasePreviewDialog({
     return entries;
   };
 
+  /* ── Fixed asset block ── */
+
+  const openItDialog = (lineId, suggestedCategory) =>
+    setItDialog({ open: true, lineId, suggestedCategory: suggestedCategory || "" });
+
+  const renderFixedAssetBlock = (source, lineId = null) => {
+    if (!source) return null;
+
+    const assets = fixedAssets.filter((a) =>
+      lineId ? String(a.purchase_line) === String(lineId) : !a.purchase_line,
+    );
+    const isCandidate = Boolean(source.is_long_term_asset_candidate);
+
+    const assetChips = assets.map((a) => (
+      <Chip
+        key={a.id}
+        icon={<WeekendIcon />}
+        label={`${a.name} · ${fmtAmount(a.acquisition_cost)}`}
+        size="small"
+        sx={{
+          bgcolor: "#fff",
+          color: "#7A4A12",
+          fontWeight: 600,
+          border: "1px solid #F0D7B1",
+          "& .MuiChip-icon": { color: "#e08d21", fontSize: "1rem" },
+        }}
+      />
+    ));
+
+    const createButton = (
+      <Button
+        size="small"
+        variant={isCandidate ? "contained" : "text"}
+        startIcon={<WeekendIcon sx={{ fontSize: "1rem !important" }} />}
+        onClick={() => openItDialog(lineId, source.suggested_asset_type)}
+        sx={
+          isCandidate
+            ? {
+                textTransform: "none",
+                fontSize: 12,
+                fontWeight: 700,
+                borderRadius: 3,
+                boxShadow: "none",
+                color: "#fff",
+                background: "linear-gradient(135deg, #FF9800, #F57C00)",
+                "&:hover": {
+                  boxShadow: "none",
+                  background: "linear-gradient(135deg, #FB8C00, #EF6C00)",
+                },
+              }
+            : {
+                textTransform: "none",
+                fontSize: 12,
+                fontWeight: 600,
+                color: "#A0590F",
+                px: 1,
+                "&:hover": { bgcolor: "#FFF8EE" },
+              }
+        }
+      >
+        Sukurti ilgalaikį turtą
+      </Button>
+    );
+
+    if (isCandidate) {
+      return (
+        <IltBanner
+          variant={lineId ? "line" : "full"}
+          assetType={source.suggested_asset_type}
+          subtotal={lineId ? source.subtotal : source.amount_wo_vat}
+          currency={purchase?.currency}
+          showMonthly={Boolean(lineId)}
+          actions={
+            <Box sx={{ display: "flex", alignItems: "center", gap: 1, flexWrap: "wrap" }}>
+              {assetChips}
+              {createButton}
+            </Box>
+          }
+        />
+      );
+    }
+
+    return (
+      <Box sx={{ display: "flex", alignItems: "center", gap: 1, flexWrap: "wrap", mb: 1 }}>
+        {assetChips}
+        {createButton}
+      </Box>
+    );
+  };
+
   /* ── Render helpers ── */
 
   const renderValidationFlags = () => {
@@ -1279,6 +1381,11 @@ export default function PurchasePreviewDialog({
     return (
       <>
         {renderValidationFlags()}
+
+        {!hasLineItems && renderFixedAssetBlock(purchase, null)}
+        {hasLineItems && lineItemsCount > 1 && purchase.is_long_term_asset_candidate && (
+          <IltBanner variant="detaliai_doc" />
+        )}
 
         <Typography gutterBottom sx={{ fontSize: "0.85rem" }}>
           Dokumento tipas: <b>{purchase.document_type || "PVM sąskaita faktūra"}</b>
@@ -1537,6 +1644,8 @@ export default function PurchasePreviewDialog({
                           {`Prekė #${index + 1}`}
                         </Typography>
 
+                        {renderFixedAssetBlock(line, line.id)}
+
                         {/* Product fields */}
                         <Typography component="div" sx={{ mb: 0.5 }}>
                           Prekės pavadinimas:{" "}
@@ -1738,6 +1847,18 @@ export default function PurchasePreviewDialog({
           {purchase?.preview_url && <ZoomableImage src={purchase.preview_url} buttonSize={48} maxHeight="calc(100vh - 100px)" fitOnLoad fitRatio={1} />}
         </Box>
       </Dialog>
+
+      <FixedAssetCreateDialog
+        open={itDialog.open}
+        onClose={() => setItDialog({ open: false, lineId: null, suggestedCategory: "" })}
+        purchaseId={purchase?.id}
+        lineId={itDialog.lineId}
+        suggestedCategory={itDialog.suggestedCategory}
+        onCreated={async () => {
+          await loadFixedAssets();
+          if (purchase?.id) await onUpdated?.(purchase.id);
+        }}
+      />
     </LocalizationProvider>
   );
 }

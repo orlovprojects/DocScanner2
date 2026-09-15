@@ -26,6 +26,7 @@ from django.contrib.postgres.search import TrigramSimilarity
 from django.utils.html import strip_tags
 from django.db.models import F, Value
 from django.db.models.functions import Coalesce
+from django.urls import reverse
 
 
 from django.core.files.base import ContentFile
@@ -144,6 +145,7 @@ from .models import (
     JournalEntry,
     JournalEntryLine,
     Company,
+    Counterparty,
 )
 
 from .serializers import (
@@ -231,6 +233,8 @@ from .serializers import (
     GuideArticleDetailSerializer,
 )
 
+from .ilgalaikis_turtas.services import FixedAssetError
+
 
 #emails
 from .emails import siusti_sveikinimo_laiska, siusti_kontakto_laiska
@@ -240,6 +244,8 @@ from .utils.play_store_link_gen import build_mobile_play_store_link
 
 from time import perf_counter
 
+from .services.counterparties import find_counterparty
+from .services.counterparties import ensure_party_counterparty
 
 # --- Logging setup ---
 logging.config.dictConfig(settings.LOGGING)
@@ -6740,7 +6746,19 @@ def counterparty_list_create(request):
     # POST
     serializer = InvoiceCounterpartySerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
-    serializer.save(user=user, company_profile_id=active_id)
+
+    existing = find_counterparty(
+        active_id and CompanyProfile.objects.get(pk=active_id),
+        company_code=serializer.validated_data.get("company_code", ""),
+        vat_code=serializer.validated_data.get("vat_code", ""),
+    )
+    if existing:
+        return Response(
+            {"detail": "Kontrahentas su tokiu kodu jau yra", "existing_id": existing.pk},
+            status=status.HTTP_409_CONFLICT,
+        )
+
+    serializer.save(user=user, company_profile_id=active_id, source="manual")
     return Response(serializer.data, status=status.HTTP_201_CREATED)
 
 
@@ -6748,7 +6766,10 @@ def counterparty_list_create(request):
 @permission_classes([IsAuthenticated])
 def counterparty_detail(request, pk):
     """GET / PUT / DELETE одного контрагента."""
-    cp = get_object_or_404(Counterparty, pk=pk, user=request.user)
+    cp = get_object_or_404(
+        Counterparty, pk=pk, user=request.user,
+        company_profile_id=getattr(request.user, "active_company_profile_id", None),
+    )
 
     if request.method == "GET":
         return Response(InvoiceCounterpartySerializer(cp).data)
@@ -6996,15 +7017,31 @@ def invoice_update(request, pk):
         invoice, data=request.data, partial=True, context={"request": request}
     )
     serializer.is_valid(raise_exception=True)
-    instance = serializer.save()
 
-    # ── Пересоздать JE если invoice уже issued ────────
-    if instance.status not in ("draft", "cancelled") and instance.invoice_type != "isankstine":
-        from .services.accounting_transfer import recreate_je_for_invoice
-        try:
-            recreate_je_for_invoice(instance)
-        except Exception as e:
-            logger.warning("[InvoiceUpdate] Recreate JE failed for %s: %s", instance.id, e)
+    from django.db.models import ProtectedError
+    from .ilgalaikis_turtas.disposal import validate_invoice_fixed_assets
+
+    try:
+        with transaction.atomic():
+            instance = serializer.save()
+
+            # ── Пересоздать JE если invoice уже issued ────────
+            if instance.status not in ("draft", "cancelled") and instance.invoice_type != "isankstine":
+                from .services.accounting_transfer import recreate_je_for_invoice
+                try:
+                    recreate_je_for_invoice(instance)
+                except FixedAssetError:
+                    raise
+                except Exception as e:
+                    logger.warning("[InvoiceUpdate] Recreate JE failed for %s: %s", instance.id, e)
+
+            # IT apsauga
+            validate_invoice_fixed_assets(instance)
+    except ProtectedError:
+        return Response(
+            {"detail": "Pagal sąskaitos eilutę parduotas ilgalaikis turtas - pirmiausia atšaukite pardavimą"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
 
     return Response(serializer.data)
 
@@ -7018,6 +7055,14 @@ def invoice_delete(request, pk):
     if not invoice.can_delete:
         return Response(
             {"detail": "Galima ištrinti tik juodraščius arba iš skaitmenizavimo perkeltas sąskaitas."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    from .models import FixedAsset
+
+    if FixedAsset.objects.filter(sale_invoice=invoice).exists():
+        return Response(
+            {"detail": "Pagal šią sąskaitą parduotas ilgalaikis turtas - pirmiausia atšaukite pardavimą"},
             status=status.HTTP_400_BAD_REQUEST,
         )
 
@@ -7205,6 +7250,12 @@ def invoice_issue(request, pk):
         if not series_obj:
             series_obj = _series_qs().first()
 
+        if not series_obj:
+            return Response(
+                {"detail": "Nerasta aktyvi serija šiam dokumento tipui."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         # Если юзер уже задал номер вручную — проверяем уникальность
         if invoice.document_number:
             exists = Invoice.objects.filter(
@@ -7291,7 +7342,16 @@ def invoice_issue(request, pk):
                 invoice.company_profile_id = active_id
                 update_fields.append("company_profile")
 
-        invoice.save(update_fields=update_fields)
+        # ── Kontrahentas: pirkėjo kortelė kataloge ──
+        if invoice.company_profile_id:
+            invoice.buyer_counterparty = ensure_party_counterparty(
+                invoice.company_profile_id, request.user, invoice, "buyer",
+                role="buyer", source="israsymas",
+            )
+            update_fields.append("buyer_counterparty")
+
+        update_fields.append("updated_at")
+        invoice.save(update_fields=list(dict.fromkeys(update_fields)))
 
         # ── Auto JE: pardavimo SF → DK įrašas ────────────
         from .services.accounting_transfer import create_je_for_invoice
@@ -7520,6 +7580,17 @@ def invoice_cancel(request, pk):
     if invoice.status in ("cancelled", "draft"):
         return Response(
             {"detail": "Ši sąskaita negali būti anuliuota."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    from .models import FixedAsset
+
+    if (
+        FixedAsset.objects.filter(sale_invoice=invoice).exists()
+        or FixedAsset.objects.filter(sale_invoice__source_invoice=invoice).exists()
+    ):
+        return Response(
+            {"detail": "Pagal šią sąskaitą parduotas ilgalaikis turtas - pirmiausia atšaukite pardavimą"},
             status=status.HTTP_400_BAD_REQUEST,
         )
 
@@ -8602,8 +8673,13 @@ def invoice_pdf(request, pk):
     pdf_bytes = generate_invoice_pdf(invoice, logo_path=logo_path, watermark=watermark)
 
     filename = f"{invoice.full_number or invoice.pk}.pdf"
+    disposition = (
+        "inline"
+        if str(request.GET.get("inline", "")).lower() in ("1", "true")
+        else "attachment"
+    )
     response = HttpResponse(pdf_bytes, content_type="application/pdf")
-    response["Content-Disposition"] = f'attachment; filename="{filename}"'
+    response["Content-Disposition"] = f'{disposition}; filename="{filename}"'
     return response
 
 
@@ -17468,7 +17544,13 @@ class PurchaseViewSet(viewsets.ModelViewSet):
 
         return qs.order_by("-created_at")
 
+    @transaction.atomic
     def perform_destroy(self, instance):
+        if instance.fixed_assets.exists():
+            raise FixedAssetError(
+                "Iš šio pirkimo sukurtas ilgalaikis turtas - pirmiausia ištrinkite turtą"
+            )
+
         scanned_doc = instance.scanned_document
         instance.delete()
 
@@ -17494,6 +17576,7 @@ class PurchaseViewSet(viewsets.ModelViewSet):
         methods=["patch"],
         url_path=r"line-items/(?P<line_id>[^/.]+)",
     )
+    @transaction.atomic
     def update_line_item(self, request, pk=None, line_id=None):
         purchase = self.get_object()
 
@@ -17539,12 +17622,15 @@ class PurchaseViewSet(viewsets.ModelViewSet):
         from .utils.journal_generators import sync_purchase_journal_entry
         try:
             sync_purchase_journal_entry(purchase)
+        except FixedAssetError:
+            raise
         except Exception as e:
             logger.warning("[Purchase] DK sync failed for %s: %s", purchase.id, e)
 
         return Response(serializer.data)
 
     @action(detail=True, methods=["post"], url_path="add-line-item")
+    @transaction.atomic
     def add_line_item(self, request, pk=None):
         purchase = self.get_object()
         line = PurchaseLine.objects.create(purchase=purchase)
@@ -17559,6 +17645,8 @@ class PurchaseViewSet(viewsets.ModelViewSet):
         from .utils.journal_generators import sync_purchase_journal_entry
         try:
             sync_purchase_journal_entry(purchase)
+        except FixedAssetError:
+            raise
         except Exception as e:
             logger.warning("[Purchase] DK sync failed for %s: %s", purchase.id, e)
 
@@ -17580,8 +17668,14 @@ class PurchaseViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_404_NOT_FOUND,
             )
  
+        if line.fixed_assets.exists():
+            return Response(
+                {"detail": "Iš šios eilutės sukurtas ilgalaikis turtas - pirmiausia ištrinkite turtą"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         line.delete()
- 
+
         # Пересчитать валидацию
         purchase.ready_for_export = check_required_fields_for_export(purchase)
         is_math_valid, _ = validate_document_math_for_export(purchase)
@@ -17592,11 +17686,14 @@ class PurchaseViewSet(viewsets.ModelViewSet):
         from .utils.journal_generators import sync_purchase_journal_entry
         try:
             sync_purchase_journal_entry(purchase)
+        except FixedAssetError:
+            raise
         except Exception as e:
             logger.warning("[Purchase] DK sync failed for %s: %s", purchase.id, e)
 
         return Response(status=status.HTTP_204_NO_CONTENT)
  
+    @transaction.atomic
     def perform_update(self, serializer):
         """Override чтобы пересчитывать валидацию при PATCH через ViewSet."""
         instance = serializer.save()
@@ -17618,7 +17715,9 @@ class PurchaseViewSet(viewsets.ModelViewSet):
 
         from .utils.journal_generators import sync_purchase_journal_entry
         try:
-            sync_purchase_journal_entry(instance)
+            sync_purchase_journal_entry(purchase)
+        except FixedAssetError:
+            raise
         except Exception as e:
             logger.warning("[Purchase] DK sync failed for %s: %s", instance.id, e)
 
@@ -17800,6 +17899,7 @@ def _next_free_number_int(user, company_profile_id, invoice_type, prefix, start_
 @permission_classes([IsAuthenticated])
 def transfer_to_accounting(request):
     from .utils.journal_generators import derive_pardavimo, resolve_debeto_for_inventory
+    from .services.counterparties import counterparty_from_party
     from decimal import Decimal, InvalidOperation
     from django.utils import timezone
     from .models import (
@@ -18319,11 +18419,17 @@ def transfer_to_accounting(request):
             doc_96_str=bool(getattr(doc, "doc_96_str", False)),
         )
 
+        seller_cp = counterparty_from_party(
+            profile, user, doc, "seller",
+            role="seller", source="transfer",
+        )
+
         purchase = Purchase.objects.create(
             user=user,
             company_profile=profile,
             scanned_document=doc,
             status="new",
+            seller_counterparty=seller_cp,
 
             # Korespondencijos
             debeto_saskaita=resolve_debeto_for_inventory(
@@ -18487,6 +18593,8 @@ def transfer_to_accounting(request):
                             uses_inventory=uses_inventory,
                         ) or None,
                         sort_order=i,
+                        is_long_term_asset_candidate=li.is_long_term_asset_candidate,
+                        suggested_asset_type=li.suggested_asset_type or "",
                     )
                 )
 
@@ -18538,6 +18646,8 @@ def transfer_to_accounting(request):
                         uses_inventory=uses_inventory,
                     ) or None,
                     sort_order=0,
+                    is_long_term_asset_candidate=doc.is_long_term_asset_candidate,
+                    suggested_asset_type=doc.suggested_asset_type or "",
                 )
             )
 
@@ -18685,12 +18795,18 @@ def transfer_to_accounting(request):
             entry_date = doc.invoice_date
             period = entry_date.replace(day=1) if entry_date else None
 
+            buyer_cp = counterparty_from_party(
+                profile, user, doc, "buyer",
+                role="buyer", source="transfer",
+            )
+
             invoice = Invoice.objects.create(
                 user=user,
                 company_profile=profile,
                 scanned_document=doc,
                 invoice_type=inv_type,
                 status="issued",
+                buyer_counterparty=buyer_cp,
 
                 # Numeracija
                 document_series=doc.document_series or "",
@@ -19006,21 +19122,24 @@ def invoice_update_kor(request, pk):
     if not new_code or not line_ids:
         return Response({"detail": "line_item_ids ir kredito_saskaita privalomi"}, status=400)
 
-    updated = invoice.line_items.filter(id__in=line_ids).update(kredito_saskaita=new_code)
+    with transaction.atomic():
+        updated = invoice.line_items.filter(id__in=line_ids).update(kredito_saskaita=new_code)
 
-    # Document level — если все line items одинаковые
-    codes = list(invoice.line_items.values_list("kredito_saskaita", flat=True).distinct())
-    if len(codes) == 1 and codes[0]:
-        invoice.kredito_saskaita = codes[0]
-    invoice.kor_balanced = compute_kor_balanced(invoice)
-    invoice.save(update_fields=["kredito_saskaita", "kor_balanced", "updated_at"])
+        # Document level — если все line items одинаковые
+        codes = list(invoice.line_items.values_list("kredito_saskaita", flat=True).distinct())
+        if len(codes) == 1 and codes[0]:
+            invoice.kredito_saskaita = codes[0]
+        invoice.kor_balanced = compute_kor_balanced(invoice)
+        invoice.save(update_fields=["kredito_saskaita", "kor_balanced", "updated_at"])
 
-    # Regenerate DK
-    from .utils.journal_generators import sync_invoice_journal_entry
-    try:
-        sync_invoice_journal_entry(invoice)
-    except Exception:
-        pass
+        # Regenerate DK
+        from .utils.journal_generators import sync_invoice_journal_entry
+        try:
+            sync_invoice_journal_entry(invoice)
+        except FixedAssetError:
+            raise
+        except Exception:
+            pass
 
     return Response(InvoiceDetailSerializer(invoice, context={"request": request}).data)
 
@@ -19068,6 +19187,7 @@ PURCHASE_LINE_MATH_FIELDS = {
 class PurchaseInlineDocUpdateView(APIView):
     permission_classes = [IsAuthenticated]
  
+    @transaction.atomic
     def patch(self, request, purchase_id):
         purchase = get_object_or_404(
             Purchase, pk=purchase_id, user=request.user,
@@ -19120,12 +19240,16 @@ class PurchaseInlineDocUpdateView(APIView):
                 update_fields.append("kor_balanced")
             if update_fields:
                 purchase.save(update_fields=update_fields)
+        except FixedAssetError:
+            raise
         except Exception as e:
             logger.error(f"Purchase validation error: {e}")
 
         from .utils.journal_generators import sync_purchase_journal_entry
         try:
             sync_purchase_journal_entry(purchase)
+        except FixedAssetError:
+            raise
         except Exception as e:
             logger.warning("[Purchase] DK sync failed for %s: %s", purchase.id, e)
 
@@ -19178,6 +19302,7 @@ class PurchaseSearchView(APIView):
 class PurchaseInlineLineUpdateView(APIView):
     permission_classes = [IsAuthenticated]
  
+    @transaction.atomic
     def patch(self, request, purchase_id, line_id):
         purchase = get_object_or_404(
             Purchase, pk=purchase_id, user=request.user,
@@ -19231,12 +19356,16 @@ class PurchaseInlineLineUpdateView(APIView):
 
             if update_fields:
                 purchase.save(update_fields=update_fields)
+        except FixedAssetError:
+            raise
         except Exception as e:
             logger.error(f"Purchase line validation error: {e}")
 
         from .utils.journal_generators import sync_purchase_journal_entry
         try:
             sync_purchase_journal_entry(purchase)
+        except FixedAssetError:
+            raise
         except Exception as e:
             logger.warning("[Purchase] DK sync failed for %s: %s", purchase.id, e)
 
@@ -19398,153 +19527,190 @@ def _parse_period(period_str):
 
 
 # ═══════════════════════════════════════════════════════════
-# TAB 1: SKOLOS — кто кому должен
+# TAB 1: SKOLOS — kontrahentų likučiai iš DK
 # ═══════════════════════════════════════════════════════════
+
+DEBT_ACCOUNTS = {
+    # Pirkėjai: 2410 skolos + 4420 gauti avansai. Likutis = D − K.
+    "customer": {"prefixes": ("2410", "4420"), "increase": "D"},
+    # Tiekėjai: 4430 skolos + 2080 sumokėti avansai. Likutis = K − D.
+    "supplier": {"prefixes": ("4430", "2080"), "increase": "K"},
+}
+
+DEBT_MONEY_FIELD = DecimalField(max_digits=14, decimal_places=4)
+DEBT_ZERO = Value(Decimal("0"), output_field=DEBT_MONEY_FIELD)
+DEBT_TOLERANCE = Decimal("0.009")
+
+
+def _parse_iso_date(value):
+    try:
+        return date.fromisoformat(str(value)) if value else None
+    except ValueError:
+        return None
+
+
+def _debt_sides(debt_type):
+    inc = DEBT_ACCOUNTS[debt_type]["increase"]
+    return inc, ("K" if inc == "D" else "D")
+
+
+def _debt_lines(profile, debt_type, as_of_date=None):
+    q = Q()
+    for prefix in DEBT_ACCOUNTS[debt_type]["prefixes"]:
+        q |= Q(account_code__startswith=prefix)
+
+    qs = JournalEntryLine.objects.filter(
+        q,
+        entry__company_profile=profile,
+        entry__status__in=[
+            JournalEntry.STATUS_DRAFT,
+            JournalEntry.STATUS_POSTED,
+            JournalEntry.STATUS_NEEDS_REVIEW,
+        ],
+    )
+    if as_of_date:
+        qs = qs.filter(entry__entry_date__lte=as_of_date)
+    return qs
+
+
+def _counterparty_balances(profile, debt_type, as_of_date=None, search=""):
+    """
+    Kontrahentų likučiai iš DK.
+    balance > 0 — skola, balance < 0 — permoka arba avansas.
+    """
+    inc, dec = _debt_sides(debt_type)
+    qs = _debt_lines(profile, debt_type, as_of_date)
+
+    if search:
+        qs = qs.filter(
+            Q(counterparty__name__icontains=search)
+            | Q(counterparty__company_code__icontains=search)
+            | Q(counterparty__vat_code__icontains=search)
+        )
+
+    grouped = qs.values(
+        "counterparty_id",
+        "counterparty__name",
+        "counterparty__company_code",
+        "counterparty__vat_code",
+    ).annotate(
+        increased=Coalesce(Sum("amount", filter=Q(side=inc)), DEBT_ZERO),
+        decreased=Coalesce(Sum("amount", filter=Q(side=dec)), DEBT_ZERO),
+        doc_count=Count("entry__invoice", distinct=True) + Count("entry__purchase", distinct=True),
+        newest_date=Max("entry__entry_date", filter=Q(side=inc)),
+    )
+
+    rows = []
+    for r in grouped:
+        balance = r["increased"] - r["decreased"]
+        if abs(balance) <= DEBT_TOLERANCE:
+            continue
+        rows.append({
+            "counterparty_id": r["counterparty_id"],
+            "counterparty_name": r["counterparty__name"] or "Be kontrahento",
+            "counterparty_code": r["counterparty__company_code"] or r["counterparty__vat_code"] or "",
+            "total_invoiced": r["increased"],
+            "total_paid": r["decreased"],
+            "balance": balance,
+            "invoice_count": r["doc_count"] or 0,
+            "newest_invoice_date": r["newest_date"],
+        })
+    return rows
+
+
+def _preview_url_getter(request):
+    """Tas pats document_preview_url kaip DK įrašų sąraše (JournalEntrySerializer)."""
+    field = JournalEntrySerializer(context={"request": request}).fields.get("document_preview_url")
+
+    def get(entry):
+        if field is None or entry is None:
+            return None
+        try:
+            value = field.get_attribute(entry)
+            return field.to_representation(value) if value is not None else None
+        except Exception:
+            return None
+
+    return get
+
+def _file_url(request, file_field):
+    """Absoliutus FileField URL arba None."""
+    if not file_field:
+        return None
+    try:
+        return request.build_absolute_uri(file_field.url)
+    except Exception:
+        return None
+
 
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 def apskaita_skolos(request):
     """
-    Skolos pagal kontrahentus.
+    Skolos pagal kontrahentus iš DK.
 
-    GET /apskaita/skolos/?type=customer&limit=25&offset=0&search=abc&as_of=2026-07-31
-    GET /apskaita/skolos/?type=supplier&limit=25&offset=0&search=abc&as_of=2026-07-31
-
-    Возвращает только открытые долги:
-    balance = amount_with_vat - paid_amount > 0
+    GET /apskaita/skolos/?type=customer|supplier&limit=25&offset=0&search=abc&as_of=2026-07-31&status=all|debt|overpaid
     """
     profile = _get_active_profile(request)
     if not profile:
         return Response({"detail": "Nepasirinktas įmonės profilis."}, status=400)
 
     debt_type = request.query_params.get("type", "customer")
-    if debt_type not in ["customer", "supplier"]:
+    if debt_type not in DEBT_ACCOUNTS:
         return Response(
             {"detail": "Netinkamas skolos tipas. Naudokite customer arba supplier."},
             status=400,
         )
 
     search = request.query_params.get("search", "").strip()
-    as_of = request.query_params.get("as_of")
+    as_of_date = _parse_iso_date(request.query_params.get("as_of"))
+    status_filter = request.query_params.get("status", "all")
 
     try:
-        limit = int(request.query_params.get("limit", 25))
+        limit = max(1, min(int(request.query_params.get("limit", 25)), 100))
     except ValueError:
         limit = 25
-
     try:
-        offset = int(request.query_params.get("offset", 0))
+        offset = max(0, int(request.query_params.get("offset", 0)))
     except ValueError:
         offset = 0
 
-    limit = max(1, min(limit, 100))
-    offset = max(0, offset)
+    rows = _counterparty_balances(profile, debt_type, as_of_date, search)
 
-    as_of_date = None
-    if as_of:
-        try:
-            year, month, day = as_of.split("-")
-            as_of_date = date(int(year), int(month), int(day))
-        except (ValueError, AttributeError):
-            as_of_date = None
+    total_balance = sum((r["balance"] for r in rows if r["balance"] > 0), Decimal("0"))
+    total_overpaid = sum((-r["balance"] for r in rows if r["balance"] < 0), Decimal("0"))
 
-    money_field = DecimalField(max_digits=14, decimal_places=4)
-    zero = Value(Decimal("0.00"), output_field=money_field)
+    if status_filter == "debt":
+        rows = [r for r in rows if r["balance"] > 0]
+    elif status_filter == "overpaid":
+        rows = [r for r in rows if r["balance"] < 0]
 
-    open_balance_expr = ExpressionWrapper(
-        Coalesce(F("amount_with_vat"), zero) - Coalesce(F("paid_amount"), zero),
-        output_field=money_field,
-    )
-
-    if debt_type == "customer":
-        qs = Invoice.objects.filter(company_profile=profile)
-
-        date_field = "invoice_date"
-        name_field = "buyer_name"
-        code_field = "buyer_id"
-        counterparty_type = "pirkejas"
-
-        if as_of_date:
-            qs = qs.filter(invoice_date__lte=as_of_date)
-
-        if search:
-            qs = qs.filter(
-                Q(buyer_name__icontains=search) |
-                Q(buyer_id__icontains=search)
-            )
-
-    else:
-        qs = Purchase.objects.filter(company_profile=profile)
-
-        date_field = "invoice_date"
-        name_field = "seller_name"
-        code_field = "seller_id"
-        counterparty_type = "tiekejas"
-
-        if as_of_date:
-            qs = qs.filter(invoice_date__lte=as_of_date)
-
-        if search:
-            qs = qs.filter(
-                Q(seller_name__icontains=search) |
-                Q(seller_id__icontains=search)
-            )
-
-    # Берём только открытые invoices/purchases
-    qs = qs.annotate(open_balance=open_balance_expr).filter(
-        open_balance__gt=Decimal("0.009")
-    )
-
-    grouped = (
-        qs.values(name_field, code_field)
-        .annotate(
-            total_invoiced=Coalesce(Sum("amount_with_vat"), Decimal("0")),
-            total_paid=Coalesce(Sum("paid_amount"), Decimal("0")),
-            balance=Coalesce(Sum("open_balance"), Decimal("0")),
-            invoice_count=Count("id"),
-            newest_invoice_date=Max(date_field),
-        )
-    )
-
-    rows = []
-    total_balance = Decimal("0.00")
-
-    for row in grouped:
-        balance = row["balance"] or Decimal("0")
-        if balance <= Decimal("0.009"):
-            continue
-
-        paid = row["total_paid"] or Decimal("0")
-        payment_status = "partially_paid" if paid > 0 else "unpaid"
-
-        newest_date = row["newest_invoice_date"]
-
-        total_balance += balance
-
-        rows.append({
-            "counterparty_name": row.get(name_field) or "",
-            "counterparty_code": row.get(code_field) or "",
-            "counterparty_type": counterparty_type,
-            "total_invoiced": str(row["total_invoiced"] or Decimal("0")),
-            "total_paid": str(paid),
-            "balance": str(balance),
-            "invoice_count": row["invoice_count"] or 0,
-            "newest_invoice_date": newest_date.isoformat() if newest_date else None,
-            "payment_status": payment_status,
-        })
-
-    rows.sort(
-        key=lambda x: x["newest_invoice_date"] or "",
-        reverse=True,
-    )
+    rows.sort(key=lambda r: r["newest_invoice_date"] or date.min, reverse=True)
 
     total_count = len(rows)
-    paginated = rows[offset:offset + limit]
+    page = rows[offset:offset + limit]
     next_offset = offset + limit
+
+    results = [{
+        "counterparty_id": r["counterparty_id"],
+        "counterparty_name": r["counterparty_name"],
+        "counterparty_code": r["counterparty_code"],
+        "counterparty_type": "pirkejas" if debt_type == "customer" else "tiekejas",
+        "total_invoiced": str(r["total_invoiced"]),
+        "total_paid": str(r["total_paid"]),
+        "balance": str(r["balance"]),
+        "invoice_count": r["invoice_count"],
+        "newest_invoice_date": r["newest_invoice_date"].isoformat() if r["newest_invoice_date"] else None,
+        "payment_status": (
+            "overpaid" if r["balance"] < 0
+            else "partially_paid" if r["total_paid"] > 0
+            else "unpaid"
+        ),
+    } for r in page]
 
     return Response({
         "type": debt_type,
-        "results": paginated,
+        "results": results,
         "total_count": total_count,
         "limit": limit,
         "offset": offset,
@@ -19552,121 +19718,139 @@ def apskaita_skolos(request):
         "next_offset": next_offset if next_offset < total_count else None,
         "summary": {
             "total_balance": str(total_balance),
+            "total_overpaid": str(total_overpaid),
         },
     })
-
-
-
-
-def _get_document_number(obj):
-    """
-    Универсально достаём номер документа, потому что в разных моделях
-    поле может называться invoice_number / document_number / number.
-    """
-    return (
-        getattr(obj, "invoice_number", None)
-        or getattr(obj, "document_number", None)
-        or getattr(obj, "number", None)
-        or f"#{obj.id}"
-    )
 
 
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 def apskaita_skolos_invoices(request):
     """
-    Возвращает открытые sąskaitos выбранного kontrahento.
+    Kontrahento atviri dokumentai + DK įrašai be dokumento
+    (avansai, rankiniai, pradiniai likučiai).
 
-    GET /apskaita/skolos/invoices/?type=customer&counterparty_code=123&counterparty_name=Client&as_of=2026-07-31
-    GET /apskaita/skolos/invoices/?type=supplier&counterparty_code=123&counterparty_name=Telia&as_of=2026-07-31
+    GET /apskaita/skolos/invoices/?type=customer&counterparty_id=123&as_of=2026-07-31
+    counterparty_id=none — eilutės be kontrahento.
     """
     profile = _get_active_profile(request)
     if not profile:
         return Response({"detail": "Nepasirinktas įmonės profilis."}, status=400)
 
     debt_type = request.query_params.get("type", "customer")
-    if debt_type not in ["customer", "supplier"]:
+    if debt_type not in DEBT_ACCOUNTS:
         return Response(
             {"detail": "Netinkamas skolos tipas. Naudokite customer arba supplier."},
             status=400,
         )
 
-    counterparty_code = request.query_params.get("counterparty_code", "").strip()
-    counterparty_name = request.query_params.get("counterparty_name", "").strip()
-    as_of = request.query_params.get("as_of")
-
-    as_of_date = None
-    if as_of:
-        try:
-            year, month, day = as_of.split("-")
-            as_of_date = date(int(year), int(month), int(day))
-        except (ValueError, AttributeError):
-            as_of_date = None
-
-    money_field = DecimalField(max_digits=14, decimal_places=4)
-    zero = Value(Decimal("0.00"), output_field=money_field)
-
-    open_balance_expr = ExpressionWrapper(
-        Coalesce(F("amount_with_vat"), zero) - Coalesce(F("paid_amount"), zero),
-        output_field=money_field,
-    )
-
-    if debt_type == "customer":
-        qs = Invoice.objects.filter(company_profile=profile)
-        source_type = "sale"
-
-        if as_of_date:
-            qs = qs.filter(invoice_date__lte=as_of_date)
-
-        if counterparty_code:
-            qs = qs.filter(buyer_id=counterparty_code)
-        elif counterparty_name:
-            qs = qs.filter(buyer_name=counterparty_name)
-        else:
-            return Response({"detail": "Trūksta kontrahento."}, status=400)
-
+    raw_cp = request.query_params.get("counterparty_id", "").strip()
+    if not raw_cp:
+        return Response({"detail": "Trūksta kontrahento."}, status=400)
+    if raw_cp == "none":
+        cp_id = None
     else:
-        qs = Purchase.objects.filter(company_profile=profile)
-        source_type = "purchase"
+        try:
+            cp_id = int(raw_cp)
+        except ValueError:
+            return Response({"detail": "Netinkamas kontrahentas."}, status=400)
 
-        if as_of_date:
-            qs = qs.filter(invoice_date__lte=as_of_date)
-
-        if counterparty_code:
-            qs = qs.filter(seller_id=counterparty_code)
-        elif counterparty_name:
-            qs = qs.filter(seller_name=counterparty_name)
-        else:
-            return Response({"detail": "Trūksta kontrahento."}, status=400)
-
-    qs = (
-        qs.annotate(open_balance=open_balance_expr)
-        .filter(open_balance__gt=Decimal("0.009"))
-        .order_by("-invoice_date", "-id")
-    )
-
+    as_of_date = _parse_iso_date(request.query_params.get("as_of"))
+    preview_url = _preview_url_getter(request)
     results = []
 
-    for obj in qs:
-        amount = obj.amount_with_vat or Decimal("0")
-        paid = obj.paid_amount or Decimal("0")
-        balance = amount - paid
+    # ── 1. Atviri dokumentai ──
+    if cp_id is not None:
+        if debt_type == "customer":
+            docs = (
+                Invoice.objects
+                .filter(company_profile=profile, buyer_counterparty_id=cp_id)
+                .exclude(status__in=["draft", "cancelled"])
+                .exclude(invoice_type="isankstine")
+            )
+            source_type, je_source, je_fk = "sale", JournalEntry.SOURCE_SALE, "invoice_id"
+        else:
+            docs = Purchase.objects.filter(company_profile=profile, seller_counterparty_id=cp_id)
+            source_type, je_source, je_fk = "purchase", JournalEntry.SOURCE_PURCHASE, "purchase_id"
 
-        if balance <= Decimal("0.009"):
+        if as_of_date:
+            docs = docs.filter(invoice_date__lte=as_of_date)
+
+        open_docs = []
+        for obj in docs.order_by("-invoice_date", "-id"):
+            amount = obj.amount_with_vat or Decimal("0")
+            paid = abs(obj.paid_amount or Decimal("0"))
+            # Kreditinė: suma neigiama, apmokėjimai teigiami
+            balance = amount + paid if amount < 0 else amount - paid
+            if abs(balance) > DEBT_TOLERANCE:
+                open_docs.append((obj, amount, paid, balance))
+
+        entries_by_doc = {
+            getattr(je, je_fk): je
+            for je in JournalEntry.objects.filter(
+                **{f"{je_fk}__in": [d[0].id for d in open_docs]},
+                source_type=je_source,
+            ).select_related(
+                "purchase", "purchase__scanned_document",
+                "invoice", "invoice__scanned_document",
+            )
+        }
+
+        for obj, amount, paid, balance in open_docs:
+            if balance < 0:
+                pay_status = "credit"
+            elif paid > 0:
+                pay_status = "partially_paid"
+            else:
+                pay_status = "unpaid"
+
+            number = f"{obj.document_series or ''}{obj.document_number or ''}".strip() or f"#{obj.id}"
+
+            results.append({
+                "id": obj.id,
+                "kind": "document",
+                "source_type": source_type,
+                "document_number": number,
+                "invoice_date": obj.invoice_date.isoformat() if obj.invoice_date else None,
+                "amount_with_vat": str(amount),
+                "paid_amount": str(paid),
+                "balance": str(balance),
+                "payment_status": pay_status,
+                "scanned_document_id": getattr(obj, "scanned_document_id", None),
+                "document_preview_url": preview_url(entries_by_doc.get(obj.id)),
+            })
+
+    # ── 2. DK įrašai be dokumento (avansai, rankiniai, pradiniai) ──
+    inc, dec = _debt_sides(debt_type)
+    other = _debt_lines(profile, debt_type, as_of_date).filter(counterparty_id=cp_id)
+    if cp_id is not None:
+        other = other.filter(entry__invoice__isnull=True, entry__purchase__isnull=True)
+
+    other = (
+        other
+        .values("entry_id", "entry__document_number", "entry__entry_date", "entry__source_type")
+        .annotate(
+            increased=Coalesce(Sum("amount", filter=Q(side=inc)), DEBT_ZERO),
+            decreased=Coalesce(Sum("amount", filter=Q(side=dec)), DEBT_ZERO),
+        )
+        .order_by("-entry__entry_date", "-entry_id")
+    )
+
+    for r in other:
+        amount = r["increased"] - r["decreased"]
+        if abs(amount) <= DEBT_TOLERANCE:
             continue
-
-        payment_status = "partially_paid" if paid > 0 else "unpaid"
-
         results.append({
-            "id": obj.id,
-            "source_type": source_type,
-            "document_number": _get_document_number(obj),
-            "invoice_date": obj.invoice_date.isoformat() if obj.invoice_date else None,
+            "id": r["entry_id"],
+            "kind": "entry",
+            "source_type": r["entry__source_type"],
+            "document_number": r["entry__document_number"] or f"DK #{r['entry_id']}",
+            "invoice_date": r["entry__entry_date"].isoformat() if r["entry__entry_date"] else None,
             "amount_with_vat": str(amount),
-            "paid_amount": str(paid),
-            "balance": str(balance),
-            "payment_status": payment_status,
-            "scanned_document_id": getattr(obj, "scanned_document_id", None),
+            "paid_amount": "0",
+            "balance": str(amount),
+            "payment_status": "credit" if amount < 0 else "entry",
+            "document_preview_url": None,
         })
 
     return Response({
@@ -19783,7 +19967,44 @@ def apskaita_likuciai(request):
 # TAB 3: OPERACIJOS — DK įrašai (журнал операций)
 # ═══════════════════════════════════════════════════════════
 
-MANUAL_DK_DEBT_CODES = {"2080", "2410", "4430"}
+MANUAL_DK_DEBT_PREFIXES = ("2080", "2410", "4420", "4430")
+MANUAL_DK_BUYER_PREFIXES = ("2410", "4420")
+
+
+def _is_manual_dk_debt_account(code):
+    return str(code or "").strip().startswith(MANUAL_DK_DEBT_PREFIXES)
+
+
+def _attach_manual_dk_counterparty(entry, user, parsed):
+    """Randa/sukuria kontrahento kortelę ir priskiria ją skolų eilutėms."""
+    from .services.counterparties import get_or_create_counterparty
+
+    codes = [line["account_code"] for line in parsed["lines"]]
+    if not parsed["counterparty_name"] or not any(_is_manual_dk_debt_account(c) for c in codes):
+        return None
+
+    is_buyer = any(c.startswith(MANUAL_DK_BUYER_PREFIXES) for c in codes)
+    is_seller = any(c.startswith(("2080", "4430")) for c in codes)
+    role = "both" if is_buyer and is_seller else ("buyer" if is_buyer else "seller")
+
+    cp, _ = get_or_create_counterparty(
+        entry.company_profile_id,
+        user,
+        name=parsed["counterparty_name"],
+        company_code=parsed["counterparty_code"],
+        vat_code=parsed["counterparty_vat_code"],
+        role=role,
+        source="manual",
+    )
+    if cp is None:
+        return None
+
+    q = Q()
+    for prefix in MANUAL_DK_DEBT_PREFIXES:
+        q |= Q(account_code__startswith=prefix)
+    entry.lines.filter(q).update(counterparty=cp)
+    return cp
+
 MANUAL_DK_TOLERANCE = Decimal("0.01")
 MANUAL_DK_MONEY = Decimal("0.01")
 
@@ -19956,7 +20177,7 @@ def _parse_manual_dk_payload(payload):
             has_credit = True
 
     requires_counterparty = any(
-        line["account_code"] in MANUAL_DK_DEBT_CODES
+        _is_manual_dk_debt_account(line["account_code"])
         for line in parsed_lines
     )
 
@@ -20021,6 +20242,35 @@ def manual_dk_company_search(request):
 
     normalized_query = " ".join(query.upper().split())
 
+    profile = _get_active_profile(request)
+    results = []
+    seen_codes = set()
+
+    # ── 1. Mūsų kontrahentų katalogas (pirmiausia) ──
+    if profile:
+        catalog = (
+            Counterparty.objects
+            .filter(company_profile=profile)
+            .filter(
+                Q(name__icontains=query)
+                | Q(company_code__icontains=query)
+                | Q(vat_code__icontains=query)
+            )
+            .order_by("name")[:10]
+        )
+        for cp in catalog:
+            if cp.company_code:
+                seen_codes.add(cp.company_code.upper())
+            results.append({
+                "id": f"cp-{cp.id}",
+                "pavadinimas": cp.name or "",
+                "im_kodas": cp.company_code or "",
+                "pvm_kodas": cp.vat_code or "",
+                "adresas": cp.address or "",
+                "source": "katalogas",
+            })
+
+    # ── 2. Įmonių registras ──
     companies = (
         Company.objects
         .filter(
@@ -20032,18 +20282,20 @@ def manual_dk_company_search(request):
         .order_by("pavadinimas", "im_kodas")[:20]
     )
 
-    return Response({
-        "results": [
-            {
-                "id": company.id,
-                "pavadinimas": company.pavadinimas or "",
-                "im_kodas": company.im_kodas or "",
-                "pvm_kodas": company.pvm_kodas or "",
-                "adresas": company.adresas or "",
-            }
-            for company in companies
-        ]
-    })
+    for company in companies:
+        if (company.im_kodas or "").upper() in seen_codes:
+            continue
+        results.append({
+            "id": company.id,
+            "pavadinimas": company.pavadinimas or "",
+            "im_kodas": company.im_kodas or "",
+            "pvm_kodas": company.pvm_kodas or "",
+            "adresas": company.adresas or "",
+            "source": "registras",
+        })
+
+    return Response({"results": results[:25]})
+
 
 @api_view(["GET", "POST"])
 @permission_classes([IsAuthenticated])
@@ -20120,6 +20372,8 @@ def manual_dk_collection(request):
             )
             for line in parsed["lines"]
         ])
+
+        _attach_manual_dk_counterparty(entry, request.user, parsed)
 
         finalize_journal_entry(entry)
 
@@ -20267,6 +20521,8 @@ def manual_dk_detail(request, pk):
             for line in parsed["lines"]
         ])
 
+        _attach_manual_dk_counterparty(entry, request.user, parsed)
+
         finalize_journal_entry(entry)
 
         entry.refresh_from_db()
@@ -20345,6 +20601,16 @@ def patch_dk_line(request, pk):
                 {
                     "detail":
                     "Rankinis DK įrašas redaguojamas visas dialogo lange."
+                },
+                status=400,
+            )
+
+        if line.entry.source_type == JournalEntry.SOURCE_OPENING:
+            return Response(
+                {
+                    "detail":
+                    "Pradinių likučių eilutės nekeičiamos. "
+                    "Atšaukite likučius ir įkelkite failą iš naujo."
                 },
                 status=400,
             )
@@ -20715,22 +20981,16 @@ def apskaita_summary_cards(request):
         else:
             period_end = date(today.year, today.month + 1, 1)
 
-    # Customer debt (2410 balance)
-    customer_debt = Decimal("0")
-    for p in Purchase.objects.filter(company_profile=profile):
-        customer_debt += (p.amount_with_vat or Decimal("0")) - (p.paid_amount or Decimal("0"))
-    customer_debt = Decimal("0")
-    supplier_debt = Decimal("0")
-
-    for inv in Invoice.objects.filter(company_profile=profile):
-        balance = (inv.amount_with_vat or Decimal("0")) - (inv.paid_amount or Decimal("0"))
-        if balance > 0:
-            customer_debt += balance
-
-    for p in Purchase.objects.filter(company_profile=profile):
-        balance = (p.amount_with_vat or Decimal("0")) - (p.paid_amount or Decimal("0"))
-        if balance > 0:
-            supplier_debt += balance
+    # ── Skolos iš DK periodo pabaigai (tas pats skaičiavimas kaip Skolos skiltyje) ──
+    as_of_cards = period_end - timedelta(days=1)
+    customer_debt = sum(
+        (r["balance"] for r in _counterparty_balances(profile, "customer", as_of_cards) if r["balance"] > 0),
+        Decimal("0"),
+    )
+    supplier_debt = sum(
+        (r["balance"] for r in _counterparty_balances(profile, "supplier", as_of_cards) if r["balance"] > 0),
+        Decimal("0"),
+    )
 
     # PVM per periodą
     period_lines = JournalEntryLine.objects.filter(
@@ -20752,6 +21012,16 @@ def apskaita_summary_cards(request):
         status=JournalEntry.STATUS_UNBALANCED,
     ).count()
 
+    # Pradinių likučių techninės sąskaitos likutis (turi būti 0)
+    opening_tech = JournalEntryLine.objects.filter(
+        entry__company_profile=profile,
+        account_code="999",
+    ).aggregate(
+        d=Coalesce(Sum("amount", filter=Q(side="D")), Decimal("0")),
+        k=Coalesce(Sum("amount", filter=Q(side="K")), Decimal("0")),
+    )
+    opening_tech_balance = opening_tech["d"] - opening_tech["k"]
+
     return Response({
         "period": period_start.strftime("%Y-%m"),
         "customer_debt": str(customer_debt),
@@ -20760,6 +21030,7 @@ def apskaita_summary_cards(request):
         "vat_payable": str(vat_payable),
         "vat_net": str(vat_net),
         "unbalanced_entries": unbalanced_count,
+        "opening_tech_balance": str(opening_tech_balance),
     })
 
 # ═══════════════════════════════════════════════════════════

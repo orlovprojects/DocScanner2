@@ -148,9 +148,18 @@ def generate_invoice_from_recurring(recurring: RecurringInvoice) -> Invoice:
                     invoice.document_number = number_str
                     invoice.status = "issued"
                     invoice.assign_pvm_codes()
+
+                    # ── Kontrahentas: jei šablone kortelės nėra ar ji pasenusi ──
+                    if invoice.company_profile_id:
+                        from .counterparties import ensure_party_counterparty
+                        invoice.buyer_counterparty = ensure_party_counterparty(
+                            invoice.company_profile_id, recurring.user, invoice, "buyer",
+                            role="buyer", source="israsymas",
+                        )
+
                     invoice.save(update_fields=[
                         "document_series", "document_number",
-                        "status", "pvm_kodas",
+                        "status", "pvm_kodas", "buyer_counterparty",
                     ])
 
             # 5.5. Payment link

@@ -1277,7 +1277,10 @@ class PaymentService:
         """
         allocs = (
             invoice.payment_allocations
-            .select_related("incoming_transaction", "incoming_transaction__bank_statement")
+            .select_related(
+                "incoming_transaction", "incoming_transaction__bank_statement",
+                "journal_entry",
+            )
             .order_by("-created_at")
         )
 
@@ -1290,6 +1293,11 @@ class PaymentService:
                 "status": a.status,
                 "status_display": a.get_status_display(),
                 "amount": a.amount,
+                "amount_eur": a.amount_eur,
+                "payment_account": a.payment_account,
+                "needs_account": a.needs_account,
+                "journal_entry_id": a.journal_entry_id,
+                "is_manual": a.source == "manual",
                 "payment_date": a.effective_payment_date,
                 "confidence": a.confidence,
                 "match_reasons": a.match_reasons,
@@ -1327,12 +1335,14 @@ class PaymentService:
 
             allocations_data.append(entry)
 
-        invoice_total = invoice.amount_with_vat or Decimal("0")
-        paid_amount = invoice.paid_amount or Decimal("0")
+        # Kreditinių sumos neigiamos — dialoge rodom moduliu.
+        invoice_total = abs(invoice.amount_with_vat or Decimal("0"))
+        paid_amount = abs(invoice.paid_amount or Decimal("0"))
 
         return {
             "invoice_id": invoice.id,
             "invoice_number": invoice.full_number,
+            "currency": invoice.currency or "EUR",
             "invoice_total": invoice_total,
             "paid_amount": paid_amount,
             "remaining": max(invoice_total - paid_amount, Decimal("0")),

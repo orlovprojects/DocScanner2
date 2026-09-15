@@ -243,6 +243,7 @@ const emptyLine = () => ({
   vat_percent: '',
   save_to_catalog: false,
   preke_paslauga: 'preke',
+  gross_input: '',
 });
 
 const PERIOD_TYPE_OPTIONS = [
@@ -501,6 +502,7 @@ const InvoiceEditorPage = () => {
   const [totalDiscountType, setTotalDiscountType] = useState('percent');
   const [totalDiscountValue, setTotalDiscountValue] = useState('0');
   const [showPerLineVat, setShowPerLineVat] = useState(false);
+  const [showGrossInput, setShowGrossInput] = useState(false);
   const [showNote, setShowNote] = useState(false);
   const [showOrderNumber, setShowOrderNumber] = useState(false);
 
@@ -577,7 +579,6 @@ const InvoiceEditorPage = () => {
   const paymentLinksLocked = isFeatureLocked("payment_links");
 
   // ── Смена активной фирмы в тулбаре → выход на список выбранной фирмы ──
-  // Первый прогон фиксирует текущую фирму, без навигации.
   useEffect(() => {
     if (activeId == null) return;
     if (initialActiveIdRef.current === null) {
@@ -627,7 +628,7 @@ const InvoiceEditorPage = () => {
     if (!product) return;
     setLineItems((prev) => prev.map((li, idx) => {
       if (idx !== lineIndex) return li;
-      return {
+      const next = {
         ...li,
         prekes_pavadinimas: product.prekes_pavadinimas || product.name || '',
         prekes_kodas: product.prekes_kodas || product.code || '',
@@ -637,6 +638,8 @@ const InvoiceEditorPage = () => {
         vat_percent: product.vat_percent != null ? String(product.vat_percent) : li.vat_percent,
         preke_paslauga: product.preke_paslauga || li.preke_paslauga || 'preke',
       };
+      if (grossMode) next.gross_input = calcGrossFromPrice(next);
+      return next;
     }));
     setLinesFromSearch((prev) => new Set(prev).add(lineIndex));
   };
@@ -729,6 +732,7 @@ const InvoiceEditorPage = () => {
   const isPvm = form.pvm_tipas === 'taikoma';
   const showPvmSelector = form.invoice_type === 'isankstine';
   const showVatOptions = isPvm && form.invoice_type !== 'saskaita';
+  const grossMode = showGrossInput && showVatOptions;
 
   const showNumberEditor = isEditable;
   const isAutoNumberMode = isNew || form.status === 'draft';
@@ -955,6 +959,7 @@ const InvoiceEditorPage = () => {
             vat_percent: li.vat_percent != null ? String(li.vat_percent) : '',
             save_to_catalog: false,
             preke_paslauga: li.preke_paslauga || 'preke',
+            gross_input: '',
           })));
           if (
             data.line_items.some(
@@ -1095,6 +1100,7 @@ const InvoiceEditorPage = () => {
             vat_percent: li.vat_percent != null ? String(li.vat_percent) : '',
             save_to_catalog: false,
             preke_paslauga: li.preke_paslauga || 'preke',
+            gross_input: '',
           })));
           if (data.line_items.some((li) => parseFloat(li.discount_wo_vat || 0) > 0)) setShowLineDiscount(true);
           if (data.line_items.some((li) => li.vat_percent != null)) setShowPerLineVat(true);
@@ -1362,6 +1368,7 @@ const InvoiceEditorPage = () => {
             vat_percent: li.vat_percent != null ? String(li.vat_percent) : '',
             save_to_catalog: false,
             preke_paslauga: li.preke_paslauga || 'preke',
+            gross_input: '',
           })));
           if (
             data.line_items.some(
@@ -1553,12 +1560,56 @@ const InvoiceEditorPage = () => {
     else if (searchActiveLine > i) setSearchActiveLine(searchActiveLine - 1);
   };
 
+  const calcPriceFromGross = (li) => {
+    const gross = parseNum(li.gross_input);
+    const qty = parseNum(li.quantity) || 1;
+    const vatPct = showPerLineVat
+      ? (li.vat_percent !== '' ? parseNum(li.vat_percent) : 0)
+      : (isPvm ? parseNum(form.vat_percent) : 0);
+    const net = isPvm ? gross / (1 + vatPct / 100) : gross;
+    let price;
+    if (showLineDiscount && li.discount_type === 'percent') {
+      const dv = parseNum(li.discount_value);
+      price = dv >= 100 ? 0 : net / (qty * (1 - dv / 100));
+    } else if (showLineDiscount) {
+      price = (net + parseNum(li.discount_value)) / qty;
+    } else {
+      price = net / qty;
+    }
+    return String(Math.round(Math.max(0, price) * 10000) / 10000).replace('.', ',');
+  };
+
+  const calcGrossFromPrice = (li) => {
+    const gross = parseNum(li.quantity) * parseNum(li.price);
+    let disc = 0;
+    if (showLineDiscount) {
+      const dv = parseNum(li.discount_value);
+      disc = li.discount_type === 'percent' ? gross * dv / 100 : dv;
+    }
+    const net = round2(Math.max(0, gross - disc));
+    const vatPct = showPerLineVat
+      ? (li.vat_percent !== '' ? parseNum(li.vat_percent) : 0)
+      : (isPvm ? parseNum(form.vat_percent) : 0);
+    const vatAmt = isPvm ? net * vatPct / 100 : 0;
+    const total = round2(net + vatAmt);
+    return total ? fmt2(total) : '';
+  };
+
+  const GROSS_DEPS = ['quantity', 'discount_value', 'discount_type', 'vat_percent', 'gross_input'];
+
   const uLine = (i, f, v) => {
-    const errorMap = { prekes_pavadinimas: 'name', prekes_kodas: 'code', quantity: 'qty', unit: 'unit', price: 'price' };
+    const errorMap = { prekes_pavadinimas: 'name', prekes_kodas: 'code', quantity: 'qty', unit: 'unit', price: 'price', gross_input: 'price' };
     if (errorMap[f]) {
       setFieldErrors((p) => { const n = { ...p }; delete n[`line_${i}_${errorMap[f]}`]; return n; });
     }
-    setLineItems((p) => p.map((li, idx) => (idx === i ? { ...li, [f]: v } : li)));
+    setLineItems((p) => p.map((li, idx) => {
+      if (idx !== i) return li;
+      const next = { ...li, [f]: v };
+      if (grossMode && GROSS_DEPS.includes(f) && next.gross_input) {
+        next.price = calcPriceFromGross(next);
+      }
+      return next;
+    }));
   };
 
   // ── Calculations ──
@@ -1578,6 +1629,22 @@ const InvoiceEditorPage = () => {
       return { gross: round2(gross), lineDiscount: round2(lineDiscount), net: round2(net), vatPct, vatAmt: round2(vatAmt), total: round2(net + vatAmt) };
     });
   }, [lineItems, showLineDiscount, showPerLineVat, isPvm, form.vat_percent]);
+
+  const handleGrossToggle = (checked) => setShowGrossInput(checked);
+
+  const grossModeRef = useRef(false);
+  useEffect(() => {
+    const justEnabled = grossMode && !grossModeRef.current;
+    grossModeRef.current = grossMode;
+    if (!grossMode) return;
+    if (justEnabled) {
+      setLineItems((p) => p.map((li) => ({ ...li, gross_input: calcGrossFromPrice(li) })));
+      return;
+    }
+    setLineItems((p) => p.map((li) => (
+      li.gross_input ? { ...li, price: calcPriceFromGross(li) } : li
+    )));
+  }, [grossMode, form.vat_percent, isPvm, showPerLineVat, showLineDiscount]);
 
   const totals = useMemo(() => {
     const sumNet = lineSums.reduce((s, l) => s + l.net, 0);
@@ -3009,6 +3076,9 @@ const InvoiceEditorPage = () => {
             {showVatOptions && (
               <FormControlLabel control={<Switch checked={showPerLineVat} onChange={(e) => setShowPerLineVat(e.target.checked)} size="small" />} label={<Typography variant="body2">Skirtingi PVM %</Typography>} />
             )}
+            {showVatOptions && isEditable && (
+              <FormControlLabel control={<Switch checked={showGrossInput} onChange={(e) => handleGrossToggle(e.target.checked)} size="small" />} label={<Typography variant="body2">Įvesti sumą su PVM</Typography>} />
+            )}
           </Box>
 
           {!isMobile ? (
@@ -3120,8 +3190,15 @@ const InvoiceEditorPage = () => {
                         error={!!fieldErrors[`line_${i}_qty`]} />
                       {renderUnitField(i, li, 120)}
                       <DebouncedNumField size="small" label={priceLabel} sx={{ width: 110 }} value={li.price}
-                        onChange={(v) => uLine(i, 'price', v)} disabled={!isEditable} maxDecimals={4}
-                        error={!!fieldErrors[`line_${i}_price`]} />
+                        onChange={(v) => uLine(i, 'price', v)} disabled={!isEditable || grossMode} maxDecimals={4}
+                        error={!grossMode && !!fieldErrors[`line_${i}_price`]} />
+
+                      {grossMode && (
+                        <DebouncedNumField size="small" label="Suma su PVM *" sx={{ width: 120 }}
+                          value={li.gross_input}
+                          onChange={(v) => uLine(i, 'gross_input', v)} disabled={!isEditable} maxDecimals={2}
+                          error={!!fieldErrors[`line_${i}_price`]} />
+                      )}
 
                       {showLineDiscount && (
                         <Box sx={{ display: 'flex', alignItems: 'flex-end', gap: 0.5 }}>
@@ -3222,7 +3299,10 @@ const InvoiceEditorPage = () => {
                       <Grid2 size={6}><DebouncedField size="small" fullWidth label="Barkodas" value={li.prekes_barkodas} onChange={(v) => uLine(i, 'prekes_barkodas', v)} disabled={!isEditable} /></Grid2>
                       <Grid2 size={4}><DebouncedNumField size="small" fullWidth label="Kiekis" value={li.quantity} onChange={(v) => uLine(i, 'quantity', v)} disabled={!isEditable} maxDecimals={5} error={!!fieldErrors[`line_${i}_qty`]} /></Grid2>
                       <Grid2 size={4}>{renderUnitField(i, li)}</Grid2>
-                      <Grid2 size={4}><DebouncedNumField size="small" fullWidth label={priceLabel} value={li.price} onChange={(v) => uLine(i, 'price', v)} disabled={!isEditable} maxDecimals={4} error={!!fieldErrors[`line_${i}_price`]} /></Grid2>
+                      <Grid2 size={4}><DebouncedNumField size="small" fullWidth label={priceLabel} value={li.price} onChange={(v) => uLine(i, 'price', v)} disabled={!isEditable || grossMode} maxDecimals={4} error={!grossMode && !!fieldErrors[`line_${i}_price`]} /></Grid2>
+                      {grossMode && (
+                        <Grid2 size={12}><DebouncedNumField size="small" fullWidth label="Suma su PVM *" value={li.gross_input} onChange={(v) => uLine(i, 'gross_input', v)} disabled={!isEditable} maxDecimals={2} error={!!fieldErrors[`line_${i}_price`]} /></Grid2>
+                      )}
                       {showLineDiscount && (
                         <Grid2 size={12}>
                           <Box sx={{ display: 'flex', gap: 0.5, alignItems: 'flex-end' }}>
@@ -3856,4 +3936,3 @@ const SumRow = ({ label, value, bold, primary, indent }) => (
 );
 
 export default InvoiceEditorPage;
-

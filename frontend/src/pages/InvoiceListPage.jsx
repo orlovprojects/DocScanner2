@@ -68,7 +68,7 @@ import { ACCOUNTING_PROGRAMS } from '../page_elements/AccountingPrograms';
 import DateField from '../components/DateField';
 import { InvoicePreviewDialog, useInvoicePdf, InvoiceKorAccordion } from '../components/InvoicePreview';
 import MarkPaidDialog from '../components/MarkPaidDialog';
-import PaymentProofDialog from '../components/PaymentProofDialog';
+import PaymentsDialog from '../components/PaymentsDialog';
 import { useInvSubscription } from '../contexts/InvSubscriptionContext';
 import LockIcon from '@mui/icons-material/Lock';
 import SettingsIcon from '@mui/icons-material/Settings';
@@ -2449,10 +2449,11 @@ const InvoiceListPage = () => {
       />
 
       {/* ── Payment Proof Dialog ── */}
-      <PaymentProofDialog
+      <PaymentsDialog
+        docType="invoice"
         open={!!paymentProofInvoiceId}
         onClose={() => setPaymentProofInvoiceId(null)}
-        invoiceId={paymentProofInvoiceId}
+        docId={paymentProofInvoiceId}
         onConfirmAllocation={handleConfirmAllocation}
         onRejectAllocation={handleRejectAllocation}
         onRemoveManualPayment={handleRemoveManualPayment}

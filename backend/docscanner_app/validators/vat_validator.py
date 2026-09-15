@@ -1,12 +1,31 @@
+import os
 import re
+import time
 import logging
 import logging.config
 import textwrap
 import requests
 import xml.etree.ElementTree as ET
+from logging.handlers import RotatingFileHandler
 
 
 logger = logging.getLogger("docscanner_app")
+
+# --- отдельный лог только под VIES ---
+vies_logger = logging.getLogger("vies_raw")
+if not vies_logger.handlers:
+    vies_logger.setLevel(logging.DEBUG)
+    vies_logger.propagate = False
+    _vies_log_path = os.environ.get(
+        "VIES_LOG_PATH",
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "vies_raw.log"),
+    )
+    os.makedirs(os.path.dirname(_vies_log_path), exist_ok=True)
+    _vies_handler = RotatingFileHandler(
+        _vies_log_path, maxBytes=5 * 1024 * 1024, backupCount=3, encoding="utf-8"
+    )
+    _vies_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+    vies_logger.addHandler(_vies_handler)
 
 
 VIES_SOAP_URL = "https://ec.europa.eu/taxation_customs/vies/services/checkVatService"
@@ -28,7 +47,7 @@ def build_soap_request(country_code: str, vat_number: str) -> str:
     return textwrap.dedent(envelope).strip()
 
 
-def check_vat(country_code: str, vat_number: str) -> dict:
+def _check_vat_raw(country_code: str, vat_number: str) -> dict:
     """
     Проверка VAT через VIES.
 
@@ -57,18 +76,27 @@ def check_vat(country_code: str, vat_number: str) -> dict:
 
     headers = {
         "Content-Type": "text/xml; charset=utf-8",
+        "SOAPAction": "",
+        "Accept": "text/xml",
         "User-Agent": "vat-checker-simple/1.0",
     }
 
     body = build_soap_request(country_code, vat_number)
 
+    vies_logger.debug("REQUEST %s%s url=%s headers=%s\n%s",
+                      country_code, vat_number, VIES_SOAP_URL, headers, body)
+
     try:
-        resp = requests.post(VIES_SOAP_URL, data=body, headers=headers, timeout=10)
+        resp = requests.post(VIES_SOAP_URL, data=body.encode("utf-8"), headers=headers, timeout=10)
     except requests.RequestException as e:
+        vies_logger.error("HTTP ERROR %s%s: %s", country_code, vat_number, e)
         return {
             "success": False,
             "error": f"HTTP error calling VIES: {e}",
         }
+
+    vies_logger.debug("RESPONSE %s%s status=%s\n%s",
+                      country_code, vat_number, resp.status_code, resp.text)
 
     if resp.status_code != 200:
         return {
@@ -127,7 +155,10 @@ def check_vat(country_code: str, vat_number: str) -> dict:
             "raw_response": resp.text[:1000],
         }
 
-
+def check_vat(country_code: str, vat_number: str) -> dict:
+    res = _check_vat_raw(country_code, vat_number)
+    vies_logger.info("PARSED %s%s -> %s", country_code, vat_number, res)
+    return res
 
 # Страны, которые поддерживает VIES (2-буквенный код, как в самом VIES)
 EU_VIES_COUNTRIES = {
@@ -225,6 +256,8 @@ def _parse_vat(raw_code: str | None, country_iso: str | None):
 
     # --- 3) Если из VAT префикса EU-страна не определилась → fallback к seller/buyer country_iso ---
     if not country_code:
+        # префикс не EU-страна → это часть самого номера, не режем его
+        rest = original
         country_code = _normalize_country_code(country_iso)
 
     # --- 4) Ни из VAT, ни из seller/buyer EU не получилось → VIES не зовём ---
@@ -329,6 +362,7 @@ def validate_vat(raw_code: str | None, country_iso: str | None) -> dict:
         # success=true, valid=false → retry один раз
         if attempt == 0:
             logger.info("VIES valid=false for %s%s, retrying once", country_code, vat_number)
+            time.sleep(1.5)
             continue
         # attempt==1 → подтверждено дважды, выходим
 

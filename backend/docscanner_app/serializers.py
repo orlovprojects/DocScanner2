@@ -3567,6 +3567,17 @@ class RecurringInvoiceWriteSerializer(serializers.ModelSerializer):
 
         instance = RecurringInvoice.objects.create(user=user, **validated_data)
 
+        # ── Kontrahentas: pirkėjo kortelė kataloge ──
+        if instance.company_profile_id:
+            from .services.counterparties import ensure_party_counterparty
+            _cp = ensure_party_counterparty(
+                instance.company_profile_id, user, instance, "buyer",
+                role="buyer", source="israsymas",
+            )
+            if _cp and _cp.pk != instance.buyer_counterparty_id:
+                instance.buyer_counterparty = _cp
+                instance.save(update_fields=["buyer_counterparty"])
+
         # Line items
         for idx, li_data in enumerate(line_items_data):
             li_data.pop("id", None)
@@ -3618,6 +3629,14 @@ class RecurringInvoiceWriteSerializer(serializers.ModelSerializer):
         if instance.status == "active":
             instance.next_run_at = instance.compute_first_run_at()
             instance.mark_finished_if_needed()
+
+        # ── Kontrahentas: jei pirkėjas pasikeitė arba kortelės nėra ──
+        if instance.company_profile_id:
+            from .services.counterparties import ensure_party_counterparty
+            instance.buyer_counterparty = ensure_party_counterparty(
+                instance.company_profile_id, self.context["request"].user, instance, "buyer",
+                role="buyer", source="israsymas",
+            )
 
         instance.save()
 
@@ -3899,6 +3918,13 @@ class PaymentAllocationDetailSerializer(serializers.Serializer):
     status = serializers.CharField()
     status_display = serializers.CharField()
     amount = serializers.DecimalField(max_digits=12, decimal_places=2)
+    amount_eur = serializers.DecimalField(
+        max_digits=12, decimal_places=2, required=False, allow_null=True,
+    )
+    payment_account = serializers.CharField(required=False, allow_blank=True, default="")
+    needs_account = serializers.BooleanField(required=False, default=False)
+    journal_entry_id = serializers.IntegerField(required=False, allow_null=True)
+    is_manual = serializers.BooleanField(required=False, default=False)
     payment_date = serializers.DateField()
     confidence = serializers.DecimalField(max_digits=3, decimal_places=2)
     match_reasons = serializers.DictField()
@@ -3917,6 +3943,7 @@ class InvoicePaymentDetailsSerializer(serializers.Serializer):
     """
     invoice_id = serializers.IntegerField()
     invoice_number = serializers.CharField()
+    currency = serializers.CharField(required=False, default="EUR")
     invoice_total = serializers.DecimalField(max_digits=12, decimal_places=4)
     paid_amount = serializers.DecimalField(max_digits=12, decimal_places=4)
     remaining = serializers.DecimalField(max_digits=12, decimal_places=4)

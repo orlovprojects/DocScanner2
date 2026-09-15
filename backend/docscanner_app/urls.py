@@ -217,12 +217,39 @@ from . import cloud_views
 from . import views
 from .views import TrackAdClickView
 
+from .opening_balances.views import (
+    opening_batch,
+    opening_confirm,
+    opening_line_detail,
+    opening_lines,
+    opening_reopen,
+    opening_summary,
+    opening_template,
+    opening_upload,
+)
+
 from rest_framework.routers import DefaultRouter
 from .views import GuideCategoryViewSet, GuideArticleViewSet
 from .utils.password_reset import (
     password_reset_request,
     password_reset_verify,
     password_reset_confirm,
+)
+
+from .ilgalaikis_turtas.views import (
+    FixedAssetGroupListView,
+    FixedAssetListView,
+    FixedAssetPurchaseSourceView,
+    FixedAssetFromPurchaseView,
+    FixedAssetDetailView,
+    FixedAssetScheduleView,
+    FixedAssetDepreciationPreviewView,
+    FixedAssetDepreciationRegisterView,
+    FixedAssetDepreciationCancelView,
+    FixedAssetWriteOffView,
+    FixedAssetWriteOffCancelView,
+    FixedAssetSaleView,
+    FixedAssetSaleCancelView,
 )
 
 
@@ -656,5 +683,30 @@ urlpatterns = [
     path("epris/overview/", EprisOverviewView.as_view()),
     path("epris/documents/", EprisDocumentsView.as_view()),
     path("epris/export/", EprisExportView.as_view()),
+
+    # Pradiniu likuciu suvedimas
+    path('apskaita/pradiniai-likuciai/', opening_batch, name='opening-batch'),
+    path('apskaita/pradiniai-likuciai/summary/', opening_summary, name='opening-summary'),
+    path('apskaita/pradiniai-likuciai/confirm/', opening_confirm, name='opening-confirm'),
+    path('apskaita/pradiniai-likuciai/reopen/', opening_reopen, name='opening-reopen'),
+    path('apskaita/pradiniai-likuciai/upload/<str:section>/', opening_upload, name='opening-upload'),
+    path('apskaita/pradiniai-likuciai/lines/<str:section>/', opening_lines, name='opening-lines'),
+    path('apskaita/pradiniai-likuciai/template/<str:section>/', opening_template, name='opening-template'),
+    path('apskaita/pradiniai-likuciai/line/<int:pk>/', opening_line_detail, name='opening-line'),
+
+    # Ilgalaikis turtas
+    path("fixed-assets/", FixedAssetListView.as_view()),
+    path("fixed-assets/groups/", FixedAssetGroupListView.as_view()),
+    path("fixed-assets/purchase-source/", FixedAssetPurchaseSourceView.as_view()),
+    path("fixed-assets/from-purchase/", FixedAssetFromPurchaseView.as_view()),
+    path("fixed-assets/<int:pk>/", FixedAssetDetailView.as_view()),
+    path("fixed-assets/<int:pk>/schedule/", FixedAssetScheduleView.as_view()),
+    path("fixed-assets/depreciation/", FixedAssetDepreciationPreviewView.as_view()),
+    path("fixed-assets/depreciation/register/", FixedAssetDepreciationRegisterView.as_view()),
+    path("fixed-assets/depreciation/cancel/", FixedAssetDepreciationCancelView.as_view()),
+    path("fixed-assets/<int:pk>/write-off/", FixedAssetWriteOffView.as_view()),
+    path("fixed-assets/<int:pk>/write-off/cancel/", FixedAssetWriteOffCancelView.as_view()),
+    path("fixed-assets/<int:pk>/sell/", FixedAssetSaleView.as_view()),
+    path("fixed-assets/<int:pk>/sell/cancel/", FixedAssetSaleCancelView.as_view()),
 
 ]

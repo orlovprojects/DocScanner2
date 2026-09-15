@@ -35,7 +35,7 @@ import {
 import { alpha } from "@mui/material/styles";
 import PurchasePreviewDialog from "../page_elements/PurchasePreviewDialog";
 import MarkPaidDialog from "../components/MarkPaidDialog";
-import PurchasePaymentsDialog from "../components/PurchasePaymentsDialog";
+import PaymentsDialog from "../components/PaymentsDialog";
 
 import MoreVertIcon from "@mui/icons-material/MoreVert";
 import DeleteOutlineIcon from "@mui/icons-material/DeleteOutline";
@@ -53,6 +53,7 @@ import LockIcon from "@mui/icons-material/Lock";
 import SearchIcon from "@mui/icons-material/Search";
 import FiberManualRecordIcon from "@mui/icons-material/FiberManualRecord";
 import PaidOutlinedIcon from "@mui/icons-material/PaidOutlined";
+import WeekendIcon from "@mui/icons-material/Weekend";
 
 import { api } from "../api/endpoints";
 import { useCompanyProfiles } from "../contexts/useCompanyProfiles";
@@ -590,6 +591,25 @@ export default function PurchasesPage() {
           <Box component="span" sx={invoiceIconWrapSx}>
             <DebitInvoiceIcon sx={invoiceIconSx} />
           </Box>
+        </Tooltip>,
+      );
+    }
+
+    if (p.is_long_term_asset_candidate) {
+      icons.push(
+        <Tooltip
+          key="ilt"
+          title={`Galimas ilgalaikis turtas${p.suggested_asset_type ? `: ${p.suggested_asset_type}` : ""}`}
+          {...tooltipProps}
+        >
+          <WeekendIcon
+            fontSize={iconFontSize}
+            onClick={() => handlePreviewOpen(p.id)}
+            sx={{
+              ...iconSx,
+              color: "#e08d21",
+            }}
+          />
         </Tooltip>,
       );
     }
@@ -1279,11 +1299,12 @@ export default function PurchasesPage() {
       />
 
       {/* Payments dialog */}
-      <PurchasePaymentsDialog
+      <PaymentsDialog
         open={paymentsOpen}
         onClose={() => { setPaymentsOpen(false); setPaymentsPurchaseId(null); }}
-        purchaseId={paymentsPurchaseId}
-        onChanged={() => handlePurchaseUpdated(paymentsPurchaseId)}
+        docType="purchase"
+        docId={paymentsPurchaseId}
+        onRefresh={() => handlePurchaseUpdated(paymentsPurchaseId)}
       />
 
       {/* Delete dialog */}

@@ -183,7 +183,7 @@ def create_je_for_allocation(allocation):
             counterparty = allocation.invoice.buyer_name or ""
             counterparty_code = allocation.invoice.buyer_id or ""
             doc_number = allocation.invoice.full_number
-            desc = f"{desc_prefix} {doc_number}"
+            desc = f"Apmokėjimas už {doc_number}"
 
             # Skolos pusė — dokumento kursu, banko pusė — realiai gauta EUR.
             if allocation.doc_rate:
@@ -388,6 +388,16 @@ def create_je_for_allocation(allocation):
                 amount=-gain, description=f"Kursinis skirtumas: {doc_number}",
                 sort_order=3,
             ))
+
+        # ── Kontrahentas skolos eilutei (2410 / 4430) ──
+        if allocation.invoice_id:
+            _debt_code, _cp_id = "2410", allocation.invoice.buyer_counterparty_id
+        else:
+            _debt_code, _cp_id = "4430", allocation.purchase.seller_counterparty_id
+        if _cp_id:
+            for _l in je_lines:
+                if _l.account_code == _debt_code:
+                    _l.counterparty_id = _cp_id
 
         JournalEntryLine.objects.bulk_create(je_lines)
 

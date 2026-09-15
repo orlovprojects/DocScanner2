@@ -13,7 +13,13 @@ from django.core.validators import MaxValueValidator
 from dateutil.relativedelta import relativedelta
 from datetime import timedelta
 import re
-
+from .ilgalaikis_turtas.constants import (
+    FixedAssetCategory,
+    FixedAssetStatus,
+    FixedAssetOperationType,
+    DepreciationBook,
+    ILT_MONTHS,
+)
 
 #wagtail importy
 from wagtail.models import Page
@@ -2425,12 +2431,12 @@ def invoice_pdf_path(instance, filename):
 # ────────────────────────────────────────────────────────────
 # 1. Counterparty — справочник контрагентов
 # ────────────────────────────────────────────────────────────
-
 class Counterparty(models.Model):
     """
-    Справочник контрагентов пользователя.
-    Используется для автозаполнения buyer/seller при создании счетов.
-    Данные копируются в Invoice при создании (денормализация).
+    Справочник контрагентов (per CompanyProfile).
+    Единая карточка для pirkėjas и tiekėjas.
+    В документах (Invoice/Purchase) реквизиты хранятся снимком + FK counterparty.
+    Создаётся автоматически через services.counterparties.get_or_create_counterparty.
     """
 
     ROLE_CHOICES = [
@@ -2446,7 +2452,7 @@ class Counterparty(models.Model):
     )
     company_profile = models.ForeignKey(
         "CompanyProfile",
-        on_delete=models.SET_NULL,
+        on_delete=models.CASCADE,
         null=True,
         blank=True,
         related_name="counterparties",
@@ -2454,7 +2460,7 @@ class Counterparty(models.Model):
 
     # Основные реквизиты
     name = models.CharField("Pavadinimas", max_length=255)
-    name_normalized = models.CharField(max_length=255, blank=True, default="")
+    name_normalized = models.CharField(max_length=255, blank=True, default="", db_index=True)
     company_code = models.CharField("Įmonės kodas", max_length=100, blank=True, default="")
     vat_code = models.CharField("PVM kodas", max_length=50, blank=True, default="")
     address = models.CharField("Adresas", max_length=255, blank=True, default="")
@@ -2463,7 +2469,7 @@ class Counterparty(models.Model):
     phone = models.CharField("Telefonas", max_length=50, blank=True, default="")
     email = models.EmailField("El. paštas", blank=True, default="")
 
-    # Банковские реквизиты
+    # Банковские реквизиты (основной счёт; все счета — в CounterpartyBankAccount)
     bank_name = models.CharField("Banko pavadinimas", max_length=255, blank=True, default="")
     iban = models.CharField("IBAN", max_length=255, blank=True, default="")
     swift = models.CharField("SWIFT/BIC", max_length=50, blank=True, default="")
@@ -2471,11 +2477,21 @@ class Counterparty(models.Model):
     # Мета
     is_person = models.BooleanField("Fizinis asmuo", default=False)
     default_role = models.CharField(max_length=10, choices=ROLE_CHOICES, default="buyer")
-    extra_info = models.TextField(blank=True, default='')  # или notes
+    extra_info = models.TextField(blank=True, default='')
     delivery_address = models.TextField(blank=True, default='')
 
-    # ID в бухгалтерской программе (для экспорта)
+    # ID в бухгалтерской программе (для экспорта; для fiz. asmenų — стабильный сгенерированный код)
     id_programoje = models.CharField("ID programoje", max_length=64, blank=True, default="")
+
+    # Источник создания карточки
+    SOURCE_CHOICES = [
+        ("manual", "Rankinis"),
+        ("israsymas", "Išrašymas"),
+        ("transfer", "Perkėlimas į apskaitą"),
+        ("opening", "Pradiniai likučiai"),
+        ("bank", "Banko išrašas"),
+    ]
+    source = models.CharField(max_length=16, choices=SOURCE_CHOICES, default="manual")
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -2485,14 +2501,20 @@ class Counterparty(models.Model):
         verbose_name_plural = "Counterparties"
         ordering = ["name"]
         indexes = [
-            models.Index(fields=["user", "name_normalized"], name="idx_cp_user_name_norm"),
-            models.Index(fields=["user", "company_code"], name="idx_cp_user_code"),
+            models.Index(fields=["company_profile", "name_normalized"], name="idx_cp_prof_name_norm"),
+            models.Index(fields=["company_profile", "company_code"], name="idx_cp_prof_code"),
+            models.Index(fields=["company_profile", "vat_code"], name="idx_cp_prof_vat"),
         ]
         constraints = [
             models.UniqueConstraint(
-                fields=["user", "company_profile", "company_code"],
+                fields=["company_profile", "company_code"],
                 condition=~models.Q(company_code=""),
-                name="unique_user_company_code",
+                name="unique_cp_profile_company_code",
+            ),
+            models.UniqueConstraint(
+                fields=["company_profile", "vat_code"],
+                condition=~models.Q(vat_code=""),
+                name="unique_cp_profile_vat_code",
             ),
         ]
 
@@ -2500,10 +2522,33 @@ class Counterparty(models.Model):
         return f"{self.name} ({self.company_code or '—'})"
 
     def save(self, *args, **kwargs):
+        from .services.counterparties import normalize_company_name, normalize_code
+        self.company_code = normalize_code(self.company_code)
+        self.vat_code = normalize_code(self.vat_code)
         if self.name:
-            self.name_normalized = self.name.strip().upper()
+            self.name_normalized = normalize_company_name(self.name)
         super().save(*args, **kwargs)
 
+
+class CounterpartyBankAccount(models.Model):
+    """Все известные IBAN контрагента — для matching банковских операций."""
+
+    counterparty = models.ForeignKey(
+        Counterparty, on_delete=models.CASCADE, related_name="bank_accounts"
+    )
+    company_profile = models.ForeignKey(
+        "CompanyProfile", on_delete=models.CASCADE, related_name="counterparty_bank_accounts"
+    )
+    iban = models.CharField(max_length=64)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["company_profile", "iban"],
+                name="unique_cp_bank_account_profile_iban",
+            ),
+        ]
 
 # ────────────────────────────────────────────────────────────
 # 2. InvoiceSettings — настройки пользователя
@@ -3097,7 +3142,8 @@ class Invoice(models.Model):
             self.pvm_kodas = ""
 
         # Perskaičiuoti antraštės sumas iš eilučių, kad neatsirastų centų skirtumo
-        if line_items:
+        # (tik jei nėra bendros nuolaidos — kitaip eilučių suma ≠ dokumento suma)
+        if line_items and not (self.invoice_discount_wo_vat or Decimal("0")):
             total_wo_vat = sum((Decimal(str(li.subtotal or 0)) for li in line_items), Decimal("0"))
             total_vat = sum((Decimal(str(li.vat or 0)) for li in line_items), Decimal("0"))
             self.amount_wo_vat = total_wo_vat
@@ -5843,6 +5889,13 @@ class Purchase(models.Model):
     operation_date = models.DateField(null=True, blank=True)
 
     # ── Seller (tiekėjas) ───────────────────────────────
+    seller_counterparty = models.ForeignKey(
+        "Counterparty",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="purchases_as_seller",
+    )
     seller_name = models.CharField(max_length=255, blank=True, null=True)
     seller_name_normalized = models.CharField(max_length=255, blank=True, default="")
     seller_id = models.CharField("Įmonės kodas", max_length=100, blank=True, null=True)
@@ -6091,12 +6144,14 @@ class JournalEntry(models.Model):
     SOURCE_BANK = "bank"
     SOURCE_MANUAL = "manual"
     SOURCE_OPENING = "opening"
+    SOURCE_FIXED_ASSET = "fixed_asset"
     SOURCE_CHOICES = [
         (SOURCE_PURCHASE, "Pirkimas"),
         (SOURCE_SALE, "Pardavimas"),
         (SOURCE_BANK, "Bankas"),
         (SOURCE_MANUAL, "Rankinis"),
         (SOURCE_OPENING, "Pradiniai likučiai"),
+        (SOURCE_FIXED_ASSET, "Ilgalaikis turtas"),
     ]
 
     STATUS_DRAFT = "draft"
@@ -6360,6 +6415,15 @@ class JournalEntryLine(models.Model):
         related_name="journal_lines",
     )
 
+    # ── Kontrahentas (2410/4430/2080/4420 eilutėms) ─────
+    counterparty = models.ForeignKey(
+        "Counterparty",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="journal_lines",
+    )
+
     sort_order = models.PositiveIntegerField(default=0)
 
     class Meta:
@@ -6374,6 +6438,10 @@ class JournalEntryLine(models.Model):
             models.Index(
                 fields=["account_code"],
                 name="idx_jel_account",
+            ),
+            models.Index(
+                fields=["counterparty", "account_code"],
+                name="idx_jel_cp_account",
             ),
         ]
 
@@ -6455,4 +6523,505 @@ class UserDKTemplate(models.Model):
 
 # ========================================================
 # END - DK
+# ========================================================
+
+
+# ========================================================
+# Pradiniai likuciai
+# ========================================================
+
+class OpeningBalanceBatch(models.Model):
+    """
+    Pradinių likučių partija: viena įmonei.
+    Sekcijos (balansas, bankai, kontrahentai) laikomos OpeningBalanceLine.section.
+    """
+
+    STATUS_DRAFT = "draft"
+    STATUS_CONFIRMED = "confirmed"
+    STATUS_CHOICES = [
+        (STATUS_DRAFT, "Juodraštis"),
+        (STATUS_CONFIRMED, "Patvirtinta"),
+    ]
+
+    DIFF_ASK = "ask"
+    DIFF_UNASSIGNED = "unassigned"
+    DIFF_CHOICES = [
+        (DIFF_ASK, "Klausti"),
+        (DIFF_UNASSIGNED, "Priskirti be kontrahento"),
+    ]
+
+    company_profile = models.OneToOneField(
+        "CompanyProfile",
+        on_delete=models.CASCADE,
+        related_name="opening_balance_batch",
+    )
+    cutover_date = models.DateField(
+        "Perėjimo data",
+        help_text="Pirma diena, nuo kurios dirbama DokSkenas ERP",
+    )
+    status = models.CharField(max_length=16, choices=STATUS_CHOICES, default=STATUS_DRAFT)
+
+    journal_entry = models.OneToOneField(
+        "JournalEntry",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="opening_batch",
+    )
+
+    diff_policy = models.CharField(max_length=16, choices=DIFF_CHOICES, default=DIFF_ASK)
+
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="+",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    confirmed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        app_label = "docscanner_app"
+        verbose_name = "Pradinių likučių partija"
+        verbose_name_plural = "Pradinių likučių partijos"
+
+    def __str__(self):
+        return f"Pradiniai likučiai {self.company_profile_id} ({self.cutover_date})"
+
+    @property
+    def entry_date(self):
+        """Likučiai įrašomi diena prieš perėjimą."""
+        from datetime import timedelta
+        return self.cutover_date - timedelta(days=1)
+
+    @property
+    def is_editable(self):
+        return self.status == self.STATUS_DRAFT
+
+
+class OpeningBalanceSection(models.Model):
+    """Vienos sekcijos (failo) būsena partijoje."""
+
+    BALANCE = "balance"
+    BANK = "bank"
+    BUYER = "buyer"
+    SUPPLIER = "supplier"
+    SECTION_CHOICES = [
+        (BALANCE, "Balansas"),
+        (BANK, "Banko sąskaitos"),
+        (BUYER, "Pirkėjų skolos"),
+        (SUPPLIER, "Tiekėjų skolos"),
+    ]
+
+    batch = models.ForeignKey(
+        OpeningBalanceBatch, on_delete=models.CASCADE, related_name="sections",
+    )
+    section = models.CharField(max_length=20, choices=SECTION_CHOICES)
+    file_name = models.CharField(max_length=255, blank=True, default="")
+    uploaded_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        app_label = "docscanner_app"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["batch", "section"], name="uq_opening_section_per_batch",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.get_section_display()} ({self.batch_id})"
+
+
+class OpeningBalanceLine(models.Model):
+    """
+    Viena importuoto failo eilutė.
+    account_code — vartotojo kodas iš failo, mapped_account — mūsų sąskaita.
+    """
+
+    batch = models.ForeignKey(
+        OpeningBalanceBatch, on_delete=models.CASCADE, related_name="lines",
+    )
+    section = models.CharField(
+        max_length=20, choices=OpeningBalanceSection.SECTION_CHOICES,
+    )
+
+    # Iš failo
+    account_code = models.CharField(max_length=40, blank=True, default="")
+    account_name = models.CharField(max_length=255, blank=True, default="")
+    debit = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    credit = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    currency = models.CharField(max_length=3, default="EUR")
+    amount_currency = models.DecimalField(
+        max_digits=14, decimal_places=2, null=True, blank=True,
+    )
+
+    # Susiejimas su mūsų planu
+    mapped_account = models.CharField(max_length=20, blank=True, default="")
+    mapped_name = models.CharField(max_length=255, blank=True, default="")
+    MATCH_EXACT = "exact"
+    MATCH_PREFIX = "prefix"
+    MATCH_NAME = "name"
+    MATCH_SAVED = "saved"
+    MATCH_MANUAL = "manual"
+    MATCH_NONE = "none"
+    MATCH_CHOICES = [
+        (MATCH_EXACT, "Tikslus kodas"),
+        (MATCH_PREFIX, "Pagal kodo pradžią"),
+        (MATCH_NAME, "Pagal pavadinimą"),
+        (MATCH_SAVED, "Iš ankstesnio susiejimo"),
+        (MATCH_MANUAL, "Pasirinkta rankiniu būdu"),
+        (MATCH_NONE, "Nesusieta"),
+    ]
+    match_type = models.CharField(max_length=10, choices=MATCH_CHOICES, default=MATCH_NONE)
+
+    # Kontrahentų sekcijai
+    counterparty = models.ForeignKey(
+        "Counterparty", null=True, blank=True, on_delete=models.SET_NULL, related_name="+",
+    )
+    counterparty_name = models.CharField(max_length=255, blank=True, default="")
+    counterparty_code = models.CharField(max_length=50, blank=True, default="")
+    counterparty_vat_code = models.CharField(max_length=50, blank=True, default="")
+
+    # Banko sekcijai + bet kokie papildomi stulpeliai ateityje
+    extra = models.JSONField(default=dict, blank=True)
+
+    row_number = models.PositiveIntegerField(default=0)
+    error = models.CharField(max_length=255, blank=True, default="")
+
+    class Meta:
+        app_label = "docscanner_app"
+        ordering = ["section", "row_number", "id"]
+        indexes = [
+            models.Index(fields=["batch", "section"], name="idx_obline_batch_section"),
+        ]
+
+    def __str__(self):
+        return f"{self.section} {self.account_code} {self.debit}/{self.credit}"
+
+    @property
+    def balance(self):
+        return (self.debit or 0) - (self.credit or 0)
+
+
+class AccountMapping(models.Model):
+    """Įsimintas vartotojo kodo → mūsų sąskaitos susiejimas."""
+
+    company_profile = models.ForeignKey(
+        "CompanyProfile", on_delete=models.CASCADE, related_name="account_mappings",
+    )
+    external_code = models.CharField(max_length=40)
+    external_name = models.CharField(max_length=255, blank=True, default="")
+    account_code = models.CharField(max_length=20)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        app_label = "docscanner_app"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["company_profile", "external_code"],
+                name="uq_account_mapping_per_profile",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.external_code} → {self.account_code}"
+
+
+# ========================================================
+# END - Pradiniai likuciai
+# ========================================================
+
+# ========================================================
+# Ilgalaikis turtas
+# ========================================================
+
+class FixedAssetGroup(models.Model):
+    """
+    Ilgalaikio turto grupė konkrečiai įmonei.
+
+    Kategorijos yra standartinės DokSkenas kategorijos,
+    tačiau kiekviena įmonė gali turėti savo:
+    - naudingo tarnavimo laiką;
+    - DK sąskaitas.
+    """
+
+    company_profile = models.ForeignKey(
+        CompanyProfile,
+        on_delete=models.CASCADE,
+        related_name="fixed_asset_groups",
+    )
+
+    category = models.CharField(
+        max_length=64,
+        choices=FixedAssetCategory.choices,
+    )
+
+    useful_life_months = models.PositiveSmallIntegerField(
+        null=True,
+        blank=True,
+    )
+
+    # Пока храним номера счетов.
+    # Когда будем подключать к вашему DK плану счетов,
+    # при необходимости заменим на ForeignKey.
+    asset_account = models.CharField(
+        max_length=32,
+        blank=True,
+        default="",
+    )
+
+    accumulated_depreciation_account = models.CharField(
+        max_length=32,
+        blank=True,
+        default="",
+    )
+
+    depreciation_expense_account = models.CharField(
+        max_length=32,
+        blank=True,
+        default="",
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["company_profile", "category"],
+                name="unique_fixed_asset_group_per_company",
+            ),
+        ]
+        ordering = ["category"]
+
+    def save(self, *args, **kwargs):
+        if self.useful_life_months is None:
+            self.useful_life_months = ILT_MONTHS.get(self.category)
+
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return self.get_category_display()
+
+
+class FixedAsset(models.Model):
+
+    company_profile = models.ForeignKey(
+        CompanyProfile,
+        on_delete=models.CASCADE,
+        related_name="fixed_assets",
+    )
+
+    group = models.ForeignKey(
+        FixedAssetGroup,
+        on_delete=models.PROTECT,
+        related_name="assets",
+        null=True,
+        blank=True,
+    )
+
+    inventory_number = models.CharField(
+        max_length=64,
+        blank=True,
+        default="",
+    )
+
+    name = models.CharField(
+        max_length=255,
+    )
+
+    status = models.CharField(
+        max_length=32,
+        choices=FixedAssetStatus.choices,
+        default=FixedAssetStatus.DRAFT,
+    )
+
+    purchase_date = models.DateField(
+        null=True,
+        blank=True,
+    )
+
+    operation_start_date = models.DateField(
+        null=True,
+        blank=True,
+    )
+
+    disposal_date = models.DateField(
+        null=True,
+        blank=True,
+    )
+
+    acquisition_cost = models.DecimalField(
+        max_digits=14,
+        decimal_places=2,
+        default=Decimal("0.00"),
+    )
+
+    salvage_value = models.DecimalField(
+        max_digits=14,
+        decimal_places=2,
+        default=Decimal("0.00"),
+    )
+
+    # Snapshot.
+    # Даже если потом у группы изменится срок с 36 на 48,
+    # уже созданный актив сам по себе не должен измениться.
+    useful_life_months = models.PositiveSmallIntegerField(
+        null=True,
+        blank=True,
+    )
+
+    description = models.TextField(
+        blank=True,
+        default="",
+    )
+
+    purchase = models.ForeignKey(
+        "Purchase",
+        on_delete=models.PROTECT,
+        related_name="fixed_assets",
+        null=True,
+        blank=True,
+    )
+
+    purchase_line = models.ForeignKey(
+        "PurchaseLine",
+        on_delete=models.PROTECT,
+        related_name="fixed_assets",
+        null=True,
+        blank=True,
+    )
+
+    sale_invoice = models.ForeignKey(
+        "Invoice",
+        on_delete=models.PROTECT,
+        related_name="sold_fixed_assets",
+        null=True,
+        blank=True,
+    )
+
+    sale_invoice_line = models.ForeignKey(
+        "InvoiceLineItem",
+        on_delete=models.PROTECT,
+        related_name="sold_fixed_assets",
+        null=True,
+        blank=True,
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["company_profile", "inventory_number"],
+                condition=~models.Q(inventory_number=""),
+                name="unique_fixed_asset_inventory_number",
+            ),
+            models.CheckConstraint(
+                check=(
+                    models.Q(purchase_line__isnull=True)
+                    | models.Q(purchase__isnull=False)
+                ),
+                name="fixed_asset_line_requires_purchase",
+            ),
+        ]
+
+        ordering = ["-created_at"]
+
+    def save(self, *args, **kwargs):
+        if (
+            self.useful_life_months is None
+            and self.group_id
+            and self.group.useful_life_months
+        ):
+            self.useful_life_months = self.group.useful_life_months
+
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        if self.inventory_number:
+            return f"{self.inventory_number} - {self.name}"
+
+        return self.name
+
+
+class FixedAssetOperation(models.Model):
+
+    asset = models.ForeignKey(
+        FixedAsset,
+        on_delete=models.CASCADE,
+        related_name="operations",
+    )
+
+    operation_type = models.CharField(
+        max_length=32,
+        choices=FixedAssetOperationType.choices,
+    )
+
+    operation_date = models.DateField()
+
+    amount = models.DecimalField(
+        max_digits=14,
+        decimal_places=2,
+        default=Decimal("0.00"),
+    )
+
+    book = models.CharField(
+        max_length=16,
+        choices=DepreciationBook.choices,
+        default=DepreciationBook.ACCOUNTING,
+    )
+
+    # Nusidėvėjimo periodas (pirmoji mėnesio diena), tik DEPRECIATION operacijoms
+    period = models.DateField(
+        null=True,
+        blank=True,
+    )
+
+    reason = models.CharField(
+        max_length=32,
+        blank=True,
+        default="",
+    )
+
+    journal_entry = models.ForeignKey(
+        "JournalEntry",
+        on_delete=models.SET_NULL,
+        related_name="fixed_asset_operations",
+        null=True,
+        blank=True,
+    )
+
+    description = models.TextField(
+        blank=True,
+        default="",
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["asset", "book", "period"],
+                condition=models.Q(operation_type="depreciation"),
+                name="unique_fixed_asset_depreciation_period",
+            ),
+        ]
+        ordering = [
+            "operation_date",
+            "created_at",
+        ]
+
+    def __str__(self):
+        return (
+            f"{self.asset} - "
+            f"{self.get_operation_type_display()} - "
+            f"{self.amount}"
+        )
+
+# ========================================================
+# END - Ilgalaikis turtas
 # ========================================================

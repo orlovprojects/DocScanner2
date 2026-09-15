@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Helmet } from "react-helmet";
 import {
   Box,
@@ -63,6 +63,8 @@ import DeleteOutlineIcon from "@mui/icons-material/DeleteOutline";
 import ContentCopyIcon from "@mui/icons-material/ContentCopy";
 
 import { api } from "../api/endpoints";
+import InvoicePreviewDialog from "../components/InvoicePreview";
+import ZoomableImage from "./ZoomableImage";
 import { useCompanyProfiles } from "../contexts/useCompanyProfiles";
 import { DatePicker, LocalizationProvider } from '@mui/x-date-pickers';
 import { AdapterDayjs } from '@mui/x-date-pickers/AdapterDayjs';
@@ -84,6 +86,8 @@ const PAYMENT_STATUS_MAP = {
   unpaid: { label: "Neapmokėta", color: "error" },
   partially_paid: { label: "Dalinai", color: "warning" },
   paid: { label: "Apmokėta", color: "success" },
+  credit: { label: "Permoka / avansas", color: "info" },
+  entry: { label: "DK įrašas", color: "default" },
 };
 
 const SOURCE_MAP = {
@@ -287,6 +291,15 @@ const MANUAL_DK_ACCOUNT_OPTIONS = [
     ],
   },
   {
+    group: "Techninės",
+    accounts: [
+      {
+        code: "999",
+        name: "Pradinių likučių tarpinė sąskaita",
+      },
+    ],
+  },
+  {
     group: "Nuosavas kapitalas",
     accounts: [
       {
@@ -298,6 +311,10 @@ const MANUAL_DK_ACCOUNT_OPTIONS = [
   {
     group: "Įsipareigojimai",
     accounts: [
+      {
+        code: "4420",
+        name: "Gauti išankstiniai apmokėjimai",
+      },
       {
         code: "4430",
         name: "Skolos tiekėjams",
@@ -331,6 +348,14 @@ const MANUAL_DK_ACCOUNT_OPTIONS = [
       )?.accounts || [],
   },
 ];
+
+// Skolų sąskaitos — joms kontrahentas privalomas (įskaitant subsąskaitas)
+const COUNTERPARTY_ACCOUNT_PREFIXES = ["2080", "2410", "4420", "4430"];
+
+const isCounterpartyAccount = (code) => {
+  const value = String(code || "").trim();
+  return COUNTERPARTY_ACCOUNT_PREFIXES.some((prefix) => value.startsWith(prefix));
+};
 
 function getEditableAccountOptions(line) {
   const sourceType =
@@ -676,6 +701,13 @@ function ApzvalgaTab({ summary, loading, setView }) {
             Ką reikia sutvarkyti
           </Typography>
 
+          {Number(summary?.opening_tech_balance || 0) !== 0 && (
+            <Alert severity="error" sx={{ borderRadius: 2, mb: 1, "& .MuiAlert-message": { fontSize: 13 } }}>
+              Pradiniai likučiai nesubalansuoti: sąskaitoje 999 liko{" "}
+              {fmtAbsAmount(summary.opening_tech_balance)}. Ištaisykite rankiniu DK įrašu.
+            </Alert>
+          )}
+
           {reviewCount > 0 ? (
             <Alert
               severity="warning"
@@ -834,6 +866,8 @@ function SkolosTab({ activeProfileId, period, dateFrom, dateTo }) {
   const [loadingInvoicesKey, setLoadingInvoicesKey] = useState(null);
 
   const loadMoreRef = useRef(null);
+  const [previewDoc, setPreviewDoc] = useState(null);
+  const [previewInvoiceId, setPreviewInvoiceId] = useState(null);
 
   const typeConfig = {
     customer: {
@@ -858,9 +892,7 @@ function SkolosTab({ activeProfileId, period, dateFrom, dateTo }) {
 
   const currentCfg = typeConfig[activeType];
 
-  const getRowKey = (row) => {
-    return `${row.counterparty_code || ""}__${row.counterparty_name || ""}`;
-  };
+  const getRowKey = (row) => `cp:${row.counterparty_id ?? "none"}`;
 
   const fetchDebts = useCallback(
     async ({ offset = 0, append = false } = {}) => {
@@ -955,12 +987,8 @@ function SkolosTab({ activeProfileId, period, dateFrom, dateTo }) {
 
     const params = {
       type: activeType,
-      counterparty_name: row.counterparty_name || "",
+      counterparty_id: row.counterparty_id ?? "none",
     };
-
-    if (row.counterparty_code) {
-      params.counterparty_code = row.counterparty_code;
-    }
 
     if (period !== "custom") {
       const asOf = getPeriodEndDate(period);
@@ -1015,7 +1043,7 @@ function SkolosTab({ activeProfileId, period, dateFrom, dateTo }) {
     return (
       <TableRow>
         <TableCell
-          colSpan={isMobile ? 4 : 6}
+          colSpan={isMobile ? 3 : 7}
           sx={{
             p: 0,
             borderBottom: expandedKey === key ? undefined : "none",
@@ -1040,7 +1068,7 @@ function SkolosTab({ activeProfileId, period, dateFrom, dateTo }) {
                   letterSpacing: 0.4,
                 }}
               >
-                Neapmokėtos sąskaitos
+                Atviri dokumentai ir įrašai
               </Typography>
 
               {loadingInvoices ? (
@@ -1081,7 +1109,27 @@ function SkolosTab({ activeProfileId, period, dateFrom, dateTo }) {
                         return (
                           <TableRow key={`${invoice.source_type}-${invoice.id}`} hover>
                             <TableCell>
-                              <Typography sx={{ fontSize: 13, fontWeight: 700 }}>{invoice.document_number || "—"}</Typography>
+                              {invoice.source_type === "sale" || invoice.document_preview_url ? (
+                                <Typography
+                                  sx={{ fontSize: 13, fontWeight: 700, color: "primary.main", cursor: "pointer", "&:hover": { textDecoration: "underline" } }}
+                                  onClick={() => {
+                                    if (invoice.source_type === "sale") {
+                                      setPreviewInvoiceId(invoice.id);
+                                      return;
+                                    }
+                                    setPreviewDoc({
+                                      document_preview_url: invoice.document_preview_url,
+                                      document_number: invoice.document_number,
+                                      counterparty_name: row.counterparty_name,
+                                      entry_date: invoice.invoice_date,
+                                    });
+                                  }}
+                                >
+                                  {invoice.document_number || "—"}
+                                </Typography>
+                              ) : (
+                                <Typography sx={{ fontSize: 13, fontWeight: 700 }}>{invoice.document_number || "—"}</Typography>
+                              )}
                             </TableCell>
                             <TableCell sx={{ fontSize: 13 }}>{fmtDate(invoice.invoice_date)}</TableCell>
                             {!isMobile && <TableCell align="right" sx={{ fontSize: 13 }}>{fmtMoney(invoice.amount_with_vat)}</TableCell>}
@@ -1138,7 +1186,12 @@ function SkolosTab({ activeProfileId, period, dateFrom, dateTo }) {
             <Typography sx={{ fontSize: 12, color: "text.secondary" }}>{currentCfg.description}</Typography>
           </Box>
         </Box>
-        <Chip size="small" variant="outlined" label={`Atvira suma: ${fmtMoney(summary.total_balance)}`} sx={{ fontWeight: 800 }} />
+        <Box sx={{ display: "flex", gap: 1, flexWrap: "wrap" }}>
+          <Chip size="small" variant="outlined" label={`Skolos: ${fmtMoney(summary.total_balance)}`} sx={{ fontWeight: 800 }} />
+          {Number(summary.total_overpaid) > 0 && (
+            <Chip size="small" variant="outlined" color="info" label={`Permokos: ${fmtMoney(summary.total_overpaid)}`} sx={{ fontWeight: 800 }} />
+          )}
+        </Box>
       </Box>
 
       <Box sx={{ display: "flex", gap: 2, mb: 2, flexWrap: "wrap", alignItems: "center" }}>
@@ -1185,8 +1238,8 @@ function SkolosTab({ activeProfileId, period, dateFrom, dateTo }) {
                   const key = getRowKey(row);
                   const expanded = expandedKey === key;
                   return (
-                    <>
-                      <TableRow key={key} hover onClick={() => handleToggleRow(row)} sx={{ cursor: "pointer" }}>
+                    <Fragment key={key}>
+                      <TableRow hover onClick={() => handleToggleRow(row)} sx={{ cursor: "pointer" }}>
                         <TableCell sx={{ width: 36 }}>
                           <IconButton size="small">
                             {expanded ? <KeyboardArrowDownIcon sx={{ fontSize: 18 }} /> : <KeyboardArrowRightIcon sx={{ fontSize: 18 }} />}
@@ -1205,10 +1258,19 @@ function SkolosTab({ activeProfileId, period, dateFrom, dateTo }) {
                         {!isMobile && <TableCell align="right" sx={{ fontSize: 13 }}>{row.invoice_count}</TableCell>}
                         {!isMobile && <TableCell align="right" sx={{ fontSize: 13 }}>{fmtMoney(row.total_invoiced)}</TableCell>}
                         {!isMobile && <TableCell align="right" sx={{ fontSize: 13 }}>{fmtMoney(row.total_paid)}</TableCell>}
-                        <TableCell align="right" sx={{ fontSize: 13, fontWeight: 900 }}>{fmtMoney(row.balance)}</TableCell>
+                        <TableCell align="right" sx={{ fontSize: 13, fontWeight: 900 }}>
+                          {Number(row.balance) < 0 ? (
+                            <Box sx={{ display: "inline-flex", alignItems: "center", gap: 0.75 }}>
+                              <Chip label="Permoka" size="small" color="info" variant="outlined" sx={{ height: 20, fontSize: 11 }} />
+                              {fmtMoney(Math.abs(Number(row.balance)))}
+                            </Box>
+                          ) : (
+                            fmtMoney(row.balance)
+                          )}
+                        </TableCell>
                       </TableRow>
                       {renderInvoiceRows(row)}
-                    </>
+                    </Fragment>
                   );
                 })}
               </TableBody>
@@ -1222,6 +1284,15 @@ function SkolosTab({ activeProfileId, period, dateFrom, dateTo }) {
           </Box>
         </>
       )}
+
+      <DocumentPreviewDialog open={!!previewDoc} onClose={() => setPreviewDoc(null)} entry={previewDoc} />
+
+      <InvoicePreviewDialog
+        open={!!previewInvoiceId}
+        onClose={() => setPreviewInvoiceId(null)}
+        invoiceId={previewInvoiceId}
+        showKor={false}
+      />
     </Box>
   );
 }
@@ -1352,14 +1423,51 @@ function LikuciaiTab({ activeProfileId, period, dateFrom, dateTo }) {
 // ═══════════════════════════════════════════════════════════
 
 function DocumentPreviewDialog({ open, onClose, entry }) {
+  const url = entry?.document_preview_url;
+  const isPdf = /\.pdf($|\?)/i.test(url || "");
+
+  const [blobUrl, setBlobUrl] = useState(null);
+  const [loadError, setLoadError] = useState(false);
+
+  useEffect(() => {
+    if (!open || !url || !isPdf) {
+      setBlobUrl(null);
+      setLoadError(false);
+      return undefined;
+    }
+
+    let objectUrl = null;
+    let cancelled = false;
+    setLoadError(false);
+
+    api
+      .get(url, { responseType: "blob", withCredentials: true })
+      .then(({ data }) => {
+        if (cancelled) return;
+        objectUrl = URL.createObjectURL(
+          new Blob([data], { type: "application/pdf" })
+        );
+        setBlobUrl(objectUrl);
+      })
+      .catch((e) => {
+        console.error(e);
+        if (!cancelled) setLoadError(true);
+      });
+
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      setBlobUrl(null);
+    };
+  }, [open, url, isPdf]);
+
   if (!entry) return null;
 
-  const url = entry.document_preview_url;
-  const isPdf = url?.toLowerCase().endsWith(".pdf");
   const docNumber = entry.document_number || "—";
+  const src = isPdf ? blobUrl : url;
 
   return (
-    <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth disableScrollLock>
+    <Dialog open={open} onClose={onClose} maxWidth="lg" fullWidth disableScrollLock>
       <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", px: 2.5, pt: 2, pb: 1 }}>
         <Box>
           <Typography sx={{ fontSize: 16, fontWeight: 800 }}>{docNumber}</Typography>
@@ -1373,11 +1481,25 @@ function DocumentPreviewDialog({ open, onClose, entry }) {
       </Box>
       <Divider />
       <Box sx={{ p: 2, minHeight: 400 }}>
-        {url ? (
+        {loadError ? (
+          <Box sx={{ height: 320, display: "flex", alignItems: "center", justifyContent: "center", borderRadius: 2, border: "2px dashed", borderColor: "divider", bgcolor: "action.hover" }}>
+            <Typography sx={{ fontSize: 14, color: "text.disabled" }}>Nepavyko įkelti dokumento</Typography>
+          </Box>
+        ) : isPdf && !blobUrl ? (
+          <Box sx={{ height: 320, display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <CircularProgress size={28} />
+          </Box>
+        ) : src ? (
           isPdf ? (
-            <Box component="iframe" src={url} sx={{ width: "100%", height: 560, border: "none", borderRadius: 2 }} />
+            <Box component="iframe" src={src} sx={{ width: "100%", height: 560, border: "none", borderRadius: 2 }} />
           ) : (
-            <Box component="img" src={url} alt={docNumber} sx={{ width: "100%", maxHeight: 560, objectFit: "contain", borderRadius: 2 }} />
+            <ZoomableImage
+              src={src}
+              buttonSize={36}
+              maxHeight="calc(70vh - 40px)"
+              fitOnLoad
+              fitRatio={0.55}
+            />
           )
         ) : (
           <Box sx={{ height: 320, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", borderRadius: 2, border: "2px dashed", borderColor: "divider", bgcolor: "action.hover" }}>
@@ -1651,10 +1773,7 @@ function ManualDkDialog({
   );
 
   const requiresCounterparty = lines.some(
-    (line) =>
-      ["2080", "2410", "4430"].includes(
-        String(line.account_code || "").trim()
-      )
+    (line) => isCounterpartyAccount(line.account_code)
   );
 
   const allLinesValid = lines.every(
@@ -2212,6 +2331,11 @@ function ManualDkDialog({
                           }}
                         >
                           {company.pavadinimas || "—"}
+                          {company.source === "katalogas" && (
+                            <Box component="span" sx={{ ml: 1, fontSize: 10, fontWeight: 800, px: 0.6, py: 0.1, borderRadius: "4px", bgcolor: "#F0FDF4", color: "#16A34A" }}>
+                              Kataloge
+                            </Box>
+                          )}
                         </Typography>
 
                         <Box
@@ -2760,9 +2884,11 @@ function DkIrasasRow({
   entry,
   isMobile,
   onOpenManual,
+  onDeleteManual,
 }) {
   const [expanded, setExpanded] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   const statusCfg = STATUS_MAP[entry.status] || STATUS_MAP.draft;
 
@@ -2916,20 +3042,44 @@ function DkIrasasRow({
                 </Typography>
 
                 {isManual && (
-                  <Button
-                    size="small"
-                    startIcon={<EditOutlinedIcon />}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      onOpenManual?.(entry);
-                    }}
-                    sx={{
-                      textTransform: "none",
-                      fontSize: 12,
-                    }}
-                  >
-                    Redaguoti
-                  </Button>
+                  <Box sx={{ display: "flex", gap: 0.5 }}>
+                    <Button
+                      size="small"
+                      startIcon={<EditOutlinedIcon />}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onOpenManual?.(entry);
+                      }}
+                      sx={{
+                        textTransform: "none",
+                        fontSize: 12,
+                      }}
+                    >
+                      Redaguoti
+                    </Button>
+
+                    <Button
+                      size="small"
+                      color="error"
+                      startIcon={<DeleteOutlineIcon />}
+                      disabled={deleting}
+                      onClick={async (event) => {
+                        event.stopPropagation();
+                        setDeleting(true);
+                        try {
+                          await onDeleteManual?.(entry);
+                        } finally {
+                          setDeleting(false);
+                        }
+                      }}
+                      sx={{
+                        textTransform: "none",
+                        fontSize: 12,
+                      }}
+                    >
+                      {deleting ? "Trinama..." : "Ištrinti"}
+                    </Button>
+                  </Box>
                 )}
               </Box>
 
@@ -3358,9 +3508,9 @@ function DkEilutesTable({ entries, isMobile, onRefresh, onLineUpdated, hasMore, 
               const canOpenDocument = isManual || Boolean(line.entry.document_preview_url);
               const canEdit =
                 !isManual &&
+                line.entry.source_type !== "opening" &&
                 line.is_editable &&
                 !isSaving;
-
               return (
                 <TableRow
                   key={`${line.entry.id}-${line.id}-${idx}`}
@@ -3649,6 +3799,19 @@ function DkIrasaiTab({
 
   useEffect(() => { loadEntries(); }, [loadEntries]);
 
+  const deleteManualDk = async (entry) => {
+    if (!window.confirm(`Ištrinti ${entry.document_number}?`)) return;
+
+    try {
+      await api.delete(`/apskaita/rankiniai-dk/${entry.id}/`, { withCredentials: true });
+      await loadEntries();
+      onChanged?.();
+    } catch (e) {
+      console.error(e);
+      window.alert(e.response?.data?.detail || "Nepavyko ištrinti DK įrašo.");
+    }
+  };
+
   return (
     <Box>
       <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", mb: 2, flexWrap: "wrap", gap: 1 }}>
@@ -3791,7 +3954,7 @@ function DkIrasaiTab({
             </TableHead>
             <TableBody>
               {entries.map((entry) => (
-                <DkIrasasRow key={entry.id} entry={entry} isMobile={isMobile} onOpenManual={openManualDk} />
+                <DkIrasasRow key={entry.id} entry={entry} isMobile={isMobile} onOpenManual={openManualDk} onDeleteManual={deleteManualDk} />
               ))}
             </TableBody>
           </Table>
