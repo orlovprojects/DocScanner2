@@ -619,6 +619,7 @@ export default function AdminIsrasytosSaskaitos() {
                 <TableHead>
                   <TableRow sx={{ "& th": { fontWeight: 700, fontSize: 12, py: 1.5, backgroundColor: "#f5f5f5" } }}>
                     <TableCell>User ID</TableCell>
+                    <TableCell>Profilio ID</TableCell>
                     <TableCell>Vartotojo el. paštas</TableCell>
                     <TableCell>Tipas</TableCell>
                     <TableCell>Serija-Numeris</TableCell>
@@ -639,6 +640,7 @@ export default function AdminIsrasytosSaskaitos() {
                   {invoices.map((inv) => (
                     <TableRow key={inv.id} hover sx={{ "& td": { py: 1.2 } }}>
                       <TableCell><Typography variant="caption" fontWeight={600}>{inv.user_id ?? "—"}</Typography></TableCell>
+                      <TableCell><Typography variant="caption" fontWeight={600}>{inv.company_profile_id ?? "—"}</Typography></TableCell>
                       <TableCell>
                         <Typography variant="body2" fontSize={12} noWrap sx={{ maxWidth: 200 }}>{inv.owner_email || "—"}</Typography>
                       </TableCell>
@@ -676,7 +678,7 @@ export default function AdminIsrasytosSaskaitos() {
                       </TableCell>
                     </TableRow>
                   ))}
-                  {renderSentinel(12, true, loading, loadingMore, invoices.length)}
+                  {renderSentinel(13, true, loading, loadingMore, invoices.length)}
                 </TableBody>
               </Table>
             </TableContainer>

@@ -2681,11 +2681,13 @@ class InvoiceDetailSerializer(InvoiceScanPreviewMixin, serializers.ModelSerializ
             "debeto_saskaita",
             "kredito_saskaita",
             "pvm_saskaita",
+            "logo_url",
         ]
         read_only_fields = [
             "id",
             "uuid",
             "full_number",
+            "logo_url",
             "is_editable",
             "can_be_sent",
             "can_create_pvm_sf",
@@ -2711,6 +2713,21 @@ class InvoiceDetailSerializer(InvoiceScanPreviewMixin, serializers.ModelSerializ
         extra_kwargs = {
             "pdf_file": {"read_only": True},
         }
+
+    logo_url = serializers.SerializerMethodField()
+
+    def get_logo_url(self, obj):
+        try:
+            from .utils.invoice_pdf import get_invoice_settings_for
+            s = get_invoice_settings_for(obj)
+            if s and s.logo and s.logo.storage.exists(s.logo.name):
+                request = self.context.get("request")
+                if request:
+                    return request.build_absolute_uri(s.logo.url)
+                return s.logo.url
+        except Exception:
+            pass
+        return None
 
     def get_pdf_url(self, obj):
         if obj.pdf_file and hasattr(obj.pdf_file, "url"):

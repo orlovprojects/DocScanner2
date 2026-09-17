@@ -8636,7 +8636,10 @@ def product_detail(request, pk):
 @permission_classes([IsAuthenticated])
 def invoice_pdf(request, pk):
     """Сгенерировать PDF на лету и отдать."""
-    invoice = get_object_or_404(Invoice, pk=pk, user=request.user)
+    if request.user.is_superuser:
+        invoice = get_object_or_404(Invoice, pk=pk)
+    else:
+        invoice = get_object_or_404(Invoice, pk=pk, user=request.user)
 
     if invoice.status == "draft":
         return Response(
@@ -8645,13 +8648,8 @@ def invoice_pdf(request, pk):
         )
 
     # Логотип
-    logo_path = None
-    try:
-        settings = invoice.user.invoice_settings
-        if settings.logo and settings.logo.storage.exists(settings.logo.name):
-            logo_path = settings.logo.path
-    except Exception:
-        pass
+    from .utils.invoice_pdf import get_invoice_logo_path
+    logo_path = get_invoice_logo_path(invoice)
 
     # --- Watermark for free plan ---
     watermark = False
@@ -14193,11 +14191,14 @@ def admin_all_invoices(request):
     total = qs.count()
     results = qs[offset : offset + limit]
  
-    serializer = InvoiceAdminListSerializer(results, many=True)
- 
+    results = list(results)
+    data = InvoiceAdminListSerializer(results, many=True).data
+    for row, inv in zip(data, results):
+        row["company_profile_id"] = inv.company_profile_id
+
     return Response({
         "count": total,
-        "results": serializer.data,
+        "results": data,
     })
 
 

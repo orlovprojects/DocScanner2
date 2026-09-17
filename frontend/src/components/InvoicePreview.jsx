@@ -1037,11 +1037,15 @@ const InvoicePreviewDialog = ({ open, onClose, invoiceId, invoiceData, showKor =
   }, [open]);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open || !invoice) return;
+    if (Object.prototype.hasOwnProperty.call(invoice, 'logo_url')) {
+      setLogoUrl(invoice.logo_url || null);
+      return;
+    }
     invoicingApi.getSettings()
       .then(({ data }) => setLogoUrl(data.logo_url || null))
       .catch(() => setLogoUrl(null));
-  }, [open]);
+  }, [open, invoice]);
 
   useEffect(() => {
     if (!open) return;
