@@ -338,6 +338,11 @@ def create_fixed_assets_from_purchase(
     if split_count < 1 or split_count > MAX_SPLIT_COUNT:
         raise FixedAssetError(f"Kortelių skaičius turi būti nuo 1 iki {MAX_SPLIT_COUNT}")
 
+    if purchase_line is not None and purchase_line.quantity is not None:
+        line_qty = abs(_to_decimal(purchase_line.quantity))
+        if line_qty >= 1 and Decimal(split_count) > line_qty:
+            raise FixedAssetError(f"Kiekis negali viršyti eilutės kiekio ({line_qty.normalize()})")
+
     cost = _to_decimal(acquisition_cost).quantize(MONEY, rounding=ROUND_HALF_UP)
     if cost <= ZERO:
         raise FixedAssetError("Įsigijimo savikaina turi būti didesnė už 0")

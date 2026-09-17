@@ -428,7 +428,7 @@ def ask_catalog_matching_kie(
     logger: logging.Logger | None = None,
 ) -> str:
     """
-    Catalog matching: KIE 2.5 Flash (3 попытки) → direct Gemini 3.1 Flash Lite.
+    Catalog matching: KIE 3 Flash → KIE 2.5 Flash → KIE 3 Flash → direct Gemini 3.1 Flash Lite.
     """
     log = logger or LOGGER
 
@@ -455,19 +455,40 @@ def ask_catalog_matching_kie(
         len(request_text),
     )
 
-    # 1) KIE Gemini 2.5 Flash — 3 попытки
+    # # 1) KIE Gemini 2.5 Flash — 3 попытки
+    # last_kie_err = None
+    # for attempt in range(1, 4):
+    #     try:
+    #         log.info("[CATALOG MATCH] KIE attempt %d/3", attempt)
+    #         result = ask_kie(
+    #             text=request_text,
+    #             prompt=CATALOG_MATCHING_PROMPT,
+    #             model="gemini-2.5-flash",
+    #             temperature=0.0,
+    #             max_output_tokens=max_output_tokens,
+    #             timeout_seconds=90,
+    #             endpoint_url=KIE_GEMINI_FLASH_URL,
+    #             logger=log,
+    #         )
+
+    # 1) KIE: 3 Flash → 2.5 Flash → 3 Flash
+    kie_chain = [
+        (KIE_GEMINI_3_FLASH_URL, "gemini-3-flash"),
+        (KIE_GEMINI_FLASH_URL, "gemini-2.5-flash"),
+        (KIE_GEMINI_3_FLASH_URL, "gemini-3-flash"),
+    ]
     last_kie_err = None
-    for attempt in range(1, 4):
+    for attempt, (kie_endpoint, kie_model) in enumerate(kie_chain, start=1):
         try:
-            log.info("[CATALOG MATCH] KIE attempt %d/3", attempt)
+            log.info("[CATALOG MATCH] KIE attempt %d/3 model=%s", attempt, kie_model)
             result = ask_kie(
                 text=request_text,
                 prompt=CATALOG_MATCHING_PROMPT,
-                model="gemini-2.5-flash",
+                model=kie_model,
                 temperature=0.0,
                 max_output_tokens=max_output_tokens,
                 timeout_seconds=90,
-                endpoint_url=KIE_GEMINI_FLASH_URL,
+                endpoint_url=kie_endpoint,
                 logger=log,
             )
             if result and result.strip():
@@ -524,17 +545,24 @@ def ask_kie_with_retry(
     slow_error_threshold: если ошибка пришла дольше чем за N секунд,
     не ретраим — сразу выбрасываем для перехода на fallback.
 
-    Стратегия:
-    - attempt 0..max_retries-1: KIE gemini-2.5-flash
-    - attempt max_retries (последний): KIE gemini-3-flash
+    Стратегия (чередование):
+    - attempt 1: KIE gemini-3-flash
+    - attempt 2: KIE gemini-2.5-flash
+    - attempt 3: KIE gemini-3-flash
     """
     log = logger or LOGGER
     last_exc = None
 
     for attempt in range(max_retries + 1):
-        is_last_attempt = attempt == max_retries
-        eff_endpoint = KIE_GEMINI_3_FLASH_URL if is_last_attempt else KIE_GEMINI_FLASH_URL
-        eff_model_label = "gemini-3-flash" if is_last_attempt else model
+        # is_last_attempt = attempt == max_retries
+        # eff_endpoint = KIE_GEMINI_3_FLASH_URL if is_last_attempt else KIE_GEMINI_FLASH_URL
+        # eff_model_label = "gemini-3-flash" if is_last_attempt else model
+        if attempt % 2 == 0:
+            eff_endpoint = KIE_GEMINI_3_FLASH_URL
+            eff_model_label = "gemini-3-flash"
+        else:
+            eff_endpoint = KIE_GEMINI_FLASH_URL
+            eff_model_label = "gemini-2.5-flash"
 
         log.info(
             "[KIE Gemini] Attempt %d/%d endpoint=%s timeout=%ss",
@@ -650,7 +678,8 @@ def ask_kie_with_retry(
         try:
             _send_telegram(
                 f"🚨 <b>KIE Gemini: все retry исчерпаны</b>\n"
-                f"<b>Endpoint:</b> <code>gemini-2.5-flash → gemini-3-flash</code>\n"
+                # f"<b>Endpoint:</b> <code>gemini-2.5-flash → gemini-3-flash</code>\n"
+                f"<b>Endpoint:</b> <code>gemini-3-flash → gemini-2.5-flash → gemini-3-flash</code>\n"
                 f"<b>Requested model:</b> <code>{model}</code>\n"
                 f"<b>Attempts:</b> {max_retries + 1}\n"
                 f"<b>Last error:</b> {str(last_exc)[:300]}",
@@ -762,7 +791,7 @@ def ask_llm_with_fallback(text: str, scan_type: str, user=None, logger: logging.
     ilt_min = str(int(user.min_ilgalaikis_turtas_amount)) if user and hasattr(user, "min_ilgalaikis_turtas_amount") else "500"
     prompt = prompt.replace("{long_term_asset_min_value}", ilt_min)
 
-    log.info("[LLM] Try primary provider=%s model=gemini-2.5-flash", LLM_PRIMARY)
+    log.info("[LLM] Try primary provider=%s chain=gemini-3-flash→gemini-2.5-flash→gemini-3-flash", LLM_PRIMARY)
 
     result, source_model = ask_llm_provider_with_retry(
         text=text,
