@@ -101,6 +101,7 @@ const PurchasesPage = lazy(() => import('./pages/PurchasesPage'));
 const ApskaitosCentrasPage = lazy(() => import('./pages/ApskaitosCentrasPage')); 
 const EprisPage = lazy(() => import('./pages/EprisPage')); 
 const PradiniaiLikuciaiPage = lazy(() => import('./pages/PradiniaiLikuciaiPage')); 
+const IlgalaikisTurtasPage = lazy(() => import("./pages/IlgalaikisTurtasPage"));
 
 
 // ─── Sidebar - Toolbar ───
@@ -283,6 +284,8 @@ function App() {
                 <Route path="/apskaitos-centras" element={<PrivateRoute><ApskaitosCentrasPage /></PrivateRoute>} />
                 <Route path="/profiliai" element={<PrivateRoute><OnboardingCompanyProfiles /></PrivateRoute>} />
                 <Route path="/pradiniai-likuciai" element={<PrivateRoute><PradiniaiLikuciaiPage /></PrivateRoute>} />
+                <Route path="/ilgalaikis-turtas" element={<PrivateRoute><IlgalaikisTurtasPage /></PrivateRoute>} />
+                
 
 
                 <Route path="/priminti-slaptazodi" element={<PasswordReset />} />

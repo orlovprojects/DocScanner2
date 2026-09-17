@@ -6,6 +6,7 @@ from decimal import Decimal, ROUND_HALF_UP
 from django.db import transaction
 from django.db.models import DecimalField, Max, Q, Sum, Value
 from django.db.models.functions import Coalesce
+from django.utils import timezone
 
 from ..models import (
     CompanyProfile,
@@ -13,10 +14,13 @@ from ..models import (
     FixedAssetOperation,
     JournalEntry,
     JournalEntryLine,
+    OpeningBalanceBatch,
 )
 from ..utils.journal_generators import _add_line, finalize_journal_entry
 from .constants import (
     DEFAULT_DEPRECIATION_START_RULE,
+    NUS_DOCUMENT_PREFIX,
+    OPENING_REASON,
     DepreciationBook,
     DepreciationStartRule,
     FixedAssetOperationType,
@@ -67,6 +71,36 @@ def depreciation_start_period(asset, rule=DEFAULT_DEPRECIATION_START_RULE):
     return start
 
 
+def nus_document_number(period):
+    return f"{NUS_DOCUMENT_PREFIX}{period:%Y-%m}"
+
+
+def first_allowed_period(company_profile_id):
+    batch = (
+        OpeningBalanceBatch.objects
+        .filter(
+            company_profile_id=company_profile_id,
+            status=OpeningBalanceBatch.STATUS_CONFIRMED,
+        )
+        .only("cutover_date")
+        .first()
+    )
+    return month_start(batch.cutover_date) if batch else None
+
+
+def last_registered_period(company_profile):
+    return (
+        FixedAssetOperation.objects
+        .filter(
+            asset__company_profile=company_profile,
+            operation_type=DEP,
+            book=ACC,
+            journal_entry__document_number__startswith=NUS_DOCUMENT_PREFIX,
+        )
+        .aggregate(p=Max("journal_entry__period"))["p"]
+    )
+
+
 # ═══════════════════════════════════════════════════════════
 # Likučiai iš operacijų
 # ═══════════════════════════════════════════════════════════
@@ -113,6 +147,35 @@ def _period_amount(asset, period, base_cost, accumulated):
     return min(amount, remaining)
 
 
+def pending_depreciation(asset, until_period, min_period=None):
+    """
+    Neužregistruotas nusidėvėjimas nuo kito mėnesio po paskutinio
+    užregistruoto iki until_period imtinai. Grąžina [(period, amount), ...].
+    asset turi būti su _annotate_balances.
+    """
+    start = depreciation_start_period(asset)
+    if start is None or not asset.useful_life_months:
+        return []
+
+    period = add_months(asset.last_period, 1) if asset.last_period else start
+    if min_period and period < min_period:
+        period = min_period
+
+    accumulated = asset.accumulated
+    rows = []
+
+    while period <= until_period:
+        amount = _period_amount(asset, period, asset.base_cost, accumulated)
+        if amount <= ZERO:
+            break
+
+        rows.append((period, amount))
+        accumulated += amount
+        period = add_months(period, 1)
+
+    return rows
+
+
 # ═══════════════════════════════════════════════════════════
 # Kortelės grafikas
 # ═══════════════════════════════════════════════════════════
@@ -124,15 +187,30 @@ def build_schedule(asset):
     if start is None or not asset.useful_life_months:
         return []
 
-    registered = dict(
+    ops = list(
         FixedAssetOperation.objects
         .filter(asset_id=asset.pk, operation_type=DEP, book=ACC)
-        .values_list("period", "amount")
+        .values_list("period", "amount", "reason")
     )
+    registered = {p: a for p, a, r in ops if r != OPENING_REASON}
+    opening = [(p, a) for p, a, r in ops if r == OPENING_REASON]
 
     rows = []
     accumulated = ZERO
     period = start
+
+    if opening:
+        opening_period, opening_amount = opening[0]
+        accumulated = opening_amount
+        rows.append({
+            "period": opening_period,
+            "amount": opening_amount,
+            "accumulated": opening_amount,
+            "residual": asset.base_cost - opening_amount,
+            "registered": True,
+            "opening": True,
+        })
+        period = add_months(opening_period, 1)
     limit = asset.useful_life_months + 120
 
     while len(rows) < limit:
@@ -163,28 +241,73 @@ def build_schedule(asset):
 # Mėnesinis skaičiavimas
 # ═══════════════════════════════════════════════════════════
 
+def _registered_rows(company_profile, period):
+    ops = (
+        FixedAssetOperation.objects
+        .filter(
+            asset__company_profile=company_profile,
+            operation_type=DEP,
+            book=ACC,
+            journal_entry__document_number=nus_document_number(period),
+        )
+        .select_related("asset", "asset__group")
+        .order_by("asset__inventory_number", "asset_id", "period")
+    )
+
+    grouped = {}
+    for op in ops:
+        row = grouped.get(op.asset_id)
+        if row is None:
+            asset = op.asset
+            row = grouped[op.asset_id] = {
+                "asset_id": asset.pk,
+                "inventory_number": asset.inventory_number,
+                "name": asset.name,
+                "group": asset.group.get_category_display() if asset.group else "",
+                "amount": ZERO,
+                "months": [],
+                "catch_up_months": 0,
+                "journal_entry_id": op.journal_entry_id,
+            }
+        row["amount"] += op.amount
+        row["months"].append({"period": op.period, "amount": op.amount})
+
+    rows = list(grouped.values())
+    for row in rows:
+        row["catch_up_months"] = len([m for m in row["months"] if m["period"] != period])
+
+    return rows
+
+
 def calculate_period(company_profile, period):
     period = month_start(period)
-    rows = []
-    errors = []
+    last = last_registered_period(company_profile)
 
-    from ..opening_balances.services import is_before_cutover
+    result = {
+        "period": period,
+        "rows": [],
+        "total": ZERO,
+        "errors": [],
+        "warnings": [],
+        "registered": False,
+        "last_registered": last,
+    }
 
-    if is_before_cutover(company_profile.pk, month_end(period)):
-        return {
-            "period": period,
-            "rows": [],
-            "total": ZERO,
-            "errors": ["Periodas yra iki perėjimo datos"],
-            "registered": False,
-        }
+    min_period = first_allowed_period(company_profile.pk)
+    if min_period and period < min_period:
+        result["errors"].append(f"Periodas yra iki perėjimo datos ({min_period:%Y-%m})")
+        return result
 
-    registered = FixedAssetOperation.objects.filter(
-        asset__company_profile=company_profile,
-        operation_type=DEP,
-        book=ACC,
-        period=period,
-    ).exists()
+    if last and period <= last:
+        rows = _registered_rows(company_profile, period)
+        result["rows"] = rows
+        result["total"] = sum((r["amount"] for r in rows), ZERO)
+        result["registered"] = bool(rows)
+        if not rows:
+            result["errors"].append(
+                f"Nusidėvėjimas užregistruotas iki {last:%Y-%m} - ankstesnio periodo skaičiuoti negalima"
+            )
+        return result
 
     assets = _annotate_balances(
         FixedAsset.objects
@@ -196,25 +319,12 @@ def calculate_period(company_profile, period):
         .select_related("group")
     ).order_by("inventory_number", "pk")
 
-    missing_periods = set()
+    rows = []
+    errors = []
 
     for asset in assets:
-        start = depreciation_start_period(asset)
-
-        if start is None or start > period or not asset.useful_life_months:
-            continue
-
-        expected = add_months(asset.last_period, 1) if asset.last_period else start
-
-        if expected > period:
-            continue
-
-        if expected < period:
-            missing_periods.add(expected)
-            continue
-
-        amount = _period_amount(asset, period, asset.base_cost, asset.accumulated)
-        if amount <= ZERO:
+        pending = pending_depreciation(asset, period, min_period)
+        if not pending:
             continue
 
         group = asset.group
@@ -226,39 +336,65 @@ def calculate_period(company_profile, period):
             errors.append(f"„{asset}“: turto grupei nenurodytos nusidėvėjimo DK sąskaitos")
             continue
 
+        amount = sum((a for _, a in pending), ZERO)
+
         rows.append({
             "asset_id": asset.pk,
             "inventory_number": asset.inventory_number,
             "name": asset.name,
             "group": group.get_category_display(),
             "amount": amount,
+            "months": [{"period": p, "amount": a} for p, a in pending],
+            "catch_up_months": len([p for p, _ in pending if p != period]),
             "accumulated_after": asset.accumulated + amount,
             "residual_after": asset.base_cost - asset.accumulated - amount,
             "expense_account": group.depreciation_expense_account,
             "accumulated_account": group.accumulated_depreciation_account,
         })
 
-    if missing_periods:
-        errors.insert(
-            0,
-            f"Pirmiausia užregistruokite {min(missing_periods):%Y-%m} nusidėvėjimą",
+    warnings = []
+
+    catch_up_count = len([r for r in rows if r["catch_up_months"] > 0])
+    if catch_up_count:
+        warnings.append(
+            f"{catch_up_count} turto vnt. bus priskaičiuotas praleistų mėnesių nusidėvėjimas"
         )
 
-    return {
-        "period": period,
-        "rows": rows,
-        "total": sum((r["amount"] for r in rows), ZERO),
-        "errors": errors,
-        "registered": registered,
-    }
+    prior_years = sorted({
+        m["period"].year
+        for r in rows
+        for m in r["months"]
+        if m["period"].year < period.year
+    })
+    if prior_years:
+        warnings.append(
+            f"Dalis nusidėvėjimo priklauso {', '.join(map(str, prior_years))} m. - "
+            "tai ankstesnių metų klaidos taisymas, suderinkite su buhalteriu"
+        )
+
+    result.update(
+        rows=rows,
+        total=sum((r["amount"] for r in rows), ZERO),
+        errors=errors,
+        warnings=warnings,
+    )
+    return result
 
 
 @transaction.atomic
 def register_period(company_profile, period, user):
-    # Užraktas: du lygiagretūs registravimai tam pačiam periodui
+    # Užraktas: du lygiagretūs registravimai
     CompanyProfile.objects.select_for_update().filter(pk=company_profile.pk).first()
 
+    period = month_start(period)
+
+    if period > month_start(timezone.localdate()):
+        raise FixedAssetError("Negalima registruoti būsimo periodo nusidėvėjimo")
+
     result = calculate_period(company_profile, period)
+
+    if result["registered"]:
+        raise FixedAssetError("Šis periodas jau užregistruotas")
 
     if result["errors"]:
         raise FixedAssetError(result["errors"][0])
@@ -266,7 +402,6 @@ def register_period(company_profile, period, user):
     if not result["rows"]:
         raise FixedAssetError("Nėra turto, kuriam reikia skaičiuoti nusidėvėjimą")
 
-    period = result["period"]
     entry_date = month_end(period)
     description = f"Ilgalaikio turto nusidėvėjimas {period:%Y-%m}"
 
@@ -276,7 +411,7 @@ def register_period(company_profile, period, user):
         source_type=JournalEntry.SOURCE_FIXED_ASSET,
         entry_date=entry_date,
         period=period,
-        document_number=f"NUS-{period:%Y-%m}",
+        document_number=nus_document_number(period),
         description=description,
         currency="EUR",
         status=JournalEntry.STATUS_DRAFT,
@@ -322,13 +457,18 @@ def register_period(company_profile, period, user):
             asset_id=r["asset_id"],
             operation_type=DEP,
             operation_date=entry_date,
-            amount=r["amount"],
+            amount=m["amount"],
             book=ACC,
-            period=period,
+            period=m["period"],
             journal_entry=entry,
-            description=description,
+            description=(
+                description
+                if m["period"] == period
+                else f"{description} (už {m['period']:%Y-%m})"
+            ),
         )
         for r in result["rows"]
+        for m in r["months"]
     ])
 
     logger.info(
@@ -351,17 +491,18 @@ def cancel_period(company_profile, period):
         asset__company_profile=company_profile,
         operation_type=DEP,
         book=ACC,
+        journal_entry__document_number=nus_document_number(period),
     )
 
-    if not ops.filter(period=period).exists():
+    if not ops.exists():
         raise FixedAssetError("Šis periodas neužregistruotas")
 
-    if ops.filter(period__gt=period).exists():
+    last = last_registered_period(company_profile)
+    if last and last > period:
         raise FixedAssetError("Pirmiausia atšaukite vėlesnių periodų nusidėvėjimą")
 
-    period_asset_ids = ops.filter(period=period).values("asset_id")
     if FixedAssetOperation.objects.filter(
-        asset_id__in=period_asset_ids,
+        asset_id__in=ops.values("asset_id"),
         operation_type__in=[
             FixedAssetOperationType.WRITE_OFF,
             FixedAssetOperationType.SALE,
@@ -369,15 +510,12 @@ def cancel_period(company_profile, period):
     ).exists():
         raise FixedAssetError(
             "Dalis šio periodo turto jau nurašyta ar parduota - "
-            "pirmiausia atšaukite nurašymą"
+            "pirmiausia atšaukite nurašymą ar pardavimą"
         )
 
-    entry_ids = set(
-        ops.filter(period=period, journal_entry__isnull=False)
-        .values_list("journal_entry_id", flat=True)
-    )
+    entry_ids = set(ops.values_list("journal_entry_id", flat=True))
 
-    ops.filter(period=period).delete()
+    ops.delete()
     JournalEntry.objects.filter(
         pk__in=entry_ids,
         source_type=JournalEntry.SOURCE_FIXED_ASSET,

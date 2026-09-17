@@ -6,8 +6,29 @@ export const fixedAssetsApi = {
   getGroups: () =>
     api.get(`${BASE}/groups/`, { withCredentials: true }),
 
+  updateGroup: (id, data) =>
+    api.patch(`${BASE}/groups/${id}/`, data, { withCredentials: true }),
+
+  createManual: (data) =>
+    api.post(`${BASE}/manual/`, data, { withCredentials: true }),
+
+  getImprovements: (purchaseId) =>
+    api.get(`${BASE}/improvements/`, { params: { purchase_id: purchaseId }, withCredentials: true }),
+
+  createImprovement: (data) =>
+    api.post(`${BASE}/improvements/`, data, { withCredentials: true }),
+
+  cancelImprovement: (opId) =>
+    api.post(`${BASE}/improvements/${opId}/cancel/`, {}, { withCredentials: true }),
+
+  getSaleCandidates: (search) =>
+    api.get(`${BASE}/sale-candidates/`, { params: { search: search || undefined }, withCredentials: true }),
+
   getAssets: (params = {}) =>
     api.get(`${BASE}/`, { params, withCredentials: true }),
+
+  getPurchaseUsage: (purchaseId) =>
+    api.get(`${BASE}/purchase-usage/`, { params: { purchase_id: purchaseId }, withCredentials: true }),
 
   getPurchaseSource: (purchaseId, lineId = null) =>
     api.get(`${BASE}/purchase-source/`, {
@@ -18,8 +39,17 @@ export const fixedAssetsApi = {
   createFromPurchase: (data) =>
     api.post(`${BASE}/from-purchase/`, data, { withCredentials: true }),
 
+  getAsset: (id) =>
+    api.get(`${BASE}/${id}/`, { withCredentials: true }),
+
+  updateAsset: (id, data) =>
+    api.patch(`${BASE}/${id}/`, data, { withCredentials: true }),
+
   deleteAsset: (id) =>
     api.delete(`${BASE}/${id}/`, { withCredentials: true }),
+
+  getOperations: (id) =>
+    api.get(`${BASE}/${id}/operations/`, { withCredentials: true }),
 
   getSchedule: (id) =>
     api.get(`${BASE}/${id}/schedule/`, { withCredentials: true }),

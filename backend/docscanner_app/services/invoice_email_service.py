@@ -95,16 +95,10 @@ def _get_invoice_pdf(invoice):
     Возвращает (pdf_bytes, filename) для вложения в email.
     Генерирует PDF в памяти, не сохраняет на диск.
     """
-    from ..utils.invoice_pdf import generate_invoice_pdf
+    from ..utils.invoice_pdf import generate_invoice_pdf, get_invoice_logo_path
 
     # Логотип
-    logo_path = None
-    try:
-        settings = invoice.user.invoice_settings
-        if settings.logo and settings.logo.storage.exists(settings.logo.name):
-            logo_path = settings.logo.path
-    except Exception:
-        pass
+    logo_path = get_invoice_logo_path(invoice)
 
     # Watermark для free
     watermark = False

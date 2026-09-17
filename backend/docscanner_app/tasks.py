@@ -3327,15 +3327,7 @@ def send_payment_reminders():
                 skipped_free += 1
                 continue
 
-            if user_id not in user_settings_cache:
-                try:
-                    inv_settings = InvoiceSettings.objects.get(user_id=user_id)
-                    days_list = inv_settings.invoice_reminder_days or [-7, -1, 3]
-                except InvoiceSettings.DoesNotExist:
-                    days_list = [-7, -1, 3]
-                user_settings_cache[user_id] = days_list
-
-            reminder_days = user_settings_cache[user_id]
+            reminder_days = [-7, -1, 3]
             diff = (inv.due_date - today).days
 
             for rd in reminder_days:

@@ -3133,7 +3133,10 @@ class InvoicePublicSerializer(serializers.ModelSerializer):
 
     def get_logo_url(self, obj):
             try:
-                inv_settings = obj.user.invoice_settings
+                from .utils.invoice_pdf import get_invoice_settings_for
+                inv_settings = get_invoice_settings_for(obj)
+                if not inv_settings:
+                    return None
                 if inv_settings.logo and inv_settings.logo.storage.exists(inv_settings.logo.name):
                     request = self.context.get('request')
                     if request:

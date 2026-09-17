@@ -34,6 +34,8 @@ import EditableCell from "../components/EditableCell";
 import EditableAutoCell from "../components/EditableAutoCell";
 import IltBanner from "../components/IltBanner";
 import FixedAssetCreateDialog from "../components/FixedAssetCreateDialog";
+import FixedAssetImprovementDialog from "../components/FixedAssetImprovementDialog";
+import { fixedAssetsApi } from "../api/fixedAssetsApi";
 import { api } from "../api/endpoints";
 import { EXTRA_FIELDS_CONFIG } from "../pages/extraFieldsConfig";
 import {
@@ -637,6 +639,9 @@ export default function PurchasePreviewDialog({
 
   const [itDialog, setItDialog] = useState({ open: false, lineId: null, suggestedCategory: "" });
   const [fixedAssets, setFixedAssets] = useState([]);
+  const [improvements, setImprovements] = useState([]);
+  const [usage, setUsage] = useState({});
+  const [improveDialog, setImproveDialog] = useState({ open: false, lineId: null });
 
   const lineItemsContainerRef = useRef(null);
   const accordionRef = useRef(null);
@@ -740,6 +745,8 @@ export default function PurchasePreviewDialog({
       setLineItemsOffset(0);
       setLineItemsTotal(0);
       setFixedAssets([]);
+      setImprovements([]);
+      setUsage({});
     }
   }, [open, loadPurchase]);
 
@@ -748,15 +755,14 @@ export default function PurchasePreviewDialog({
   const loadFixedAssets = useCallback(async () => {
     if (!open || !purchaseId) return;
     try {
-      const { data } = await api.get("/fixed-assets/", {
-        withCredentials: true,
-        params: {
-          purchase: purchaseId,
-          ...(activeProfileId ? { company_profile: activeProfileId } : {}),
-        },
-      });
-      const list = Array.isArray(data) ? data : (data?.results || []);
-      setFixedAssets(list);
+      const [assetsRes, improvementsRes, usageRes] = await Promise.all([
+        fixedAssetsApi.getAssets({ purchase_id: purchaseId }),
+        fixedAssetsApi.getImprovements(purchaseId),
+        fixedAssetsApi.getPurchaseUsage(purchaseId),
+      ]);
+      setFixedAssets(assetsRes.data || []);
+      setImprovements(improvementsRes.data || []);
+      setUsage(usageRes.data || {});
     } catch (e) {
       console.error("Failed to load fixed assets:", e);
     }
@@ -1200,7 +1206,7 @@ export default function PurchasePreviewDialog({
     setItDialog({ open: true, lineId, suggestedCategory: suggestedCategory || "" });
 
   const renderFixedAssetBlock = (source, lineId = null) => {
-    if (!source) return null;
+    if (!source || purchase?.is_credit_invoice) return null;
 
     const assets = fixedAssets.filter((a) =>
       lineId ? String(a.purchase_line) === String(lineId) : !a.purchase_line,
@@ -1222,6 +1228,44 @@ export default function PurchasePreviewDialog({
         }}
       />
     ));
+
+    const improvementChips = improvements
+      .filter((op) =>
+        lineId ? String(op.purchase_line) === String(lineId) : !op.purchase_line,
+      )
+      .map((op) => (
+        <Chip
+          key={`imp-${op.id}`}
+          icon={<WeekendIcon />}
+          label={`Pagerinimas: ${op.asset_name} · ${fmtAmount(op.amount)}`}
+          size="small"
+          sx={{
+            bgcolor: "#fff",
+            color: "#7A4A12",
+            fontWeight: 600,
+            border: "1px dashed #F0D7B1",
+            "& .MuiChip-icon": { color: "#e08d21", fontSize: "1rem" },
+          }}
+        />
+      ));
+
+    const improveButton = (
+      <Button
+        size="small"
+        variant="text"
+        onClick={() => setImproveDialog({ open: true, lineId })}
+        sx={{
+          textTransform: "none",
+          fontSize: 12,
+          fontWeight: 600,
+          color: "#A0590F",
+          px: 1,
+          "&:hover": { bgcolor: "#FFF8EE" },
+        }}
+      >
+        Pagerinimas
+      </Button>
+    );
 
     const createButton = (
       <Button
@@ -1258,6 +1302,44 @@ export default function PurchasePreviewDialog({
       </Button>
     );
 
+    const linkedCount = assetChips.length + improvementChips.length;
+    const remaining = Number(usage[lineId ? String(lineId) : "doc"] ?? 0);
+
+    if (linkedCount > 0) {
+      return (
+        <Box
+          sx={{
+            mt: 1,
+            mb: 1.5,
+            p: 1.25,
+            borderRadius: 2,
+            bgcolor: "#F3FAF3",
+            border: "1px solid #CDE7CE",
+          }}
+        >
+          <Box sx={{ display: "flex", alignItems: "center", gap: 0.75, mb: 1 }}>
+            <CheckCircleIcon sx={{ color: "#2E7D32", fontSize: 18 }} />
+            <Typography sx={{ fontSize: 13, fontWeight: 700, color: "#1B5E20" }}>
+              Užregistruota kaip ilgalaikis turtas
+            </Typography>
+          </Box>
+          <Box sx={{ display: "flex", alignItems: "center", gap: 1, flexWrap: "wrap" }}>
+            {assetChips}
+            {improvementChips}
+          </Box>
+          {remaining > 0.004 && (
+            <Button
+              size="small"
+              onClick={() => openItDialog(lineId, source.suggested_asset_type)}
+              sx={{ mt: 0.75, textTransform: "none", fontSize: 12, fontWeight: 600, color: "#A0590F", px: 0.5 }}
+            >
+              Sukurti iš likučio ({fmtAmount(remaining)})
+            </Button>
+          )}
+        </Box>
+      );
+    }
+
     if (isCandidate) {
       return (
         <IltBanner
@@ -1269,7 +1351,9 @@ export default function PurchasePreviewDialog({
           actions={
             <Box sx={{ display: "flex", alignItems: "center", gap: 1, flexWrap: "wrap" }}>
               {assetChips}
+              {improvementChips}
               {createButton}
+              {improveButton}
             </Box>
           }
         />
@@ -1279,7 +1363,9 @@ export default function PurchasePreviewDialog({
     return (
       <Box sx={{ display: "flex", alignItems: "center", gap: 1, flexWrap: "wrap", mb: 1 }}>
         {assetChips}
+        {improvementChips}
         {createButton}
+        {improveButton}
       </Box>
     );
   };
@@ -1848,12 +1934,24 @@ export default function PurchasePreviewDialog({
         </Box>
       </Dialog>
 
+      <FixedAssetImprovementDialog
+        open={improveDialog.open}
+        onClose={() => setImproveDialog({ open: false, lineId: null })}
+        purchaseId={purchase?.id}
+        lineId={improveDialog.lineId}
+        onCreated={async () => {
+          await loadFixedAssets();
+          if (purchase?.id) await onUpdated?.(purchase.id);
+        }}
+      />
+
       <FixedAssetCreateDialog
         open={itDialog.open}
         onClose={() => setItDialog({ open: false, lineId: null, suggestedCategory: "" })}
         purchaseId={purchase?.id}
         lineId={itDialog.lineId}
         suggestedCategory={itDialog.suggestedCategory}
+        previewUrl={purchase?.preview_url}
         onCreated={async () => {
           await loadFixedAssets();
           if (purchase?.id) await onUpdated?.(purchase.id);

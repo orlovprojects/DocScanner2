@@ -59,6 +59,7 @@ import DashboardIcon from "@mui/icons-material/Dashboard";
 import FormatListBulletedIcon from "@mui/icons-material/FormatListBulleted";
 import AddIcon from "@mui/icons-material/Add";
 import LockIcon from "@mui/icons-material/Lock";
+import WeekendIcon from "@mui/icons-material/Weekend";
 import DeleteOutlineIcon from "@mui/icons-material/DeleteOutline";
 import ContentCopyIcon from "@mui/icons-material/ContentCopy";
 
@@ -120,6 +121,12 @@ const SOURCE_MAP = {
     color: "#D97706",
     bg: "#FFFBEB",
     icon: <LockIcon sx={{ fontSize: 14 }} />,
+  },
+  fixed_asset: {
+    label: "Ilgalaikis turtas",
+    color: "#A0590F",
+    bg: "#FFF8EE",
+    icon: <WeekendIcon sx={{ fontSize: 14 }} />,
   },
 };
 

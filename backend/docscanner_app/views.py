@@ -7981,13 +7981,8 @@ def invoice_public_pdf(request, uuid):
         return Response(status=status.HTTP_404_NOT_FOUND)
 
     # Логотип
-    logo_path = None
-    try:
-        settings = invoice.user.invoice_settings
-        if settings.logo and settings.logo.storage.exists(settings.logo.name):
-            logo_path = settings.logo.path
-    except Exception:
-        pass
+    from .utils.invoice_pdf import get_invoice_logo_path
+    logo_path = get_invoice_logo_path(invoice)
 
     # --- Watermark for free plan ---
     watermark = False
@@ -17546,7 +17541,7 @@ class PurchaseViewSet(viewsets.ModelViewSet):
 
     @transaction.atomic
     def perform_destroy(self, instance):
-        if instance.fixed_assets.exists():
+        if instance.fixed_assets.exists() or instance.fixed_asset_improvements.exists():
             raise FixedAssetError(
                 "Iš šio pirkimo sukurtas ilgalaikis turtas - pirmiausia ištrinkite turtą"
             )
@@ -17668,7 +17663,7 @@ class PurchaseViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_404_NOT_FOUND,
             )
  
-        if line.fixed_assets.exists():
+        if line.fixed_assets.exists() or line.fixed_asset_improvements.exists():
             return Response(
                 {"detail": "Iš šios eilutės sukurtas ilgalaikis turtas - pirmiausia ištrinkite turtą"},
                 status=status.HTTP_400_BAD_REQUEST,

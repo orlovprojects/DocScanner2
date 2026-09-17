@@ -809,7 +809,7 @@ def delete_purchase_journal_entry(purchase):
     from ..ilgalaikis_turtas.services import FixedAssetError
     from ..models import FixedAsset
 
-    if FixedAsset.objects.filter(purchase=purchase).exists():
+    if FixedAsset.objects.filter(purchase=purchase).exists() or purchase.fixed_asset_improvements.exists():
         raise FixedAssetError(
             "Iš šio pirkimo sukurtas ilgalaikis turtas - "
             "pirmiausia ištrinkite turtą"

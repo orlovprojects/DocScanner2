@@ -94,3 +94,17 @@ class WriteOffReason(models.TextChoices):
 
 SALE_GAIN_ACCOUNT = "5400"
 SALE_LOSS_ACCOUNT = "6400"
+
+
+INVENTORY_NUMBER_PREFIX = "IT-"
+INVENTORY_NUMBER_DIGITS = 6
+MAX_SPLIT_COUNT = 500
+NUS_DOCUMENT_PREFIX = "NUS-"
+
+OPENING_REASON = "pradiniai_likuciai"
+CONTROL_ACCOUNT_PREFIXES = ("2080", "2410", "4420", "4430")
+
+
+class ManualAssetSource(models.TextChoices):
+    OPENING = "opening", "Pradiniai likučiai"
+    OTHER = "other", "Kita"

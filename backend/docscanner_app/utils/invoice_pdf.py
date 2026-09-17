@@ -379,6 +379,26 @@ def _parse_num(v):
     return Decimal(str(v).replace(",", "."))
 
 
+def get_invoice_settings_for(invoice):
+    from ..models import InvoiceSettings
+    qs = InvoiceSettings.objects.filter(user_id=invoice.user_id)
+    s = None
+    if getattr(invoice, "company_profile_id", None):
+        s = qs.filter(company_profile_id=invoice.company_profile_id).first()
+    return s or qs.first()
+
+
+def get_invoice_logo_path(invoice):
+    import logging
+    try:
+        s = get_invoice_settings_for(invoice)
+        if s and s.logo and s.logo.storage.exists(s.logo.name):
+            return s.logo.path
+    except Exception:
+        logging.getLogger("docscanner_app").exception("Logo path error invoice=%s", invoice.pk)
+    return None
+
+
 def _make_logo(logo_path, max_width_mm=25, max_height_mm=10):
     try:
         img = ImageReader(logo_path)
@@ -1417,13 +1437,7 @@ def generate_invoice_pdf(invoice, logo_path=None, watermark=False):
 
 
 def save_invoice_pdf(invoice):
-    logo_path = None
-    try:
-        settings = invoice.user.invoice_settings
-        if settings.logo and settings.logo.storage.exists(settings.logo.name):
-            logo_path = settings.logo.path
-    except Exception:
-        pass
+    logo_path = get_invoice_logo_path(invoice)
 
     # --- Watermark for free plan ---
     watermark = False

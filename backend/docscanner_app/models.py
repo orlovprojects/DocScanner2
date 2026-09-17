@@ -6987,6 +6987,25 @@ class FixedAssetOperation(models.Model):
         default="",
     )
 
+    # Pagerinimo šaltinis
+    purchase = models.ForeignKey(
+        "Purchase",
+        on_delete=models.PROTECT,
+        related_name="fixed_asset_improvements",
+        null=True,
+        blank=True,
+    )
+
+    purchase_line = models.ForeignKey(
+        "PurchaseLine",
+        on_delete=models.PROTECT,
+        related_name="fixed_asset_improvements",
+        null=True,
+        blank=True,
+    )
+
+    extra_months = models.PositiveSmallIntegerField(default=0)
+
     journal_entry = models.ForeignKey(
         "JournalEntry",
         on_delete=models.SET_NULL,
