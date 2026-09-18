@@ -4565,9 +4565,12 @@ def admin_all_documents(request):
     if owner:
         qs = qs.filter(user__email__icontains=owner)
 
-    search = request.GET.get('search')
+    search = (request.GET.get('search') or '').strip()
     if search:
-        qs = qs.filter(document_number__icontains=search)
+        qs = qs.filter(
+            Q(document_number__icontains=search) |
+            Q(user__email__icontains=search)
+        )
 
     from django.utils.dateparse import parse_date
     from datetime import timedelta
@@ -4701,17 +4704,61 @@ def admin_users_simple(request):
     if not request.user.is_superuser:
         return Response({"detail": "Not authorized"}, status=status.HTTP_403_FORBIDDEN)
 
-    qs = CustomUser.objects.all().order_by("-date_joined", "-id")
-    
-    # --- фильтры (опционально) ---
-    email = request.GET.get('email')
-    if email:
-        qs = qs.filter(email__icontains=email)
-    
+    from datetime import timedelta
+    from django.utils import timezone
+    from django.db.models import OuterRef, Subquery, Sum, Count, Value, IntegerField, DecimalField
+    from django.db.models.functions import Coalesce
+
+    now = timezone.localtime()
+    this_month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    prev_month_start = (this_month_start - timedelta(days=1)).replace(day=1)
+    d90_start = now - timedelta(days=90)
+
+    def credits_sq(start, end=None):
+        q = CreditUsageLog.objects.filter(user=OuterRef("pk"), created_at__gte=start)
+        if end:
+            q = q.filter(created_at__lt=end)
+        q = q.order_by().values("user").annotate(s=Sum("credits_used")).values("s")[:1]
+        return Coalesce(
+            Subquery(q, output_field=DecimalField(max_digits=14, decimal_places=2)),
+            Value(0),
+            output_field=DecimalField(max_digits=14, decimal_places=2),
+        )
+
+    def invoices_sq(start, end=None):
+        q = Invoice.objects.filter(user=OuterRef("pk"), created_at__gte=start).exclude(status="draft")
+        if end:
+            q = q.filter(created_at__lt=end)
+        q = q.order_by().values("user").annotate(c=Count("id")).values("c")[:1]
+        return Coalesce(Subquery(q, output_field=IntegerField()), Value(0), output_field=IntegerField())
+
+    profiles_sq = (
+        CompanyProfile.objects.filter(user=OuterRef("pk"))
+        .order_by().values("user").annotate(c=Count("id")).values("c")[:1]
+    )
+
+    qs = CustomUser.objects.all().annotate(
+        company_profiles_count=Coalesce(Subquery(profiles_sq, output_field=IntegerField()), Value(0)),
+        credits_this_month=credits_sq(this_month_start),
+        credits_prev_month=credits_sq(prev_month_start, this_month_start),
+        credits_90d=credits_sq(d90_start),
+        invoices_this_month=invoices_sq(this_month_start),
+        invoices_prev_month=invoices_sq(prev_month_start, this_month_start),
+        invoices_90d=invoices_sq(d90_start),
+    ).order_by("-date_joined", "-id")
+
+    # --- поиск: user_id или email ---
+    search = (request.GET.get('search') or request.GET.get('email') or '').strip()
+    if search:
+        if search.isdigit():
+            qs = qs.filter(Q(id=int(search)) | Q(email__icontains=search))
+        else:
+            qs = qs.filter(email__icontains=search)
+
     # --- курсорная пагинация ---
     paginator = UsersCursorPagination()
     page = paginator.paginate_queryset(qs, request)
-    
+
     ser = CustomUserAdminListSerializer(page, many=True, context={'request': request})
     return paginator.get_paginated_response(ser.data)
 

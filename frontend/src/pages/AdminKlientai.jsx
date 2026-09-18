@@ -16,8 +16,11 @@ import {
   Stack,
   IconButton,
   Tooltip,
+  TextField,
+  InputAdornment,
 } from "@mui/material";
 import RefreshIcon from "@mui/icons-material/Refresh";
+import SearchIcon from "@mui/icons-material/Search";
 import PaymentIcon from "@mui/icons-material/Payment";
 import ReceiptLongIcon from "@mui/icons-material/ReceiptLong";
 import HourglassEmptyIcon from "@mui/icons-material/HourglassEmpty";
@@ -105,6 +108,29 @@ const IsleistaCell = ({ totalSpent }) => {
   );
 };
 
+const TripleStatCell = ({ thisMonth, prevMonth, last90, decimals = 0 }) => {
+  const f = (v) => {
+    const n = Number(v || 0);
+    return decimals ? n.toFixed(decimals) : String(Math.round(n));
+  };
+
+  if (!Number(thisMonth) && !Number(prevMonth) && !Number(last90)) {
+    return <Typography sx={{ color: "text.disabled", fontSize: 13 }}>-</Typography>;
+  }
+
+  return (
+    <Tooltip title="Šis mėn. / Praėjęs mėn. / 90 d." arrow>
+      <Stack direction="row" spacing={0.75} justifyContent="center" sx={{ fontSize: 13, fontFamily: "monospace", whiteSpace: "nowrap" }}>
+        <Box sx={{ fontWeight: 700, color: "text.primary" }}>{f(thisMonth)}</Box>
+        <Box sx={{ color: "text.disabled" }}>/</Box>
+        <Box sx={{ color: "text.secondary" }}>{f(prevMonth)}</Box>
+        <Box sx={{ color: "text.disabled" }}>/</Box>
+        <Box sx={{ color: "text.secondary" }}>{f(last90)}</Box>
+      </Stack>
+    </Tooltip>
+  );
+};
+
 export default function AdminUsers() {
   const [me, setMe] = useState(null);
   const [meLoaded, setMeLoaded] = useState(false);
@@ -114,7 +140,15 @@ export default function AdminUsers() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [nextCursor, setNextCursor] = useState(null);
 
+  const [searchInput, setSearchInput] = useState("");
+  const [search, setSearch] = useState("");
+
   const tableContainerRef = useRef(null);
+
+  useEffect(() => {
+    const t = setTimeout(() => setSearch(searchInput.trim()), 400);
+    return () => clearTimeout(t);
+  }, [searchInput]);
 
   const loadingRef = useRef(false);
   const loadingMoreRef = useRef(false);
@@ -140,10 +174,11 @@ export default function AdminUsers() {
 
   const buildUrl = useCallback((cursor = null) => {
     const params = new URLSearchParams();
+    if (search) params.set("search", search);
     if (cursor) params.set("cursor", cursor);
     const qs = params.toString();
     return `/admin/users/${qs ? `?${qs}` : ""}`;
-  }, []);
+  }, [search]);
 
   const mergeUniqueUsers = (prev, incoming) => {
     const map = new Map(prev.map((item) => [item.id, item]));
@@ -277,6 +312,21 @@ export default function AdminUsers() {
           />
         </Stack>
 
+        <Stack direction="row" alignItems="center" gap={1.5}>
+        <TextField
+          size="small"
+          placeholder="Ieškoti pagal ID arba el. paštą"
+          value={searchInput}
+          onChange={(e) => setSearchInput(e.target.value)}
+          sx={{ minWidth: 280 }}
+          InputProps={{
+            startAdornment: (
+              <InputAdornment position="start">
+                <SearchIcon sx={{ fontSize: 20, color: "text.secondary" }} />
+              </InputAdornment>
+            ),
+          }}
+        />
         <Tooltip title="Atnaujinti duomenis">
           <IconButton
             onClick={fetchUsers}
@@ -286,6 +336,7 @@ export default function AdminUsers() {
             <RefreshIcon />
           </IconButton>
         </Tooltip>
+        </Stack>
       </Stack>
 
       {loading && <LinearProgress sx={{ mb: 3, borderRadius: 1 }} />}
@@ -299,10 +350,20 @@ export default function AdminUsers() {
                 <TableCell sx={{ fontWeight: 600, bgcolor: "grey.50", minWidth: 200 }}>Email</TableCell>
                 <TableCell sx={{ fontWeight: 600, bgcolor: "grey.50", minWidth: 150 }}>Registruotas</TableCell>
                 <TableCell sx={{ fontWeight: 600, bgcolor: "grey.50", minWidth: 100 }}>Kreditai</TableCell>
-                <TableCell sx={{ fontWeight: 600, bgcolor: "grey.50", minWidth: 180 }}>Stripe ID</TableCell>
                 <TableCell sx={{ fontWeight: 600, bgcolor: "grey.50", minWidth: 180 }}>Apskaitos programa</TableCell>
                 <TableCell sx={{ fontWeight: 600, bgcolor: "grey.50", minWidth: 180 }}>Įmonė</TableCell>
                 <TableCell sx={{ fontWeight: 600, bgcolor: "grey.50", minWidth: 120 }}>Įmonės kodas</TableCell>
+                <TableCell sx={{ fontWeight: 600, bgcolor: "grey.50", minWidth: 80, textAlign: "center" }}>
+                  Profiliai
+                </TableCell>
+                <TableCell sx={{ fontWeight: 600, bgcolor: "grey.50", minWidth: 150, textAlign: "center" }}>
+                  Kreditai
+                  <Typography variant="caption" display="block" color="text.secondary">mėn / praėj / 90d</Typography>
+                </TableCell>
+                <TableCell sx={{ fontWeight: 600, bgcolor: "grey.50", minWidth: 150, textAlign: "center" }}>
+                  Sąskaitos
+                  <Typography variant="caption" display="block" color="text.secondary">mėn / praėj / 90d</Typography>
+                </TableCell>
                 <TableCell sx={{ fontWeight: 600, bgcolor: "grey.50", minWidth: 80, textAlign: "center" }}>
                   <Tooltip title="Skaitmenizavimas" arrow>
                     <ReceiptLongIcon sx={{ fontSize: 20, color: "text.secondary" }} />
@@ -343,21 +404,33 @@ export default function AdminUsers() {
                       }}
                     />
                   </TableCell>
-                  <TableCell
-                    sx={{
-                      color: u.stripe_customer_id ? "text.primary" : "text.disabled",
-                      fontFamily: "monospace",
-                      fontSize: "0.875rem",
-                    }}
-                  >
-                    {u.stripe_customer_id || "-"}
-                  </TableCell>
                   <TableCell sx={{ color: "text.secondary" }}>
                     {programLabel(u.default_accounting_program)}
                   </TableCell>
                   <TableCell sx={{ color: "text.secondary" }}>{u.company_name || "-"}</TableCell>
                   <TableCell sx={{ color: "text.secondary", fontFamily: "monospace", fontSize: "0.875rem" }}>
                     {u.company_code || "-"}
+                  </TableCell>
+
+                  <TableCell sx={{ textAlign: "center", fontWeight: 600, color: u.company_profiles_count ? "text.primary" : "text.disabled" }}>
+                    {u.company_profiles_count || "-"}
+                  </TableCell>
+
+                  <TableCell sx={{ textAlign: "center" }}>
+                    <TripleStatCell
+                      thisMonth={u.credits_this_month}
+                      prevMonth={u.credits_prev_month}
+                      last90={u.credits_90d}
+                      decimals={2}
+                    />
+                  </TableCell>
+
+                  <TableCell sx={{ textAlign: "center" }}>
+                    <TripleStatCell
+                      thisMonth={u.invoices_this_month}
+                      prevMonth={u.invoices_prev_month}
+                      last90={u.invoices_90d}
+                    />
                   </TableCell>
 
                   <TableCell sx={{ textAlign: "center" }}>
@@ -376,7 +449,7 @@ export default function AdminUsers() {
 
               {loadingMore && (
                 <TableRow>
-                  <TableCell colSpan={11} align="center" sx={{ py: 3 }}>
+                  <TableCell colSpan={13} align="center" sx={{ py: 3 }}>
                     <LinearProgress sx={{ maxWidth: 200, mx: "auto", mb: 1 }} />
                     <Typography variant="body2" color="text.secondary">
                       Kraunama daugiau...
@@ -387,7 +460,7 @@ export default function AdminUsers() {
 
               {!loading && !loadingMore && users.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={11} align="center" sx={{ py: 8, color: "text.disabled" }}>
+                  <TableCell colSpan={13} align="center" sx={{ py: 8, color: "text.disabled" }}>
                     <Typography variant="body1">Duomenų nėra</Typography>
                   </TableCell>
                 </TableRow>
@@ -395,7 +468,7 @@ export default function AdminUsers() {
 
               {!nextCursor && users.length > 0 && !loading && !loadingMore && (
                 <TableRow>
-                  <TableCell colSpan={11} align="center" sx={{ py: 2, color: "text.disabled" }}>
+                  <TableCell colSpan={13} align="center" sx={{ py: 2, color: "text.disabled" }}>
                     <Typography variant="body2">Visi vartotojai įkelti ({users.length})</Typography>
                   </TableCell>
                 </TableRow>

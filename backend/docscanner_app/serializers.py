@@ -1236,6 +1236,14 @@ class CustomUserAdminListSerializer(CustomUserSerializer):
     inv_subscription_status = serializers.SerializerMethodField()
     total_spent = serializers.SerializerMethodField()
 
+    company_profiles_count = serializers.IntegerField(read_only=True)
+    credits_this_month = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
+    credits_prev_month = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
+    credits_90d = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
+    invoices_this_month = serializers.IntegerField(read_only=True)
+    invoices_prev_month = serializers.IntegerField(read_only=True)
+    invoices_90d = serializers.IntegerField(read_only=True)
+
     class Meta(CustomUserSerializer.Meta):
         model = CustomUser
         fields = [
@@ -1247,11 +1255,17 @@ class CustomUserAdminListSerializer(CustomUserSerializer):
             'company_iban', 'company_address', 'company_country_iso',
             'purchase_defaults', 'sales_defaults',
             'extra_settings', 'lineitem_rules',
-            'stripe_customer_id',
             # Новые поля:
             'last_payment_date',
             'inv_subscription_status',
-            'total_spent', 
+            'total_spent',
+            'company_profiles_count',
+            'credits_this_month',
+            'credits_prev_month',
+            'credits_90d',
+            'invoices_this_month',
+            'invoices_prev_month',
+            'invoices_90d',
         ]
         read_only_fields = getattr(CustomUserSerializer.Meta, 'read_only_fields', ('credits',))
 
