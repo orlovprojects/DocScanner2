@@ -239,25 +239,25 @@ def _apply_top_level_fields(
     db_doc.buyer_is_person = doc_struct.get("buyer_is_person")
 
 
-    try:
-        seller_vat_res = validate_vat(
-            raw_code=db_doc.seller_vat_code,
-            country_iso=db_doc.seller_country_iso,
-        )
-        db_doc.seller_vat_val = seller_vat_res.get("status")
-    except Exception as e:
-        logger.warning("Seller VAT validation failed: %s", e)
-        db_doc.seller_vat_val = None
+    # try:
+    #     seller_vat_res = validate_vat(
+    #         raw_code=db_doc.seller_vat_code,
+    #         country_iso=db_doc.seller_country_iso,
+    #     )
+    #     db_doc.seller_vat_val = seller_vat_res.get("status")
+    # except Exception as e:
+    #     logger.warning("Seller VAT validation failed: %s", e)
+    #     db_doc.seller_vat_val = None
 
-    try:
-        buyer_vat_res = validate_vat(
-            raw_code=db_doc.buyer_vat_code,
-            country_iso=db_doc.buyer_country_iso,
-        )
-        db_doc.buyer_vat_val = buyer_vat_res.get("status")
-    except Exception as e:
-        logger.warning("Buyer VAT validation failed: %s", e)
-        db_doc.buyer_vat_val = None
+    # try:
+    #     buyer_vat_res = validate_vat(
+    #         raw_code=db_doc.buyer_vat_code,
+    #         country_iso=db_doc.buyer_country_iso,
+    #     )
+    #     db_doc.buyer_vat_val = buyer_vat_res.get("status")
+    # except Exception as e:
+    #     logger.warning("Buyer VAT validation failed: %s", e)
+    #     db_doc.buyer_vat_val = None
 
 
     # --- Нормализованные имена для поиска дубликатов ---
@@ -369,8 +369,13 @@ def _apply_top_level_fields(
             db_doc.document_number = db_doc.document_series
 
     db_doc.amount_wo_vat = doc_struct.get("amount_wo_vat")
-    db_doc.invoice_discount_with_vat = doc_struct.get("invoice_discount_with_vat")
-    db_doc.invoice_discount_wo_vat = doc_struct.get("invoice_discount_wo_vat")
+    if scan_type == "sumiskai":
+        # скидки для sumiskai — только для внутренних расчётов, в БД/экспорт не уходят
+        db_doc.invoice_discount_with_vat = None
+        db_doc.invoice_discount_wo_vat = None
+    else:
+        db_doc.invoice_discount_with_vat = doc_struct.get("invoice_discount_with_vat")
+        db_doc.invoice_discount_wo_vat = doc_struct.get("invoice_discount_wo_vat")
     db_doc.vat_amount = doc_struct.get("vat_amount")
     db_doc.vat_percent = doc_struct.get("vat_percent")
     db_doc.amount_with_vat = doc_struct.get("amount_with_vat")

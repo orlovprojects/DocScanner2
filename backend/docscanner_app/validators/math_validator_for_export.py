@@ -55,15 +55,18 @@ def validate_document_math_for_export(db_doc) -> Tuple[bool, Dict[str, Any]]:
     separate_vat = bool(getattr(db_doc, "separate_vat", False))
     logger.info(f"Doc {getattr(db_doc, 'id', '?')}: separate_vat={separate_vat}")
 
+    # 2) Строки нужны заранее: при их наличии VAT округляется построчно,
+    # поэтому документная проверка ставки неприменима
+    line_items = list(db_doc.line_items.all())
+
     # 1) Проверки документа
     doc_checks_passed = _validate_document_totals(
         db_doc=db_doc,
         separate_vat=separate_vat,
         report=validation_report,
+        has_lines=bool(line_items),
     )
-
     # 2) Проверки строк
-    line_items = list(db_doc.line_items.all())
     if line_items:
         lines_passed = _validate_line_items(
             line_items=line_items,
@@ -109,7 +112,7 @@ def _d(value) -> Decimal:
 
 # ===================== document checks =====================
 
-def _validate_document_totals(db_doc, separate_vat: bool, report: Dict[str, Any]) -> bool:
+def _validate_document_totals(db_doc, separate_vat: bool, report: Dict[str, Any], has_lines: bool = False) -> bool:
     """
     CHECK 1: amount_wo_vat - invoice_discount_wo_vat + vat_amount = amount_with_vat
     CHECK 2: (amount_wo_vat - invoice_discount_wo_vat) × vat_percent/100 ≈ vat_amount
@@ -142,7 +145,7 @@ def _validate_document_totals(db_doc, separate_vat: bool, report: Dict[str, Any]
 
     # CHECK 2 — НДС через процент
     vat_percent_valid = vat_percent is not None and vat_percent != 0
-    if not separate_vat and vat_percent_valid and amount_wo != 0:
+    if not separate_vat and not has_lines and vat_percent_valid and amount_wo != 0:
         expected_vat = Q2((amount_wo - discount_wo) * vat_percent / Decimal("100"))
         delta_vat = (expected_vat - vat_amount).copy_abs()
         match_vat = delta_vat <= DOC_TOLERANCE
@@ -160,7 +163,12 @@ def _validate_document_totals(db_doc, separate_vat: bool, report: Dict[str, Any]
                 f"Doc VAT %: {expected_vat:.2f} ≠ {vat_amount:.2f} (Δ={delta_vat:.4f})"
             )
     else:
-        skip_reason = "separate_vat=True" if separate_vat else "vat_percent not set or zero"
+        if separate_vat:
+            skip_reason = "separate_vat=True"
+        elif has_lines:
+            skip_reason = "has line items (VAT rounded per line)"
+        else:
+            skip_reason = "vat_percent not set or zero"
         report["document_checks"]["vat_percent_check"] = {
             "status": "SKIP",
             "reason": skip_reason,

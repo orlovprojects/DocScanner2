@@ -85,6 +85,8 @@ Assign the detected type to the field "document_type".
 - document_number
 - order_number
 - amount_wo_vat
+- invoice_discount_wo_vat
+- invoice_discount_with_vat
 - vat_amount
 - vat_percent
 - amount_with_vat
@@ -97,13 +99,14 @@ Assign the detected type to the field "document_type".
 - is_long_term_asset_candidate
 - suggested_asset_type
 - pirkimo_saskaita
+- fees
 
 All boolean fields (seller_is_person, buyer_is_person, with_receipt, separate_vat, paid_by_cash, doc_96_str, is_credit_invoice, is_debit_invoice, is_long_term_asset_candidate) must be returned as true/false, not as strings.
 
 *Return ONLY a valid JSON object in a SINGLE LINE (compact form): no newlines, no \n, no \r, no tabs, and no spaces outside string values. Do not use Markdown or code fences. No trailing commas. Do NOT wrap in quotes or escape characters. Do NOT include any explanations, comments, or extra text outside the JSON. The output must be directly parsable by JSON.parse().
 
 Example (structure and field names; values may be empty strings, booleans must be true/false, numbers should be numbers when available):
-{"docs":<number_of_documents>,"documents":[{"document_type":"","seller_id":"","seller_name":"","seller_vat_code":"","seller_address":"","seller_country":"","seller_country_iso":"","seller_iban":"","seller_is_person":false,"buyer_id":"","buyer_name":"","buyer_vat_code":"","buyer_address":"","buyer_country":"","buyer_country_iso":"","buyer_iban":"","buyer_is_person":false,"invoice_date":"","due_date":"","operation_date":"","document_series":"","document_number":"","order_number":"","amount_wo_vat":"","vat_amount":"","vat_percent":"","amount_with_vat":"","separate_vat":false,"currency":"","with_receipt":false,"paid_by_cash":false,"doc_96_str":false,"traded_type":"","pirkimo_saskaita":""}]}
+{"docs":<number_of_documents>,"documents":[{"document_type":"","seller_id":"","seller_name":"","seller_vat_code":"","seller_address":"","seller_country":"","seller_country_iso":"","seller_iban":"","seller_is_person":false,"buyer_id":"","buyer_name":"","buyer_vat_code":"","buyer_address":"","buyer_country":"","buyer_country_iso":"","buyer_iban":"","buyer_is_person":false,"invoice_date":"","due_date":"","operation_date":"","document_series":"","document_number":"","order_number":"","invoice_discount_wo_vat":"","invoice_discount_with_vat":"","amount_wo_vat":"","vat_amount":"","vat_percent":"","amount_with_vat":"","separate_vat":false,"currency":"","with_receipt":false,"paid_by_cash":false,"doc_96_str":false,"traded_type":"","pirkimo_saskaita":"","fees":[{"type":"","amount":"","includes_vat":false}]}]}
 
 Format dates as yyyy-mm-dd. Delete country from addresses. seller_country and buyer_country must be full country name in language of address provided. country_iso must be 2-letter code.
 In lithuanian documents dates are usually displayed in yyyy-mm-dd or dd/mm/yyyy formats. For example, when parsing 12/01/2026, it's 12th January, not 1st December.
@@ -126,6 +129,10 @@ If due_date is not stated in the document, but invoice date and payment terms li
 Set "separate_vat": true ONLY when the document has 2 or more different VAT rates, AND each rate's taxable base > 0. A 0% VAT rate counts if its taxable base > 0, even though VAT amount = 0 (e.g., 21% on 100 EUR + 0% on 50 EUR = separate_vat: true).
 To decide this, you MUST check line items and VAT summary - if lines have different vat_percent (e.g., some 0%, some 21%) with subtotal > 0, set separate_vat: true.
 When separate_vat is true, omit document-level "vat_percent" (do NOT put a single rate like "21").
+
+Extract into "fees" every separately stated charge that is not a product/service line: delivery (pristatymas, siuntimas, kurjeris), packaging (pakavimas), deposit/packaging deposit (tara, užstatas), payment/handling/administration fees (mokėjimo, apdorojimo, administravimo mokestis). For each: "type" (pristatymas | pakavimas | tara | uzstatas | mokestis), "amount" (exactly as printed) and "includes_vat" (true if the printed amount is VAT-inclusive, false if it is stated without VAT, e.g. "Pristatymas be PVM"). Do NOT put discounts or rounding here, and do not guess a VAT rate for fees. If there are no such charges, omit "fees".
+
+If the document states a discount that applies to the whole document, put it in "invoice_discount_wo_vat" (if stated without VAT) or "invoice_discount_with_vat" (if stated with VAT). If both a net and a gross figure are printed for the same discount, report it once, in the field matching the figure you use. Report the discount even when the printed totals already reflect it. Never report the same discount in both fields.
 
 Set "doc_96_str": true only if the document explicitly mentions Lietuvos PVM įstatymo 96 straipsnis, e.g. “PVM įstatymo 96 straipsnis”, “96 straipsnis”, “96 str.”, “taikomas 96 straipsnis”, “pagal PVMĮ 96 str.”. Otherwise set "doc_96_str": false.
 

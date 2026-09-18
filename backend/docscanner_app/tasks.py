@@ -71,6 +71,7 @@ from .utils.file_converter import normalize_any, ArchiveLimitError, MAX_SINGLE_F
 from .validators.required_fields_checker import check_required_fields_for_export
 from .validators.company_matcher import update_seller_buyer_info
 from .validators.verify_lt_company_match import update_seller_buyer_info_from_companies
+from .validators.vat_validator import validate_vat
 from .services.sync_lt_companies import sync_companies_from_vmi, sync_addresses_from_jar
 from .celery_signals import _send_telegram
 from .models import ExportSession
@@ -2190,6 +2191,45 @@ def process_uploaded_file_task(self, user_id, doc_id, scan_type, split_depth=0, 
         except Exception as e:
             logger.exception("Failed to apply company_replace_rules (post-enrich): %s", e)
         _log_t("apply_company_replace_rules (post-enrich)", t0)
+
+        # 15.055) VIES проверка ФИНАЛЬНЫХ PVM кодов (после Company enrichment + replace rules)
+        t0 = _t()
+        try:
+            doc.refresh_from_db(fields=[
+                "seller_vat_code", "seller_country_iso",
+                "buyer_vat_code", "buyer_country_iso",
+            ])
+
+            logger.info(
+                "[FINAL VAT] seller=%r country=%r | buyer=%r country=%r",
+                doc.seller_vat_code, doc.seller_country_iso,
+                doc.buyer_vat_code, doc.buyer_country_iso,
+            )
+
+            try:
+                seller_vat_res = validate_vat(
+                    raw_code=doc.seller_vat_code,
+                    country_iso=doc.seller_country_iso,
+                )
+                doc.seller_vat_val = seller_vat_res.get("status")
+            except Exception as e:
+                logger.warning("Seller VAT validation failed: %s", e)
+                doc.seller_vat_val = None
+
+            try:
+                buyer_vat_res = validate_vat(
+                    raw_code=doc.buyer_vat_code,
+                    country_iso=doc.buyer_country_iso,
+                )
+                doc.buyer_vat_val = buyer_vat_res.get("status")
+            except Exception as e:
+                logger.warning("Buyer VAT validation failed: %s", e)
+                doc.buyer_vat_val = None
+
+            doc.save(update_fields=["seller_vat_val", "buyer_vat_val"])
+        except Exception as e:
+            logger.warning("Final VAT validation failed: %s", e)
+        _log_t("VIES final VAT check (post-enrich)", t0)
 
         # 15.06) Пересчёт готовности к экспорту после обогащения контрагентов
         t0 = _t()

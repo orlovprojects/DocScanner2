@@ -10,6 +10,8 @@ from django.db.models import Prefetch, QuerySet
 from docscanner_app.models import ScannedDocument, LineItem
 from docscanner_app.validators.vat_klas import auto_select_pvm_code
 from decimal import Decimal
+from docscanner_app.utils.parsers import parse_decimal_lit
+
 _TOL = Decimal("0.02")
 
 logger = logging.getLogger("docscanner_app")
@@ -729,6 +731,182 @@ def _fix_vat_percent_from_amounts(doc: Dict[str, Any]) -> bool:
     return False
 
 
+_FEE_ZERO_FIRST = ("tara", "uzstatas")  # почти всегда 0% → пробуем первыми
+
+
+def _fee_base_wo_vat(fee: Dict[str, Any], vp: Decimal) -> Decimal:
+    """База сбора без НДС. includes_vat=True → вычищаем НДС по ставке документа."""
+    amt = d(parse_decimal_lit(fee.get("amount")), 2)
+    if amt <= 0:
+        return Decimal("0.00")
+    if bool(fee.get("includes_vat")) and vp != 0:
+        return Q2(amt / (Decimal("1") + vp / Decimal("100")))
+    return amt
+
+def _std_rate_from_amounts(wo: Decimal, vat: Decimal) -> Optional[Decimal]:
+    """Ставка из wo и vat, округлённая до целого процента, с обратной проверкой."""
+    if wo <= 0 or vat <= 0:
+        return None
+    raw = vat / wo * Decimal("100")
+    cand = raw.to_integral_value(rounding=ROUND_HALF_UP)
+    if cand <= 0 or cand > Decimal("30"):
+        return None
+    if _approx(Q2(wo * cand / Decimal("100")), vat, tol=Decimal("0.02")):
+        return cand
+    return None
+
+def _detect_mixed_vat_from_fees(doc: Dict[str, Any]) -> bool:
+    """
+    Sumiskai: объясняем расхождение сборами по ставке 0%.
+
+    Ветка A (сбор ВНУТРИ wo): wo+vat≈with, но wo×vp≠vat
+        → (wo - база_сборов) × vp ≈ vat  →  separate_vat := True
+    Ветка B (сбор ВНЕ wo):    wo+vat≠with, дельта ≈ база_сборов
+        → wo := wo + база_сборов        →  separate_vat := True
+
+    Returns: True если separate_vat был выставлен.
+    """
+    if doc.get("line_items"):
+        return False
+    if bool(doc.get("separate_vat")):
+        return False
+
+    fees = doc.get("fees") or []
+    if not isinstance(fees, list) or not fees:
+        return False
+
+    inv_wo = d(doc.get("invoice_discount_wo_vat"), 2)
+    inv_w = d(doc.get("invoice_discount_with_vat"), 2)
+
+    wo = d(doc.get("amount_wo_vat"), 2)
+    vat = d(doc.get("vat_amount"), 2)
+    w = d(doc.get("amount_with_vat"), 2)
+    vp = d(doc.get("vat_percent"), 2)
+
+    if wo <= 0 or vat <= 0 or w <= 0:
+        return False
+
+    core_ok = _approx(Q2(wo + vat), w, tol=Decimal("0.02"))
+
+    if core_ok:
+        # --- ВЕТКА A: сбор уже внутри wo ---
+        if vp > 0:
+            # дробная ставка (18.26%) — не настоящая ставка, а следствие смешанных ставок
+            vp_fractional = (vp != vp.to_integral_value())
+            if not vp_fractional and _approx(Q2(wo * vp / Decimal("100")), vat, tol=Decimal("0.02")):
+                return False  # документ и так валиден
+            vp_eff = vp
+        else:
+            # vp не задан: если из полного wo выводится целая стандартная ставка — всё ок
+            derived = _std_rate_from_amounts(wo, vat)
+            if derived:
+                return False
+            vp_fractional = True
+            vp_eff = Decimal("0.00")
+        mode = "A"
+    else:
+        # --- ВЕТКА B: сбор не попал в wo ---
+        vp_eff = vp if vp > 0 else _std_rate_from_amounts(wo, vat)
+        if not vp_eff:
+            append_log(doc, f"mixed-vat-fees: SKIP - cannot derive rate (wo={wo}, vat={vat})")
+            return False
+        if not _approx(Q2(wo * vp_eff / Decimal("100")), vat, tol=Decimal("0.02")):
+            append_log(doc, f"mixed-vat-fees: SKIP - vat does not match rate {vp_eff}% on wo={wo}")
+            return False
+        delta = Q2(w - Q2(wo + vat))
+        if delta <= Decimal("0.02"):
+            return False
+        mode = "B"
+
+    # Кандидаты: сборы с ненулевой базой.
+    # Если ставка неизвестна (vp_eff=0) и сумма указана с НДС — пробуем
+    # очистить её по стандартным ставкам, поэтому у сбора может быть
+    # несколько вариантов базы.
+    _STD_RATES = (Decimal("21"), Decimal("9"), Decimal("5"))
+
+    cands = []
+    for f in fees:
+        if not isinstance(f, dict):
+            continue
+
+        if vp_eff > 0:
+            variants = [_fee_base_wo_vat(f, vp_eff)]
+        else:
+            amt = d(parse_decimal_lit(f.get("amount")), 2)
+            if bool(f.get("includes_vat")) and amt > 0:
+                variants = [amt] + [
+                    Q2(amt / (Decimal("1") + r / Decimal("100"))) for r in _STD_RATES
+                ]
+            else:
+                variants = [amt]
+
+        seen = set()
+        for base in variants:
+            if base > Decimal("0.00") and base not in seen:
+                seen.add(base)
+                cands.append((str(f.get("type") or "").strip().lower(), base, id(f)))
+
+    if not cands:
+        return False
+
+    cands.sort(key=lambda x: 0 if x[0] in _FEE_ZERO_FIRST else 1)
+
+    from itertools import combinations
+
+    n = len(cands)
+    for k in range(1, n + 1):
+        for combo in combinations(range(n), k):
+            # не брать два варианта одного и того же сбора
+            owners = [cands[i][2] for i in combo]
+            if len(set(owners)) != len(owners):
+                continue
+            zero_base = Q2(sum(cands[i][1] for i in combo))
+            types = ", ".join(cands[i][0] or "?" for i in combo)
+
+            if mode == "A":
+                taxable = Q2(wo - zero_base)
+                if taxable <= 0:
+                    continue
+                # при дробной vp ставку выводим заново из очищенной базы
+                rate = _std_rate_from_amounts(taxable, vat) if vp_fractional else vp_eff
+                if not rate:
+                    continue
+                if not _approx(Q2(taxable * rate / Decimal("100")), vat, tol=Decimal("0.02")):
+                    continue
+                msg = (f"mixed-vat-fees[A]: fee(s) [{types}] base={zero_base} at 0% → "
+                       f"({wo} - {zero_base}) × {rate}% ≈ vat {vat}")
+            else:
+                if not _approx(zero_base, delta, tol=Decimal("0.02")):
+                    continue
+                new_wo = Q2(wo + zero_base)
+                doc["_orig_amount_wo_vat"] = wo
+                doc["amount_wo_vat"] = new_wo
+                msg = (f"mixed-vat-fees[B]: fee(s) [{types}] base={zero_base} at 0% ≈ Δ({delta}) → "
+                       f"amount_wo_vat {wo} → {new_wo}, rate {vp_eff}% applies to {wo}")
+
+            if inv_wo != 0 or inv_w != 0:
+                doc["_orig_invoice_discount_wo_vat"] = inv_wo
+                doc["_orig_invoice_discount_with_vat"] = inv_w
+                doc["invoice_discount_wo_vat"] = Decimal("0.00")
+                doc["invoice_discount_with_vat"] = Decimal("0.00")
+                msg += f"; doc discounts (wo={inv_wo}, with={inv_w}) treated as informational → zeroed"
+
+            doc["_orig_vat_percent_before_fees"] = vp
+            doc["separate_vat"] = True
+            doc["vat_percent"] = None
+            doc["_mixed_vat_auto_detected"] = True
+            doc["_mixed_vat_zero_rate_base"] = float(zero_base)
+            append_log(doc, msg + " → separate_vat := True, vat_percent := None")
+            return True
+
+    append_log(
+        doc,
+        f"mixed-vat-fees[{mode}]: no fee combination matched "
+        f"(wo={wo}, vat={vat}, with={w}, vp={vp_eff}, fees={[(t, str(b)) for t, b, _ in cands]})"
+    )
+    return False
+
+
 def resolve_document_amounts(doc: Dict[str, Any]) -> Dict[str, Any]:
     """
     ЕДИНАЯ функция для документа (line_items НЕ трогаем):
@@ -807,6 +985,11 @@ def resolve_document_amounts(doc: Dict[str, Any]) -> Dict[str, Any]:
     # if bool(doc.get("separate_vat")):
     #     append_log(doc, "skip: separate_vat=True → anchors only, no discount reconciliation")
     #     return _calc_anchors_discount_aware(doc, allow_discount_from_with=False)
+
+    # --- 1.9) sumiskai: сборы по 0% объясняют расхождение ставки? ---
+    if _detect_mixed_vat_from_fees(doc):
+        append_log(doc, "skip: separate_vat detected from fees → anchors only")
+        return _final_checks(_calc_anchors_discount_aware(doc, allow_discount_from_with=False))
 
     # --- 2) если без скидок уже wo+vat≈with → скидки информационные (обнулим) ---
     if _approx(Q2(wo + v), w):  # ← Q2 вместо Q4
@@ -937,6 +1120,11 @@ def _calc_anchors_discount_aware(doc: Dict[str, Any], *, allow_discount_from_wit
             vp = Q2(v / wo * Decimal("100")); log.append("vat% from vat & wo")
         elif not has_disc and w != 0 and wo != 0:
             vp = Q2((w / wo - Decimal("1")) * Decimal("100")); log.append("vat% from with & wo (no-disc)")
+
+        # нестандартная дробная ставка — признак смешанных ставок, а не реальная ставка
+        if vp != 0 and vp != vp.to_integral_value():
+            log.append(f"vat% {vp} is not a whole percent → suspicious, kept for checks")
+            doc["_vat_percent_fractional"] = float(vp)
 
     # 4) with — при скидках учитываем скидки
     if w == 0 and wo != 0:

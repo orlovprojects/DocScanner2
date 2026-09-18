@@ -355,16 +355,19 @@ def validate_vat(raw_code: str | None, country_iso: str | None) -> dict:
             )
             continue
 
-        # success=true, valid=true → готово
-        if vies_res.get("valid"):
-            break
+        # success=true → ответ окончательный (valid=true или valid=false), retry только на ошибки
+        break
 
-        # success=true, valid=false → retry один раз
-        if attempt == 0:
-            logger.info("VIES valid=false for %s%s, retrying once", country_code, vat_number)
-            time.sleep(1.5)
-            continue
-        # attempt==1 → подтверждено дважды, выходим
+        # # success=true, valid=true → готово
+        # if vies_res.get("valid"):
+        #     break
+
+        # # success=true, valid=false → retry один раз
+        # if attempt == 0:
+        #     logger.info("VIES valid=false for %s%s, retrying once", country_code, vat_number)
+        #     time.sleep(1.5)
+        #     continue
+        # # attempt==1 → подтверждено дважды, выходим
 
     # 3) Обработка финального результата
     if vies_res is None:
