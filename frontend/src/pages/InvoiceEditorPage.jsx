@@ -1378,6 +1378,21 @@ const InvoiceEditorPage = () => {
             setShowLineDiscount(true);
           }
           if (data.line_items.some((li) => li.vat_percent != null)) setShowPerLineVat(true);
+          const grossUsed = data.line_items.some((li) => {
+            const net = parseFloat(li.subtotal || 0);
+            const vat = parseFloat(li.vat || 0);
+            const pct = li.vat_percent != null ? parseFloat(li.vat_percent) : parseFloat(data.vat_percent || 0);
+            return Math.abs(Math.abs(vat) - round2(Math.abs(net) * pct / 100)) >= 0.005;
+          });
+          if (grossUsed) {
+            setShowGrossInput(true);
+            setLineItems((prev) => prev.map((row, idx) => {
+              const li = data.line_items[idx];
+              if (!li) return row;
+              const total = round2(Math.abs(parseFloat(li.subtotal || 0)) + Math.abs(parseFloat(li.vat || 0)));
+              return { ...row, gross_input: total ? fmt2(total) : '' };
+            }));
+          }
         }
         if (data.note) setShowNote(true);
         if (Math.abs(parseFloat(data.invoice_discount_wo_vat || 0)) > 0) {
@@ -1625,10 +1640,16 @@ const InvoiceEditorPage = () => {
       }
       const net = Math.max(0, gross - lineDiscount);
       const vatPct = showPerLineVat ? (li.vat_percent !== '' ? parseNum(li.vat_percent) : 0) : (isPvm ? parseNum(form.vat_percent) : 0);
-      const vatAmt = isPvm ? net * vatPct / 100 : 0;
-      return { gross: round2(gross), lineDiscount: round2(lineDiscount), net: round2(net), vatPct, vatAmt: round2(vatAmt), total: round2(net + vatAmt) };
+      const netR = round2(net);
+      let vatAmt = isPvm ? netR * vatPct / 100 : 0;
+      let total = round2(netR + vatAmt);
+      if (isPvm && grossMode && li.gross_input) {
+        total = round2(parseNum(li.gross_input));
+        vatAmt = total - netR;
+      }
+      return { gross: round2(gross), lineDiscount: round2(lineDiscount), net: netR, vatPct, vatAmt: round2(vatAmt), total };
     });
-  }, [lineItems, showLineDiscount, showPerLineVat, isPvm, form.vat_percent]);
+  }, [lineItems, showLineDiscount, showPerLineVat, isPvm, form.vat_percent, grossMode]);
 
   const handleGrossToggle = (checked) => setShowGrossInput(checked);
 
@@ -1658,19 +1679,24 @@ const InvoiceEditorPage = () => {
     const groups = {};
     lineSums.forEach((ls) => {
       const rate = ls.vatPct;
-      if (!groups[rate]) groups[rate] = 0;
-      groups[rate] += ls.net;
+      if (!groups[rate]) groups[rate] = { net: 0, vat: 0 };
+      groups[rate].net += ls.net;
+      groups[rate].vat += ls.vatAmt;
     });
     const vatBreakdown = Object.entries(groups)
-      .map(([rate, groupNet]) => {
+      .map(([rate, g]) => {
         const r = parseFloat(rate);
-        const ratio = sumNet > 0 ? groupNet / sumNet : 0;
-        const discountedNet = round2(groupNet - totalDisc * ratio);
-        const vat = round2(discountedNet * r / 100);
+        const ratio = sumNet > 0 ? g.net / sumNet : 0;
+        const discountedNet = round2(g.net - totalDisc * ratio);
+        const vat = totalDisc > 0
+          ? round2(discountedNet * r / 100)
+          : round2(g.vat);
         return { rate: r, discountedNet, vat };
       })
       .sort((a, b) => b.rate - a.rate);
-    const vatTotal = round2(vatBreakdown.reduce((s, g) => s + g.vat, 0));
+    const vatTotal = totalDisc > 0
+      ? round2(vatBreakdown.reduce((s, g) => s + g.vat, 0))
+      : round2(lineSums.reduce((s, l) => s + l.vatAmt, 0));
     return { sumLines: round2(sumNet), totalDiscount: totalDisc, base: afterDisc, vat: vatTotal, grand: round2(afterDisc + vatTotal), vatBreakdown };
   }, [lineSums, showTotalDiscount, totalDiscountValue, totalDiscountType, isPvm, form.vat_percent]);
 
@@ -1724,6 +1750,7 @@ const InvoiceEditorPage = () => {
       unit: li.unit,
       price: parseNum(li.price),
       subtotal: round2(lineSums[i]?.net || 0),
+      vat: round2(lineSums[i]?.vatAmt || 0),
       vat_percent: showPerLineVat && li.vat_percent !== '' ? parseNum(li.vat_percent) : null,
       discount_wo_vat: round2(lineSums[i]?.lineDiscount || 0),
       preke_paslauga: li.preke_paslauga || '',
@@ -1804,6 +1831,8 @@ const InvoiceEditorPage = () => {
       preke_paslauga: li.preke_paslauga || '',
     })),
   });
+  // NOTE: periodinėse sąskaitose suma su PVM neišsaugoma —
+  // generuojant sąskaitą PVM skaičiuojamas pagal tarifą.
 
   const handleSave = async (andAction) => {
     setFieldErrors({});
@@ -1923,7 +1952,9 @@ const InvoiceEditorPage = () => {
         if (!li.prekes_kodas.trim()) { lineErrors.push(`Eilutė ${n}: prekės kodas`); fe[`line_${idx}_code`] = true; }
         if (parseNum(li.quantity) <= 0) { lineErrors.push(`Eilutė ${n}: kiekis`); fe[`line_${idx}_qty`] = true; }
         if (!li.unit.trim()) { lineErrors.push(`Eilutė ${n}: mato vienetas`); fe[`line_${idx}_unit`] = true; }
-        if (li.price === '' || li.price === null || li.price === undefined) { lineErrors.push(`Eilutė ${n}: kaina`); fe[`line_${idx}_price`] = true; }
+        if (grossMode) {
+          if (!li.gross_input || parseNum(li.gross_input) <= 0) { lineErrors.push(`Eilutė ${n}: suma su PVM`); fe[`line_${idx}_price`] = true; }
+        } else if (li.price === '' || li.price === null || li.price === undefined) { lineErrors.push(`Eilutė ${n}: kaina`); fe[`line_${idx}_price`] = true; }
       });
       if (lineErrors.length > 0) { errs.push(...lineErrors); fe.line_items = true; }
       setFieldErrors(fe);

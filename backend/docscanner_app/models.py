@@ -3150,6 +3150,13 @@ class Invoice(models.Model):
             self.vat_amount = total_vat
             self.amount_with_vat = total_wo_vat + total_vat
 
+            if self.pk:
+                Invoice.objects.filter(pk=self.pk).update(
+                    amount_wo_vat=self.amount_wo_vat,
+                    vat_amount=self.vat_amount,
+                    amount_with_vat=self.amount_with_vat,
+                )
+
 
 # ────────────────────────────────────────────────────────────
 # 4. InvoiceLineItem — строки счёта

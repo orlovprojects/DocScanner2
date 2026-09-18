@@ -7350,6 +7350,13 @@ def invoice_issue(request, pk):
             )
             update_fields.append("buyer_counterparty")
 
+        if invoice.invoice_type != "kreditine":
+            update_fields.extend([
+                "amount_wo_vat",
+                "vat_amount",
+                "amount_with_vat",
+            ])
+
         update_fields.append("updated_at")
         invoice.save(update_fields=list(dict.fromkeys(update_fields)))
 

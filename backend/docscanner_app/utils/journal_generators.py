@@ -233,21 +233,34 @@ def recalculate_invoice_totals(invoice):
         invoice.pvm_tipas == "taikoma"
         and sum_net > ZERO
     ):
-        for vat_percent, group_net in vat_groups.items():
-            ratio = group_net / sum_net
+        # Jei eilutėse PVM jau apskaičiuotas (pvz. įvedant sumą su PVM),
+        # imame jį tiesiogiai — kitaip atsirastų cento skirtumas.
+        lines_vat = sum(
+            (
+                abs(_to_decimal(line.vat))
+                for line in invoice_lines
+            ),
+            ZERO,
+        )
 
-            discounted_group_net = round_money(
-                group_net -
-                invoice_discount * ratio
-            )
+        if invoice_discount == ZERO and lines_vat > ZERO:
+            vat_amount = lines_vat
+        else:
+            for vat_percent, group_net in vat_groups.items():
+                ratio = group_net / sum_net
 
-            group_vat = round_money(
-                discounted_group_net *
-                vat_percent /
-                Decimal("100")
-            )
+                discounted_group_net = round_money(
+                    group_net -
+                    invoice_discount * ratio
+                )
 
-            vat_amount += group_vat
+                group_vat = round_money(
+                    discounted_group_net *
+                    vat_percent /
+                    Decimal("100")
+                )
+
+                vat_amount += group_vat
 
     vat_amount = round_money(vat_amount)
 
