@@ -1741,6 +1741,8 @@ def process_uploaded_file_task(self, user_id, doc_id, scan_type, split_depth=0, 
         t0 = _t()
         try:
             llm_resp, source_model = kie_ask_llm_with_fallback(glued_text_for_db or "", scan_type, user=user, logger=logger)
+        except SoftTimeLimitExceeded:
+            raise
         except Exception as e:
             logger.warning(f"[TASK] Gemini request failed: {e}")
             llm_resp = None
@@ -1764,6 +1766,8 @@ def process_uploaded_file_task(self, user_id, doc_id, scan_type, split_depth=0, 
                     logger.info("[TASK] Retry succeeded, got valid response (len=%d)", len(llm_resp))
                 else:
                     logger.warning("[TASK] Retry also truncated/empty, keeping original")
+            except SoftTimeLimitExceeded:
+                raise
             except Exception as e:
                 logger.warning("[TASK] Retry failed: %s, keeping original", e)
             _log_t("LLM retry (truncated response)", t_retry)
@@ -2106,6 +2110,11 @@ def process_uploaded_file_task(self, user_id, doc_id, scan_type, split_depth=0, 
             catalog_matched = _match_document_line_items_with_catalog(
                 doc=doc,
                 user=user,
+            )
+        except SoftTimeLimitExceeded:
+            logger.warning(
+                "[CATALOG MATCH] Soft time limit hit doc_id=%s — skip matching, finishing document",
+                doc.pk,
             )
         except Exception as e:
             logger.exception(

@@ -4,6 +4,7 @@ import time
 import logging
 import requests
 from dotenv import load_dotenv
+from celery.exceptions import SoftTimeLimitExceeded
 
 from ..celery_signals import _send_telegram
 from . import gemini as direct_gemini
@@ -36,6 +37,7 @@ KIE_TIMEOUT_SECONDS = float(os.getenv("KIE_TIMEOUT_SECONDS", "300"))
 LLM_PRIMARY = os.getenv("LLM_PRIMARY", "kie").strip().lower()
 LLM_DIRECT_GEMINI_FALLBACK = os.getenv("LLM_DIRECT_GEMINI_FALLBACK", "1").strip().lower() in ("1", "true", "yes", "on")
 KIE_ERROR_TELEGRAM = os.getenv("KIE_ERROR_TELEGRAM", "1").strip().lower() in ("1", "true", "yes", "on")
+LLM_MERCURY_FIRST = os.getenv("LLM_MERCURY_FIRST", "1").strip().lower() in ("1", "true", "yes", "on")
 
 DIRECT_GEMINI_MAIN_MODEL = os.getenv("DIRECT_GEMINI_MAIN_MODEL", "gemini-2.5-flash").strip()
 DIRECT_GEMINI_LITE_MODEL = os.getenv("DIRECT_GEMINI_LITE_MODEL", "gemini-3.1-flash-lite").strip()
@@ -420,6 +422,97 @@ Return only valid JSON in this exact structure:
 # }
 # """.strip()
 
+DIRECT_FALLBACK_MODEL = "gemini-3.1-flash-lite"
+
+
+def _ask_direct_lite_then_kie(
+    *,
+    text: str,
+    prompt: str,
+    temperature: float,
+    max_output_tokens: int,
+    kie_timeout: float | int,
+    direct_timeout: float | int,
+    log: logging.Logger,
+    tag: str,
+    notify_telegram: bool = False,
+) -> tuple[str, str]:
+    """
+    1) direct gemini-3.1-flash-lite
+    2) KIE gemini-3-flash
+    3) KIE gemini-2.5-flash
+    Returns: (response_text, source_model)
+    """
+    last_exc = None
+
+    # 1) direct gemini-3.1-flash-lite
+    try:
+        log.info("[%s] Attempt 1/3 direct %s", tag, DIRECT_FALLBACK_MODEL)
+        result = direct_gemini.ask_gemini_with_retry(
+            text=text,
+            prompt=prompt,
+            model=DIRECT_FALLBACK_MODEL,
+            max_retries=0,
+            wait_seconds=0,
+            temperature=temperature,
+            max_output_tokens=max_output_tokens,
+            timeout_seconds=direct_timeout,
+            logger=log,
+        )
+        if result and result.strip():
+            return result, f"direct-{DIRECT_FALLBACK_MODEL}"
+        log.warning("[%s] Direct %s returned empty", tag, DIRECT_FALLBACK_MODEL)
+    except SoftTimeLimitExceeded:
+        raise
+    except Exception as e:
+        last_exc = e
+        log.warning("[%s] Direct %s failed: %s", tag, DIRECT_FALLBACK_MODEL, e)
+
+    # 2-3) KIE gemini-3-flash → KIE gemini-2.5-flash
+    kie_chain = [
+        (2, KIE_GEMINI_3_FLASH_URL, "gemini-3-flash"),
+        (3, KIE_GEMINI_FLASH_URL, "gemini-2.5-flash"),
+    ]
+    for attempt, kie_url, kie_model in kie_chain:
+        try:
+            log.info("[%s] Attempt %d/3 KIE %s", tag, attempt, kie_model)
+            result = ask_kie(
+                text=text,
+                prompt=prompt,
+                model=kie_model,
+                temperature=temperature,
+                max_output_tokens=max_output_tokens,
+                timeout_seconds=kie_timeout,
+                endpoint_url=kie_url,
+                logger=log,
+            )
+            if result and result.strip():
+                return result, "kie-gemini"
+            log.warning("[%s] KIE %s returned empty", tag, kie_model)
+        except SoftTimeLimitExceeded:
+            raise
+        except Exception as e:
+            last_exc = e
+            log.warning("[%s] KIE %s failed: %s", tag, kie_model, e)
+            if notify_telegram:
+                _notify_kie_api_error(e, kie_model, log, attempt=attempt)
+
+    if notify_telegram and KIE_ERROR_TELEGRAM:
+        try:
+            _send_telegram(
+                f"🚨 <b>{tag}: все попытки исчерпаны</b>\n"
+                f"<b>Chain:</b> <code>direct {DIRECT_FALLBACK_MODEL} → kie gemini-3-flash → kie gemini-2.5-flash</code>\n"
+                f"<b>Last error:</b> {str(last_exc)[:300]}",
+                dedup_key=f"llm_chain_exhausted_{tag}",
+                dedup_ttl=600,
+            )
+        except Exception:
+            pass
+
+    raise ValueError(
+        f"{tag}: direct {DIRECT_FALLBACK_MODEL} + KIE gemini-3-flash + KIE gemini-2.5-flash failed (last_err={last_exc})"
+    ) from last_exc
+
 
 def ask_catalog_matching_kie(
     *,
@@ -428,7 +521,7 @@ def ask_catalog_matching_kie(
     logger: logging.Logger | None = None,
 ) -> str:
     """
-    Catalog matching: KIE 3 Flash → KIE 2.5 Flash → KIE 3 Flash → direct Gemini 3.1 Flash Lite.
+    Catalog matching: direct Gemini 3.1 Flash Lite → KIE 3 Flash → KIE 2.5 Flash.
     """
     log = logger or LOGGER
 
@@ -455,78 +548,90 @@ def ask_catalog_matching_kie(
         len(request_text),
     )
 
-    # # 1) KIE Gemini 2.5 Flash — 3 попытки
+    result, _source = _ask_direct_lite_then_kie(
+        text=request_text,
+        prompt=CATALOG_MATCHING_PROMPT,
+        temperature=0.0,
+        max_output_tokens=max_output_tokens,
+        kie_timeout=90,
+        direct_timeout=90,
+        log=log,
+        tag="CATALOG MATCH",
+    )
+    return result
+
+    # # # 1) KIE Gemini 2.5 Flash — 3 попытки
+    # # last_kie_err = None
+    # # for attempt in range(1, 4):
+    # #     try:
+    # #         log.info("[CATALOG MATCH] KIE attempt %d/3", attempt)
+    # #         result = ask_kie(
+    # #             text=request_text,
+    # #             prompt=CATALOG_MATCHING_PROMPT,
+    # #             model="gemini-2.5-flash",
+    # #             temperature=0.0,
+    # #             max_output_tokens=max_output_tokens,
+    # #             timeout_seconds=90,
+    # #             endpoint_url=KIE_GEMINI_FLASH_URL,
+    # #             logger=log,
+    # #         )
+
+    # # 1) KIE: 3 Flash → 2.5 Flash → 3 Flash
+    # kie_chain = [
+    #     (KIE_GEMINI_3_FLASH_URL, "gemini-3-flash"),
+    #     (KIE_GEMINI_FLASH_URL, "gemini-2.5-flash"),
+    #     (KIE_GEMINI_3_FLASH_URL, "gemini-3-flash"),
+    # ]
     # last_kie_err = None
-    # for attempt in range(1, 4):
+    # for attempt, (kie_endpoint, kie_model) in enumerate(kie_chain, start=1):
     #     try:
-    #         log.info("[CATALOG MATCH] KIE attempt %d/3", attempt)
+    #         log.info("[CATALOG MATCH] KIE attempt %d/3 model=%s", attempt, kie_model)
     #         result = ask_kie(
     #             text=request_text,
     #             prompt=CATALOG_MATCHING_PROMPT,
-    #             model="gemini-2.5-flash",
+    #             model=kie_model,
     #             temperature=0.0,
     #             max_output_tokens=max_output_tokens,
     #             timeout_seconds=90,
-    #             endpoint_url=KIE_GEMINI_FLASH_URL,
+    #             endpoint_url=kie_endpoint,
     #             logger=log,
     #         )
+    #         if result and result.strip():
+    #             return result
+    #         log.warning("[CATALOG MATCH] KIE attempt %d returned empty", attempt)
+    #     except Exception as e:
+    #         last_kie_err = e
+    #         log.warning("[CATALOG MATCH] KIE attempt %d failed: %s", attempt, e)
 
-    # 1) KIE: 3 Flash → 2.5 Flash → 3 Flash
-    kie_chain = [
-        (KIE_GEMINI_3_FLASH_URL, "gemini-3-flash"),
-        (KIE_GEMINI_FLASH_URL, "gemini-2.5-flash"),
-        (KIE_GEMINI_3_FLASH_URL, "gemini-3-flash"),
-    ]
-    last_kie_err = None
-    for attempt, (kie_endpoint, kie_model) in enumerate(kie_chain, start=1):
-        try:
-            log.info("[CATALOG MATCH] KIE attempt %d/3 model=%s", attempt, kie_model)
-            result = ask_kie(
-                text=request_text,
-                prompt=CATALOG_MATCHING_PROMPT,
-                model=kie_model,
-                temperature=0.0,
-                max_output_tokens=max_output_tokens,
-                timeout_seconds=90,
-                endpoint_url=kie_endpoint,
-                logger=log,
-            )
-            if result and result.strip():
-                return result
-            log.warning("[CATALOG MATCH] KIE attempt %d returned empty", attempt)
-        except Exception as e:
-            last_kie_err = e
-            log.warning("[CATALOG MATCH] KIE attempt %d failed: %s", attempt, e)
+    #     if attempt < 3:
+    #         time.sleep(3)
 
-        if attempt < 3:
-            time.sleep(3)
+    # log.warning(
+    #     "[CATALOG MATCH] KIE exhausted 3 attempts (last_err=%s) → direct Gemini fallback",
+    #     last_kie_err,
+    # )
 
-    log.warning(
-        "[CATALOG MATCH] KIE exhausted 3 attempts (last_err=%s) → direct Gemini fallback",
-        last_kie_err,
-    )
+    # # 2) Direct Gemini 3.1 Flash Lite fallback
+    # try:
+    #     result = direct_gemini.ask_gemini_with_retry(
+    #         text=request_text,
+    #         prompt=CATALOG_MATCHING_PROMPT,
+    #         model="gemini-3.1-flash-lite",
+    #         max_retries=0,
+    #         wait_seconds=0,
+    #         temperature=0.0,
+    #         max_output_tokens=max_output_tokens,
+    #         timeout_seconds=90,
+    #         logger=log,
+    #     )
+    #     if result and result.strip():
+    #         log.info("[CATALOG MATCH] Direct Gemini fallback OK len=%d", len(result))
+    #         return result
+    #     log.warning("[CATALOG MATCH] Direct Gemini fallback also empty")
+    # except Exception as e:
+    #     log.warning("[CATALOG MATCH] Direct Gemini fallback failed: %s", e)
 
-    # 2) Direct Gemini 3.1 Flash Lite fallback
-    try:
-        result = direct_gemini.ask_gemini_with_retry(
-            text=request_text,
-            prompt=CATALOG_MATCHING_PROMPT,
-            model="gemini-3.1-flash-lite",
-            max_retries=0,
-            wait_seconds=0,
-            temperature=0.0,
-            max_output_tokens=max_output_tokens,
-            timeout_seconds=90,
-            logger=log,
-        )
-        if result and result.strip():
-            log.info("[CATALOG MATCH] Direct Gemini fallback OK len=%d", len(result))
-            return result
-        log.warning("[CATALOG MATCH] Direct Gemini fallback also empty")
-    except Exception as e:
-        log.warning("[CATALOG MATCH] Direct Gemini fallback failed: %s", e)
-
-    raise ValueError("Catalog matching: KIE (3 attempts) and direct Gemini both failed")
+    # raise ValueError("Catalog matching: KIE (3 attempts) and direct Gemini both failed")
 
 
 def ask_kie_with_retry(
@@ -791,18 +896,40 @@ def ask_llm_with_fallback(text: str, scan_type: str, user=None, logger: logging.
     ilt_min = str(int(user.min_ilgalaikis_turtas_amount)) if user and hasattr(user, "min_ilgalaikis_turtas_amount") else "500"
     prompt = prompt.replace("{long_term_asset_min_value}", ilt_min)
 
-    log.info("[LLM] Try primary provider=%s chain=gemini-3-flash→gemini-2.5-flash→gemini-3-flash", LLM_PRIMARY)
+    # ── Mercury 2.5 kaip 1 bandymas (1 из 4) ──
+    # Чтобы вернуть: раскомментировать блок ниже.
+    # if LLM_MERCURY_FIRST:
+    #     try:
+    #         from .mercury import ask_mercury
+    #         t_m = time.perf_counter()
+    #         m_resp = ask_mercury(
+    #             text=text,
+    #             prompt=prompt,
+    #             model="mercury-2.5",
+    #             reasoning_effort="low",
+    #             max_tokens=30000 if scan_type == "detaliai" else 20000,
+    #             timeout_seconds=90 if scan_type == "detaliai" else 60,
+    #             logger_override=log,
+    #         )
+    #         if m_resp and m_resp.strip():
+    #             log.info("[LLM] OK source=mercury-2.5 len=%d elapsed=%.2fs", len(m_resp), time.perf_counter() - t_m)
+    #             return m_resp, "mercury-2.5"
+    #         log.warning("[LLM] Mercury 2.5 returned empty → KIE chain")
+    #     except Exception as e:
+    #         log.warning("[LLM] Mercury 2.5 failed: %s → KIE chain", e)
 
-    result, source_model = ask_llm_provider_with_retry(
+    log.info("[LLM] Chain: direct %s → KIE gemini-3-flash → KIE gemini-2.5-flash", DIRECT_FALLBACK_MODEL)
+
+    result, source_model = _ask_direct_lite_then_kie(
         text=text,
         prompt=prompt,
-        model=DIRECT_GEMINI_MAIN_MODEL,
-        max_retries=2,
-        wait_seconds=3,
         temperature=1.0,
         max_output_tokens=30000 if scan_type == "detaliai" else 20000,
-        timeout_seconds=180 if scan_type == "detaliai" else 90,
-        logger=log,
+        kie_timeout=180 if scan_type == "detaliai" else 90,
+        direct_timeout=180 if scan_type == "detaliai" else 90,
+        log=log,
+        tag="LLM",
+        notify_telegram=True,
     )
 
     log.info("[LLM] OK source=%s len=%d preview=%r", source_model, len(result), result[:200].replace("\n", " "))

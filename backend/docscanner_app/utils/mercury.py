@@ -2,7 +2,10 @@
 import os
 import time
 import logging
+from dotenv import load_dotenv
 from openai import OpenAI, RateLimitError, APITimeoutError
+
+load_dotenv()
 
 logger = logging.getLogger("docscanner_app")
 
@@ -26,23 +29,26 @@ def _get_client():
 def ask_mercury(
     text: str,
     prompt: str,
-    model: str = "mercury-2",
+    model: str = "mercury-2.5",
     temperature: float = 0.6,
     max_tokens: int = 30000,
     reasoning_effort: str = "low",
     logger_override=None,
+    timeout_seconds: float | None = None,
 ) -> str:
     log = logger_override or logger
 
     combined = prompt + "\n\n" + text
 
     log.info(
-        "[Mercury] Request start model=%s len_text=%d len_prompt=%d total_len=%d temp=%.2f reasoning=%s",
-        model, len(text), len(prompt), len(combined), temperature, reasoning_effort,
+        "[Mercury] Request start model=%s len_text=%d len_prompt=%d total_len=%d temp=%.2f reasoning=%s timeout=%s",
+        model, len(text), len(prompt), len(combined), temperature, reasoning_effort, timeout_seconds,
     )
 
     t0 = time.perf_counter()
     client = _get_client()
+    if timeout_seconds:
+        client = client.with_options(timeout=float(timeout_seconds), max_retries=0)
 
     response = client.chat.completions.create(
         model=model,
@@ -70,13 +76,14 @@ def ask_mercury(
 def ask_mercury_with_retry(
     text: str,
     prompt: str,
-    model: str = "mercury-2",
+    model: str = "mercury-2.5",
     max_retries: int = 2,
     wait_seconds: int = 15,     
     temperature: float = 0.6,
     max_tokens: int = 30000,
     reasoning_effort: str = "low",
     logger=None,
+    timeout_seconds: float | None = None,
 ) -> str:
     log = logger or globals()["logger"]
     last_exc = None
@@ -96,6 +103,7 @@ def ask_mercury_with_retry(
                 max_tokens=max_tokens,
                 reasoning_effort=reasoning_effort,
                 logger_override=log,
+                timeout_seconds=timeout_seconds,
             )
             elapsed = time.perf_counter() - t0
             log.info("[Mercury] Attempt %d succeeded in %.2fs", attempt + 1, elapsed)
