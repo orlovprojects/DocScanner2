@@ -4737,8 +4737,7 @@ def admin_users_simple(request):
     same_ip_sq = (
         CustomUser.objects.filter(registration_ip=OuterRef("registration_ip"))
         .exclude(pk=OuterRef("pk"))
-        .exclude(registration_ip__isnull=True)
-        .exclude(registration_ip="")
+        .filter(registration_ip__isnull=False)
         .order_by().values("registration_ip")
         .annotate(ids=ArrayAgg("id", ordering="id"))
         .values("ids")[:1]

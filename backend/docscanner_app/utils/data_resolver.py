@@ -768,8 +768,8 @@ def _detect_mixed_vat_from_fees(doc: Dict[str, Any]) -> bool:
     """
     if doc.get("line_items"):
         return False
-    if bool(doc.get("separate_vat")):
-        return False
+
+    sep_vat_in = bool(doc.get("separate_vat"))
 
     fees = doc.get("fees") or []
     if not isinstance(fees, list) or not fees:
@@ -788,7 +788,18 @@ def _detect_mixed_vat_from_fees(doc: Dict[str, Any]) -> bool:
 
     core_ok = _approx(Q2(wo + vat), w, tol=Decimal("0.02"))
 
-    if core_ok:
+    # separate_vat уже стоит: ставку не проверяем и не меняем,
+    # но дельту по сборам починить можем (ветка B)
+    if sep_vat_in:
+        if core_ok:
+            return False
+        delta = Q2(w - Q2(wo + vat))
+        if delta <= Decimal("0.02"):
+            return False
+        vp_eff = Decimal("0.00")
+        vp_fractional = True
+        mode = "B"
+    elif core_ok:
         # --- ВЕТКА A: сбор уже внутри wo ---
         if vp > 0:
             # дробная ставка (18.26%) — не настоящая ставка, а следствие смешанных ставок
@@ -829,16 +840,17 @@ def _detect_mixed_vat_from_fees(doc: Dict[str, Any]) -> bool:
         if not isinstance(f, dict):
             continue
 
-        if vp_eff > 0:
-            variants = [_fee_base_wo_vat(f, vp_eff)]
+        amt = d(parse_decimal_lit(f.get("amount")), 2)
+        if not bool(f.get("includes_vat")) or amt <= 0:
+            variants = [amt]
+        elif vp_eff > 0:
+            # сбор по 0% → сумма с НДС равна сумме без НДС, поэтому
+            # сырую сумму пробуем тоже
+            variants = [amt, Q2(amt / (Decimal("1") + vp_eff / Decimal("100")))]
         else:
-            amt = d(parse_decimal_lit(f.get("amount")), 2)
-            if bool(f.get("includes_vat")) and amt > 0:
-                variants = [amt] + [
-                    Q2(amt / (Decimal("1") + r / Decimal("100"))) for r in _STD_RATES
-                ]
-            else:
-                variants = [amt]
+            variants = [amt] + [
+                Q2(amt / (Decimal("1") + r / Decimal("100"))) for r in _STD_RATES
+            ]
 
         seen = set()
         for base in variants:
@@ -968,8 +980,10 @@ def resolve_document_amounts(doc: Dict[str, Any]) -> Dict[str, Any]:
 
     # separate_vat → никаких скидочных эвристик, только якоря "как есть"
     if bool(doc.get("separate_vat")):
+        # но дельту по сборам починить можем
+        _detect_mixed_vat_from_fees(doc)
         append_log(doc, "skip: separate_vat=True → anchors only, no discount reconciliation")
-        return _calc_anchors_discount_aware(doc, allow_discount_from_with=False)
+        return _final_checks(_calc_anchors_discount_aware(doc, allow_discount_from_with=False))
 
     # append_log(doc, f"check#0 discounts: invoice_discount_wo_vat={inv_wo}, invoice_discount_with_vat={inv_w}")
     # if v < 0 or vp < 0:
