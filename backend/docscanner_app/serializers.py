@@ -1243,6 +1243,7 @@ class CustomUserAdminListSerializer(CustomUserSerializer):
     invoices_this_month = serializers.IntegerField(read_only=True)
     invoices_prev_month = serializers.IntegerField(read_only=True)
     invoices_90d = serializers.IntegerField(read_only=True)
+    same_ip_user_ids = serializers.ListField(child=serializers.IntegerField(), read_only=True, allow_null=True)
 
     class Meta(CustomUserSerializer.Meta):
         model = CustomUser
@@ -1266,6 +1267,8 @@ class CustomUserAdminListSerializer(CustomUserSerializer):
             'invoices_this_month',
             'invoices_prev_month',
             'invoices_90d',
+            'registration_ip',
+            'same_ip_user_ids',
         ]
         read_only_fields = getattr(CustomUserSerializer.Meta, 'read_only_fields', ('credits',))
 

@@ -4708,6 +4708,8 @@ def admin_users_simple(request):
     from django.utils import timezone
     from django.db.models import OuterRef, Subquery, Sum, Count, Value, IntegerField, DecimalField
     from django.db.models.functions import Coalesce
+    from django.contrib.postgres.aggregates import ArrayAgg
+    from django.contrib.postgres.fields import ArrayField
 
     now = timezone.localtime()
     this_month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
@@ -4732,6 +4734,16 @@ def admin_users_simple(request):
         q = q.order_by().values("user").annotate(c=Count("id")).values("c")[:1]
         return Coalesce(Subquery(q, output_field=IntegerField()), Value(0), output_field=IntegerField())
 
+    same_ip_sq = (
+        CustomUser.objects.filter(registration_ip=OuterRef("registration_ip"))
+        .exclude(pk=OuterRef("pk"))
+        .exclude(registration_ip__isnull=True)
+        .exclude(registration_ip="")
+        .order_by().values("registration_ip")
+        .annotate(ids=ArrayAgg("id", ordering="id"))
+        .values("ids")[:1]
+    )
+
     profiles_sq = (
         CompanyProfile.objects.filter(user=OuterRef("pk"))
         .order_by().values("user").annotate(c=Count("id")).values("c")[:1]
@@ -4739,6 +4751,7 @@ def admin_users_simple(request):
 
     qs = CustomUser.objects.all().annotate(
         company_profiles_count=Coalesce(Subquery(profiles_sq, output_field=IntegerField()), Value(0)),
+        same_ip_user_ids=Subquery(same_ip_sq, output_field=ArrayField(IntegerField())),
         credits_this_month=credits_sq(this_month_start),
         credits_prev_month=credits_sq(prev_month_start, this_month_start),
         credits_90d=credits_sq(d90_start),

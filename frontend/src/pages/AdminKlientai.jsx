@@ -21,6 +21,7 @@ import {
 } from "@mui/material";
 import RefreshIcon from "@mui/icons-material/Refresh";
 import SearchIcon from "@mui/icons-material/Search";
+import GroupsIcon from "@mui/icons-material/Groups";
 import PaymentIcon from "@mui/icons-material/Payment";
 import ReceiptLongIcon from "@mui/icons-material/ReceiptLong";
 import HourglassEmptyIcon from "@mui/icons-material/HourglassEmpty";
@@ -388,7 +389,30 @@ export default function AdminUsers() {
                   }}
                 >
                   <TableCell sx={{ color: "text.secondary", fontWeight: 500 }}>{u.id}</TableCell>
-                  <TableCell sx={{ fontWeight: 500 }}>{u.email || "-"}</TableCell>
+                  <TableCell sx={{ fontWeight: 500 }}>
+                    <Stack direction="row" alignItems="center" gap={0.75}>
+                      <span>{u.email || "-"}</span>
+                      {u.same_ip_user_ids?.length > 0 && (
+                        <Tooltip
+                          arrow
+                          title={
+                            <Box>
+                              <Box sx={{ fontWeight: 600, mb: 0.5 }}>Tas pats registracijos IP: {u.registration_ip}</Box>
+                              <Box>Vartotojai: {u.same_ip_user_ids.map((id) => `#${id}`).join(", ")}</Box>
+                            </Box>
+                          }
+                        >
+                          <Box
+                            onClick={() => setSearchInput(String(u.same_ip_user_ids[0]))}
+                            sx={{ display: "flex", alignItems: "center", gap: 0.25, color: "warning.main", cursor: "pointer" }}
+                          >
+                            <GroupsIcon sx={{ fontSize: 18 }} />
+                            <Typography sx={{ fontSize: 12, fontWeight: 700 }}>{u.same_ip_user_ids.length}</Typography>
+                          </Box>
+                        </Tooltip>
+                      )}
+                    </Stack>
+                  </TableCell>
                   <TableCell sx={{ color: "text.secondary", fontSize: "0.875rem" }}>
                     {fmtDateTime(u.date_joined)}
                   </TableCell>
