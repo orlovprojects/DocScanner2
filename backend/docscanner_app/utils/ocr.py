@@ -208,12 +208,88 @@ def _postprocess_text(text: str) -> str:
         # Убираем множественные пробелы внутри строки, но не в начале
         # Сохраняем двойные+ пробелы для колонок (если > 3 пробелов подряд)
         # Только сворачиваем 2 пробела в 1
-        fixed = re.sub(r'(?<! ) {2}(?! )', ' ', stripped)
+        # в строках с колоночным выравниванием (3+ пробела подряд) пробелы не трогаем
+        if re.search(r' {3,}', stripped):
+            fixed = stripped
+        else:
+            fixed = re.sub(r'(?<! ) {2}(?! )', ' ', stripped)
         fixed_lines.append(' ' * leading + fixed)
     text = '\n'.join(fixed_lines)
     
     return text
 
+def _merge_stacked_tokens(row: List[Dict], h_med: float) -> List[Dict]:
+    """
+    Многострочные заголовки таблиц ('Kaina su' / 'PVM') после группировки по Y
+    попадают в одну строку и перемешиваются по X ('Kaina PVM su').
+    Токены, которые перекрываются по X, но лежат на разной высоте, собираем
+    в одну «стопку» и склеиваем сверху вниз: 'Kaina su PVM'.
+    В строках данных токены по X не перекрываются → ничего не меняется.
+    """
+    n = len(row)
+    if n < 2:
+        return row
+
+    parent = list(range(n))
+
+    def find(i):
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    y_gap = 0.4 * h_med
+    stacked = False
+    for i in range(n):
+        for j in range(i + 1, n):
+            a, b = row[i], row[j]
+            if abs(a["y_c"] - b["y_c"]) <= y_gap:
+                continue
+            overlap = min(a["x_r"], b["x_r"]) - max(a["x_l"], b["x_l"])
+            if overlap > 0:
+                parent[find(i)] = find(j)
+                stacked = True
+
+    if not stacked:
+        return row
+
+    groups: Dict[int, List[Dict]] = {}
+    for i in range(n):
+        groups.setdefault(find(i), []).append(row[i])
+
+    merged = []
+    for toks in groups.values():
+        if len(toks) == 1:
+            merged.append(toks[0])
+            continue
+
+        # сверху вниз по визуальным строкам, внутри строки — слева направо
+        toks.sort(key=lambda t: t["y_c"])
+        vlines: List[List[Dict]] = []
+        for t in toks:
+            if vlines and abs(t["y_c"] - vlines[-1][0]["y_c"]) <= y_gap:
+                vlines[-1].append(t)
+            else:
+                vlines.append([t])
+
+        parts = []
+        for vl in vlines:
+            vl.sort(key=lambda t: t["x_l"])
+            s = vl[0]["text"]
+            for prev_t, cur_t in zip(vl, vl[1:]):
+                s += ("" if _should_glue_tokens(prev_t["text"], cur_t["text"], 0) else " ") + cur_t["text"]
+            parts.append(s)
+
+        merged.append({
+            "text": " ".join(parts),
+            "x_l": min(t["x_l"] for t in toks),
+            "x_r": max(t["x_r"] for t in toks),
+            "y_c": min(t["y_c"] for t in toks),
+            "char_pos": min(t["char_pos"] for t in toks),
+            "char_end": max(t["char_end"] for t in toks),
+        })
+
+    return merged
 
 def _join_words_to_lines(
     words_data: List[Dict],
@@ -329,6 +405,7 @@ def _join_words_to_lines(
     all_lines_text = []
 
     for row in lines:
+        row = _merge_stacked_tokens(row, h_med)
         row.sort(key=lambda t: t["char_pos"])
         
         # Собираем строку посимвольно
@@ -355,9 +432,11 @@ def _join_words_to_lines(
                     # Склеиваем без пробела
                     spaces = 0
                 else:
-                    # Обычный случай — пробелы по координатам
-                    # Гарантируем минимум 1 пробел между обычными словами
-                    spaces = max(1, gap_chars)
+                    # Абсолютная позиция по сетке: догоняем курсор до target_pos,
+                    # чтобы колонки не уезжали из-за накопленной разницы длины слов.
+                    # При явном разрыве колонок по пикселям — минимум 2 пробела
+                    min_spaces = 2 if gap_chars >= 3 else 1
+                    spaces = max(min_spaces, target_pos - cursor)
                 
                 if spaces > 0:
                     line_chars.append(" " * spaces)
