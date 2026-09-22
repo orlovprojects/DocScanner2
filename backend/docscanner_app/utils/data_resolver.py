@@ -345,11 +345,13 @@ def _canon_line_from_partial(li: Dict[str, Any]) -> None:
 
     if net != 0 and tot != 0:
         vat_calc = Q2(tot - net)  # ← Q2 вместо Q4
+        vat_by_rate = Q2(net * vp / Decimal("100")) if vp != 0 else Decimal("0.00")
         if vat == 0:
             li["vat"] = vat_calc if vat_calc >= Decimal("0.00") else Decimal("0.00")  # ← 0.00 вместо 0.0000
         li["total"] = Q2(tot)      # ← Q2 вместо Q4
         li["subtotal"] = Q2(net)   # ← Q2 вместо Q4
-        if d(li.get("vat"), 2) == 0 and vp != 0:  # ← d(..., 2) вместо d(..., 4)
+        # копейки: vat по ставке и так округляется в 0 → ставку НЕ обнуляем
+        if d(li.get("vat"), 2) == 0 and vp != 0 and vat_by_rate != 0:  # ← d(..., 2) вместо d(..., 4)
             li["vat_percent"] = Decimal("0.00")
         elif d(li.get("vat"), 2) > 0 and net > 0 and vp == 0:  # ← d(..., 2)
             li["vat_percent"] = Q2(d(li.get("vat"), 2) / net * Decimal("100"))  # ← d(..., 2)
@@ -690,6 +692,20 @@ def _fix_vat_percent_from_amounts(doc: Dict[str, Any]) -> bool:
     if not _approx(Q2(wo + vat), w, tol=Decimal("0.02")):
         return False
 
+    # Текущая ставка уже объясняет VAT → не трогаем
+    old_vp = d(doc.get("vat_percent"), 2)
+    if old_vp > 0 and _approx(Q2(wo * old_vp / Decimal("100")), vat, tol=Decimal("0.02")):
+        return False
+
+    # На малых суммах подходит несколько ставок → неоднозначно
+    fitting = [
+        r for r in range(0, 31)
+        if _approx(Q2(wo * Decimal(r) / Decimal("100")), vat, tol=Decimal("0.02"))
+    ]
+    if len(fitting) > 1:
+        append_log(doc, f"vat-percent-fix: SKIP - ambiguous rates {fitting} (wo={wo}, vat={vat})")
+        return False
+
     # Фактическая ставка по суммам
     raw_rate = vat / wo * Decimal("100")
 
@@ -927,6 +943,11 @@ def resolve_document_amounts(doc: Dict[str, Any]) -> Dict[str, Any]:
       • discount-aware досчитывает 4 якоря: amount_wo_vat, vat_amount, vat_percent, amount_with_vat
       • выполняет финальные консистент-проверки и пишет *_check_* флаги
     """
+    # Запомнить, какие строки пришли от LLM с vat (до любых досчётов)
+    for li in (doc.get("line_items") or []):
+        raw_vat = li.get("vat")
+        li["_vat_provided"] = raw_vat is not None and str(raw_vat).strip() != ""
+
     _infer_doc_from_lines_when_missing(doc)
     # ✅ НОВОЕ: Очистить vat_percent если separate_vat=true
     _ensure_vat_percent_cleared_when_separate(doc)
@@ -3561,6 +3582,16 @@ def _fix_delta_adjust_lines_and_doc(doc: Dict[str, Any], customer_user=None) -> 
     diff_with = (sum_with - doc_with).copy_abs()
     
     append_log(doc, f"fix_delta: checking deltas: wo={diff_wo}, vat={diff_vat}, with={diff_with}")
+
+    # Документ сам согласован, Σwo совпадает → дельта только от построчного округления НДС,
+    # документ не подгоняем
+    doc_vp = d(doc.get("vat_percent"), 2)
+    if (not separate_vat and doc_vp > 0
+            and diff_wo <= FIX_DELTA_MIN
+            and _approx(Q2(doc_wo + doc_vat), doc_with)
+            and _approx(Q2(doc_wo * doc_vp / Decimal("100")), doc_vat)):
+        append_log(doc, "fix_delta: SKIP - doc totals self-consistent, delta is line VAT rounding")
+        return False
     
     # Все дельты маленькие — ничего не делаем
     if diff_wo <= FIX_DELTA_MIN and diff_vat <= FIX_DELTA_MIN and diff_with <= FIX_DELTA_MIN:
@@ -3841,6 +3872,70 @@ def _infer_line_vat_percent_from_doc_total(doc: Dict[str, Any]) -> bool:
     append_log(doc, f"vat-infer: no valid combination found for doc_vat={doc_vat}")
     return False
 
+def _redistribute_doc_vat_to_lines(doc: Dict[str, Any]) -> bool:
+    """
+    НДС документа посчитан от итога, а в строках — построчное округление
+    (на копейках строки дают 0.00). Если ставка одна, Σsubtotal ≈ doc.wo
+    и doc.vat = Q2(wo×vp) — раскладываем doc.vat по строкам методом
+    наибольшего остатка.
+    """
+    items = doc.get("line_items") or []
+    if not items or bool(doc.get("separate_vat")):
+        return False
+
+    vp = d(doc.get("vat_percent"), 2)
+    doc_wo = d(doc.get("amount_wo_vat"), 2)
+    doc_vat = d(doc.get("vat_amount"), 2)
+    if vp <= 0 or doc_wo <= 0:
+        return False
+
+    # все строки с той же ставкой
+    if any(d(li.get("vat_percent"), 2) != vp for li in items):
+        return False
+
+    # НДС строк от LLM отличается от построчного расчёта → он реально с бумаги, не трогаем
+    # (если совпадает с Q2(sub×vp) — LLM просто досчитала сама)
+    for li in items:
+        if li.get("_vat_provided"):
+            calc = Q2(d(li.get("subtotal"), 2) * vp / Decimal("100"))
+            if d(li.get("vat"), 2) != calc:
+                append_log(doc, "vat-redistribute: SKIP - line VAT provided by LLM differs from per-line calc")
+                return False
+
+    sum_wo, sum_vat, _ = _aggregate_lines(doc)
+    if sum_vat == doc_vat:
+        return False
+    if not _approx(sum_wo, doc_wo):
+        return False
+    if not _approx(Q2(doc_wo * vp / Decimal("100")), doc_vat):
+        return False
+
+    # разница объяснима округлением: максимум 0.005 на строку
+    if (sum_vat - doc_vat).copy_abs() > max(Decimal("0.02"), Decimal("0.005") * len(items)):
+        return False
+
+    exact = [d(li.get("subtotal"), 2) * vp for li in items]  # НДС в центах
+    floors = [int(e) for e in exact]
+    remaining = int((doc_vat * 100).to_integral_value(rounding=ROUND_HALF_UP)) - sum(floors)
+    if remaining < 0 or remaining > len(items):
+        return False
+
+    order = sorted(range(len(items)), key=lambda i: exact[i] - floors[i], reverse=True)
+    for i in order[:remaining]:
+        floors[i] += 1
+
+    for i, li in enumerate(items):
+        old_vat = d(li.get("vat"), 2)
+        new_vat = Decimal(floors[i]) / Decimal("100")
+        li["vat"] = new_vat
+        li["total"] = Q2(d(li.get("subtotal"), 2) + new_vat)
+        if new_vat != old_vat:
+            (li.setdefault("_li_calc_log", [])).append(
+                f"vat-redistribute: vat {old_vat}→{new_vat} (doc VAT calculated on total)"
+            )
+
+    append_log(doc, f"vat-redistribute: Σvat {sum_vat}→{doc_vat} distributed across {len(items)} line(s)")
+    return True
 
 # def resolve_line_items(doc: Dict[str, Any]) -> Dict[str, Any]:
 def resolve_line_items(doc: Dict[str, Any], customer_user=None) -> Dict[str, Any]:
@@ -3986,6 +4081,12 @@ def resolve_line_items(doc: Dict[str, Any], customer_user=None) -> Dict[str, Any
 
     # ✅ НОВОЕ: Fallback детекция смешанных ставок по line_items
     _detect_mixed_vat_from_lines(doc)
+
+    # НДС документа посчитан от итога → разложить по строкам
+    if not doc.get("ar_sutapo", False):
+        if _redistribute_doc_vat_to_lines(doc):
+            sum_wo, sum_vat, sum_with = _aggregate_lines(doc)
+            _check_against_doc(doc, sum_wo, sum_vat, sum_with)
 
 
     # 4) Хинты
