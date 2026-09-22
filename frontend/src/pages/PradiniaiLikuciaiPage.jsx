@@ -12,6 +12,8 @@ import ArrowBackIcon from "@mui/icons-material/ArrowBack";
 import ArrowForwardIcon from "@mui/icons-material/ArrowForward";
 import LockOpenIcon from "@mui/icons-material/LockOpen";
 import ReceiptLongIcon from "@mui/icons-material/ReceiptLong";
+import WeekendIcon from "@mui/icons-material/Weekend";
+import MenuItem from "@mui/material/MenuItem";
 import { DatePicker, LocalizationProvider } from "@mui/x-date-pickers";
 import { AdapterDayjs } from "@mui/x-date-pickers/AdapterDayjs";
 import dayjs from "dayjs";
@@ -23,7 +25,7 @@ import { useCompanyProfiles } from "../contexts/useCompanyProfiles";
 
 const BASE = "/apskaita/pradiniai-likuciai";
 
-const SECTION_KEYS = ["balance", "bank", "buyer", "supplier"];
+const SECTION_KEYS = ["balance", "bank", "buyer", "supplier", "fixed_asset"];
 
 const STEPS = [
   { key: "date", label: "Perėjimo data" },
@@ -31,6 +33,7 @@ const STEPS = [
   { key: "bank", label: "Banko sąskaitos" },
   { key: "buyer", label: "Pirkėjų skolos" },
   { key: "supplier", label: "Tiekėjų skolos" },
+  { key: "fixed_asset", label: "Ilgalaikis turtas" },
   { key: "review", label: "Patikrinimas" },
 ];
 
@@ -53,6 +56,11 @@ const SECTION_INFO = {
   supplier: {
     title: "Įkelkite tiekėjų skolas",
     hint: "Kiek jūs skolingi tiekėjams. Avansas — kai sumokėjote iš anksto.",
+    required: false,
+  },
+  fixed_asset: {
+    title: "Įkelkite ilgalaikio turto registrą",
+    hint: "Kiekvieno turto savikaina ir sukauptas nusidėvėjimas perėjimo dienai. Kortelės bus sukurtos patvirtinus likučius, DK įrašas nekuriamas — sumos jau yra balanse.",
     required: false,
   },
 };
@@ -95,7 +103,7 @@ const fmtAmount = (val, currency = "EUR") => {
 // Vieno žingsnio failo įkėlimas + lentelė
 // ════════════════════════════════════════════════════════
 
-function SectionStep({ sectionKey, batch, lines, onUploaded, onLineChanged, disabled }) {
+function SectionStep({ sectionKey, batch, lines, onUploaded, onLineChanged, disabled, categories }) {
   const inputRef = useRef(null);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState("");
@@ -106,6 +114,7 @@ function SectionStep({ sectionKey, batch, lines, onUploaded, onLineChanged, disa
   const cfg = SECTION_INFO[sectionKey];
   const info = batch?.sections?.[sectionKey];
   const isCounterparty = sectionKey === "buyer" || sectionKey === "supplier";
+  const isAsset = sectionKey === "fixed_asset";
 
   const handleFile = async (file) => {
     if (!file) return;
@@ -145,6 +154,17 @@ function SectionStep({ sectionKey, batch, lines, onUploaded, onLineChanged, disa
     }
   };
 
+  const saveCategory = async (lineId, category) => {
+    try {
+      const { data } = await api.patch(
+        `${BASE}/line/${lineId}/`, { category }, { withCredentials: true },
+      );
+      onLineChanged(sectionKey, data.line, data.summary);
+    } catch (e) {
+      setError(e.response?.data?.detail || "Nepavyko priskirti grupės.");
+    }
+  };
+
   const downloadTemplate = async () => {
     setError("");
     try {
@@ -159,6 +179,7 @@ function SectionStep({ sectionKey, batch, lines, onUploaded, onLineChanged, disa
         bank: "banko_saskaitos",
         buyer: "pirkejai",
         supplier: "tiekejai",
+        fixed_asset: "ilgalaikis_turtas",
       };
       a.download = `pradiniai_likuciai_${fileNames[sectionKey] || sectionKey}.xlsx`;
       document.body.appendChild(a);
@@ -172,7 +193,9 @@ function SectionStep({ sectionKey, batch, lines, onUploaded, onLineChanged, disa
 
   const totalD = lines.reduce((s, l) => s + Number(l.debit || 0), 0);
   const totalK = lines.reduce((s, l) => s + Number(l.credit || 0), 0);
-  const unmapped = lines.filter((l) => !isCounterparty && !l.mapped_account).length;
+  const unmapped = isAsset
+    ? lines.filter((l) => !l.category).length
+    : lines.filter((l) => !isCounterparty && !l.mapped_account).length;
 
   return (
     <Box>
@@ -251,11 +274,74 @@ function SectionStep({ sectionKey, batch, lines, onUploaded, onLineChanged, disa
 
       {unmapped > 0 && (
         <Alert severity="warning" sx={{ mt: 1.5, "& .MuiAlert-message": { fontSize: 13 } }}>
-          Priskirkite mūsų sąskaitą {unmapped} eilutėms — spustelėkite brūkšnelį stulpelyje „Mūsų sąskaita“.
+          {isAsset
+            ? `Priskirkite turto grupę ${unmapped} eilutėms — be jos kortelė nebus sukurta.`
+            : `Priskirkite mūsų sąskaitą ${unmapped} eilutėms — spustelėkite brūkšnelį stulpelyje „Mūsų sąskaita“.`}
         </Alert>
       )}
 
-      {lines.length > 0 && (
+      {lines.length > 0 && isAsset && (
+        <TableContainer component={Paper} sx={{ mt: 1.5, maxHeight: 440, borderRadius: 2, boxShadow: "none", border: "0.5px solid", borderColor: "divider" }}>
+          <Table size="small" stickyHeader>
+            <TableHead>
+              <TableRow>
+                <TableCell sx={{ fontSize: 11, fontWeight: 800, width: 110 }}>Inv. nr.</TableCell>
+                <TableCell sx={{ fontSize: 11, fontWeight: 800 }}>Pavadinimas</TableCell>
+                <TableCell sx={{ fontSize: 11, fontWeight: 800, width: 210 }}>Turto grupė</TableCell>
+                <TableCell sx={{ fontSize: 11, fontWeight: 800, width: 100 }}>Eksploatacija</TableCell>
+                <TableCell sx={{ fontSize: 11, fontWeight: 800, width: 70 }} align="right">Mėn.</TableCell>
+                <TableCell sx={{ fontSize: 11, fontWeight: 800, width: 120 }} align="right">Savikaina</TableCell>
+                <TableCell sx={{ fontSize: 11, fontWeight: 800, width: 130 }} align="right">Sukaupta</TableCell>
+                <TableCell sx={{ fontSize: 11, fontWeight: 800, width: 120 }} align="right">Likutinė</TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {lines.map((line) => {
+                const extra = line.extra || {};
+                const cost = Number(line.debit || 0);
+                const accumulated = Number(line.credit || 0);
+                return (
+                  <TableRow key={line.id} hover sx={!line.category ? { bgcolor: "#FFFBF5" } : undefined}>
+                    <TableCell sx={{ fontSize: 12 }}>{extra.inventory_number || "—"}</TableCell>
+                    <TableCell sx={{ fontSize: 12.5, fontWeight: 600 }}>{line.account_name}</TableCell>
+                    <TableCell>
+                      <TextField
+                        select size="small" value={line.category || ""}
+                        disabled={disabled}
+                        onChange={(e) => saveCategory(line.id, e.target.value)}
+                        SelectProps={{ MenuProps: { disableScrollLock: true } }}
+                        error={!line.category}
+                        sx={{ width: 195, "& .MuiInputBase-root": { fontSize: 12, height: 30 } }}
+                      >
+                        {categories.map((c) => (
+                          <MenuItem key={c.value} value={c.value} sx={{ fontSize: 12.5 }}>
+                            {c.label}
+                          </MenuItem>
+                        ))}
+                      </TextField>
+                    </TableCell>
+                    <TableCell sx={{ fontSize: 12 }}>{extra.operation_start_date || "—"}</TableCell>
+                    <TableCell align="right" sx={{ fontSize: 12 }}>{extra.useful_life_months || "—"}</TableCell>
+                    <TableCell align="right" sx={{ fontSize: 12.5, color: "#2563EB" }}>{fmtMoney(cost)}</TableCell>
+                    <TableCell align="right" sx={{ fontSize: 12.5, color: "#DC2626" }}>{fmtMoney(accumulated)}</TableCell>
+                    <TableCell align="right" sx={{ fontSize: 12.5, fontWeight: 700 }}>{fmtMoney(cost - accumulated)}</TableCell>
+                  </TableRow>
+                );
+              })}
+              <TableRow>
+                <TableCell colSpan={5} align="right" sx={{ fontSize: 11.5, fontWeight: 800 }}>
+                  Iš viso {lines.length} vnt.
+                </TableCell>
+                <TableCell align="right" sx={{ fontSize: 12.5, fontWeight: 800, color: "#2563EB" }}>{fmtMoney(totalD)}</TableCell>
+                <TableCell align="right" sx={{ fontSize: 12.5, fontWeight: 800, color: "#DC2626" }}>{fmtMoney(totalK)}</TableCell>
+                <TableCell align="right" sx={{ fontSize: 12.5, fontWeight: 800 }}>{fmtMoney(totalD - totalK)}</TableCell>
+              </TableRow>
+            </TableBody>
+          </Table>
+        </TableContainer>
+      )}
+
+      {lines.length > 0 && !isAsset && (
         <TableContainer component={Paper} sx={{ mt: 1.5, maxHeight: 420, borderRadius: 2, boxShadow: "none", border: "0.5px solid", borderColor: "divider" }}>
           <Table size="small" stickyHeader>
             <TableHead>
@@ -361,6 +447,8 @@ function ReviewStep({ summary, batch, onConfirm, onReopen, confirming, onGoTo })
   const confirmed = batch?.status === "confirmed";
   const hasDiff = (summary?.control_accounts || []).some((r) => !r.matches);
   const unmapped = summary?.unmapped || [];
+  const assets = summary?.fixed_assets;
+  const assetDiff = (assets?.accounts || []).some((r) => !r.cost_matches || !r.accumulated_matches);
 
   const run = async (fn, arg) => {
     setError("");
@@ -378,6 +466,7 @@ function ReviewStep({ summary, batch, onConfirm, onReopen, confirming, onGoTo })
         <Typography sx={{ fontSize: 18, fontWeight: 800 }}>Likučiai patvirtinti</Typography>
         <Typography sx={{ fontSize: 13, color: "text.secondary", mt: 0.5, mb: 3 }}>
           Įrašyti {batch.entry_date} · {summary?.line_count} eilutės · {summary?.counterparty_count} kontrahentai
+          {assets?.created ? ` · ${assets.created} ilgalaikio turto kortelės` : ""}
         </Typography>
         <Box sx={{ display: "flex", gap: 1, justifyContent: "center", flexWrap: "wrap" }}>
           <Button
@@ -448,6 +537,87 @@ function ReviewStep({ summary, batch, onConfirm, onReopen, confirming, onGoTo })
         </TableContainer>
       )}
 
+      {assets && (
+        <Paper sx={{ mb: 2, p: 1.75, borderRadius: 2, boxShadow: "none", bgcolor: "#FFF8EE", border: "1px solid #F0D7B1" }}>
+          <Box sx={{ display: "flex", alignItems: "center", gap: 0.75, mb: 1 }}>
+            <WeekendIcon sx={{ fontSize: 18, color: "#e08d21" }} />
+            <Typography sx={{ fontSize: 13.5, fontWeight: 800, color: "#7A4A12" }}>
+              Ilgalaikis turtas: {assets.count} vnt.
+            </Typography>
+          </Box>
+
+          <Typography sx={{ fontSize: 12.5, color: "#5F513A", mb: 1 }}>
+            Savikaina {fmtMoney(assets.total_cost)} · Sukauptas nusidėvėjimas {fmtMoney(assets.total_accumulated)} ·
+            Likutinė vertė <b>{fmtMoney(assets.total_residual)}</b>
+          </Typography>
+
+          {(assets.accounts || []).length > 0 && (
+            <Table size="small" sx={{ bgcolor: "#fff", borderRadius: 1 }}>
+              <TableHead>
+                <TableRow>
+                  <TableCell sx={{ fontSize: 11, fontWeight: 800 }}>Sąskaita</TableCell>
+                  <TableCell sx={{ fontSize: 11, fontWeight: 800 }} align="right">Registre</TableCell>
+                  <TableCell sx={{ fontSize: 11, fontWeight: 800 }} align="right">Balanse</TableCell>
+                  <TableCell sx={{ fontSize: 11, fontWeight: 800 }} align="right">Skirtumas</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {assets.accounts.map((row) => [
+                  <TableRow key={`${row.asset_account}-cost`}>
+                    <TableCell sx={{ fontSize: 12.5, fontWeight: 700 }}>
+                      {row.asset_account}
+                      <Typography component="span" sx={{ fontSize: 11.5, color: "text.secondary", ml: 1 }}>
+                        savikaina · {row.count} vnt.
+                      </Typography>
+                    </TableCell>
+                    <TableCell align="right" sx={{ fontSize: 12.5 }}>{fmtMoney(row.cost)}</TableCell>
+                    <TableCell align="right" sx={{ fontSize: 12.5 }}>{fmtMoney(row.balance_cost)}</TableCell>
+                    <TableCell align="right" sx={{ fontSize: 12.5, fontWeight: 800, color: row.cost_matches ? "success.main" : "error.main" }}>
+                      {row.cost_matches ? "0,00 €" : fmtMoney(Number(row.cost) - Number(row.balance_cost))}
+                    </TableCell>
+                  </TableRow>,
+                  <TableRow key={`${row.asset_account}-acc`}>
+                    <TableCell sx={{ fontSize: 12.5, fontWeight: 700 }}>
+                      {row.accumulated_account || "—"}
+                      <Typography component="span" sx={{ fontSize: 11.5, color: "text.secondary", ml: 1 }}>
+                        nusidėvėjimas
+                      </Typography>
+                    </TableCell>
+                    <TableCell align="right" sx={{ fontSize: 12.5 }}>{fmtMoney(row.accumulated)}</TableCell>
+                    <TableCell align="right" sx={{ fontSize: 12.5 }}>{fmtMoney(row.balance_accumulated)}</TableCell>
+                    <TableCell align="right" sx={{ fontSize: 12.5, fontWeight: 800, color: row.accumulated_matches ? "success.main" : "error.main" }}>
+                      {row.accumulated_matches ? "0,00 €" : fmtMoney(Number(row.accumulated) - Number(row.balance_accumulated))}
+                    </TableCell>
+                  </TableRow>,
+                ])}
+              </TableBody>
+            </Table>
+          )}
+
+          {assets.unmapped > 0 && (
+            <Alert severity="warning" sx={{ mt: 1.5, "& .MuiAlert-message": { fontSize: 12.5 } }}
+              action={<Button size="small" onClick={() => onGoTo("fixed_asset")} sx={{ textTransform: "none" }}>Taisyti</Button>}
+            >
+              {assets.unmapped} turto eilutėms nepriskirta grupė — kortelės nebus sukurtos.
+            </Alert>
+          )}
+
+          {assetDiff && (
+            <Alert severity="warning" sx={{ mt: 1.5, "& .MuiAlert-message": { fontSize: 12.5 } }}>
+              Turto registro sumos nesutampa su balansu. Patikslinkite failus — kitaip DK ir turto
+              registras nuo pradžių skirsis.
+            </Alert>
+          )}
+        </Paper>
+      )}
+
+      {summary?.fixed_asset_errors?.length > 0 && (
+        <Alert severity="error" sx={{ mb: 1.5, "& .MuiAlert-message": { fontSize: 12.5 } }}>
+          Dalis turto kortelių nesukurta:
+          {summary.fixed_asset_errors.slice(0, 5).map((e, i) => <div key={i}>{e}</div>)}
+        </Alert>
+      )}
+
       {unmapped.length > 0 && (
         <Alert
           severity="warning" sx={{ mb: 1.5, "& .MuiAlert-message": { fontSize: 13 } }}
@@ -510,7 +680,8 @@ export default function PradiniaiLikuciaiPage() {
   const [activeStep, setActiveStep] = useState(0);
   const [batch, setBatch] = useState(null);
   const [summary, setSummary] = useState(null);
-  const [linesBySection, setLinesBySection] = useState({ balance: [], bank: [], buyer: [], supplier: [] });
+  const [linesBySection, setLinesBySection] = useState({ balance: [], bank: [], buyer: [], supplier: [], fixed_asset: [] });
+  const [assetCategories, setAssetCategories] = useState([]);
   const [loading, setLoading] = useState(true);
   const [savingDate, setSavingDate] = useState(false);
   const [confirming, setConfirming] = useState(false);
@@ -546,9 +717,12 @@ export default function PradiniaiLikuciaiPage() {
     setActiveStep(0);
     setBatch(null);
     setSummary(null);
-    setLinesBySection({ balance: [], bank: [], buyer: [], supplier: [] });
+    setLinesBySection({ balance: [], bank: [], buyer: [], supplier: [], fixed_asset: [] });
     setCutover(dayjs().startOf("year"));
     loadAll();
+    api.get(`${BASE}/asset-categories/`, { withCredentials: true })
+      .then(({ data }) => setAssetCategories(data.categories || []))
+      .catch(() => setAssetCategories([]));
   }, [loadAll]);
 
   const saveDate = async () => {
@@ -695,6 +869,7 @@ export default function PradiniaiLikuciaiPage() {
               onUploaded={handleUploaded}
               onLineChanged={handleLineChanged}
               disabled={locked}
+              categories={assetCategories}
             />
           )}
 

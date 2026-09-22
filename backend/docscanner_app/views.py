@@ -6932,6 +6932,12 @@ def invoice_list(request):
         .filter(user=user)
         .select_related("scanned_document")
         .annotate(
+            has_fixed_asset=Exists(
+                InvoiceLineItem.objects.filter(
+                    invoice=OuterRef("pk"),
+                    fixed_asset__isnull=False,
+                )
+            ),
             line_items_count=Count("line_items"),
             _has_proposed=Exists(
                 PaymentAllocation.objects.filter(
@@ -7426,6 +7432,38 @@ def invoice_issue(request, pk):
         except Exception as e:
             logger.warning("[InvoiceIssue] Auto JE failed for %s: %s", invoice.id, e)
 
+        # ── IT pardavimas: susiejam turtą su išrašyta sąskaita ──
+        from .ilgalaikis_turtas.disposal import sell_asset
+
+        asset_lines = list(
+            invoice.line_items
+            .select_related("fixed_asset")
+            .filter(fixed_asset__isnull=False)
+        )
+
+        if asset_lines:
+            from decimal import Decimal
+            from .ilgalaikis_turtas.services import FixedAssetError
+
+            if len(asset_lines) > 1:
+                raise FixedAssetError("Vienoje sąskaitoje galima parduoti tik vieną ilgalaikį turtą")
+
+            if abs(invoice.invoice_discount_wo_vat or Decimal("0")) > 0:
+                raise FixedAssetError(
+                    "Sąskaitoje su ilgalaikiu turtu negali būti nuolaidos visai sąskaitai"
+                )
+
+            if abs(asset_lines[0].quantity or Decimal("0")) != Decimal("1"):
+                raise FixedAssetError("Ilgalaikio turto eilutėje kiekis turi būti 1")
+
+        for line in asset_lines:
+            sell_asset(
+                line.fixed_asset,
+                invoice=invoice,
+                invoice_line=line,
+                user=request.user,
+            )
+
     serializer = InvoiceDetailSerializer(invoice, context={"request": request})
     return Response(serializer.data)
 
@@ -7649,20 +7687,31 @@ def invoice_cancel(request, pk):
             status=status.HTTP_400_BAD_REQUEST,
         )
 
-    from .models import FixedAsset
+    from .models import FixedAsset, PaymentAllocation
 
-    if (
-        FixedAsset.objects.filter(sale_invoice=invoice).exists()
-        or FixedAsset.objects.filter(sale_invoice__source_invoice=invoice).exists()
-    ):
+    sold_assets = list(
+        FixedAsset.objects.filter(sale_invoice=invoice)
+    ) + list(
+        FixedAsset.objects.filter(sale_invoice__source_invoice=invoice)
+    )
+
+    if sold_assets and PaymentAllocation.objects.filter(
+        invoice=invoice,
+    ).exclude(status="proposed").exists():
         return Response(
-            {"detail": "Pagal šią sąskaitą parduotas ilgalaikis turtas - pirmiausia atšaukite pardavimą"},
+            {"detail": "Sąskaita apmokėta - pirmiausia atšaukite mokėjimą, "
+                       "tada bus galima anuliuoti ilgalaikio turto pardavimą"},
             status=status.HTTP_400_BAD_REQUEST,
         )
 
     now = timezone.now()
 
     with transaction.atomic():
+        # ── IT grįžta į eksploataciją ──
+        from .ilgalaikis_turtas.disposal import cancel_sale
+        for asset in sold_assets:
+            cancel_sale(asset)
+
         invoice.status = "cancelled"
         invoice.cancelled_at = now
         invoice.save(update_fields=["status", "cancelled_at", "updated_at"])
@@ -7744,7 +7793,7 @@ def invoice_duplicate(request, pk):
             for field in InvoiceLineItem._meta.get_fields():
                 if not hasattr(field, "attname"):
                     continue
-                if field.attname in ("id", "invoice_id"):
+                if field.attname in ("id", "invoice_id", "fixed_asset_id"):
                     continue
                 li_data[field.attname] = getattr(li, field.attname)
             InvoiceLineItem.objects.create(invoice=new_invoice, **li_data)
@@ -7856,6 +7905,15 @@ class CreateCreditInvoiceView(APIView):
         if original.status not in ("issued", "sent", "partially_paid", "paid"):
             return Response(
                 {"detail": "Sąskaita turi būti išrašyta, kad galima būtų kurti kreditinę."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        from .models import FixedAsset
+
+        if FixedAsset.objects.filter(sale_invoice=original).exists():
+            return Response(
+                {"detail": "Pagal šią sąskaitą parduotas ilgalaikis turtas - "
+                           "kainai keisti pirmiausia atšaukite pardavimą"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 

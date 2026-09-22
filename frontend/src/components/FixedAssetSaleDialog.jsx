@@ -51,7 +51,7 @@ function OptionRow({ checked, disabled, onSelect, title, subtitle, amount }) {
   );
 }
 
-export default function FixedAssetSaleDialog({ open, asset, onClose, onConfirm, busy }) {
+export default function FixedAssetSaleDialog({ open, asset, onClose, onConfirm, onCreateInvoice, busy }) {
   const [search, setSearch] = useState("");
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -117,6 +117,21 @@ export default function FixedAssetSaleDialog({ open, asset, onClose, onConfirm, 
 
       <DialogContent sx={{ pt: 2 }}>
         <Stack spacing={1.5} sx={{ mt: 1 }}>
+          <Box sx={{ p: 1.25, borderRadius: 1.5, bgcolor: ILT_COLORS.bg, border: `1px solid ${ILT_COLORS.border}` }}>
+            <Typography sx={{ fontSize: 12.5, color: ILT_COLORS.text, mb: 0.75 }}>
+              Dar neišrašėte sąskaitos už šį turtą?
+            </Typography>
+            <Button
+              size="small"
+              variant="outlined"
+              onClick={onCreateInvoice}
+              disabled={busy}
+              sx={{ textTransform: "none", color: "#A0590F", borderColor: "#F0D7B1" }}
+            >
+              Išrašyti naują pardavimo sąskaitą
+            </Button>
+          </Box>
+
           <TextField
             size="small"
             placeholder="Ieškoti pagal numerį ar pirkėją..."

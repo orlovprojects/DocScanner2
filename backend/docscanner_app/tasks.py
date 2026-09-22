@@ -1533,26 +1533,90 @@ def process_uploaded_file_task(self, user_id, doc_id, scan_type, split_depth=0, 
 
         else:
 
-            t0 = _t()
-            # get_ocr_text_gcv возвращает: raw_json, joined_text, paragraphs, error
-            gcv_raw_json, gcv_joined_text, _, gcv_err = get_ocr_text_gcv(data, original_filename, logger)
-            _log_t("OCR (Google Vision)", t0)
-            logger.info("[TASK] GCV result: err=%s, raw_len=%s, text_len=%s",
-                gcv_err, len(gcv_raw_json or ''), len(gcv_joined_text or ''))
+            # ── OCR: GCV → повтор GCV через 2с → enhanced OCR (Gemini) ──
+            def _gcv_attempt(attempt_no: int):
+                t_g = _t()
+                try:
+                    # get_ocr_text_gcv возвращает: raw_json, joined_text, paragraphs, error
+                    r_json, r_text, _, r_err = get_ocr_text_gcv(data, original_filename, logger)
+                except SoftTimeLimitExceeded:
+                    raise
+                except Exception as e:
+                    r_json, r_text, r_err = None, None, f"exception: {e}"
+                _log_t(f"OCR (Google Vision, attempt {attempt_no})", t_g)
+                logger.info("[TASK] GCV attempt %d: err=%s, raw_len=%s, text_len=%s",
+                    attempt_no, r_err, len(r_json or ''), len(r_text or ''))
+                r_failed = bool(r_err) or (not r_json and not r_text)
+                return r_json, r_text, r_err, r_failed
 
-            if gcv_err or (not gcv_raw_json and not gcv_joined_text):
-                # ВРЕМЕННО: без fallback, чтобы увидеть ошибку GCV
-                t0 = _t()
-                doc.status = 'rejected'
-                doc.error_message = f"GCV error: {gcv_err or 'empty result'}"
-                doc.preview_url = preview_url
-                doc.save(update_fields=['status', 'error_message', 'preview_url'])
-                _settle_and_finish_if_session(doc)
-                _log_t("Save rejected (GCV error, no fallback)", t0)
-                logger.error("[TASK] GCV FAILED: err=%s, raw=%s, text=%s",
-                    gcv_err, len(gcv_raw_json or ''), len(gcv_joined_text or ''))
-                _log_t("TOTAL", total_start)
-                return
+            gcv_raw_json, gcv_joined_text, gcv_err, gcv_failed = _gcv_attempt(1)
+
+            if gcv_failed:
+                logger.warning("[TASK] GCV attempt 1 failed (%s) → retry in 2s", gcv_err or "empty result")
+                time.sleep(2)
+                gcv_raw_json, gcv_joined_text, gcv_err, gcv_failed = _gcv_attempt(2)
+
+            ocr_fallback_used = False
+
+            if gcv_failed:
+                logger.error("[TASK] GCV failed twice (%s) → enhanced OCR fallback", gcv_err or "empty result")
+                try:
+                    _send_telegram(
+                        f"🚨 <b>GCV failed twice → enhanced OCR fallback</b>\n"
+                        f"<b>Doc:</b> {doc.pk}\n"
+                        f"<b>File:</b> <code>{original_filename}</code>\n"
+                        f"<b>Error:</b> {str(gcv_err or 'empty result')[:300]}",
+                        dedup_key="gcv_double_fail",
+                        dedup_ttl=300,
+                    )
+                except Exception as tg_err:
+                    logger.warning("[TASK] Telegram alert (GCV double fail) failed: %s", tg_err)
+
+                enhanced_text, enhanced_err = None, None
+                t_m = _t()
+                try:
+                    from .utils.enhanced_ocr import get_enhanced_ocr_text
+                    enhanced_text, enhanced_err = get_enhanced_ocr_text(
+                        data, original_filename, logger
+                    )
+                except SoftTimeLimitExceeded:
+                    raise
+                except Exception as e:
+                    enhanced_err = f"exception: {e}"
+                _log_t("OCR (Enhanced Gemini, GCV fallback)", t_m)
+
+                if not enhanced_text or enhanced_err:
+                    t0 = _t()
+                    doc.status = 'rejected'
+                    doc.error_message = (
+                        f"OCR klaida: GCV ({str(gcv_err or 'empty result')[:150]}), "
+                        f"Gemini ({str(enhanced_err or 'empty result')[:150]})"
+                    )
+                    doc.preview_url = preview_url
+                    doc.save(update_fields=['status', 'error_message', 'preview_url'])
+                    _settle_and_finish_if_session(doc)
+                    _log_t("Save rejected (GCV x2 + enhanced OCR failed)", t0)
+                    logger.error("[TASK] OCR FAILED: GCV=%s, enhanced=%s", gcv_err, enhanced_err)
+                    _log_t("TOTAL", total_start)
+                    return
+
+                ocr_fallback_used = True
+                gcv_raw_json = json.dumps(
+                    {
+                        "pages": [],
+                        "meta": {
+                            "mode": "ENHANCED_FALLBACK",
+                            "gcv_error": str(gcv_err or "empty result")[:500],
+                        },
+                    },
+                    ensure_ascii=False,
+                )
+                gcv_joined_text = enhanced_text
+
+                doc.enhanced_ocr_text = enhanced_text
+                doc.enhanced_ocr_source = "gemini-flash-lite-latest (gcv-fallback)"
+                doc.save(update_fields=["enhanced_ocr_text", "enhanced_ocr_source"])
+                logger.info("[TASK] Using enhanced OCR as GCV fallback (len=%d)", len(enhanced_text))
 
             raw_json_for_db = gcv_raw_json
             glued_text_for_db = gcv_joined_text
@@ -1570,7 +1634,9 @@ def process_uploaded_file_task(self, user_id, doc_id, scan_type, split_depth=0, 
                 pass
             logger.info("[TASK] GCV OCR mode=%s, line_collision=%.1f", ocr_mode, line_collision)
 
-            need_enhanced_ocr = (ocr_mode == "FULLTEXT") or (line_collision > 22)
+            need_enhanced_ocr = (not ocr_fallback_used) and (
+                (ocr_mode == "FULLTEXT") or (line_collision > 22)
+            )
 
             if need_enhanced_ocr and data:
                 t_m = _t()
@@ -5914,4 +5980,113 @@ def remove_prerender_task(route: str):
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # END - Prerender novoj statji Wagtail
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# IT nusidevejimo Celery Beat
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@shared_task(name="fixed_assets.notify_depreciation_errors")
+def notify_depreciation_errors_task(period, stats, errors):
+    """Telegram pranešimas darbo metu, ne naktį."""
+    import requests
+    from django.conf import settings
+
+    token = getattr(settings, "TELEGRAM_BOT_TOKEN", "")
+    chat_id = getattr(settings, "TELEGRAM_CHAT_ID", "")
+    if not token or not chat_id:
+        return "no telegram config"
+
+    text = (
+        f"IT nusidėvėjimas {period}\n"
+        f"Užregistruota: {stats['registered']}\n"
+        f"Praleista: {stats['skipped']}\n"
+        f"Klaidų: {stats['errors']}\n\n"
+        + "\n".join(errors[:15])
+    )
+
+    try:
+        requests.post(
+            f"https://api.telegram.org/bot{token}/sendMessage",
+            json={"chat_id": chat_id, "text": text[:4000]},
+            timeout=15,
+        )
+    except Exception as e:
+        logger.warning("[AutoDepreciation] Telegram failed: %s", e)
+
+    return "sent"
+
+
+@shared_task(name="fixed_assets.register_monthly_depreciation")
+def register_monthly_depreciation_task():
+    import datetime
+
+    from django.utils import timezone
+    from .models import CompanyProfile
+    from .ilgalaikis_turtas.constants import FixedAssetStatus
+    from .ilgalaikis_turtas.depreciation import (
+        add_months,
+        calculate_period,
+        month_start,
+        register_period,
+    )
+
+    today = timezone.localdate()
+    period = add_months(month_start(today), -1)
+    stats = {"registered": 0, "skipped": 0, "errors": 0}
+    errors = []
+
+    companies = (
+        CompanyProfile.objects
+        .filter(
+            fixed_assets__status=FixedAssetStatus.ACTIVE,
+            fixed_assets__operation_start_date__isnull=False,
+        )
+        .select_related("user")
+        .distinct()
+    )
+
+    for cp in companies:
+        try:
+            result = calculate_period(cp, period)
+
+            if result["registered"] or not result["rows"]:
+                stats["skipped"] += 1
+                continue
+
+            if result["errors"]:
+                stats["errors"] += 1
+                errors.append(f"{cp.name}: {result['errors'][0]}")
+                continue
+
+            entry = register_period(cp, period, cp.user)
+            stats["registered"] += 1
+            logger.info(
+                "[AutoDepreciation] company_profile=%s period=%s je=%s total=%s",
+                cp.pk, period, entry.pk, entry.total_debit,
+            )
+        except Exception as e:
+            stats["errors"] += 1
+            errors.append(f"{cp.name}: {e}")
+            logger.exception("[AutoDepreciation] company_profile=%s failed", cp.pk)
+
+    logger.info("[AutoDepreciation] period=%s done %s", period, stats)
+
+    if errors:
+        eta = timezone.make_aware(
+            datetime.datetime.combine(today, datetime.time(9, 0)),
+            timezone.get_current_timezone(),
+        )
+        if eta < timezone.now():
+            eta = timezone.now()
+
+        notify_depreciation_errors_task.apply_async(
+            args=[period.strftime("%Y-%m"), stats, errors],
+            eta=eta,
+        )
+
+    return stats
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# END - IT nusidevejimo Celery Beat
 # ═══════════════════════════════════════════════════════════════════════════════

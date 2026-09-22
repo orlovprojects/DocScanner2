@@ -33,6 +33,7 @@ from .constants import (
     INVENTORY_NUMBER_PREFIX,
     MAX_SPLIT_COUNT,
     CONTROL_ACCOUNT_PREFIXES,
+    MANUAL_CREDIT_ACCOUNTS,
     OPENING_REASON,
     ManualAssetSource,
 )
@@ -338,7 +339,13 @@ def create_fixed_assets_from_purchase(
     if split_count < 1 or split_count > MAX_SPLIT_COUNT:
         raise FixedAssetError(f"Kortelių skaičius turi būti nuo 1 iki {MAX_SPLIT_COUNT}")
 
-    if purchase_line is not None and purchase_line.quantity is not None:
+    from .views import _is_sumiskai
+
+    if (
+        purchase_line is not None
+        and not _is_sumiskai(purchase)
+        and purchase_line.quantity is not None
+    ):
         line_qty = abs(_to_decimal(purchase_line.quantity))
         if line_qty >= 1 and Decimal(split_count) > line_qty:
             raise FixedAssetError(f"Kiekis negali viršyti eilutės kiekio ({line_qty.normalize()})")
@@ -442,7 +449,7 @@ def create_fixed_assets_from_purchase(
     return assets
 
 
-LOCKED_AFTER_DEPRECIATION = {"operation_start_date", "useful_life_months", "salvage_value"}
+LOCKED_AFTER_DEPRECIATION = {"operation_start_date"}
 
 
 @transaction.atomic
@@ -479,17 +486,44 @@ def update_fixed_asset(asset, data):
             f"Eksploatacijos pradžia negali būti ankstesnė už įsigijimo datą {asset.purchase_date:%Y-%m-%d}"
         )
 
-    if "salvage_value" in data and data["salvage_value"] >= asset.acquisition_cost:
-        raise FixedAssetError("Likvidacinė vertė turi būti mažesnė už savikainą")
+    life_changed = "useful_life_months" in data and data["useful_life_months"] != asset.useful_life_months
+    salvage_changed = "salvage_value" in data and data["salvage_value"] != asset.salvage_value
+
+    if life_changed or salvage_changed:
+        from .depreciation import _annotate_balances, depreciation_start_period, months_between
+
+        balances = _annotate_balances(FixedAsset.objects.filter(pk=asset.pk)).get()
+
+        if salvage_changed:
+            salvage = data["salvage_value"]
+            if salvage < ZERO or salvage > balances.base_cost - balances.accumulated:
+                raise FixedAssetError("Likvidacinė vertė negali viršyti likutinės vertės")
+
+        if life_changed and balances.last_period:
+            start = depreciation_start_period(asset)
+            used = months_between(start, balances.last_period) + 1 if start else 0
+            if data["useful_life_months"] <= used:
+                raise FixedAssetError(
+                    f"Nusidėvėjimas jau skaičiuotas {used} mėn. - naudingo tarnavimo laikas turi būti ilgesnis"
+                )
 
     for field, value in data.items():
         setattr(asset, field, value)
 
-    asset.status = (
-        FixedAssetStatus.ACTIVE
-        if asset.operation_start_date
-        else FixedAssetStatus.DRAFT
-    )
+    # Į juodraštį grąžinam tik jei turtas dar neturi jokių operacijų
+    has_operations = asset.operations.exclude(
+        operation_type=FixedAssetOperationType.ACQUISITION
+    ).exists()
+
+    if asset.operation_start_date:
+        asset.status = FixedAssetStatus.ACTIVE
+    elif not has_operations:
+        asset.status = FixedAssetStatus.DRAFT
+    else:
+        raise FixedAssetError(
+            "Turtas jau turi operacijų - eksploatacijos pradžios pašalinti negalima"
+        )
+
     asset.save()
 
     return asset
@@ -734,16 +768,13 @@ def create_manual_fixed_asset(
         accumulated = ZERO
         credit_account = (credit_account or "").strip()
 
-        if not is_valid_account(credit_account):
-            raise FixedAssetError("Nurodykite teisingą kredito sąskaitą")
-
-        if credit_account == group.asset_account:
-            raise FixedAssetError("Kredito sąskaita negali sutapti su turto sąskaita")
-
-        if credit_account.startswith(CONTROL_ACCOUNT_PREFIXES):
-            raise FixedAssetError(
-                "Skolai tiekėjui ar avansui naudokite pirkimo sąskaitą - turtą kurkite iš Pirkimų"
-            )
+        if credit_account not in MANUAL_CREDIT_ACCOUNTS:
+            if credit_account.startswith(CONTROL_ACCOUNT_PREFIXES):
+                raise FixedAssetError(
+                    "Skolai tiekėjui ar pirkėjui naudokite sąskaitą faktūrą - "
+                    "turtą kurkite iš Pirkimų arba Pardavimų"
+                )
+            raise FixedAssetError("Pasirinkite kredito sąskaitą iš sąrašo")
 
     else:
         raise FixedAssetError("Neteisingas šaltinis")
@@ -856,12 +887,19 @@ def create_manual_fixed_asset(
 # ═══════════════════════════════════════════════════════════
 
 @transaction.atomic
-def improve_fixed_asset(*, asset, purchase, purchase_line=None, amount, extra_months=0):
-    purchase = Purchase.objects.select_for_update().get(pk=purchase.pk)
-    asset = FixedAsset.objects.select_for_update().select_related("group").get(pk=asset.pk)
-
-    if asset.company_profile_id != purchase.company_profile_id:
-        raise FixedAssetError("Turtas priklauso kitai įmonei")
+def improve_fixed_asset(
+    *,
+    asset,
+    purchase=None,
+    purchase_line=None,
+    amount,
+    extra_months=0,
+    credit_account="",
+    operation_date=None,
+    user=None,
+):
+    FixedAsset.objects.select_for_update().filter(pk=asset.pk).first()
+    asset = FixedAsset.objects.select_related("group", "company_profile").get(pk=asset.pk)
 
     if asset.status not in (FixedAssetStatus.ACTIVE, FixedAssetStatus.DRAFT):
         raise FixedAssetError("Pagerinti galima tik naudojamą turtą")
@@ -870,32 +908,51 @@ def improve_fixed_asset(*, asset, purchase, purchase_line=None, amount, extra_mo
     if not group or not group.asset_account:
         raise FixedAssetError("Turto grupei nenurodyta turto DK sąskaita")
 
-    if purchase.is_credit_invoice:
-        raise FixedAssetError("Kreditinė sąskaita negali būti pagerinimo šaltinis")
-
-    purchase_date = _purchase_entry_date(purchase)
-
     from ..opening_balances.services import is_before_cutover
-    if is_before_cutover(purchase.company_profile_id, purchase_date):
-        raise FixedAssetError("Pirkimas yra iki perėjimo datos")
 
-    if not JournalEntry.objects.filter(
-        purchase=purchase,
-        source_type=JournalEntry.SOURCE_PURCHASE,
-        status=JournalEntry.STATUS_POSTED,
-    ).exists():
-        raise FixedAssetError("Pirkimas dar neužregistruotas DK")
+    if purchase is not None:
+        purchase = Purchase.objects.select_for_update().get(pk=purchase.pk)
 
-    if asset.purchase_date and purchase_date < asset.purchase_date:
+        if asset.company_profile_id != purchase.company_profile_id:
+            raise FixedAssetError("Turtas priklauso kitai įmonei")
+
+        if purchase.is_credit_invoice:
+            raise FixedAssetError("Kreditinė sąskaita negali būti pagerinimo šaltinis")
+
+        operation_date = _purchase_entry_date(purchase)
+
+        if not JournalEntry.objects.filter(
+            purchase=purchase,
+            source_type=JournalEntry.SOURCE_PURCHASE,
+            status=JournalEntry.STATUS_POSTED,
+        ).exists():
+            raise FixedAssetError("Pirkimas dar neužregistruotas DK")
+    else:
+        if not operation_date:
+            raise FixedAssetError("Nurodykite pagerinimo datą")
+
+        credit_account = (credit_account or "").strip()
+        if credit_account not in MANUAL_CREDIT_ACCOUNTS:
+            if credit_account.startswith(CONTROL_ACCOUNT_PREFIXES):
+                raise FixedAssetError(
+                    "Skolai tiekėjui naudokite pirkimo sąskaitą - pagerinimą kurkite iš Pirkimų"
+                )
+            raise FixedAssetError("Pasirinkite kredito sąskaitą iš sąrašo")
+
+    if is_before_cutover(asset.company_profile_id, operation_date):
+        raise FixedAssetError("Pagerinimo data yra iki perėjimo datos")
+
+    if asset.purchase_date and operation_date < asset.purchase_date:
         raise FixedAssetError("Pagerinimo data negali būti ankstesnė už turto įsigijimą")
 
     cost = _to_decimal(amount).quantize(MONEY, rounding=ROUND_HALF_UP)
     if cost <= ZERO:
         raise FixedAssetError("Pagerinimo suma turi būti didesnė už 0")
 
-    available = get_available_amount(purchase, purchase_line)
-    if cost > available:
-        raise FixedAssetError(f"Viršyta galima suma. Galima: {available} EUR")
+    if purchase is not None:
+        available = get_available_amount(purchase, purchase_line)
+        if cost > available:
+            raise FixedAssetError(f"Viršyta galima suma. Galima: {available} EUR")
 
     extra_months = int(extra_months or 0)
     if extra_months < 0:
@@ -904,29 +961,62 @@ def improve_fixed_asset(*, asset, purchase, purchase_line=None, amount, extra_mo
     if extra_months and not asset.useful_life_months:
         raise FixedAssetError("Turtui nenurodytas naudingo tarnavimo laikas")
 
-    _, source_account = get_purchase_source(purchase, purchase_line)
-
+    description = f"IT pagerinimas: {asset.name}"[:255]
     entry = None
-    if source_account != group.asset_account:
-        entry = _create_reclass_entry(
-            purchase=purchase,
-            group=group,
-            source_account=source_account,
-            amount=cost,
-            description=f"IT pagerinimas: {asset.name}"[:255],
+
+    if purchase is not None:
+        _, source_account = get_purchase_source(purchase, purchase_line)
+        if source_account != group.asset_account:
+            entry = _create_reclass_entry(
+                purchase=purchase,
+                group=group,
+                source_account=source_account,
+                amount=cost,
+                description=description,
+            )
+    else:
+        entry = JournalEntry.objects.create(
+            user=user or asset.company_profile.user,
+            company_profile=asset.company_profile,
+            source_type=JournalEntry.SOURCE_FIXED_ASSET,
+            entry_date=operation_date,
+            period=_period_from_date(operation_date),
+            document_number=f"PAG-{asset.inventory_number or asset.pk}",
+            description=description,
+            currency="EUR",
+            status=JournalEntry.STATUS_DRAFT,
         )
+
+        lines = []
+        sort_order = _add_line(
+            lines, entry=entry, side="D",
+            account_code=group.asset_account, amount=cost,
+            description=description, sort_order=0,
+        )
+        _add_line(
+            lines, entry=entry, side="K",
+            account_code=credit_account, amount=cost,
+            description=description, sort_order=sort_order,
+        )
+
+        JournalEntryLine.objects.bulk_create(lines)
+        finalize_journal_entry(entry)
 
     op = FixedAssetOperation.objects.create(
         asset=asset,
         operation_type=FixedAssetOperationType.IMPROVEMENT,
-        operation_date=purchase_date,
+        operation_date=operation_date,
         amount=cost,
         book=DepreciationBook.ACCOUNTING,
         journal_entry=entry,
         purchase=purchase,
         purchase_line=purchase_line,
         extra_months=extra_months,
-        description=f"Pagerinimas pagal pirkimą {_purchase_document_number(purchase)}".strip(),
+        description=(
+            f"Pagerinimas pagal pirkimą {_purchase_document_number(purchase)}".strip()
+            if purchase is not None
+            else "Rankinis pagerinimas"
+        ),
     )
 
     if extra_months:
@@ -937,7 +1027,7 @@ def improve_fixed_asset(*, asset, purchase, purchase_line=None, amount, extra_mo
     logger.info(
         "Fixed asset %s improved purchase=%s line=%s amount=%s extra_months=%s je=%s",
         asset.pk,
-        purchase.pk,
+        getattr(purchase, "pk", None),
         getattr(purchase_line, "pk", None),
         cost,
         extra_months,
@@ -949,12 +1039,8 @@ def improve_fixed_asset(*, asset, purchase, purchase_line=None, amount, extra_mo
 
 @transaction.atomic
 def cancel_improvement(op):
-    op = (
-        FixedAssetOperation.objects
-        .select_for_update()
-        .select_related("asset")
-        .get(pk=op.pk)
-    )
+    FixedAssetOperation.objects.select_for_update().filter(pk=op.pk).first()
+    op = FixedAssetOperation.objects.select_related("asset").get(pk=op.pk)
 
     if op.operation_type != FixedAssetOperationType.IMPROVEMENT:
         raise FixedAssetError("Tai ne pagerinimo operacija")
@@ -1002,7 +1088,8 @@ GROUP_ACCOUNT_RULES = {
 
 @transaction.atomic
 def update_fixed_asset_group(group, data):
-    group = FixedAssetGroup.objects.select_for_update().get(pk=group.pk)
+    FixedAssetGroup.objects.select_for_update().filter(pk=group.pk).first()
+    group = FixedAssetGroup.objects.get(pk=group.pk)
 
     for field, (prefix, message) in GROUP_ACCOUNT_RULES.items():
         if field not in data:

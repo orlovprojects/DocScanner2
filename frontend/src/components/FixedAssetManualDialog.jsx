@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   Alert,
-  Autocomplete,
   Box,
   Button,
   CircularProgress,
@@ -12,58 +11,102 @@ import {
   MenuItem,
   Stack,
   TextField,
-  ToggleButton,
-  ToggleButtonGroup,
   Typography,
 } from "@mui/material";
 import CloseIcon from "@mui/icons-material/Close";
 import WeekendIcon from "@mui/icons-material/Weekend";
 import { fixedAssetsApi } from "../api/fixedAssetsApi";
 import { ILT_COLORS } from "./IltBanner";
-import { errorText, fmtEur, nextMonthStart } from "./fixedAssetsUtils";
+import { getAccountName } from "./KorespondencijaComponents";
+import LtDatePicker from "./LtDatePicker";
+import {
+  MoneyField,
+  errorText,
+  fmtEur,
+  nextMonthStart,
+  sanitizeInt,
+  todayIso,
+  toNumber,
+} from "./fixedAssetsUtils";
 
 const CREDIT_OPTIONS = [
-  { code: "308", label: "Savininkų įnašai" },
-  { code: "3011", label: "Paprastosios akcijos (įnašas į kapitalą)" },
-  { code: "401", label: "Su turtu susijusios dotacijos" },
-  { code: "5401", label: "Kitos pajamos" },
-  { code: "272", label: "Kasa" },
+  { code: "308", label: "Savininkų įnašai", hint: "Savininkas perdavė turtą įmonei" },
+  { code: "3011", label: "Paprastosios akcijos", hint: "Įnašas į įstatinį kapitalą" },
+  { code: "401", label: "Su turtu susijusios dotacijos", hint: "Dotacija, ES parama" },
+  { code: "272", label: "Kasa", hint: "Pirkta grynaisiais be sąskaitos" },
+  { code: "4494", label: "Kitos mokėtinos sumos", hint: "Pirko darbuotojas, įmonė grąžins" },
+  { code: "5401", label: "Kitos pajamos", hint: "Gauta neatlygintinai" },
+  { code: "2010", label: "Žaliavos ir medžiagos", hint: "Perkelta iš atsargų" },
+  { code: "2040", label: "Pirktos prekės", hint: "Perkelta iš atsargų" },
 ];
 
 const EMPTY_FORM = {
-  source: "opening",
   name: "",
   group_id: "",
   acquisition_cost: "",
   purchase_date: "",
   operation_start_date: "",
   useful_life_months: "",
-  salvage_value: "",
-  accumulated_depreciation: "",
   credit_account: "308",
   inventory_number: "",
   description: "",
 };
 
+function DkRow({ side, code, name, amount }) {
+  return (
+    <Box sx={{ display: "grid", gridTemplateColumns: "32px 1fr 110px", alignItems: "center", py: 0.5 }}>
+      <Box
+        component="span"
+        sx={{
+          fontSize: 10,
+          fontWeight: 700,
+          px: 0.5,
+          py: 0.15,
+          borderRadius: 0.75,
+          width: "fit-content",
+          bgcolor: side === "D" ? "#EFF6FF" : "#FEF2F2",
+          color: side === "D" ? "#2563EB" : "#DC2626",
+        }}
+      >
+        {side}
+      </Box>
+      <Typography sx={{ fontSize: 12, fontWeight: 600 }}>
+        {code} {name || getAccountName(code) || ""}
+      </Typography>
+      <Typography sx={{ fontSize: 12, fontWeight: 700, textAlign: "right" }}>{fmtEur(amount)}</Typography>
+    </Box>
+  );
+}
+
 export default function FixedAssetManualDialog({ open, onClose, onCreated }) {
   const [groups, setGroups] = useState([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
   const [error, setError] = useState("");
   const [form, setForm] = useState(EMPTY_FORM);
+  const [nextNumber, setNextNumber] = useState("");
 
   useEffect(() => {
     if (!open) return;
 
     let cancelled = false;
-    setForm(EMPTY_FORM);
+    setForm({ ...EMPTY_FORM, purchase_date: todayIso() });
     setError("");
+    setSubmitted(false);
     setLoading(true);
 
-    fixedAssetsApi
-      .getGroups()
-      .then(({ data }) => {
-        if (!cancelled) setGroups(data || []);
+    Promise.all([fixedAssetsApi.getGroups(), fixedAssetsApi.getAssets()])
+      .then(([groupsRes, assetsRes]) => {
+        if (cancelled) return;
+        setGroups(groupsRes.data || []);
+
+        const numbers = (assetsRes.data || [])
+          .map((a) => /^IT-(\d+)$/.exec(a.inventory_number || ""))
+          .filter(Boolean)
+          .map((m) => Number(m[1]));
+        const last = numbers.length ? Math.max(...numbers) : 0;
+        setNextNumber(`IT-${String(last + 1).padStart(6, "0")}`);
       })
       .catch((e) => {
         if (!cancelled) setError(errorText(e));
@@ -82,64 +125,67 @@ export default function FixedAssetManualDialog({ open, onClose, onCreated }) {
     [groups, form.group_id],
   );
 
-  const setField = (field) => (e) =>
-    setForm((prev) => ({ ...prev, [field]: e.target.value }));
+  const setField = (field) => (e) => setForm((prev) => ({ ...prev, [field]: e.target.value }));
 
   const handleGroupChange = (e) => {
     const g = groups.find((x) => String(x.id) === String(e.target.value));
     setForm((prev) => ({
       ...prev,
       group_id: e.target.value,
-      useful_life_months: g?.useful_life_months ?? "",
+      useful_life_months: g?.useful_life_months ? String(g.useful_life_months) : "",
     }));
   };
 
-  const isOpening = form.source === "opening";
-  const cost = Number(form.acquisition_cost);
-  const salvage = Number(form.salvage_value || 0);
-  const accumulated = Number(form.accumulated_depreciation || 0);
+  const cost = toNumber(form.acquisition_cost);
   const life = Number(form.useful_life_months);
-
-  const costInvalid = !cost || cost <= 0;
-  const salvageInvalid = salvage < 0 || (!costInvalid && salvage >= cost);
-  const accumulatedInvalid =
-    isOpening && (accumulated < 0 || (!costInvalid && accumulated > cost - salvage + 0.0001));
-  const needsStart = isOpening && accumulated > 0 && !form.operation_start_date;
-  const creditOption = CREDIT_OPTIONS.find((o) => o.code === form.credit_account.trim());
-
+  const creditAccount = form.credit_account.trim();
+  const creditOption = CREDIT_OPTIONS.find((o) => o.code === creditAccount);
   const depreciationStart = nextMonthStart(form.operation_start_date);
 
-  const canSubmit =
-    !loading &&
-    !saving &&
-    group &&
-    group.asset_account &&
-    form.name.trim() &&
+  const errors = {};
+  if (!form.name.trim()) errors.name = "Nurodykite pavadinimą";
+  if (!group) errors.group_id = "Pasirinkite turto grupę";
+  else if (!group.asset_account) errors.group_id = "Turto grupei nenurodyta turto DK sąskaita";
+  if (!form.acquisition_cost) errors.acquisition_cost = "Nurodykite savikainą";
+  if (!form.purchase_date) errors.purchase_date = "Nurodykite įsigijimo datą";
+  if (!form.useful_life_months) errors.useful_life_months = "Nurodykite laiką";
+  if (!creditAccount) errors.credit_account = "Pasirinkite kredito sąskaitą";
+
+  const liveErrors = {};
+  if (form.acquisition_cost && (!Number.isFinite(cost) || cost <= 0))
+    liveErrors.acquisition_cost = "Suma turi būti didesnė už 0";
+  if (form.useful_life_months && (!Number.isInteger(life) || life < 1))
+    liveErrors.useful_life_months = "Turi būti ne mažiau 1 mėn.";
+  if (
+    form.operation_start_date &&
     form.purchase_date &&
-    !costInvalid &&
-    !salvageInvalid &&
-    !accumulatedInvalid &&
-    !needsStart &&
-    life >= 1 &&
-    (isOpening || form.credit_account.trim());
+    form.operation_start_date < form.purchase_date
+  )
+    liveErrors.operation_start_date = "Negali būti ankstesnė už įsigijimo datą";
+
+  const fieldError = (f) => liveErrors[f] || (submitted ? errors[f] : "");
+  const hasErrors = Object.keys(errors).length > 0 || Object.keys(liveErrors).length > 0;
+  const costValid = !liveErrors.acquisition_cost && Number.isFinite(cost) && cost > 0;
 
   const handleSubmit = async () => {
-    if (!canSubmit) return;
+    setSubmitted(true);
+    if (loading || saving || hasErrors) return;
+
     setSaving(true);
     setError("");
     try {
       const { data } = await fixedAssetsApi.createManual({
-        source: form.source,
+        source: "other",
         group_id: group.id,
         name: form.name.trim(),
         acquisition_cost: cost.toFixed(2),
         purchase_date: form.purchase_date,
         operation_start_date: form.operation_start_date || null,
         useful_life_months: life,
-        salvage_value: salvage.toFixed(2),
-        accumulated_depreciation: isOpening ? accumulated.toFixed(2) : "0.00",
-        credit_account: isOpening ? "" : form.credit_account.trim(),
-        inventory_number: form.inventory_number.trim(),
+        salvage_value: "0.00",
+        accumulated_depreciation: "0.00",
+        credit_account: creditAccount,
+        inventory_number: "",
         description: form.description,
       });
       await onCreated?.(data);
@@ -158,7 +204,7 @@ export default function FixedAssetManualDialog({ open, onClose, onCreated }) {
       fullWidth
       maxWidth="sm"
       disableScrollLock
-      PaperProps={{ sx: { borderRadius: "14px" } }}
+      PaperProps={{ sx: { borderRadius: "14px", maxWidth: 560 } }}
     >
       <Box
         sx={{
@@ -180,31 +226,28 @@ export default function FixedAssetManualDialog({ open, onClose, onCreated }) {
         </IconButton>
       </Box>
 
-      <DialogContent sx={{ pt: 2.5 }}>
+      <DialogContent sx={{ pt: 2.5, overflowX: "hidden" }}>
         {loading ? (
           <Box sx={{ display: "flex", justifyContent: "center", py: 4 }}>
             <CircularProgress size={28} />
           </Box>
         ) : (
           <Stack spacing={2}>
-            <ToggleButtonGroup
-              exclusive
-              size="small"
-              value={form.source}
-              onChange={(_, v) => v && setForm((prev) => ({ ...prev, source: v }))}
-              sx={{ "& .MuiToggleButton-root": { textTransform: "none", flex: 1 } }}
-            >
-              <ToggleButton value="opening">Pradiniai likučiai</ToggleButton>
-              <ToggleButton value="other">Kita (be pirkimo sąskaitos)</ToggleButton>
-            </ToggleButtonGroup>
-
             <Alert severity="info" sx={{ fontSize: 13 }}>
-              {isOpening
-                ? "Turtas, įsigytas iki perėjimo datos. Savikainą ir sukauptą nusidėvėjimą perėjimo datai paimkite iš ankstesnės programos. DK įrašas nekuriamas - vertės jau yra pradiniuose likučiuose."
-                : "Įnašas į kapitalą, dotacija, pirkimas grynaisiais be sąskaitos ir pan. Bus sukurtas DK įrašas. Turtą su tiekėjo sąskaita kurkite iš Pirkimų."}
+              Turtas be pirkimo sąskaitos: įnašas į kapitalą, dotacija, pirkimas grynaisiais.
+              Jei turite tiekėjo sąskaitą, turtą kurkite iš Pirkimų. Turtą, įsigytą iki perėjimo
+              datos, įkelkite per Pradinius likučius.
             </Alert>
 
-            <TextField label="Pavadinimas" size="small" value={form.name} onChange={setField("name")} fullWidth />
+            <TextField
+              label="Pavadinimas"
+              size="small"
+              value={form.name}
+              onChange={setField("name")}
+              error={Boolean(fieldError("name"))}
+              helperText={fieldError("name")}
+              fullWidth
+            />
 
             <TextField
               select
@@ -212,6 +255,8 @@ export default function FixedAssetManualDialog({ open, onClose, onCreated }) {
               size="small"
               value={form.group_id}
               onChange={handleGroupChange}
+              error={Boolean(fieldError("group_id"))}
+              helperText={fieldError("group_id")}
               fullWidth
               SelectProps={{ MenuProps: { disableScrollLock: true } }}
             >
@@ -225,128 +270,80 @@ export default function FixedAssetManualDialog({ open, onClose, onCreated }) {
               ))}
             </TextField>
 
-            <Box sx={{ display: "flex", gap: 2 }}>
-              <TextField
+            <Box sx={{ display: "flex", gap: 2, alignItems: "flex-start" }}>
+              <MoneyField
                 label="Įsigijimo savikaina, EUR"
                 size="small"
-                type="number"
                 value={form.acquisition_cost}
-                onChange={setField("acquisition_cost")}
-                inputProps={{ step: "0.01", min: 0 }}
+                onChange={(v) => setForm((prev) => ({ ...prev, acquisition_cost: v }))}
+                error={Boolean(fieldError("acquisition_cost"))}
+                helperText={fieldError("acquisition_cost")}
                 fullWidth
               />
-              <TextField
-                label="Likvidacinė vertė, EUR"
-                size="small"
-                type="number"
-                value={form.salvage_value}
-                onChange={setField("salvage_value")}
-                error={salvageInvalid}
-                inputProps={{ step: "0.01", min: 0 }}
-                fullWidth
-              />
-            </Box>
-
-            <Box sx={{ display: "flex", gap: 2 }}>
-              <TextField
-                label="Įsigijimo data"
-                size="small"
-                type="date"
-                value={form.purchase_date}
-                onChange={setField("purchase_date")}
-                InputLabelProps={{ shrink: true }}
-                fullWidth
-              />
-              <TextField
-                label="Eksploatacijos pradžia"
-                size="small"
-                type="date"
-                value={form.operation_start_date}
-                onChange={setField("operation_start_date")}
-                InputLabelProps={{ shrink: true }}
-                error={needsStart}
-                helperText={
-                  depreciationStart
-                    ? `Nusidėvėjimas skaičiuojamas nuo ${depreciationStart}`
-                    : "Tuščia - juodraštis"
-                }
-                fullWidth
-              />
-            </Box>
-
-            <Box sx={{ display: "flex", gap: 2 }}>
               <TextField
                 label="Naudingo tarnavimo laikas, mėn."
                 size="small"
-                type="number"
                 value={form.useful_life_months}
-                onChange={setField("useful_life_months")}
-                inputProps={{ min: 1 }}
-                fullWidth
-              />
-              <TextField
-                label="Inventorinis nr."
-                size="small"
-                value={form.inventory_number}
-                onChange={setField("inventory_number")}
-                helperText="Tuščia - suteikiamas automatiškai"
+                onChange={(e) =>
+                  setForm((prev) => ({ ...prev, useful_life_months: sanitizeInt(e.target.value) }))
+                }
+                error={Boolean(fieldError("useful_life_months"))}
+                helperText={fieldError("useful_life_months")}
+                inputProps={{ inputMode: "numeric" }}
                 fullWidth
               />
             </Box>
 
-            {isOpening ? (
-              <Box
-                sx={{
-                  p: 1.25,
-                  borderRadius: 1.5,
-                  bgcolor: ILT_COLORS.bg,
-                  border: `1px solid ${ILT_COLORS.border}`,
-                }}
+            <Box sx={{ display: "flex", gap: 2, alignItems: "flex-start" }}>
+              <LtDatePicker
+                label="Įsigijimo data"
+                value={form.purchase_date}
+                onChange={(v) => setForm((prev) => ({ ...prev, purchase_date: v }))}
+                error={Boolean(fieldError("purchase_date"))}
+                helperText={fieldError("purchase_date")}
+              />
+              <LtDatePicker
+                label="Eksploatacijos pradžia"
+                value={form.operation_start_date}
+                onChange={(v) => setForm((prev) => ({ ...prev, operation_start_date: v }))}
+                minDate={form.purchase_date || undefined}
+                error={Boolean(fieldError("operation_start_date"))}
+                helperText={
+                  fieldError("operation_start_date") ||
+                  (depreciationStart
+                    ? `Nusidėvėjimas nuo ${depreciationStart}`
+                    : "Tuščia - juodraštis")
+                }
+              />
+            </Box>
+
+            <Box sx={{ display: "flex", gap: 2, alignItems: "flex-start" }}>
+              <TextField
+                select
+                label="Kredito sąskaita"
+                size="small"
+                value={form.credit_account}
+                onChange={setField("credit_account")}
+                error={Boolean(fieldError("credit_account"))}
+                helperText={fieldError("credit_account") || creditOption?.hint || ""}
+                sx={{ flex: 2 }}
+                SelectProps={{ MenuProps: { disableScrollLock: true } }}
               >
-                <TextField
-                  label="Sukauptas nusidėvėjimas perėjimo datai, EUR"
-                  size="small"
-                  type="number"
-                  value={form.accumulated_depreciation}
-                  onChange={setField("accumulated_depreciation")}
-                  error={accumulatedInvalid}
-                  helperText={accumulatedInvalid ? "Negali viršyti savikainos atėmus likvidacinę vertę" : " "}
-                  inputProps={{ step: "0.01", min: 0 }}
-                  sx={{ bgcolor: "#fff" }}
-                  fullWidth
-                />
-                {!costInvalid && (
-                  <Typography sx={{ fontSize: 12, color: ILT_COLORS.text }}>
-                    Likutinė vertė perėjimo datai: <b>{fmtEur(cost - accumulated)}</b>
-                  </Typography>
-                )}
-              </Box>
-            ) : (
-              <Box>
-                <Autocomplete
-                  freeSolo
-                  options={CREDIT_OPTIONS}
-                  getOptionLabel={(o) => (typeof o === "string" ? o : `${o.code} ${o.label}`)}
-                  inputValue={form.credit_account}
-                  onInputChange={(_, value) =>
-                    setForm((prev) => ({ ...prev, credit_account: (value || "").split(" ")[0] }))
-                  }
-                  renderInput={(params) => (
-                    <TextField
-                      {...params}
-                      label="Kredito sąskaita"
-                      size="small"
-                      helperText={creditOption ? creditOption.label : "Įveskite sąskaitos kodą"}
-                    />
-                  )}
-                />
-                {group?.asset_account && form.credit_account.trim() && !costInvalid && (
-                  <Typography sx={{ fontSize: 12, color: "text.secondary", mt: 0.5 }}>
-                    DK: D {group.asset_account} / K {form.credit_account.trim()} - {fmtEur(cost)}
-                  </Typography>
-                )}
-              </Box>
-            )}
+                {CREDIT_OPTIONS.map((o) => (
+                  <MenuItem key={o.code} value={o.code}>
+                    {o.code} {o.label}
+                  </MenuItem>
+                ))}
+              </TextField>
+              <TextField
+                label="Inventorinis nr."
+                size="small"
+                value={nextNumber}
+                disabled
+                helperText="Suteikiamas automatiškai"
+                sx={{ flex: 1 }}
+              />
+            </Box>
 
             <TextField
               label="Aprašymas"
@@ -357,6 +354,18 @@ export default function FixedAssetManualDialog({ open, onClose, onCreated }) {
               minRows={2}
               fullWidth
             />
+
+            {group?.asset_account && creditAccount && costValid && (
+              <Box sx={{ p: 1.25, borderRadius: 1.5, border: "1px solid", borderColor: "divider" }}>
+                <Typography sx={{ fontSize: 12, fontWeight: 700, mb: 0.5 }}>DK įrašas</Typography>
+                <DkRow side="D" code={group.asset_account} name={group.asset_account_name} amount={cost} />
+                <DkRow side="K" code={creditAccount} amount={cost} />
+              </Box>
+            )}
+
+            {submitted && hasErrors && (
+              <Alert severity="warning" sx={{ fontSize: 13 }}>Užpildykite pažymėtus laukus</Alert>
+            )}
 
             {error && <Alert severity="error">{error}</Alert>}
           </Stack>
@@ -370,7 +379,7 @@ export default function FixedAssetManualDialog({ open, onClose, onCreated }) {
         <Button
           variant="contained"
           onClick={handleSubmit}
-          disabled={!canSubmit}
+          disabled={loading || saving}
           sx={{ textTransform: "none", borderRadius: 3, background: "linear-gradient(135deg, #FF9800, #F57C00)" }}
         >
           {saving ? <CircularProgress size={18} sx={{ color: "#fff" }} /> : "Sukurti"}

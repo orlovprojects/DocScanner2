@@ -59,6 +59,15 @@ class FixedAssetSerializer(serializers.ModelSerializer):
     accumulated = serializers.SerializerMethodField()
     residual = serializers.SerializerMethodField()
     depreciation_start = serializers.SerializerMethodField()
+    last_depreciation_period = serializers.SerializerMethodField()
+    is_fully_depreciated = serializers.SerializerMethodField()
+
+    def get_is_fully_depreciated(self, obj):
+        accumulated = getattr(obj, "accumulated", None)
+        if accumulated is None or accumulated <= 0:
+            return False
+        base = getattr(obj, "base_cost", None) or obj.acquisition_cost
+        return base - accumulated <= (obj.salvage_value or 0)
     purchase_document = serializers.SerializerMethodField()
 
     def get_base_cost(self, obj):
@@ -76,6 +85,9 @@ class FixedAssetSerializer(serializers.ModelSerializer):
 
     def get_depreciation_start(self, obj):
         return depreciation_start_period(obj)
+
+    def get_last_depreciation_period(self, obj):
+        return getattr(obj, "last_period", None)
 
     def get_purchase_document(self, obj):
         purchase = obj.purchase
@@ -98,6 +110,8 @@ class FixedAssetSerializer(serializers.ModelSerializer):
             "operation_start_date",
             "disposal_date",
             "depreciation_start",
+            "last_depreciation_period",
+            "is_fully_depreciated",
             "acquisition_cost",
             "salvage_value",
             "useful_life_months",
@@ -174,7 +188,6 @@ class FixedAssetFromPurchaseSerializer(serializers.Serializer):
 
 class FixedAssetUpdateSerializer(serializers.Serializer):
     name = serializers.CharField(max_length=255, required=False)
-    inventory_number = serializers.CharField(max_length=64, required=False, allow_blank=True)
     description = serializers.CharField(required=False, allow_blank=True)
     operation_start_date = serializers.DateField(required=False, allow_null=True)
     useful_life_months = serializers.IntegerField(required=False, min_value=1)
@@ -216,7 +229,9 @@ class FixedAssetManualSerializer(serializers.Serializer):
 
 class FixedAssetImprovementSerializer(serializers.Serializer):
     asset_id = serializers.IntegerField()
-    purchase_id = serializers.IntegerField()
+    purchase_id = serializers.IntegerField(required=False, allow_null=True)
     purchase_line_id = serializers.IntegerField(required=False, allow_null=True)
     amount = serializers.DecimalField(max_digits=14, decimal_places=2)
     extra_months = serializers.IntegerField(required=False, default=0, min_value=0, max_value=600)
+    credit_account = serializers.CharField(max_length=32, required=False, allow_blank=True, default="")
+    operation_date = serializers.DateField(required=False, allow_null=True)

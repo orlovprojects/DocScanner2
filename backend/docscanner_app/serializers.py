@@ -2427,6 +2427,7 @@ class InvoiceLineItemSerializer(serializers.ModelSerializer):
             "sort_order",
             "kredito_saskaita",
             "pvm_saskaita",
+            "fixed_asset",
         ]
         read_only_fields = ["id"]
 
@@ -2481,6 +2482,7 @@ class InvoiceListSerializer(InvoiceScanPreviewMixin, serializers.ModelSerializer
     has_proposed_payments = serializers.SerializerMethodField()
     email_sent_count = serializers.IntegerField(read_only=True)
     email_last_status = serializers.CharField(read_only=True)
+    has_fixed_asset = serializers.BooleanField(read_only=True, default=False)
 
     def get_has_proposed_payments(self, obj):
         if hasattr(obj, '_has_proposed'):
@@ -2532,7 +2534,7 @@ class InvoiceListSerializer(InvoiceScanPreviewMixin, serializers.ModelSerializer
             "has_proposed_payments",
             "email_sent_count",
             "email_last_status",
-        
+            "has_fixed_asset",        
         ]
 
     def get_is_overdue(self, obj):

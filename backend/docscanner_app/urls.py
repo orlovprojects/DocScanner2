@@ -226,6 +226,7 @@ from .opening_balances.views import (
     opening_summary,
     opening_template,
     opening_upload,
+    opening_asset_categories
 )
 
 from rest_framework.routers import DefaultRouter
@@ -257,6 +258,8 @@ from .ilgalaikis_turtas.views import (
     FixedAssetWriteOffCancelView,
     FixedAssetSaleView,
     FixedAssetSaleCancelView,
+    FixedAssetSalePrefillView,
+    FixedAssetSaleCheckView,
 )
 
 
@@ -700,6 +703,7 @@ urlpatterns = [
     path('apskaita/pradiniai-likuciai/lines/<str:section>/', opening_lines, name='opening-lines'),
     path('apskaita/pradiniai-likuciai/template/<str:section>/', opening_template, name='opening-template'),
     path('apskaita/pradiniai-likuciai/line/<int:pk>/', opening_line_detail, name='opening-line'),
+    path("apskaita/pradiniai-likuciai/asset-categories/", opening_asset_categories),
 
     # Ilgalaikis turtas
     path("fixed-assets/", FixedAssetListView.as_view()),
@@ -722,5 +726,7 @@ urlpatterns = [
     path("fixed-assets/<int:pk>/write-off/cancel/", FixedAssetWriteOffCancelView.as_view()),
     path("fixed-assets/<int:pk>/sell/", FixedAssetSaleView.as_view()),
     path("fixed-assets/<int:pk>/sell/cancel/", FixedAssetSaleCancelView.as_view()),
+    path("fixed-assets/<int:pk>/sale-prefill/", FixedAssetSalePrefillView.as_view()),
+    path("fixed-assets/<int:pk>/sale-check/", FixedAssetSaleCheckView.as_view()),
 
 ]

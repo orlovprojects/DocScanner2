@@ -31,6 +31,10 @@ app.conf.beat_schedule = {
         "task": "process_recurring_invoices",
         "schedule": crontab(hour=8, minute=55),
     },
+    "fixed-assets-monthly-depreciation": {
+        "task": "fixed_assets.register_monthly_depreciation",
+        "schedule": crontab(day_of_month=1, hour=4, minute=0),
+    },
     "send-payment-reminders": {
         "task": "send_payment_reminders",
         "schedule": crontab(hour=9, minute=30),

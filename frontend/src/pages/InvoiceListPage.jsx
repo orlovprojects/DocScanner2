@@ -77,6 +77,7 @@ import ExportStatusBar from '../components/ExportStatusBar';
 import { ExportLogPopup } from '../page_elements/DocumentsTable';
 import DifferenceIcon from '@mui/icons-material/Difference';
 import DocumentScannerIcon from '@mui/icons-material/DocumentScanner';
+import WeekendIcon from '@mui/icons-material/Weekend';
 import ZoomableImage from './ZoomableImage';
 
 
@@ -1383,6 +1384,12 @@ const InvoiceListPage = () => {
       }
     }
 
+    // Parduotas IT — kreditinė negalima, pirmiausia reikia atšaukti pardavimą
+    if (inv.has_fixed_asset) {
+      const idx = a.indexOf('create_credit');
+      if (idx !== -1) a.splice(idx, 1);
+    }
+
     // Iš skaitmenizavimo — negalima anuliuoti, tik ištrinti jeigu backend leidžia
     if (inv.is_from_scan) {
       const removeForScan = ['send_email', 'send_reminder', 'duplicate', 'convert_sf', 'cancel'];
@@ -1564,7 +1571,9 @@ const InvoiceListPage = () => {
           <IconButton size="small" color="error"
             onClick={() => openConfirm(
               'Anuliuoti sąskaitą?',
-              `${inv.full_number || 'Sąskaita'} bus anuliuota.`,
+              inv.has_fixed_asset
+                ? `${inv.full_number || 'Sąskaita'} bus anuliuota, o parduotas ilgalaikis turtas grįš į eksploataciją.`
+                : `${inv.full_number || 'Sąskaita'} bus anuliuota.`,
               () => handleAction('cancel', { id: invoiceId }),
             )}>
             <CancelIcon fontSize="small" />
@@ -1838,6 +1847,12 @@ const InvoiceListPage = () => {
                 {inv.is_from_scan && (
                   <Tooltip title="Iš skaitmenizavimo" arrow>
                     <DocumentScannerIcon sx={{ fontSize: 16, color: 'text.secondary' }} />
+                  </Tooltip>
+                )}
+
+                {inv.has_fixed_asset && (
+                  <Tooltip title="Parduotas ilgalaikis turtas" arrow>
+                    <WeekendIcon sx={{ fontSize: 16, color: '#e08d21' }} />
                   </Tooltip>
                 )}
               </Box>
@@ -2282,6 +2297,12 @@ const InvoiceListPage = () => {
                       {inv.is_from_scan && (
                         <Tooltip title="Iš skaitmenizavimo" arrow>
                           <DocumentScannerIcon sx={{ fontSize: 20, color: 'text.secondary' }} />
+                        </Tooltip>
+                      )}
+
+                      {inv.has_fixed_asset && (
+                        <Tooltip title="Parduotas ilgalaikis turtas" arrow>
+                          <WeekendIcon sx={{ fontSize: 20, color: '#e08d21' }} />
                         </Tooltip>
                       )}
                     </Box>

@@ -37,7 +37,12 @@ import {
   fmtEur,
   fmtPeriod,
   todayIso,
+  MoneyField,
+  sanitizeInt,
+  toCommaInput,
+  toNumber,
 } from "./fixedAssetsUtils";
+import LtDatePicker from "./LtDatePicker";
 
 const headCellSx = { fontWeight: 600, bgcolor: "#f3f4f6", fontSize: 12 };
 const cellSx = { fontSize: 13 };
@@ -83,13 +88,10 @@ function WriteOffDialog({ open, onClose, onConfirm, busy }) {
       </Box>
       <DialogContent sx={{ pt: 2 }}>
         <Stack spacing={2} sx={{ mt: 1 }}>
-          <TextField
+          <LtDatePicker
             label="Nurašymo data"
-            type="date"
-            size="small"
             value={form.disposal_date}
-            onChange={setField("disposal_date")}
-            InputLabelProps={{ shrink: true }}
+            onChange={(v) => setForm((prev) => ({ ...prev, disposal_date: v }))}
           />
           <TextField
             select
@@ -218,11 +220,10 @@ export default function FixedAssetDetailDialog({
   const startEdit = () => {
     setForm({
       name: asset.name || "",
-      inventory_number: asset.inventory_number || "",
       description: asset.description || "",
       operation_start_date: asset.operation_start_date || "",
-      useful_life_months: asset.useful_life_months ?? "",
-      salvage_value: asset.salvage_value ?? "0",
+      useful_life_months: asset.useful_life_months ? String(asset.useful_life_months) : "",
+      salvage_value: toCommaInput(Number(asset.salvage_value || 0)),
     });
     setEditing(true);
   };
@@ -230,22 +231,31 @@ export default function FixedAssetDetailDialog({
   const setField = (field) => (e) => setForm((prev) => ({ ...prev, [field]: e.target.value }));
 
   const saveEdit = async () => {
+    const life = Number(form.useful_life_months);
+    const salvage = toNumber(form.salvage_value || "0");
+
+    if (!form.name.trim()) {
+      setError("Nurodykite pavadinimą");
+      return;
+    }
+    if (!Number.isInteger(life) || life < 1) {
+      setError("Nurodykite naudingo tarnavimo laiką");
+      return;
+    }
+    if (!Number.isFinite(salvage) || salvage < 0) {
+      setError("Neteisinga likvidacinė vertė");
+      return;
+    }
+
     const payload = {
-      name: form.name,
-      inventory_number: form.inventory_number,
+      name: form.name.trim(),
       description: form.description,
+      useful_life_months: life,
+      salvage_value: salvage.toFixed(2),
     };
 
     if (!hasDepreciation) {
-      if (!form.useful_life_months || Number(form.useful_life_months) < 1) {
-        setError("Nurodykite naudingo tarnavimo laiką");
-        return;
-      }
-      Object.assign(payload, {
-        operation_start_date: form.operation_start_date || null,
-        useful_life_months: Number(form.useful_life_months),
-        salvage_value: form.salvage_value === "" ? "0" : String(form.salvage_value),
-      });
+      payload.operation_start_date = form.operation_start_date || null;
     }
 
     const ok = await runAction(() => fixedAssetsApi.updateAsset(asset.id, payload));
@@ -260,6 +270,10 @@ export default function FixedAssetDetailDialog({
   const handleWriteOff = async (data) => {
     const ok = await runAction(() => fixedAssetsApi.writeOff(asset.id, data));
     if (ok) setWriteOffOpen(false);
+  };
+
+  const handleCreateInvoice = () => {
+    window.open(`/israsymas/nauja?fixed_asset=${asset.id}`, "_blank");
   };
 
   const handleSell = async (data) => {
@@ -283,48 +297,46 @@ export default function FixedAssetDetailDialog({
   const renderInfo = () => {
     if (editing) {
       return (
-        <Stack spacing={2} sx={{ mt: 1 }}>
+        <Stack spacing={2} sx={{ mt: 2 }}>
           <TextField label="Pavadinimas" size="small" value={form.name} onChange={setField("name")} />
+
           <Box sx={{ display: "flex", gap: 2, flexDirection: isMobile ? "column" : "row" }}>
             <TextField
               label="Inventorinis nr."
               size="small"
-              value={form.inventory_number}
-              onChange={setField("inventory_number")}
+              value={asset.inventory_number || ""}
+              disabled
               fullWidth
             />
-            <TextField
+            <LtDatePicker
               label="Eksploatacijos pradžia"
-              type="date"
-              size="small"
               value={form.operation_start_date}
-              onChange={setField("operation_start_date")}
-              InputLabelProps={{ shrink: true }}
+              onChange={(v) => setForm((prev) => ({ ...prev, operation_start_date: v }))}
+              minDate={asset.purchase_date}
               disabled={hasDepreciation}
-              fullWidth
+              helperText={hasDepreciation ? "Jau nudėvimas - keisti negalima" : ""}
             />
           </Box>
+
           <Box sx={{ display: "flex", gap: 2, flexDirection: isMobile ? "column" : "row" }}>
             <TextField
               label="Naudingo tarnavimo laikas, mėn."
-              type="number"
               size="small"
               value={form.useful_life_months}
-              onChange={setField("useful_life_months")}
-              disabled={hasDepreciation}
+              onChange={(e) => setForm((prev) => ({ ...prev, useful_life_months: sanitizeInt(e.target.value) }))}
+              inputProps={{ inputMode: "numeric" }}
               fullWidth
             />
-            <TextField
+            <MoneyField
               label="Likvidacinė vertė, EUR"
-              type="number"
               size="small"
               value={form.salvage_value}
-              onChange={setField("salvage_value")}
-              disabled={hasDepreciation}
-              inputProps={{ step: "0.01", min: 0 }}
+              onChange={(v) => setForm((prev) => ({ ...prev, salvage_value: v }))}
+              helperText="Suma, kurią tikitės gauti pabaigoje. Dažniausiai 0"
               fullWidth
             />
           </Box>
+
           <TextField
             label="Aprašymas"
             size="small"
@@ -333,10 +345,12 @@ export default function FixedAssetDetailDialog({
             multiline
             minRows={2}
           />
+
           {hasDepreciation && (
-            <Typography sx={{ fontSize: 12, color: "text.secondary" }}>
-              Turtas jau nudėvimas - eksploatacijos pradžios, tarnavimo laiko ir likvidacinės vertės keisti negalima.
-            </Typography>
+            <Alert severity="info" sx={{ fontSize: 12 }}>
+              Pakeitus tarnavimo laiką ar likvidacinę vertę, jau užregistruotas nusidėvėjimas nekeičiamas -
+              perskaičiuojami tik būsimi mėnesiai.
+            </Alert>
           )}
         </Stack>
       );
@@ -630,6 +644,7 @@ export default function FixedAssetDetailDialog({
         asset={asset}
         onClose={() => setSaleOpen(false)}
         onConfirm={handleSell}
+        onCreateInvoice={handleCreateInvoice}
         busy={busy}
       />
 

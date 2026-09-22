@@ -549,3 +549,74 @@ def validate_invoice_fixed_assets(invoice):
             raise FixedAssetError(
                 f"Pakeista sąskaitos data - ji nebeatitinka parduoto turto „{asset.name}“"
             )
+
+
+
+def check_sale(asset, *, invoice_date=None, amount=None, invoice_type="", currency="EUR"):
+    """Patikra prieš išrašant sąskaitą. Nieko nekuria."""
+    errors = []
+    warnings = []
+
+    asset = _load_asset(asset.pk)
+
+    if asset.status not in (FixedAssetStatus.ACTIVE, FixedAssetStatus.DRAFT):
+        errors.append(f"„{asset.name}“ jau nurašytas arba parduotas")
+
+    if invoice_type in ("kreditine", "isankstine"):
+        errors.append("Ilgalaikį turtą galima parduoti tik sąskaita faktūra arba PVM sąskaita faktūra")
+
+    group = asset.group
+    if not group or not group.asset_account:
+        errors.append("Turto grupei nenurodyta turto DK sąskaita")
+
+    catch_up_total = ZERO
+
+    if invoice_date:
+        from ..opening_balances.services import is_before_cutover
+
+        if is_before_cutover(asset.company_profile_id, invoice_date):
+            errors.append("Sąskaitos data yra iki perėjimo datos")
+
+        min_date = asset.operation_start_date or asset.purchase_date
+        if min_date and invoice_date < min_date:
+            errors.append(
+                f"Sąskaitos data negali būti ankstesnė už turto įsigijimą ({min_date:%Y-%m-%d})"
+            )
+
+        try:
+            catch_up = _disposal_catch_up(asset, invoice_date)
+            catch_up_total = sum((a for _, a in catch_up), ZERO)
+        except FixedAssetError as e:
+            errors.append(str(e.detail))
+
+    currency = (currency or "EUR").upper()
+    if currency != "EUR" and invoice_date:
+        from ..services.accounting_transfer import rate_to_eur
+
+        rate = rate_to_eur(currency, invoice_date)
+        if not rate or rate <= ZERO:
+            errors.append(f"Nėra {currency} kurso {invoice_date:%Y-%m-%d} dienai")
+
+    residual = asset.base_cost - asset.accumulated - catch_up_total
+
+    if amount is not None:
+        amount = _to_decimal(amount)
+        if amount <= ZERO:
+            errors.append("Pardavimo kaina turi būti didesnė už 0")
+        elif currency == "EUR" and amount < residual * Decimal("0.5"):
+            warnings.append(
+                f"Kaina gerokai mažesnė už likutinę vertę ({residual} EUR). "
+                "Įsitikinkite, kad ji atitinka rinkos kainą"
+            )
+
+    if catch_up_total > ZERO:
+        warnings.append(
+            f"Prieš pardavimą bus priskaičiuotas trūkstamas nusidėvėjimas {catch_up_total} EUR"
+        )
+
+    return {
+        "errors": errors,
+        "warnings": warnings,
+        "residual": str(residual),
+        "catch_up": str(catch_up_total),
+    }

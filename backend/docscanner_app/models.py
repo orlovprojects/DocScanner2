@@ -627,8 +627,26 @@ class CreditUsageLog(models.Model):
 
 
 
+#Cache proverenyx PVM kodov 
+class VatCheckCache(models.Model):
+    """Кэш ответов VIES: valid — 24ч, invalid — 6ч. Ошибки VIES не кэшируются."""
+    country_code = models.CharField(max_length=2)
+    vat_number = models.CharField(max_length=32)
+    valid = models.BooleanField()
+    name = models.CharField(max_length=500, blank=True, default="")
+    address = models.TextField(blank=True, default="")
+    checked_at = models.DateTimeField()
 
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["country_code", "vat_number"],
+                name="uniq_vat_check_cache",
+            ),
+        ]
 
+    def __str__(self):
+        return f"{self.country_code}{self.vat_number} valid={self.valid}"
 
 
 
@@ -3215,6 +3233,16 @@ class InvoiceLineItem(models.Model):
         blank=True,
         null=True,
         help_text="Pvz. 4492",
+    )
+
+    # ---- Ilgalaikis turtas ----
+    fixed_asset = models.ForeignKey(
+        "FixedAsset",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="sale_lines",
+        help_text="Jei eilutėje parduodamas ilgalaikis turtas",
     )
 
     # ---- Порядок ----
@@ -6615,11 +6643,13 @@ class OpeningBalanceSection(models.Model):
     BANK = "bank"
     BUYER = "buyer"
     SUPPLIER = "supplier"
+    FIXED_ASSET = "fixed_asset"
     SECTION_CHOICES = [
         (BALANCE, "Balansas"),
         (BANK, "Banko sąskaitos"),
         (BUYER, "Pirkėjų skolos"),
         (SUPPLIER, "Tiekėjų skolos"),
+        (FIXED_ASSET, "Ilgalaikis turtas"),
     ]
 
     batch = models.ForeignKey(

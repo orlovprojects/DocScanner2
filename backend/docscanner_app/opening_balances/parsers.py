@@ -39,6 +39,20 @@ def _text(value, limit=255):
 
 # Stulpelių atpažinimas. Aliasai be diakritikos ir mažosiomis.
 # Tvarka svarbi: konkretesni variantai tikrinami pirmiau.
+# Ilgalaikio turto failas
+FIXED_ASSET_ALIASES = {
+    "inventory_number": ("inventorinis nr", "inventorinis numeris", "inv nr", "inventorinis"),
+    "name": ("pavadinimas", "turto pavadinimas"),
+    "category": ("turto grupe", "grupe", "kategorija"),
+    "purchase_date": ("isigijimo data", "pirkimo data"),
+    "operation_start_date": ("eksploatacijos pradzia", "naudojimo pradzia"),
+    "acquisition_cost": ("isigijimo savikaina", "savikaina", "verte"),
+    "accumulated": ("sukauptas nusidevejimas", "nusidevejimas", "amortizacija"),
+    "useful_life_months": ("naudingo tarnavimo laikas", "tarnavimo laikas", "menesiai", "laikotarpis"),
+    "salvage_value": ("likvidacine verte", "likvidacine"),
+}
+
+
 HEADER_ALIASES = {
     # Kontrahentų failai
     "debt": ("pirkejo skola", "skola tiekejui", "skola"),
@@ -68,6 +82,142 @@ COUNTERPARTY_ACCOUNTS = {
     OpeningBalanceSection.BUYER: {"debt": "2410", "advance": "4420"},
     OpeningBalanceSection.SUPPLIER: {"debt": "4430", "advance": "2080"},
 }
+
+
+def _detect_fixed_asset_columns(header_row):
+    found = {}
+    for idx, cell in enumerate(header_row):
+        title = _strip_diacritics(cell).strip().lower()
+        if not title:
+            continue
+        for field, aliases in FIXED_ASSET_ALIASES.items():
+            if field in found:
+                continue
+            if any(title == a or title.startswith(a) for a in aliases):
+                found[field] = idx
+                break
+    return found
+
+
+def _to_date(value):
+    import datetime
+
+    if value in (None, ""):
+        return None
+    if isinstance(value, datetime.datetime):
+        return value.date()
+    if isinstance(value, datetime.date):
+        return value
+
+    raw = str(value).strip()[:10]
+    for fmt in ("%Y-%m-%d", "%d.%m.%Y", "%Y.%m.%d", "%d/%m/%Y", "%m/%d/%Y"):
+        try:
+            return datetime.datetime.strptime(raw, fmt).date()
+        except ValueError:
+            continue
+    return None
+
+
+def parse_fixed_assets(file_obj, categories):
+    """
+    Grąžina (lines, warnings). categories — {normalizuotas pavadinimas: kodas}.
+    Duomenys saugomi OpeningBalanceLine.extra.
+    """
+    rows = _read_rows(file_obj)
+
+    header_idx, cols = None, None
+    for idx, row in enumerate(rows[:10]):
+        found = _detect_fixed_asset_columns(row)
+        if "name" in found and "acquisition_cost" in found:
+            header_idx, cols = idx, found
+            break
+
+    if cols is None:
+        raise ParseError("Nerasti stulpeliai „Pavadinimas“ ir „Įsigijimo savikaina“.")
+
+    def cell(row, field):
+        i = cols.get(field)
+        return row[i] if i is not None and i < len(row) else None
+
+    lines = []
+    warnings = []
+    seen_numbers = set()
+
+    for offset, row in enumerate(rows[header_idx + 1:], start=1):
+        if not any(str(c or "").strip() for c in row):
+            continue
+
+        name = _text(cell(row, "name"))
+        inventory_number = _text(cell(row, "inventory_number"), 64)
+
+        if _is_total_row(name, inventory_number):
+            continue
+
+        cost = abs(_to_decimal(cell(row, "acquisition_cost")))
+        if not name and cost == 0:
+            continue
+
+        if not name:
+            warnings.append(f"{offset} eilutė: nenurodytas pavadinimas, praleista.")
+            continue
+
+        if cost <= 0:
+            warnings.append(f"{offset} eilutė ({name}): nenurodyta savikaina, praleista.")
+            continue
+
+        if inventory_number:
+            if inventory_number in seen_numbers:
+                warnings.append(f"{offset} eilutė ({name}): kartojasi inventorinis nr. {inventory_number}.")
+            seen_numbers.add(inventory_number)
+
+        raw_category = _strip_diacritics(cell(row, "category")).strip().lower()
+        category = categories.get(raw_category, "")
+        if raw_category and not category:
+            warnings.append(f"{offset} eilutė ({name}): nežinoma grupė „{_text(cell(row, 'category'))}“.")
+
+        accumulated = abs(_to_decimal(cell(row, "accumulated")))
+        salvage = abs(_to_decimal(cell(row, "salvage_value")))
+
+        if accumulated > cost - salvage:
+            warnings.append(
+                f"{offset} eilutė ({name}): sukauptas nusidėvėjimas viršija nudėvimą vertę."
+            )
+
+        life = cell(row, "useful_life_months")
+        try:
+            life = int(_to_decimal(life)) if life not in (None, "") else 0
+        except (ValueError, TypeError):
+            life = 0
+
+        purchase_date = _to_date(cell(row, "purchase_date"))
+        start_date = _to_date(cell(row, "operation_start_date")) or purchase_date
+
+        if not purchase_date:
+            warnings.append(f"{offset} eilutė ({name}): nenurodyta įsigijimo data.")
+
+        line = OpeningBalanceLine(
+            section=OpeningBalanceSection.FIXED_ASSET,
+            account_code=category,
+            account_name=name,
+            debit=cost,
+            credit=accumulated,
+            row_number=offset,
+            extra={
+                "inventory_number": inventory_number,
+                "category": category,
+                "raw_category": _text(cell(row, "category")),
+                "purchase_date": purchase_date.isoformat() if purchase_date else "",
+                "operation_start_date": start_date.isoformat() if start_date else "",
+                "useful_life_months": life,
+                "salvage_value": str(salvage),
+            },
+        )
+        lines.append(line)
+
+    if not lines:
+        raise ParseError("Faile nerasta turto eilučių.")
+
+    return lines, warnings
 
 
 def _detect_columns(header_row, section):

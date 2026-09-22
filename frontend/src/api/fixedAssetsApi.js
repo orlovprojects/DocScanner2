@@ -72,6 +72,12 @@ export const fixedAssetsApi = {
   sell: (id, data) =>
     api.post(`${BASE}/${id}/sell/`, data, { withCredentials: true }),
 
+  getSalePrefill: (id) =>
+    api.get(`${BASE}/${id}/sale-prefill/`, { withCredentials: true }),
+
+  checkSale: (id, data) =>
+    api.post(`${BASE}/${id}/sale-check/`, data, { withCredentials: true }),
+
   cancelSale: (id) =>
     api.post(`${BASE}/${id}/sell/cancel/`, {}, { withCredentials: true }),
 };

@@ -15,7 +15,8 @@ from ..models import (
 from ..utils.chart_of_accounts import get_account_name, is_valid_account
 from . import services
 from .matching import apply_matching, save_mapping
-from .parsers import ParseError, parse_section
+from .fixed_assets import category_lookup, category_options
+from .parsers import ParseError, parse_fixed_assets, parse_section
 
 SECTION_CODES = {s[0] for s in OpeningBalanceSection.SECTION_CHOICES}
 
@@ -45,6 +46,7 @@ def _line_payload(line):
         "counterparty_code": line.counterparty_code,
         "counterparty_vat_code": line.counterparty_vat_code,
         "extra": line.extra or {},
+        "category": (line.extra or {}).get("category", ""),
         "error": line.error,
     }
 
@@ -150,7 +152,10 @@ def opening_upload(request, section):
         return Response({"detail": "Įkelkite .xlsx failą."}, status=400)
 
     try:
-        lines, warnings = parse_section(upload, section)
+        if section == OpeningBalanceSection.FIXED_ASSET:
+            lines, warnings = parse_fixed_assets(upload, category_lookup())
+        else:
+            lines, warnings = parse_section(upload, section)
     except ParseError as e:
         return Response({"detail": str(e)}, status=400)
     except Exception as e:
@@ -214,6 +219,21 @@ def opening_line_detail(request, pk):
         return Response({"detail": "Eilutė nerasta."}, status=404)
     if not line.batch.is_editable:
         return Response({"detail": "Likučiai patvirtinti."}, status=400)
+
+    if line.section == OpeningBalanceSection.FIXED_ASSET:
+        from ..ilgalaikis_turtas.constants import FixedAssetCategory
+
+        category = str(request.data.get("category") or "").strip()
+        if category not in FixedAssetCategory.values:
+            return Response({"detail": "Nežinoma turto grupė."}, status=400)
+
+        extra = line.extra or {}
+        extra["category"] = category
+        line.extra = extra
+        line.account_code = category
+        line.save(update_fields=["extra", "account_code"])
+
+        return Response({"line": _line_payload(line), "summary": services.reconcile(line.batch)})
 
     code = str(request.data.get("mapped_account") or "").strip()
     if not code:
@@ -342,6 +362,18 @@ def opening_template(request, section):
             ["UAB Tiekėjas", "300654321", None, 830, None, "EUR", None, None, None, None],
             ["ACME Inc", None, None, None, 1000, "USD", None, "US", None, None],
         ],
+        OpeningBalanceSection.FIXED_ASSET: [
+            [
+                "Inventorinis nr.", "Pavadinimas", "Turto grupė",
+                "Įsigijimo data", "Eksploatacijos pradžia",
+                "Įsigijimo savikaina", "Sukauptas nusidėvėjimas",
+                "Naudingo tarnavimo laikas", "Likvidacinė vertė (nebūtina)",
+            ],
+            ["IT-000001", "MacBook Pro M4", "kompiuterinė technika",
+             "2024-05-10", "2024-05-10", 2400, 1200, 36, None],
+            ["IT-000002", "Toyota Corolla", "lengvasis automobilis",
+             "2022-03-01", "2022-03-01", 18000, 9000, 72, None],
+        ],
     }[section]
 
     from openpyxl.styles import Alignment, Font, PatternFill
@@ -351,6 +383,7 @@ def opening_template(request, section):
         OpeningBalanceSection.BANK: [12, 24, 26, 16, 14, 14, 10, 14],
         OpeningBalanceSection.BUYER: [34, 14, 18, 15, 17, 10, 22, 20, 30, 42],
         OpeningBalanceSection.SUPPLIER: [34, 14, 18, 16, 18, 10, 22, 20, 30, 42],
+        OpeningBalanceSection.FIXED_ASSET: [16, 34, 24, 16, 20, 18, 22, 22, 24],
     }[section]
 
     sheet_titles = {
@@ -358,6 +391,7 @@ def opening_template(request, section):
         OpeningBalanceSection.BANK: "Banko_saskaitos",
         OpeningBalanceSection.BUYER: "Pirkeju_skolos_permokos",
         OpeningBalanceSection.SUPPLIER: "Skolos_avansai_tiekejams",
+        OpeningBalanceSection.FIXED_ASSET: "Ilgalaikis_turtas",
     }
 
     wb = Workbook()
@@ -383,6 +417,16 @@ def opening_template(request, section):
     ws.row_dimensions[1].height = 30
     ws.freeze_panes = "A2"
 
+    if section == OpeningBalanceSection.FIXED_ASSET:
+        ref = wb.create_sheet("Turto_grupes")
+        ref.append(["Turto grupė", "Standartinis laikas, mėn."])
+        for item in category_options():
+            ref.append([item["label"], item["months"]])
+        ref.column_dimensions["A"].width = 30
+        ref.column_dimensions["B"].width = 26
+        ref.cell(row=1, column=1).font = required_font
+        ref.cell(row=1, column=2).font = required_font
+
     buffer = io.BytesIO()
     wb.save(buffer)
     buffer.seek(0)
@@ -396,8 +440,16 @@ def opening_template(request, section):
         OpeningBalanceSection.BANK: "banko_saskaitos",
         OpeningBalanceSection.BUYER: "pirkejai",
         OpeningBalanceSection.SUPPLIER: "tiekejai",
+        OpeningBalanceSection.FIXED_ASSET: "ilgalaikis_turtas",
     }
     response["Content-Disposition"] = (
         f'attachment; filename="pradiniai_likuciai_{file_names[section]}.xlsx"'
     )
     return response
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def opening_asset_categories(request):
+    """GET — turto grupių sąrašas IT eilučių priskyrimui."""
+    return Response({"categories": category_options()})

@@ -104,6 +104,9 @@ NUS_DOCUMENT_PREFIX = "NUS-"
 OPENING_REASON = "pradiniai_likuciai"
 CONTROL_ACCOUNT_PREFIXES = ("2080", "2410", "4420", "4430")
 
+# Leidžiamos kredito sąskaitos rankiniu būdu kuriamam turtui
+MANUAL_CREDIT_ACCOUNTS = ("308", "3011", "401", "272", "4494", "5401", "2010", "2040")
+
 
 class ManualAssetSource(models.TextChoices):
     OPENING = "opening", "Pradiniai likučiai"

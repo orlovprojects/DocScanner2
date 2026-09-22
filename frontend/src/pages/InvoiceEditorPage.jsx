@@ -28,6 +28,7 @@ import PaymentLinkToggle from '../components/PaymentLinkToggle';
 import { useInvSubscription } from '../contexts/InvSubscriptionContext';
 import LockOutlinedIcon from '@mui/icons-material/LockOutlined';
 import { useCompanyProfiles } from '../contexts/useCompanyProfiles';
+import { fixedAssetsApi } from '../api/fixedAssetsApi';
 
 // ═══════════════════════════════════════════════════════════
 // Helpers
@@ -232,6 +233,7 @@ const recurringSectionTitleSx = {
 };
 
 const emptyLine = () => ({
+  fixed_asset: null,
   prekes_pavadinimas: '',
   prekes_kodas: '',
   prekes_barkodas: '',
@@ -446,6 +448,7 @@ const InvoiceEditorPage = () => {
   const duplicateFromId = isNew ? searchParams.get('from') : null;
   const recurringEditId = isNew ? searchParams.get('recurring') : null;
   const recurringCopyId = isNew ? searchParams.get('recurring_from') : null;
+  const fixedAssetId = isNew ? searchParams.get('fixed_asset') : null;
 
   const [loading, setLoading] = useState(!isNew);
   const [saving, setSaving] = useState(false);
@@ -491,6 +494,7 @@ const InvoiceEditorPage = () => {
   });
 
   const [lineItems, setLineItems] = useState([emptyLine()]);
+  const [saleCheck, setSaleCheck] = useState({ errors: [], warnings: [] });
 
   const [showSellerExtra, setShowSellerExtra] = useState(false);
   const [showBuyerExtra, setShowBuyerExtra] = useState(false);
@@ -590,6 +594,39 @@ const InvoiceEditorPage = () => {
       navigate('/israsymas', { replace: true });
     }
   }, [activeId, navigate]);
+
+  // ── IT pardavimas: prefill (vieną kartą, kai įkelti nustatymai) ──
+  useEffect(() => {
+    if (!fixedAssetId || !settings || prefillDoneRef.current) return;
+    prefillDoneRef.current = true;
+
+    (async () => {
+      try {
+        const { data } = await fixedAssetsApi.getSalePrefill(fixedAssetId);
+
+        const vntUnit = availableUnits.find((un) => un.code === 'vnt');
+        const unitCode = vntUnit ? 'vnt' : getDefaultUnit();
+        const isVatPayer = Boolean(settings?.seller?.vat_code);
+
+        u('invoice_type', isVatPayer ? 'pvm_saskaita' : 'saskaita');
+
+        setLineItems([{
+          ...emptyLine(),
+          fixed_asset: data.fixed_asset_id,
+          prekes_pavadinimas: data.name || '',
+          prekes_kodas: data.inventory_number || '',
+          quantity: '1',
+          unit: unitCode,
+          price: String(data.suggested_price ?? 0).replace('.', ','),
+          preke_paslauga: data.preke_paslauga || 'preke',
+        }]);
+        setShowTotalDiscount(false);
+        showMsg('Užpildyta iš ilgalaikio turto kortelės. Patikslinkite pirkėją ir kainą.', 'info');
+      } catch (e) {
+        showMsg(e.response?.data?.detail || 'Nepavyko įkelti turto duomenų', 'error');
+      }
+    })();
+  }, [fixedAssetId, settings, availableUnits]);
 
   // ── Buyer search ──
   useEffect(() => {
@@ -728,6 +765,12 @@ const InvoiceEditorPage = () => {
 
   // FIX #1: Editing allowed for all statuses except cancelled
   const isEditable = form.status !== 'cancelled';
+
+  // Parduoto IT eilutė po išrašymo užrakinama
+  const isAssetLineLocked = (li) => Boolean(li.fixed_asset) && form.status !== 'draft';
+  const hasAssetLine = lineItems.some((li) => li.fixed_asset);
+  const assetSaleLocked = hasAssetLine && form.status !== 'draft';
+  const prefillDoneRef = useRef(false);
   const sym = getSym(form.currency);
   const isPvm = form.pvm_tipas === 'taikoma';
   const showPvmSelector = form.invoice_type === 'isankstine';
@@ -1350,6 +1393,7 @@ const InvoiceEditorPage = () => {
         });
         if (data.line_items?.length) {
           setLineItems(data.line_items.map((li) => ({
+            fixed_asset: li.fixed_asset || null,
             prekes_pavadinimas: li.prekes_pavadinimas || '',
             prekes_kodas: li.prekes_kodas || '',
             prekes_barkodas: li.prekes_barkodas || '',
@@ -1651,6 +1695,36 @@ const InvoiceEditorPage = () => {
     });
   }, [lineItems, showLineDiscount, showPerLineVat, isPvm, form.vat_percent, grossMode]);
 
+  const saleAssetLine = useMemo(
+    () => lineItems.findIndex((li) => li.fixed_asset),
+    [lineItems],
+  );
+
+  // ── IT pardavimas: patikra prieš išrašant ──
+  useEffect(() => {
+    const idx = saleAssetLine;
+    if (idx < 0) { setSaleCheck({ errors: [], warnings: [] }); return; }
+
+    const assetId = lineItems[idx].fixed_asset;
+    const amount = lineSums[idx]?.net ?? 0;
+
+    const t = setTimeout(async () => {
+      try {
+        const { data } = await fixedAssetsApi.checkSale(assetId, {
+          invoice_date: form.invoice_date || null,
+          amount,
+          invoice_type: form.invoice_type,
+          currency: form.currency,
+        });
+        setSaleCheck({ errors: data.errors || [], warnings: data.warnings || [] });
+      } catch {
+        setSaleCheck({ errors: [], warnings: [] });
+      }
+    }, 400);
+
+    return () => clearTimeout(t);
+  }, [saleAssetLine, lineItems, lineSums, form.invoice_date, form.invoice_type, form.currency]);
+
   const handleGrossToggle = (checked) => setShowGrossInput(checked);
 
   const grossModeRef = useRef(false);
@@ -1754,12 +1828,16 @@ const InvoiceEditorPage = () => {
       vat_percent: showPerLineVat && li.vat_percent !== '' ? parseNum(li.vat_percent) : null,
       discount_wo_vat: round2(lineSums[i]?.lineDiscount || 0),
       preke_paslauga: li.preke_paslauga || '',
-      kredito_saskaita:
-        li.kredito_saskaita ||
-        (
-          li.preke_paslauga === 'preke'
-            ? '5000'
-            : '5001'
+      fixed_asset: li.fixed_asset || null,
+      kredito_saskaita: li.fixed_asset
+        ? '5400'
+        : (
+          li.kredito_saskaita ||
+          (
+            li.preke_paslauga === 'preke'
+              ? '5000'
+              : '5001'
+          )
         ),
 
       pvm_saskaita: isPvm
@@ -2209,6 +2287,10 @@ const InvoiceEditorPage = () => {
 
   const handleRecurringModeChange = (_, value) => {
     if (!value) return;
+    if (value === 'recurring' && saleAssetLine >= 0) {
+      showMsg('Ilgalaikio turto pardavimo sąskaita negali būti periodinė', 'warning');
+      return;
+    }
     if (value === 'recurring' && recurringLocked) {
       showLockedMsg("recurring");
       return;
@@ -2368,7 +2450,7 @@ const InvoiceEditorPage = () => {
     const isFromSearch = linesFromSearch.has(i);
     return (
       <Box sx={{ display: 'flex', gap: 0.5, alignItems: 'center' }}>
-        {isEditable && (
+        {isEditable && !li.fixed_asset && (
           <Tooltip title="Ieškoti iš prekių katalogo">
             <IconButton size="small" onClick={() => activateSearch(i)}
               sx={{
@@ -2391,7 +2473,7 @@ const InvoiceEditorPage = () => {
         <DebouncedField size="small" fullWidth
           value={li.prekes_pavadinimas}
           onChange={(v) => uLine(i, 'prekes_pavadinimas', v)}
-          disabled={!isEditable}
+          disabled={!isEditable || isAssetLineLocked(li)}
           placeholder="Pavadinimas *"
           error={!!fieldErrors[`line_${i}_name`]}
           InputProps={isFromSearch && li.prekes_pavadinimas ? {
@@ -2416,7 +2498,7 @@ const InvoiceEditorPage = () => {
         if (e.target.value === '__new_unit__') { setNewUnitForLine(i); setNewUnitDialog(true); return; }
         uLine(i, 'unit', e.target.value);
       }}
-      disabled={!isEditable}
+      disabled={!isEditable || isAssetLineLocked(li)}
       SelectProps={{ MenuProps: { disableScrollLock: true, PaperProps: { sx: { maxHeight: 300, minWidth: 180 } } } }}
       sx={width ? { width, minWidth: width } : undefined}
     >
@@ -2555,7 +2637,7 @@ const InvoiceEditorPage = () => {
                   Konvertuoti į {form.pvm_tipas === 'taikoma' ? 'PVM SF' : 'SF'}
                 </Button>
               )}
-              {form.can_create_credit && (
+              {form.can_create_credit && !hasAssetLine && (
                 <Button size="small" variant="outlined" color="error"
                   onClick={async () => {
                     setSaving(true);
@@ -2596,7 +2678,10 @@ const InvoiceEditorPage = () => {
                 sx={segmentedGroupSx}
               >
                 <ToggleButton value="single">Vienkartinė sąskaita</ToggleButton>
-                <ToggleButton value="recurring" sx={recurringLocked ? { opacity: 0.6 } : {}}>
+                <ToggleButton
+                  value="recurring"
+                  sx={recurringLocked || saleAssetLine >= 0 ? { opacity: 0.6 } : {}}
+                >
                   {recurringLocked && <LockOutlinedIcon sx={{ fontSize: 15, mr: 0.5, color: '#d32f2f' }} />}
                   Periodinė sąskaita
                 </ToggleButton>
@@ -2811,10 +2896,19 @@ const InvoiceEditorPage = () => {
           <Grid2 container spacing={1.5} alignItems="center" sx={{ maxWidth: 780 }}>
             <Grid2 size={{ xs: 12, sm: 5 }}>
               <TextField fullWidth select label="Dokumento tipas *" value={form.invoice_type}
-                onChange={(e) => u('invoice_type', e.target.value)} disabled={!isEditable}
+                onChange={(e) => u('invoice_type', e.target.value)} disabled={!isEditable || assetSaleLocked}
                 SelectProps={{ MenuProps: menuProps }}>
                 {Object.entries(TYPE_LABELS).map(([k, v]) => (
-                  <MenuItem key={k} value={k} disabled={isRecurring && k === 'kreditine'}>{v}</MenuItem>
+                  <MenuItem
+                    key={k}
+                    value={k}
+                    disabled={
+                      (isRecurring && k === 'kreditine') ||
+                      (hasAssetLine && (k === 'kreditine' || k === 'isankstine'))
+                    }
+                  >
+                    {v}
+                  </MenuItem>
                 ))}
               </TextField>
             </Grid2>
@@ -2935,7 +3029,7 @@ const InvoiceEditorPage = () => {
             {!isRecurring && (
               <>
                 <Grid2 size={{ xs: 6, sm: 3 }}>
-                  <DateField label="Sąskaitos data *" value={form.invoice_date} onChange={(v) => u('invoice_date', v)} disabled={!isEditable} error={!!fieldErrors.invoice_date} />
+                  <DateField label="Sąskaitos data *" value={form.invoice_date} onChange={(v) => u('invoice_date', v)} disabled={!isEditable || assetSaleLocked} error={!!fieldErrors.invoice_date} />
                 </Grid2>
                 <Grid2 size={{ xs: 6, sm: 2 }}>
                   <DateField label="Apmokėti iki" value={form.due_date} onChange={(v) => u('due_date', v)} disabled={!isEditable} />
@@ -2952,14 +3046,14 @@ const InvoiceEditorPage = () => {
             )}
             {showVatOptions && !showPerLineVat && (
               <Grid2 size={{ xs: 6, sm: 2 }}>
-                <DebouncedIntField fullWidth label="PVM % *" value={form.vat_percent} onChange={(v) => u('vat_percent', v)} disabled={!isEditable}
+                <DebouncedIntField fullWidth label="PVM % *" value={form.vat_percent} onChange={(v) => u('vat_percent', v)} disabled={!isEditable || assetSaleLocked}
                   InputProps={{ endAdornment: <InputAdornment position="end">%</InputAdornment> }} />
               </Grid2>
             )}
             <Grid2 size={{ xs: 6, sm: 3 }}>
               <Autocomplete value={form.currency}
                 onChange={(_, v) => { if (v) u('currency', v); }}
-                options={sortedCurrencies} disableClearable disabled={!isEditable}
+                options={sortedCurrencies} disableClearable disabled={!isEditable || assetSaleLocked}
                 groupBy={(option) => POPULAR_CURRENCIES.includes(option) ? 'Populiarios' : 'Visos valiutos'}
                 getOptionLabel={(option) => `${option} (${getSym(option)})`}
                 renderInput={(params) => <TextField {...params} label="Valiuta *" />}
@@ -3103,12 +3197,12 @@ const InvoiceEditorPage = () => {
           </Box>
 
           <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mb: 2 }}>
-            <FormControlLabel control={<Switch checked={showLineDiscount} onChange={(e) => setShowLineDiscount(e.target.checked)} size="small" />} label={<Typography variant="body2">Nuolaida eilutei</Typography>} />
+            <FormControlLabel control={<Switch checked={showLineDiscount} disabled={assetSaleLocked} onChange={(e) => setShowLineDiscount(e.target.checked)} size="small" />} label={<Typography variant="body2">Nuolaida eilutei</Typography>} />
             {showVatOptions && (
-              <FormControlLabel control={<Switch checked={showPerLineVat} onChange={(e) => setShowPerLineVat(e.target.checked)} size="small" />} label={<Typography variant="body2">Skirtingi PVM %</Typography>} />
+              <FormControlLabel control={<Switch checked={showPerLineVat} disabled={assetSaleLocked} onChange={(e) => setShowPerLineVat(e.target.checked)} size="small" />} label={<Typography variant="body2">Skirtingi PVM %</Typography>} />
             )}
             {showVatOptions && isEditable && (
-              <FormControlLabel control={<Switch checked={showGrossInput} onChange={(e) => handleGrossToggle(e.target.checked)} size="small" />} label={<Typography variant="body2">Įvesti sumą su PVM</Typography>} />
+              <FormControlLabel control={<Switch checked={showGrossInput} disabled={assetSaleLocked} onChange={(e) => handleGrossToggle(e.target.checked)} size="small" />} label={<Typography variant="body2">Įvesti sumą su PVM</Typography>} />
             )}
           </Box>
 
@@ -3160,16 +3254,18 @@ const InvoiceEditorPage = () => {
                         <Typography sx={{ fontWeight: 700, fontSize: 13, color: '#8a97a8' }}>{i + 1}</Typography>
                       </Box>
                       {renderNameField(i, li)}
-                      <DebouncedField size="small" fullWidth value={li.prekes_kodas} onChange={(v) => uLine(i, 'prekes_kodas', v)} disabled={!isEditable} placeholder="Kodas *" error={!!fieldErrors[`line_${i}_code`]} />
+                      <DebouncedField size="small" fullWidth value={li.prekes_kodas} onChange={(v) => uLine(i, 'prekes_kodas', v)} disabled={!isEditable || Boolean(li.fixed_asset)} placeholder="Kodas *" error={!!fieldErrors[`line_${i}_code`]} />
                       <DebouncedField size="small" fullWidth value={li.prekes_barkodas} onChange={(v) => uLine(i, 'prekes_barkodas', v)} disabled={!isEditable} placeholder="Barkodas" />
-                      {isEditable ? (
+                      {isEditable && !(li.fixed_asset && form.status !== 'draft') ? (
                         <Box sx={{ display: 'flex', gap: 0.25, alignItems: 'center', justifyContent: 'center', pt: 0.5 }}>
-                          <Tooltip title="Dubliuoti eilutę">
-                            <IconButton size="small" onClick={() => {
-                              setLineItems((p) => { const copy = { ...p[i] }; const next = [...p]; next.splice(i + 1, 0, copy); return next; });
-                            }} sx={{ p: 0.5, color: '#8a97a8', '&:hover': { color: P.primary, backgroundColor: '#e3f2fd' } }}>
-                              <DuplicateIcon sx={{ fontSize: 16 }} />
-                            </IconButton>
+                          <Tooltip title={li.fixed_asset ? 'Ilgalaikio turto eilutės dubliuoti negalima' : 'Dubliuoti eilutę'}>
+                            <span>
+                              <IconButton size="small" disabled={Boolean(li.fixed_asset)} onClick={() => {
+                                setLineItems((p) => { const copy = { ...p[i] }; const next = [...p]; next.splice(i + 1, 0, copy); return next; });
+                              }} sx={{ p: 0.5, color: '#8a97a8', '&:hover': { color: P.primary, backgroundColor: '#e3f2fd' } }}>
+                                <DuplicateIcon sx={{ fontSize: 16 }} />
+                              </IconButton>
+                            </span>
                           </Tooltip>
                           <Tooltip title="Ištrinti eilutę">
                             <span>
@@ -3217,24 +3313,24 @@ const InvoiceEditorPage = () => {
                       )}
 
                       <DebouncedNumField size="small" label="Kiekis *" sx={{ width: 90 }} value={li.quantity}
-                        onChange={(v) => uLine(i, 'quantity', v)} disabled={!isEditable} maxDecimals={5}
+                        onChange={(v) => uLine(i, 'quantity', v)} disabled={!isEditable || Boolean(li.fixed_asset)} maxDecimals={5}
                         error={!!fieldErrors[`line_${i}_qty`]} />
                       {renderUnitField(i, li, 120)}
                       <DebouncedNumField size="small" label={priceLabel} sx={{ width: 110 }} value={li.price}
-                        onChange={(v) => uLine(i, 'price', v)} disabled={!isEditable || grossMode} maxDecimals={4}
+                        onChange={(v) => uLine(i, 'price', v)} disabled={!isEditable || grossMode || isAssetLineLocked(li)} maxDecimals={4}
                         error={!grossMode && !!fieldErrors[`line_${i}_price`]} />
 
                       {grossMode && (
                         <DebouncedNumField size="small" label="Suma su PVM *" sx={{ width: 120 }}
                           value={li.gross_input}
-                          onChange={(v) => uLine(i, 'gross_input', v)} disabled={!isEditable} maxDecimals={2}
+                          onChange={(v) => uLine(i, 'gross_input', v)} disabled={!isEditable || isAssetLineLocked(li)} maxDecimals={2}
                           error={!!fieldErrors[`line_${i}_price`]} />
                       )}
 
                       {showLineDiscount && (
                         <Box sx={{ display: 'flex', alignItems: 'flex-end', gap: 0.5 }}>
                           <DebouncedNumField size="small" label="Nuolaida" sx={{ width: 90 }} value={li.discount_value}
-                            onChange={(v) => uLine(i, 'discount_value', v)} disabled={!isEditable} />
+                            onChange={(v) => uLine(i, 'discount_value', v)} disabled={!isEditable || isAssetLineLocked(li)} />
                           <ToggleButtonGroup size="small" exclusive value={li.discount_type}
                             onChange={(_, v) => { if (v) uLine(i, 'discount_type', v); }}
                             sx={{ height: 40, '& .MuiToggleButton-root': { height: 40, px: 1, fontSize: 12, fontWeight: 600 } }}>
@@ -3246,7 +3342,7 @@ const InvoiceEditorPage = () => {
 
                       {showPerLineVat && showVatOptions && (
                         <DebouncedIntField size="small" label="PVM %" sx={{ width: 90 }} value={li.vat_percent}
-                          onChange={(v) => uLine(i, 'vat_percent', v)} disabled={!isEditable} placeholder={form.vat_percent}
+                          onChange={(v) => uLine(i, 'vat_percent', v)} disabled={!isEditable || isAssetLineLocked(li)} placeholder={form.vat_percent}
                           InputProps={{ endAdornment: <InputAdornment position="end" sx={{ '& p': { fontSize: 11 } }}>%</InputAdornment> }} />
                       )}
 
@@ -3254,7 +3350,7 @@ const InvoiceEditorPage = () => {
                         label="Prekė ar paslauga"
                         value={li.preke_paslauga || 'preke'}
                         onChange={(e) => uLine(i, 'preke_paslauga', e.target.value)}
-                        disabled={!isEditable}
+                        disabled={!isEditable || isAssetLineLocked(li)}
                         sx={{ width: 130, '& .MuiInputLabel-root': { fontSize: 12 } }}
                         SelectProps={{ MenuProps: { disableScrollLock: true } }}>
                         <MenuItem value="preke">Prekė</MenuItem>
@@ -3262,7 +3358,7 @@ const InvoiceEditorPage = () => {
                       </TextField>
 
                       {/* ── Catalog save — redesigned ── */}
-                      {isEditable && (
+                      {isEditable && !li.fixed_asset && (
                         <Box sx={{
                           display: 'flex',
                           alignItems: 'center',
@@ -3317,20 +3413,20 @@ const InvoiceEditorPage = () => {
                           </Box>
                         )}
                       </Box>
-                      {isEditable && (
+                      {isEditable && !isAssetLineLocked(li) && (
                         <Box sx={{ display: 'flex', gap: 0.5 }}>
-                          <IconButton size="small" onClick={() => { setLineItems((p) => { const next = [...p]; next.splice(i + 1, 0, { ...p[i] }); return next; }); }}><DuplicateIcon fontSize="small" /></IconButton>
+                          <IconButton size="small" disabled={Boolean(li.fixed_asset)} onClick={() => { setLineItems((p) => { const next = [...p]; next.splice(i + 1, 0, { ...p[i] }); return next; }); }}><DuplicateIcon fontSize="small" /></IconButton>
                           <IconButton size="small" onClick={() => removeLine(i)} disabled={lineItems.length === 1}><DeleteIcon fontSize="small" /></IconButton>
                         </Box>
                       )}
                     </Box>
                     <Grid2 container spacing={1}>
                       <Grid2 size={12}>{renderNameField(i, li)}</Grid2>
-                      <Grid2 size={6}><DebouncedField size="small" fullWidth label="Kodas" value={li.prekes_kodas} onChange={(v) => uLine(i, 'prekes_kodas', v)} disabled={!isEditable} error={!!fieldErrors[`line_${i}_code`]} /></Grid2>
+                      <Grid2 size={6}><DebouncedField size="small" fullWidth label="Kodas" value={li.prekes_kodas} onChange={(v) => uLine(i, 'prekes_kodas', v)} disabled={!isEditable || Boolean(li.fixed_asset)} error={!!fieldErrors[`line_${i}_code`]} /></Grid2>
                       <Grid2 size={6}><DebouncedField size="small" fullWidth label="Barkodas" value={li.prekes_barkodas} onChange={(v) => uLine(i, 'prekes_barkodas', v)} disabled={!isEditable} /></Grid2>
-                      <Grid2 size={4}><DebouncedNumField size="small" fullWidth label="Kiekis" value={li.quantity} onChange={(v) => uLine(i, 'quantity', v)} disabled={!isEditable} maxDecimals={5} error={!!fieldErrors[`line_${i}_qty`]} /></Grid2>
+                      <Grid2 size={4}><DebouncedNumField size="small" fullWidth label="Kiekis" value={li.quantity} onChange={(v) => uLine(i, 'quantity', v)} disabled={!isEditable || Boolean(li.fixed_asset)} maxDecimals={5} error={!!fieldErrors[`line_${i}_qty`]} /></Grid2>
                       <Grid2 size={4}>{renderUnitField(i, li)}</Grid2>
-                      <Grid2 size={4}><DebouncedNumField size="small" fullWidth label={priceLabel} value={li.price} onChange={(v) => uLine(i, 'price', v)} disabled={!isEditable || grossMode} maxDecimals={4} error={!grossMode && !!fieldErrors[`line_${i}_price`]} /></Grid2>
+                      <Grid2 size={4}><DebouncedNumField size="small" fullWidth label={priceLabel} value={li.price} onChange={(v) => uLine(i, 'price', v)} disabled={!isEditable || grossMode || isAssetLineLocked(li)} maxDecimals={4} error={!grossMode && !!fieldErrors[`line_${i}_price`]} /></Grid2>
                       {grossMode && (
                         <Grid2 size={12}><DebouncedNumField size="small" fullWidth label="Suma su PVM *" value={li.gross_input} onChange={(v) => uLine(i, 'gross_input', v)} disabled={!isEditable} maxDecimals={2} error={!!fieldErrors[`line_${i}_price`]} /></Grid2>
                       )}
@@ -3354,13 +3450,13 @@ const InvoiceEditorPage = () => {
                           label="Prekė ar paslauga"
                           value={li.preke_paslauga || 'preke'}
                           onChange={(e) => uLine(i, 'preke_paslauga', e.target.value)}
-                          disabled={!isEditable}
+                          disabled={!isEditable || isAssetLineLocked(li)}
                           SelectProps={{ MenuProps: { disableScrollLock: true } }}>
                           <MenuItem value="preke">Prekė</MenuItem>
                           <MenuItem value="paslauga">Paslauga</MenuItem>
                         </TextField>
                       </Grid2>
-                      {isEditable && (
+                      {isEditable && !li.fixed_asset && (
                         <Grid2 size={6}>
                           <FormControlLabel
                             control={<Switch checked={li.save_to_catalog || false} onChange={(e) => uLine(i, 'save_to_catalog', e.target.checked)} size="small" />}
@@ -3385,7 +3481,21 @@ const InvoiceEditorPage = () => {
         {/* ─── 5. Totals ─── */}
         <Box sx={secSx}>
           <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mb: 2 }}>
-            <FormControlLabel control={<Switch checked={showTotalDiscount} onChange={(e) => setShowTotalDiscount(e.target.checked)} size="small" />} label={<Typography variant="body2">Nuolaida visai sąskaitai</Typography>} />
+            <Tooltip title={hasAssetLine ? 'Parduodant ilgalaikį turtą naudokite nuolaidą eilutei' : ''}>
+              <span>
+                <FormControlLabel
+                  control={
+                    <Switch
+                      checked={showTotalDiscount && !hasAssetLine}
+                      disabled={hasAssetLine}
+                      onChange={(e) => setShowTotalDiscount(e.target.checked)}
+                      size="small"
+                    />
+                  }
+                  label={<Typography variant="body2">Nuolaida visai sąskaitai</Typography>}
+                />
+              </span>
+            </Tooltip>
           </Box>
           <Collapse in={showTotalDiscount}>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1, maxWidth: 350 }}>
@@ -3731,6 +3841,26 @@ const InvoiceEditorPage = () => {
               <PaymentLinkToggle value={paymentLink} onChange={setPaymentLink} />
             ))}
 
+        {saleAssetLine >= 0 && (
+          <Box sx={{ mb: 2 }}>
+            <Alert severity={saleCheck.errors.length ? 'error' : 'info'} sx={{ mb: saleCheck.warnings.length ? 1 : 0 }}>
+              {saleCheck.errors.length ? (
+                <>
+                  <strong>Ilgalaikio turto pardavimas negalimas:</strong>
+                  {saleCheck.errors.map((e, i) => <div key={i}>{e}</div>)}
+                </>
+              ) : form.status !== 'draft' ? (
+                'Pagal šią sąskaitą parduotas ilgalaikis turtas. Kiekio ir kainos keisti negalima - pirmiausia atšaukite pardavimą turto kortelėje.'
+              ) : (
+                'Šioje sąskaitoje parduodamas ilgalaikis turtas. Išrašius sąskaitą turtas bus nurašytas iš apskaitos, pajamos - į 5400.'
+              )}
+            </Alert>
+            {saleCheck.warnings.map((w, i) => (
+              <Alert key={i} severity="warning" sx={{ mb: 0.5 }}>{w}</Alert>
+            ))}
+          </Box>
+        )}
+
         {/* ─── 8. Buttons ─── */}
         {isEditable && (isNew || form.status === 'draft') && (
           <Box sx={{ display: 'flex', justifyContent: 'center', gap: 2, mt: 4, flexWrap: 'wrap' }}>
@@ -3762,7 +3892,7 @@ const InvoiceEditorPage = () => {
                       handleSave('issue');
                     }
                   }}
-                  disabled={saving}
+                  disabled={saving || saleCheck.errors.length > 0}
                 >
                   Sukurti sąskaitą
                 </Button>
@@ -3780,7 +3910,7 @@ const InvoiceEditorPage = () => {
                       handleSave('issue_send');
                     }
                   }}
-                  disabled={saving}
+                  disabled={saving || saleCheck.errors.length > 0}
                 >
                   Sukurti ir išsiųsti
                 </Button>

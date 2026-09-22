@@ -1328,13 +1328,25 @@ export default function PurchasePreviewDialog({
             {improvementChips}
           </Box>
           {remaining > 0.004 && (
-            <Button
-              size="small"
-              onClick={() => openItDialog(lineId, source.suggested_asset_type)}
-              sx={{ mt: 0.75, textTransform: "none", fontSize: 12, fontWeight: 600, color: "#A0590F", px: 0.5 }}
-            >
-              Sukurti iš likučio ({fmtAmount(remaining)})
-            </Button>
+            <Box sx={{ mt: 1, display: "flex", alignItems: "center", gap: 1, flexWrap: "wrap" }}>
+              <Typography sx={{ fontSize: 12, color: "text.secondary" }}>
+                Likutis: <b>{fmtAmount(remaining)}</b>
+              </Typography>
+              <Button
+                size="small"
+                onClick={() => openItDialog(lineId, source.suggested_asset_type)}
+                sx={{ textTransform: "none", fontSize: 12, fontWeight: 600, color: "#A0590F", px: 1 }}
+              >
+                Sukurti ilgalaikį turtą
+              </Button>
+              <Button
+                size="small"
+                onClick={() => setImproveDialog({ open: true, lineId })}
+                sx={{ textTransform: "none", fontSize: 12, fontWeight: 600, color: "#A0590F", px: 1 }}
+              >
+                Pagerinimas
+              </Button>
+            </Box>
           )}
         </Box>
       );
@@ -1939,6 +1951,7 @@ export default function PurchasePreviewDialog({
         onClose={() => setImproveDialog({ open: false, lineId: null })}
         purchaseId={purchase?.id}
         lineId={improveDialog.lineId}
+        previewUrl={purchase?.preview_url}
         onCreated={async () => {
           await loadFixedAssets();
           if (purchase?.id) await onUpdated?.(purchase.id);

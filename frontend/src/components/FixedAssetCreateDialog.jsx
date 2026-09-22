@@ -21,6 +21,7 @@ import { api } from "../api/endpoints";
 import { fixedAssetsApi } from "../api/fixedAssetsApi";
 import { getAccountName } from "./KorespondencijaComponents";
 import DocumentImagePane from "./DocumentImagePane";
+import LtDatePicker from "./LtDatePicker";
 import { errorText, fmtEur, nextMonthStart } from "./fixedAssetsUtils";
 
 const MAX_CARDS = 500;
@@ -147,7 +148,8 @@ export default function FixedAssetCreateDialog({
         const lineQty = Number(src.quantity);
         const sourceAmount = Number(src.source_amount || 0);
         const available = Number(src.available_amount || 0);
-        const hasLineQty = Boolean(lineId) && Number.isFinite(lineQty) && lineQty > 0;
+        const isSumiskai = Boolean(src.is_sumiskai) || !lineId;
+        const hasLineQty = !isSumiskai && Number.isFinite(lineQty) && lineQty > 0;
         const maxQty = hasLineQty ? Math.max(1, Math.floor(lineQty)) : null;
         const unitCost = hasLineQty ? sourceAmount / lineQty : null;
         const defaultQty = unitCost
@@ -155,7 +157,7 @@ export default function FixedAssetCreateDialog({
           : 1;
 
         setGroups(groupsRes.data || []);
-        setSource({ ...src, unitCost, maxQty });
+        setSource({ ...src, unitCost, maxQty, isSumiskai });
         if (purchaseRes?.data) setImageUrl(purchaseRes.data.preview_url || null);
 
         setForm({
@@ -186,7 +188,7 @@ export default function FixedAssetCreateDialog({
   );
 
   const available = Number(source?.available_amount || 0);
-  const isDetaliai = Boolean(lineId);
+  const isDetaliai = Boolean(source) && !source.isSumiskai;
 
   const setField = (field) => (e) => setForm((prev) => ({ ...prev, [field]: e.target.value }));
 
@@ -301,7 +303,17 @@ export default function FixedAssetCreateDialog({
       <Box sx={{ p: 1.5, borderRadius: 1.5, bgcolor: "#fafafa", border: "1px solid", borderColor: "divider" }}>
         <InfoLine label="Tiekėjas">{source.seller_name || "—"}</InfoLine>
         <InfoLine label={isDetaliai ? "Eilutės suma (be PVM)" : "Dokumento suma (be PVM)"}>
-          {fmtEur(source.source_amount)}
+          {source.currency && source.currency !== "EUR" ? (
+            <>
+              {Number(source.source_amount_original).toLocaleString("lt-LT", {
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2,
+              })}{" "}
+              {source.currency} → {fmtEur(source.source_amount)}
+            </>
+          ) : (
+            fmtEur(source.source_amount)
+          )}
         </InfoLine>
         <InfoLine label="Likutis (be PVM)">{fmtEur(source.available_amount)}</InfoLine>
         {source.unitCost && (
@@ -315,7 +327,14 @@ export default function FixedAssetCreateDialog({
 
       {!isDetaliai && (
         <Alert severity="info" sx={{ fontSize: 12 }}>
-          Sumiškai sąskaita: pagal dokumentą kairėje įveskite ilgalaikio turto sumą be PVM ir kiekį.
+          Suminė sąskaita: pagal dokumentą kairėje įveskite ilgalaikio turto sumą (be PVM) ir kiekį.
+        </Alert>
+      )}
+
+      {source.currency && source.currency !== "EUR" && (
+        <Alert severity="info" sx={{ fontSize: 12 }}>
+          Sąskaita {source.currency} valiuta. Turtas apskaitomas EUR pagal LB kursą dokumento dienai -
+          savikainą įveskite EUR.
         </Alert>
       )}
 
@@ -395,19 +414,16 @@ export default function FixedAssetCreateDialog({
         />
       </Box>
 
-      <TextField
+      <LtDatePicker
         label="Eksploatacijos pradžia"
-        size="small"
-        type="date"
         value={form.operation_start_date}
-        onChange={setField("operation_start_date")}
-        InputLabelProps={{ shrink: true }}
+        onChange={(v) => setForm((prev) => ({ ...prev, operation_start_date: v }))}
+        minDate={source.purchase_date}
         helperText={
           depreciationStart
             ? `Nusidėvėjimas bus skaičiuojamas nuo ${depreciationStart}`
             : "Tuščia - juodraštis, nusidėvėjimas neskaičiuojamas"
         }
-        fullWidth
       />
 
       {group && group.asset_account && costValid && (

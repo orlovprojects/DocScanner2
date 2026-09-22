@@ -85,6 +85,29 @@ def _get_asset(cp, pk, annotate=False):
     return asset
 
 
+def _is_sumiskai(purchase):
+    """
+    Sumiškai pirkimas: perkeliant sukuriama viena techninė eilutė,
+    kurios suma sutampa su viso dokumento suma.
+    """
+    if (getattr(purchase, "scan_type", "") or "") == "sumiskai":
+        return True
+
+    lines = list(purchase.line_items.all()[:2])
+    if len(lines) != 1:
+        return False
+
+    from .services import _to_decimal
+    return abs(_to_decimal(lines[0].subtotal)) == abs(_to_decimal(purchase.amount_wo_vat))
+
+def _source_amount_original(purchase, line):
+    """Eilutės ar dokumento suma dokumento valiuta (be konvertavimo)."""
+    from .services import _to_decimal
+
+    source = line if line is not None else purchase
+    value = getattr(source, "subtotal", None) if line is not None else purchase.amount_wo_vat
+    return abs(_to_decimal(value))
+
 def _parse_period(value):
     try:
         year, month = str(value or "")[:7].split("-")
@@ -177,6 +200,9 @@ class FixedAssetPurchaseSourceView(APIView):
             "source_amount": source_amount,
             "available_amount": get_available_amount(purchase, line),
             "quantity": quantity,
+            "is_sumiskai": _is_sumiskai(purchase),
+            "currency": (purchase.currency or "EUR").upper(),
+            "source_amount_original": _source_amount_original(purchase, line),
             "next_inventory_number": next_inventory_numbers(cp.pk)[0],
         })
 
@@ -499,11 +525,14 @@ class FixedAssetImprovementListCreateView(APIView):
         data = serializer.validated_data
 
         asset = _get_asset(cp, data["asset_id"])
-        purchase, line = _get_purchase_and_line(
-            cp,
-            data["purchase_id"],
-            data.get("purchase_line_id"),
-        )
+
+        purchase, line = (None, None)
+        if data.get("purchase_id"):
+            purchase, line = _get_purchase_and_line(
+                cp,
+                data["purchase_id"],
+                data.get("purchase_line_id"),
+            )
 
         op = improve_fixed_asset(
             asset=asset,
@@ -511,6 +540,9 @@ class FixedAssetImprovementListCreateView(APIView):
             purchase_line=line,
             amount=data["amount"],
             extra_months=data.get("extra_months") or 0,
+            credit_account=data.get("credit_account", ""),
+            operation_date=data.get("operation_date"),
+            user=request.user,
         )
 
         return Response(
@@ -645,3 +677,63 @@ class FixedAssetPurchaseUsageView(APIView):
             for line in lines
             if line.pk in linked
         })
+
+
+class FixedAssetSalePrefillView(APIView):
+    """GET /api/fixed-assets/<pk>/sale-prefill/ - duomenys naujai pardavimo sąskaitai."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        from .constants import SALE_GAIN_ACCOUNT
+
+        cp = _get_company_profile(request)
+        asset = _get_asset(cp, pk, annotate=True)
+
+        if asset.status not in (FixedAssetStatus.ACTIVE, FixedAssetStatus.DRAFT):
+            raise FixedAssetError("Turtas jau nurašytas arba parduotas")
+
+        residual = asset.base_cost - asset.accumulated
+
+        # Nematerialaus turto perleidimas PVM prasme yra paslauga
+        asset_account = (asset.group.asset_account if asset.group else "") or ""
+        preke_paslauga = "paslauga" if asset_account.startswith("11") else "preke"
+
+        return Response({
+            "fixed_asset_id": asset.pk,
+            "name": asset.name,
+            "inventory_number": asset.inventory_number,
+            "preke_paslauga": preke_paslauga,
+            "quantity": 1,
+            "suggested_price": residual,
+            "residual": residual,
+            "base_cost": asset.base_cost,
+            "accumulated": asset.accumulated,
+            "kredito_saskaita": SALE_GAIN_ACCOUNT,
+        })
+
+
+
+class FixedAssetSaleCheckView(APIView):
+    """POST /api/fixed-assets/<pk>/sale-check/ {invoice_date, amount, invoice_type, currency}"""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        from .disposal import check_sale
+
+        cp = _get_company_profile(request)
+        asset = _get_asset(cp, pk)
+
+        invoice_date = request.data.get("invoice_date") or None
+        if invoice_date:
+            try:
+                invoice_date = datetime.date.fromisoformat(str(invoice_date)[:10])
+            except ValueError:
+                invoice_date = None
+
+        return Response(check_sale(
+            asset,
+            invoice_date=invoice_date,
+            amount=request.data.get("amount"),
+            invoice_type=request.data.get("invoice_type", ""),
+            currency=request.data.get("currency", "EUR"),
+        ))

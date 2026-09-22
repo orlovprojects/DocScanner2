@@ -18,6 +18,7 @@ from ..services.counterparties import add_counterparty_iban, get_or_create_count
 from ..utils.chart_of_accounts import get_account_name
 from ..utils.journal_generators import finalize_journal_entry
 from .enrich import enrich_counterparty_data
+from .fixed_assets import create_assets, delete_assets, summarize as summarize_assets
 from .matching import save_mapping
 
 COUNTERPARTY_SECTIONS = (OpeningBalanceSection.BUYER, OpeningBalanceSection.SUPPLIER)
@@ -99,7 +100,9 @@ def reconcile(batch):
             "row_number": line.row_number,
         }
         for line in lines
-        if line.section not in COUNTERPARTY_SECTIONS and not line.mapped_account
+        if line.section not in COUNTERPARTY_SECTIONS
+        and line.section != OpeningBalanceSection.FIXED_ASSET
+        and not line.mapped_account
     ]
 
     entry_date = batch.entry_date
@@ -139,6 +142,8 @@ def reconcile(batch):
     total_debit = ZERO
     total_credit = ZERO
     for line in lines:
+        if line.section == OpeningBalanceSection.FIXED_ASSET:
+            continue  # IT sumos jau yra balanse, kortelės kuriamos atskirai
         if line.section == OpeningBalanceSection.BALANCE and _control_key(line.mapped_account):
             continue  # kontrolinės sąskaitos imamos iš kontrahentų failų
         eur = line_eur_balance(line, entry_date)
@@ -171,6 +176,7 @@ def reconcile(batch):
         "balanced": abs(balance_diff) <= TOLERANCE,
         "technical_account": TECHNICAL_ACCOUNT,
         "can_confirm": can_confirm,
+        "fixed_assets": summarize_assets(batch),
     }
 
 
@@ -262,6 +268,9 @@ def confirm(batch, user):
     je_lines = []
     order = 0
 
+    # IT kortelės kuriamos be DK - sumos jau yra balanse
+    asset_errors = create_assets(batch, user)[1]
+
     # 1. Balansas — be kontrolinių sąskaitų (jos ateina iš kontrahentų failų)
     for line in batch.lines.filter(section=OpeningBalanceSection.BALANCE):
         if _control_key(line.mapped_account):
@@ -351,7 +360,11 @@ def confirm(batch, user):
         "[Opening] Confirmed batch %s: %s lines, JE #%s",
         batch.id, len(je_lines), entry.id,
     )
-    return entry, reconcile(batch)
+
+    result = reconcile(batch)
+    if asset_errors:
+        result["fixed_asset_errors"] = asset_errors
+    return entry, result
 
 
 @transaction.atomic
@@ -364,6 +377,13 @@ def reopen(batch):
 
     if blocking:
         return False, "Prie pradinių likučių jau priskirti mokėjimai. Pirmiausia juos atšaukite."
+
+    from ..ilgalaikis_turtas.services import FixedAssetError
+
+    try:
+        delete_assets(batch)
+    except FixedAssetError as e:
+        return False, str(e.detail)
 
     if batch.journal_entry_id:
         JournalEntry.objects.filter(pk=batch.journal_entry_id).delete()

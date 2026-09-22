@@ -295,6 +295,56 @@ def _parse_vat(raw_code: str | None, country_iso: str | None):
     }
 
 
+from datetime import timedelta
+
+VAT_CACHE_TTL_VALID = timedelta(hours=24)
+VAT_CACHE_TTL_INVALID = timedelta(hours=6)
+
+
+def _vat_cache_get(country_code: str, vat_number: str):
+    """Вернуть свежую запись кэша или None."""
+    try:
+        from django.utils import timezone
+        from docscanner_app.models import VatCheckCache
+
+        row = (
+            VatCheckCache.objects
+            .filter(country_code=country_code, vat_number=vat_number.upper())
+            .only("valid", "name", "checked_at")
+            .first()
+        )
+        if not row:
+            return None
+
+        ttl = VAT_CACHE_TTL_VALID if row.valid else VAT_CACHE_TTL_INVALID
+        if timezone.now() - row.checked_at > ttl:
+            return None
+        return row
+    except Exception as e:
+        logger.warning("VAT cache read failed for %s%s: %s", country_code, vat_number, e)
+        return None
+
+
+def _vat_cache_set(country_code: str, vat_number: str, vies_res: dict) -> None:
+    """Сохранить окончательный ответ VIES (success=True)."""
+    try:
+        from django.utils import timezone
+        from docscanner_app.models import VatCheckCache
+
+        VatCheckCache.objects.update_or_create(
+            country_code=country_code,
+            vat_number=vat_number.upper(),
+            defaults={
+                "valid": bool(vies_res.get("valid")),
+                "name": (vies_res.get("name") or "")[:500],
+                "address": vies_res.get("address") or "",
+                "checked_at": timezone.now(),
+            },
+        )
+    except Exception as e:
+        logger.warning("VAT cache write failed for %s%s: %s", country_code, vat_number, e)
+
+
 def validate_vat(raw_code: str | None, country_iso: str | None) -> dict:
     """
     Главная функция для использования в докскенасе.
@@ -336,6 +386,21 @@ def validate_vat(raw_code: str | None, country_iso: str | None) -> dict:
     country_code = parsed["country_code"]
     vat_number = parsed["vat_number"]
 
+    # 1.5) кэш: valid — 24ч, invalid — 6ч
+    cached = _vat_cache_get(country_code, vat_number)
+    if cached is not None:
+        logger.info(
+            "VIES cache hit for %s%s: valid=%s name=%r (checked_at=%s)",
+            country_code, vat_number, cached.valid, cached.name, cached.checked_at,
+        )
+        return {
+            "status": "valid" if cached.valid else "invalid",
+            "country_code": country_code,
+            "vat_number": vat_number,
+            "api_called": False,
+            "cached": True,
+        }
+
     # 2) зовём VIES (с retry при valid=false или ошибке)
     vies_res = None
     for attempt in range(2):
@@ -353,6 +418,8 @@ def validate_vat(raw_code: str | None, country_iso: str | None) -> dict:
                 vies_res.get("error"),
                 vies_res.get("faultstring"),
             )
+            if attempt == 0:
+                time.sleep(1.5)
             continue
 
         # success=true → ответ окончательный (valid=true или valid=false), retry только на ошибки
@@ -388,7 +455,8 @@ def validate_vat(raw_code: str | None, country_iso: str | None) -> dict:
             "api_called": True,
         }
 
-    # success=true
+    # success=true → окончательный ответ, кэшируем (ошибки VIES сюда не доходят)
+    _vat_cache_set(country_code, vat_number, vies_res)
     is_valid = bool(vies_res.get("valid"))
     logger.info(
         "VIES result for %s%s: valid=%s name=%r address=%r",
