@@ -245,6 +245,9 @@ def _merge_stacked_tokens(row: List[Dict], h_med: float) -> List[Dict]:
             a, b = row[i], row[j]
             if abs(a["y_c"] - b["y_c"]) <= y_gap:
                 continue
+            # числа из разных строк в стопку не собираем (две строки товаров слились по Y)
+            if _is_number_like(a["text"]) and _is_number_like(b["text"]):
+                continue
             overlap = min(a["x_r"], b["x_r"]) - max(a["x_l"], b["x_l"])
             if overlap > 0:
                 parent[find(i)] = find(j)
