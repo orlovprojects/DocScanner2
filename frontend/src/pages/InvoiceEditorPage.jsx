@@ -766,10 +766,10 @@ const InvoiceEditorPage = () => {
   // FIX #1: Editing allowed for all statuses except cancelled
   const isEditable = form.status !== 'cancelled';
 
-  // Parduoto IT eilutė po išrašymo užrakinama
-  const isAssetLineLocked = (li) => Boolean(li.fixed_asset) && form.status !== 'draft';
   const hasAssetLine = lineItems.some((li) => li.fixed_asset);
   const assetSaleLocked = hasAssetLine && form.status !== 'draft';
+  // Po išrašymo užrakinamos visos IT pardavimo sąskaitos eilutės
+  const isAssetLineLocked = () => assetSaleLocked;
   const prefillDoneRef = useRef(false);
   const sym = getSym(form.currency);
   const isPvm = form.pvm_tipas === 'taikoma';
@@ -1703,7 +1703,7 @@ const InvoiceEditorPage = () => {
   // ── IT pardavimas: patikra prieš išrašant ──
   useEffect(() => {
     const idx = saleAssetLine;
-    if (idx < 0) { setSaleCheck({ errors: [], warnings: [] }); return; }
+    if (idx < 0 || form.status !== 'draft') { setSaleCheck({ errors: [], warnings: [] }); return; }
 
     const assetId = lineItems[idx].fixed_asset;
     const amount = lineSums[idx]?.net ?? 0;
@@ -1723,7 +1723,7 @@ const InvoiceEditorPage = () => {
     }, 400);
 
     return () => clearTimeout(t);
-  }, [saleAssetLine, lineItems, lineSums, form.invoice_date, form.invoice_type, form.currency]);
+  }, [saleAssetLine, lineItems, lineSums, form.status, form.invoice_date, form.invoice_type, form.currency]);
 
   const handleGrossToggle = (checked) => setShowGrossInput(checked);
 
@@ -3193,7 +3193,7 @@ const InvoiceEditorPage = () => {
         <Box sx={{ ...secSx, ...(fieldErrors.line_items ? { borderColor: '#d32f2f', borderWidth: 2 } : {}) }}>
           <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1.5 }}>
             <Typography sx={{ ...titleSx, mb: 0 }}>Prekės / Paslaugos</Typography>
-            {isEditable && <Button startIcon={<AddIcon />} onClick={addLine} variant="contained" size="small">Pridėti</Button>}
+            {isEditable && !assetSaleLocked && <Button startIcon={<AddIcon />} onClick={addLine} variant="contained" size="small">Pridėti</Button>}
           </Box>
 
           <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mb: 2 }}>
@@ -3254,8 +3254,8 @@ const InvoiceEditorPage = () => {
                         <Typography sx={{ fontWeight: 700, fontSize: 13, color: '#8a97a8' }}>{i + 1}</Typography>
                       </Box>
                       {renderNameField(i, li)}
-                      <DebouncedField size="small" fullWidth value={li.prekes_kodas} onChange={(v) => uLine(i, 'prekes_kodas', v)} disabled={!isEditable || Boolean(li.fixed_asset)} placeholder="Kodas *" error={!!fieldErrors[`line_${i}_code`]} />
-                      <DebouncedField size="small" fullWidth value={li.prekes_barkodas} onChange={(v) => uLine(i, 'prekes_barkodas', v)} disabled={!isEditable} placeholder="Barkodas" />
+                      <DebouncedField size="small" fullWidth value={li.prekes_kodas} onChange={(v) => uLine(i, 'prekes_kodas', v)} disabled={!isEditable || Boolean(li.fixed_asset) || isAssetLineLocked(li)} placeholder="Kodas *" error={!!fieldErrors[`line_${i}_code`]} />
+                      <DebouncedField size="small" fullWidth value={li.prekes_barkodas} onChange={(v) => uLine(i, 'prekes_barkodas', v)} disabled={!isEditable || isAssetLineLocked(li)} placeholder="Barkodas" />
                       {isEditable && !(li.fixed_asset && form.status !== 'draft') ? (
                         <Box sx={{ display: 'flex', gap: 0.25, alignItems: 'center', justifyContent: 'center', pt: 0.5 }}>
                           <Tooltip title={li.fixed_asset ? 'Ilgalaikio turto eilutės dubliuoti negalima' : 'Dubliuoti eilutę'}>
@@ -3267,14 +3267,16 @@ const InvoiceEditorPage = () => {
                               </IconButton>
                             </span>
                           </Tooltip>
-                          <Tooltip title="Ištrinti eilutę">
-                            <span>
-                              <IconButton size="small" onClick={() => removeLine(i)} disabled={lineItems.length === 1}
-                                sx={{ p: 0.5, color: '#8a97a8', '&:hover': { color: '#d32f2f', backgroundColor: '#fdeaea' } }}>
-                                <DeleteIcon sx={{ fontSize: 16 }} />
-                              </IconButton>
-                            </span>
-                          </Tooltip>
+                          {!li.fixed_asset && (
+                            <Tooltip title="Ištrinti eilutę">
+                              <span>
+                                <IconButton size="small" onClick={() => removeLine(i)} disabled={lineItems.length === 1}
+                                  sx={{ p: 0.5, color: '#8a97a8', '&:hover': { color: '#d32f2f', backgroundColor: '#fdeaea' } }}>
+                                  <DeleteIcon sx={{ fontSize: 16 }} />
+                                </IconButton>
+                              </span>
+                            </Tooltip>
+                          )}
                         </Box>
                       ) : <Box sx={{ width: 68 }} />}
                     </Box>
@@ -3313,7 +3315,7 @@ const InvoiceEditorPage = () => {
                       )}
 
                       <DebouncedNumField size="small" label="Kiekis *" sx={{ width: 90 }} value={li.quantity}
-                        onChange={(v) => uLine(i, 'quantity', v)} disabled={!isEditable || Boolean(li.fixed_asset)} maxDecimals={5}
+                        onChange={(v) => uLine(i, 'quantity', v)} disabled={!isEditable || Boolean(li.fixed_asset) || isAssetLineLocked(li)} maxDecimals={5}
                         error={!!fieldErrors[`line_${i}_qty`]} />
                       {renderUnitField(i, li, 120)}
                       <DebouncedNumField size="small" label={priceLabel} sx={{ width: 110 }} value={li.price}
@@ -3416,15 +3418,17 @@ const InvoiceEditorPage = () => {
                       {isEditable && !isAssetLineLocked(li) && (
                         <Box sx={{ display: 'flex', gap: 0.5 }}>
                           <IconButton size="small" disabled={Boolean(li.fixed_asset)} onClick={() => { setLineItems((p) => { const next = [...p]; next.splice(i + 1, 0, { ...p[i] }); return next; }); }}><DuplicateIcon fontSize="small" /></IconButton>
-                          <IconButton size="small" onClick={() => removeLine(i)} disabled={lineItems.length === 1}><DeleteIcon fontSize="small" /></IconButton>
+                          {!li.fixed_asset && (
+                            <IconButton size="small" onClick={() => removeLine(i)} disabled={lineItems.length === 1}><DeleteIcon fontSize="small" /></IconButton>
+                          )}
                         </Box>
                       )}
                     </Box>
                     <Grid2 container spacing={1}>
                       <Grid2 size={12}>{renderNameField(i, li)}</Grid2>
-                      <Grid2 size={6}><DebouncedField size="small" fullWidth label="Kodas" value={li.prekes_kodas} onChange={(v) => uLine(i, 'prekes_kodas', v)} disabled={!isEditable || Boolean(li.fixed_asset)} error={!!fieldErrors[`line_${i}_code`]} /></Grid2>
-                      <Grid2 size={6}><DebouncedField size="small" fullWidth label="Barkodas" value={li.prekes_barkodas} onChange={(v) => uLine(i, 'prekes_barkodas', v)} disabled={!isEditable} /></Grid2>
-                      <Grid2 size={4}><DebouncedNumField size="small" fullWidth label="Kiekis" value={li.quantity} onChange={(v) => uLine(i, 'quantity', v)} disabled={!isEditable || Boolean(li.fixed_asset)} maxDecimals={5} error={!!fieldErrors[`line_${i}_qty`]} /></Grid2>
+                      <Grid2 size={6}><DebouncedField size="small" fullWidth label="Kodas" value={li.prekes_kodas} onChange={(v) => uLine(i, 'prekes_kodas', v)} disabled={!isEditable || Boolean(li.fixed_asset) || isAssetLineLocked(li)} error={!!fieldErrors[`line_${i}_code`]} /></Grid2>
+                      <Grid2 size={6}><DebouncedField size="small" fullWidth label="Barkodas" value={li.prekes_barkodas} onChange={(v) => uLine(i, 'prekes_barkodas', v)} disabled={!isEditable || isAssetLineLocked(li)} /></Grid2>
+                      <Grid2 size={4}><DebouncedNumField size="small" fullWidth label="Kiekis" value={li.quantity} onChange={(v) => uLine(i, 'quantity', v)} disabled={!isEditable || Boolean(li.fixed_asset) || isAssetLineLocked(li)} maxDecimals={5} error={!!fieldErrors[`line_${i}_qty`]} /></Grid2>
                       <Grid2 size={4}>{renderUnitField(i, li)}</Grid2>
                       <Grid2 size={4}><DebouncedNumField size="small" fullWidth label={priceLabel} value={li.price} onChange={(v) => uLine(i, 'price', v)} disabled={!isEditable || grossMode || isAssetLineLocked(li)} maxDecimals={4} error={!grossMode && !!fieldErrors[`line_${i}_price`]} /></Grid2>
                       {grossMode && (
@@ -3850,7 +3854,7 @@ const InvoiceEditorPage = () => {
                   {saleCheck.errors.map((e, i) => <div key={i}>{e}</div>)}
                 </>
               ) : form.status !== 'draft' ? (
-                'Pagal šią sąskaitą parduotas ilgalaikis turtas. Kiekio ir kainos keisti negalima - pirmiausia atšaukite pardavimą turto kortelėje.'
+                'Pagal šią sąskaitą parduotas ilgalaikis turtas. Eilučių, sumų ir datos keisti negalima - galite taisyti pirkėjo duomenis ir pastabą. Kitais atvejais anuliuokite sąskaitą turto kortelėje ir išrašykite naują.'
               ) : (
                 'Šioje sąskaitoje parduodamas ilgalaikis turtas. Išrašius sąskaitą turtas bus nurašytas iš apskaitos, pajamos - į 5400.'
               )}

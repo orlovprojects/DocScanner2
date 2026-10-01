@@ -464,21 +464,123 @@ def resume_sync_from_cursor(cursor):
         raise
 
 
-# ---------------------------------------------------------------------------
-# Celery task — weekly orchestrator
-# ---------------------------------------------------------------------------
-@shared_task
-def sync_lt_companies_weekly():
-    """Weekly sync: companies (incremental) + addresses."""
-    logger.info("sync_lt_companies_weekly: start")
-    try:
-        result1 = sync_companies_from_vmi(full=False)
-        logger.info(result1)
-    except Exception as e:
-        logger.error(f"sync_lt_companies_weekly: companies error: {e}")
+# ===========================================================================
+# Sodros draudėjų kodai -> Company.sodra_kodas
+# Šaltinis: atvira.sodra.lt. Naują mėnesį praneša .../imones-rest/config/available-dates
+# ===========================================================================
+import json as _json
+import zipfile as _zipfile
 
+SODRA_DATES_URL = "https://atvira.sodra.lt/imones-rest/config/available-dates"
+SODRA_FILE_URL = "https://atvira.sodra.lt/imones/downloads/{y}/daily-{y}-{m:02d}.json.zip"
+SODRA_STALE_DAYS = 60
+SODRA_HEADERS = {"User-Agent": "DokSkenas/1.0"}
+
+
+def _read_sodra_records(raw):
+    if raw[:2] == b"PK":
+        with _zipfile.ZipFile(io.BytesIO(raw)) as z:
+            names = [n for n in z.namelist() if n.lower().endswith(".json")]
+            if not names:
+                raise ValueError("ZIP archyve nėra JSON failo")
+            raw = z.read(names[0])
+    data = _json.loads(raw.decode("utf-8-sig"))
+    if not isinstance(data, list):
+        raise ValueError("JSON turi būti masyvas")
+    return data
+
+
+def sync_sodra_codes(raw):
+    """
+    Užpildo Company.sodra_kodas pagal jarCode (= im_kodas).
+    Draudėjai be jarCode (ambasados, fiziniai asmenys) praleidžiami.
+    Grąžina (pranešimas, atnaujinta įmonių).
+    """
+    records = _read_sodra_records(raw)
+    latest = {}  # jarCode -> (month, code)
+    skipped = 0
+    for r in records:
+        jar = str(r.get("jarCode") or "").strip()
+        code = str(r.get("code") or "").strip()
+        if not jar or not code:
+            skipped += 1
+            continue
+        month = int(r.get("month") or 0)
+        if jar not in latest or month >= latest[jar][0]:
+            latest[jar] = (month, code)
+    if records and not latest:
+        raise ValueError("Faile nerasta laukų code / jarCode - galbūt pasikeitė formatas")
+
+    updated = 0
+    batch = []
+    now = timezone.now()
+    qs = Company.objects.filter(im_kodas__in=latest.keys()).only("id", "im_kodas", "sodra_kodas")
+    for c in qs.iterator(chunk_size=5000):
+        code = latest[c.im_kodas][1]
+        if c.sodra_kodas != code:
+            c.sodra_kodas = code
+            c.last_synced_at = now
+            batch.append(c)
+        if len(batch) >= 2000:
+            Company.objects.bulk_update(batch, ["sodra_kodas", "last_synced_at"])
+            updated += len(batch)
+            batch = []
+    if batch:
+        Company.objects.bulk_update(batch, ["sodra_kodas", "last_synced_at"])
+        updated += len(batch)
+    msg = (f"sync_sodra_codes: done. Insurers with jarCode: {len(latest)}, "
+           f"updated: {updated}, without jarCode: {skipped}")
+    logger.info(msg)
+    return msg, updated
+
+
+@shared_task
+def sync_sodra_codes_weekly():
+    """
+    Kartą per savaitę (dieną): ar Sodra paskelbė naują mėnesį? Jei taip - atsisiunčia ir atnaujina kodus.
+    Telegram: sėkmė, bet kokia klaida, ilgai (>60 d.) nesikeičiantys duomenys.
+    """
+    from docscanner_app.models import SyncState
+    from docscanner_app.payroll.notify import notify_admin
+
+    state, _ = SyncState.objects.get_or_create(name="sodra_codes")
+    now = timezone.now()
+    state.last_checked_at = now
+
+    # 1. Koks paskutinis paskelbtas mėnuo?
     try:
-        result2 = sync_addresses_from_jar()
-        logger.info(result2)
-    except Exception as e:
-        logger.error(f"sync_lt_companies_weekly: addresses error: {e}")
+        r = requests.get(SODRA_DATES_URL, timeout=30, headers=SODRA_HEADERS)
+        r.raise_for_status()
+        d = r.json()
+        y, m = int(d["toYear"]), int(d["toMonth"])
+        if not (2018 <= y <= 2100 and 1 <= m <= 12):
+            raise ValueError(f"neįprastas atsakymas: {d}")
+    except Exception as e:  # noqa: BLE001
+        state.save(update_fields=["last_checked_at"])
+        logger.exception("sync_sodra_codes_weekly: available-dates")
+        notify_admin(f"⚠ DokSkenas: Sodros available-dates nepavyko\n{SODRA_DATES_URL}\n{type(e).__name__}: {e}")
+        return
+
+    # 2. Naujo mėnesio nėra
+    if (y, m) == (state.last_year, state.last_month):
+        state.save(update_fields=["last_checked_at"])
+        if state.last_changed_at and (now - state.last_changed_at).days > SODRA_STALE_DAYS:
+            notify_admin(f"⚠ DokSkenas: Sodros duomenys neatnaujinti jau "
+                         f"{(now - state.last_changed_at).days} d. (paskutinis mėnuo {y}-{m:02d})")
+        return
+
+    # 3. Naujas mėnuo - atsisiunčiam ir apdorojam
+    url = SODRA_FILE_URL.format(y=y, m=m)
+    try:
+        resp = requests.get(url, timeout=300, headers=SODRA_HEADERS)
+        resp.raise_for_status()
+        _, updated = sync_sodra_codes(resp.content)
+    except Exception as e:  # noqa: BLE001
+        state.save(update_fields=["last_checked_at"])
+        logger.exception("sync_sodra_codes_weekly: %s", url)
+        notify_admin(f"❌ DokSkenas: nepavyko atnaujinti Sodros kodų už {y}-{m:02d}\n{url}\n{type(e).__name__}: {e}")
+        return
+
+    state.last_year, state.last_month, state.last_changed_at = y, m, now
+    state.save()
+    notify_admin(f"✅ Sodros kodai atnaujinti: {y}-{m:02d}, atnaujinta {updated} įmonių")

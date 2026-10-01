@@ -261,6 +261,27 @@ from .ilgalaikis_turtas.views import (
     FixedAssetSalePrefillView,
     FixedAssetSaleCheckView,
 )
+from .payroll.views import (
+    PayrollSettingsView,
+    TimesheetView,
+    WorkScheduleViewSet,
+    PositionViewSet,
+    PayCodeViewSet,
+    EmployeeViewSet,
+    EmployeeChildViewSet,
+    EmploymentContractViewSet,
+    ContractTermsViewSet,
+    AbsenceEventViewSet,
+    PayrollRunViewSet,
+    PayrollLineViewSet,
+    PositionGroupViewSet, DasView, DasDocumentHtmlView,
+    LpkSearchView,
+    LeavePreviewView, PersonalCodeCheckView,
+    EmployeeDocumentViewSet,
+    EmployeeRequestViewSet,
+    DeclarationsView, DeclarationFileView, DeclarationStatusView,
+    DeclarationSubmitView, DeclarationCheckView, VmiConnectionTestView,
+)
 
 
 router = DefaultRouter()
@@ -271,6 +292,19 @@ router.register(r"company-profiles", CompanyProfileViewSet, basename="company-pr
 router.register(r"purchases", PurchaseViewSet, basename="purchase")
 router.register(r"apskaita/operacijos", OperacijosViewSet, basename="apskaita-operacijos")
 
+router.register(r"payroll/schedules", WorkScheduleViewSet, basename="payroll-schedule")
+router.register(r"payroll/positions", PositionViewSet, basename="payroll-position")
+router.register(r"payroll/pay-codes", PayCodeViewSet, basename="payroll-paycode")
+router.register(r"payroll/employees", EmployeeViewSet, basename="payroll-employee")
+router.register(r"payroll/children", EmployeeChildViewSet, basename="payroll-child")
+router.register(r"payroll/contracts", EmploymentContractViewSet, basename="payroll-contract")
+router.register(r"payroll/contract-terms", ContractTermsViewSet, basename="payroll-contract-terms")
+router.register(r"payroll/absences", AbsenceEventViewSet, basename="payroll-absence")
+router.register(r"payroll/runs", PayrollRunViewSet, basename="payroll-run")
+router.register(r"payroll/run-lines", PayrollLineViewSet, basename="payroll-run-line")
+router.register(r"payroll/position-groups", PositionGroupViewSet, basename="payroll-position-group")
+router.register(r"payroll/documents", EmployeeDocumentViewSet, basename="payroll-document")
+router.register(r"payroll/requests", EmployeeRequestViewSet, basename="payroll-request")
 
 
 urlpatterns = [
@@ -729,4 +763,21 @@ urlpatterns = [
     path("fixed-assets/<int:pk>/sale-prefill/", FixedAssetSalePrefillView.as_view()),
     path("fixed-assets/<int:pk>/sale-check/", FixedAssetSaleCheckView.as_view()),
 
+    #Darbo uzmokestis
+    path("payroll/settings/", PayrollSettingsView.as_view(), name="payroll-settings"),
+    path("payroll/timesheet/", TimesheetView.as_view(), name="payroll-timesheet"),
+    path("payroll/das/", DasView.as_view(), name="payroll-das"),
+    path("payroll/das/<int:pk>/", DasDocumentHtmlView.as_view(), name="payroll-das-html"),
+    path("payroll/lpk/", LpkSearchView.as_view(), name="payroll-lpk"),
+    path("payroll/leave-preview/", LeavePreviewView.as_view(), name="payroll-leave-preview"),
+    path("payroll/personal-code/", PersonalCodeCheckView.as_view(), name="payroll-personal-code"),
+    path("payroll/declarations/", DeclarationsView.as_view(), name="payroll-declarations"),
+    path("payroll/declarations/<int:pk>/file/", DeclarationFileView.as_view(), name="payroll-declaration-file"),
+    path("payroll/declarations/<int:pk>/status/", DeclarationStatusView.as_view(), name="payroll-declaration-status"),
+    path("payroll/declarations/<int:pk>/submit/", DeclarationSubmitView.as_view(), name="payroll-declaration-submit"),
+    path("payroll/declarations/<int:pk>/check/", DeclarationCheckView.as_view(), name="payroll-declaration-check"),
+    path("payroll/settings/test-vmi/", VmiConnectionTestView.as_view(), name="payroll-settings-test-vmi"),
+
+    #Darbuotoju savitarna
+    path("savitarna/", include("docscanner_app.payroll.savitarna_urls")),
 ]

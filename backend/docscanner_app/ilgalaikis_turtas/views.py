@@ -75,7 +75,9 @@ def _get_purchase_and_line(cp, purchase_id, line_id):
 
 
 def _get_asset(cp, pk, annotate=False):
-    qs = FixedAsset.objects.filter(pk=pk, company_profile=cp).select_related("group", "purchase")
+    qs = FixedAsset.objects.filter(pk=pk, company_profile=cp).select_related(
+        "group", "purchase", "sale_invoice", "sale_invoice_line",
+    )
     if annotate:
         qs = _annotate_balances(qs)
 
@@ -422,7 +424,15 @@ class FixedAssetSaleCancelView(APIView):
 
     def post(self, request, pk):
         cp = _get_company_profile(request)
-        cancel_sale(_get_asset(cp, pk))
+        asset = _get_asset(cp, pk)
+
+        line = asset.sale_invoice_line
+        if line is not None and line.fixed_asset_id == asset.pk:
+            raise FixedAssetError(
+                "Sąskaita išrašyta šiam turtui parduoti - anuliuokite pardavimo sąskaitą"
+            )
+
+        cancel_sale(asset)
         return Response(FixedAssetSerializer(_get_asset(cp, pk, annotate=True)).data)
 
 

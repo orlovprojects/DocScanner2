@@ -102,6 +102,12 @@ const ApskaitosCentrasPage = lazy(() => import('./pages/ApskaitosCentrasPage'));
 const EprisPage = lazy(() => import('./pages/EprisPage')); 
 const PradiniaiLikuciaiPage = lazy(() => import('./pages/PradiniaiLikuciaiPage')); 
 const IlgalaikisTurtasPage = lazy(() => import("./pages/IlgalaikisTurtasPage"));
+const DarbuotojaiPage = lazy(() => import("./pages/payroll/DarbuotojaiPage"));
+const MenesioDUPage = lazy(() => import("./pages/payroll/MenesioDUPage"));
+const DarboApmokejimoSistemaPage = lazy(() => import("./pages/payroll/DarboApmokejimoSistemaPage"));
+const PrasymaiPage = lazy(() => import("./pages/payroll/PrasymaiPage"));
+const DeklaracijosPage = lazy(() => import("./pages/payroll/DeklaracijosPage"));
+
 
 
 // ─── Sidebar - Toolbar ───
@@ -285,8 +291,11 @@ function App() {
                 <Route path="/profiliai" element={<PrivateRoute><OnboardingCompanyProfiles /></PrivateRoute>} />
                 <Route path="/pradiniai-likuciai" element={<PrivateRoute><PradiniaiLikuciaiPage /></PrivateRoute>} />
                 <Route path="/ilgalaikis-turtas" element={<PrivateRoute><IlgalaikisTurtasPage /></PrivateRoute>} />
-                
-
+                <Route path="/darbo-uzmokestis/darbuotojai" element={<PrivateRoute><DarbuotojaiPage /></PrivateRoute>} />
+                <Route path="/darbo-uzmokestis/atlyginimai" element={<PrivateRoute><MenesioDUPage /></PrivateRoute>} />
+                <Route path="/darbo-uzmokestis/apmokejimo-sistema" element={<PrivateRoute><DarboApmokejimoSistemaPage /></PrivateRoute>} />                      
+                <Route path="/darbo-uzmokestis/prasymai" element={<PrivateRoute><PrasymaiPage /></PrivateRoute>} />
+                <Route path="/darbo-uzmokestis/deklaracijos" element={<DeklaracijosPage />} />
 
                 <Route path="/priminti-slaptazodi" element={<PasswordReset />} />
                 <Route path="/buhalterine-apskaita" element={<BuhalterinenApskaita />} />

@@ -1,0 +1,3490 @@
+{
+  "0110": {
+    "skills": 4,
+    "qualification": 4,
+    "effort": 5,
+    "responsibility": 5,
+    "conditions": 5,
+    "note": "Karinis išsilavinimas, vadovavimas operacijoms, atsakomybė už gyvybes ir kovinė rizika"
+  },
+  "0210": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 5,
+    "responsibility": 4,
+    "conditions": 5,
+    "note": "Karinis profesinis rengimas, karių priežiūra, didelė fizinė ir emocinė įtampa, kovinė rizika"
+  },
+  "0310": {
+    "skills": 2,
+    "qualification": 3,
+    "effort": 5,
+    "responsibility": 3,
+    "conditions": 5,
+    "note": "Bazinis karinis rengimas, fizinė ir emocinė įtampa, ginklų sauga ir kovinė rizika"
+  },
+  "1111": {
+    "skills": 5,
+    "qualification": 2,
+    "effort": 4,
+    "responsibility": 5,
+    "conditions": 1,
+    "note": "Sudėtingi teisėkūros sprendimai, viešųjų interesų ir valstybės išteklių atsakomybė"
+  },
+  "1112": {
+    "skills": 5,
+    "qualification": 4,
+    "effort": 4,
+    "responsibility": 5,
+    "conditions": 1,
+    "note": "Strateginis viešasis valdymas, aukštasis išsilavinimas, atsakomybė už institucijos sprendimus"
+  },
+  "1113": {
+    "skills": 4,
+    "qualification": 4,
+    "effort": 4,
+    "responsibility": 4,
+    "conditions": 2,
+    "note": "Vietos paslaugų valdymas, gyventojų problemų sprendimas ir atsakomybė už darbuotojus"
+  },
+  "1114": {
+    "skills": 5,
+    "qualification": 4,
+    "effort": 4,
+    "responsibility": 5,
+    "conditions": 2,
+    "note": "Organizacijos strategija, interesų derinimas, atsakomybė už žmones ir bendrą veiklą"
+  },
+  "1120": {
+    "skills": 5,
+    "qualification": 4,
+    "effort": 4,
+    "responsibility": 5,
+    "conditions": 2,
+    "note": "Aukštasis išsilavinimas, strateginis valdymas ir atsakomybė už visą organizaciją"
+  },
+  "1211": {
+    "skills": 5,
+    "qualification": 5,
+    "effort": 3,
+    "responsibility": 5,
+    "conditions": 1,
+    "note": "Finansų valdymo ekspertinės žinios, aukšta kvalifikacija ir atsakomybė už didelius finansus"
+  },
+  "1212": {
+    "skills": 4,
+    "qualification": 4,
+    "effort": 4,
+    "responsibility": 4,
+    "conditions": 1,
+    "note": "Personalo politika, sudėtingi darbo santykiai, konfidencialumas ir atsakomybė už žmones"
+  },
+  "1213": {
+    "skills": 5,
+    "qualification": 4,
+    "effort": 4,
+    "responsibility": 4,
+    "conditions": 1,
+    "note": "Strateginis planavimas, sudėtinga analizė ir atsakomybė už svarbius valdymo sprendimus"
+  },
+  "1219": {
+    "skills": 4,
+    "qualification": 4,
+    "effort": 4,
+    "responsibility": 4,
+    "conditions": 2,
+    "note": "Paslaugų ir administravimo organizavimas, komandos bei reikšmingų išteklių valdymas"
+  },
+  "1221": {
+    "skills": 4,
+    "qualification": 4,
+    "effort": 4,
+    "responsibility": 4,
+    "conditions": 2,
+    "note": "Pardavimo strategija, derybos, komandos ir didelių biudžetų valdymas"
+  },
+  "1222": {
+    "skills": 4,
+    "qualification": 4,
+    "effort": 4,
+    "responsibility": 4,
+    "conditions": 1,
+    "note": "Komunikacijos strategija, reputacijos ir komandos valdymas, intensyvūs terminai"
+  },
+  "1223": {
+    "skills": 5,
+    "qualification": 5,
+    "effort": 4,
+    "responsibility": 4,
+    "conditions": 2,
+    "note": "Ekspertinis tyrimų ir plėtros valdymas, aukšta kvalifikacija, inovacijų ir komandos atsakomybė"
+  },
+  "1311": {
+    "skills": 4,
+    "qualification": 4,
+    "effort": 4,
+    "responsibility": 4,
+    "conditions": 3,
+    "note": "Ūkio ir specialistų valdymas, biologinių procesų išmanymas, išvykos į gamybos vietas"
+  },
+  "1312": {
+    "skills": 4,
+    "qualification": 4,
+    "effort": 4,
+    "responsibility": 4,
+    "conditions": 3,
+    "note": "Žuvininkystės technologijos, darbuotojų ir biologinių išteklių valdymas, išvykos"
+  },
+  "1321": {
+    "skills": 4,
+    "qualification": 4,
+    "effort": 4,
+    "responsibility": 4,
+    "conditions": 3,
+    "note": "Gamybos procesų ir žmonių valdymas, kokybės bei saugos sprendimai, gamybinė aplinka"
+  },
+  "1322": {
+    "skills": 4,
+    "qualification": 4,
+    "effort": 4,
+    "responsibility": 4,
+    "conditions": 4,
+    "note": "Gavybos organizavimas, atsakomybė už darbuotojų saugą, pavojingų darbų priežiūra"
+  },
+  "1323": {
+    "skills": 4,
+    "qualification": 5,
+    "effort": 4,
+    "responsibility": 4,
+    "conditions": 4,
+    "note": "Atestuojamų statybos darbų valdymas, konstrukcijų ir darbuotojų sauga, darbas objektuose"
+  },
+  "1324": {
+    "skills": 4,
+    "qualification": 4,
+    "effort": 4,
+    "responsibility": 4,
+    "conditions": 3,
+    "note": "Tiekimo ir transporto srautų valdymas, dideli ištekliai, terminai ir nereguliarus režimas"
+  },
+  "1330": {
+    "skills": 5,
+    "qualification": 4,
+    "effort": 4,
+    "responsibility": 4,
+    "conditions": 1,
+    "note": "IT strategija, sudėtingų sistemų ir komandos valdymas, duomenų bei veiklos tęstinumo atsakomybė"
+  },
+  "1341": {
+    "skills": 4,
+    "qualification": 4,
+    "effort": 4,
+    "responsibility": 4,
+    "conditions": 3,
+    "note": "Vaikų priežiūros organizavimas, atsakomybė už vaikų gerovę, darbuotojus ir sudėtingas situacijas"
+  },
+  "1342": {
+    "skills": 5,
+    "qualification": 5,
+    "effort": 4,
+    "responsibility": 5,
+    "conditions": 3,
+    "note": "Sveikatos paslaugų valdymas, klinikinė kvalifikacija, pacientų sauga ir didelė emocinė įtampa"
+  },
+  "1343": {
+    "skills": 4,
+    "qualification": 4,
+    "effort": 4,
+    "responsibility": 4,
+    "conditions": 3,
+    "note": "Slaugos ir socialinės pagalbos valdymas, pažeidžiamų žmonių gerovė ir emocinė įtampa"
+  },
+  "1344": {
+    "skills": 4,
+    "qualification": 4,
+    "effort": 4,
+    "responsibility": 4,
+    "conditions": 3,
+    "note": "Socialinės paramos sprendimai, pažeidžiamų žmonių interesai, komandos ir išteklių valdymas"
+  },
+  "1345": {
+    "skills": 4,
+    "qualification": 4,
+    "effort": 4,
+    "responsibility": 4,
+    "conditions": 3,
+    "note": "Ugdymo ir darbuotojų valdymas, mokinių gerovė, atsakingi sprendimai ir emocinė įtampa"
+  },
+  "1346": {
+    "skills": 5,
+    "qualification": 4,
+    "effort": 4,
+    "responsibility": 5,
+    "conditions": 1,
+    "note": "Finansinių paslaugų ir rizikos valdymas, komandos bei didelių klientų lėšų atsakomybė"
+  },
+  "1349": {
+    "skills": 4,
+    "qualification": 4,
+    "effort": 4,
+    "responsibility": 4,
+    "conditions": 3,
+    "note": "Specializuotų paslaugų valdymas, svarbūs profesiniai sprendimai ir atsakomybė už darbuotojus"
+  },
+  "1411": {
+    "skills": 4,
+    "qualification": 3,
+    "effort": 4,
+    "responsibility": 4,
+    "conditions": 3,
+    "note": "Apgyvendinimo veiklos ir darbuotojų valdymas, svečių sauga, pamainos ir konfliktų sprendimas"
+  },
+  "1412": {
+    "skills": 4,
+    "qualification": 3,
+    "effort": 4,
+    "responsibility": 4,
+    "conditions": 3,
+    "note": "Maitinimo veiklos valdymas, maisto sauga, komandos priežiūra ir intensyvios pamainos"
+  },
+  "1420": {
+    "skills": 4,
+    "qualification": 3,
+    "effort": 4,
+    "responsibility": 4,
+    "conditions": 3,
+    "note": "Prekybos ir atsargų valdymas, darbuotojų priežiūra, klientų srautai ir pamainos"
+  },
+  "1431": {
+    "skills": 4,
+    "qualification": 4,
+    "effort": 4,
+    "responsibility": 4,
+    "conditions": 3,
+    "note": "Kultūros ar sporto programų valdymas, komandų ir biudžetų atsakomybė, vakariniai renginiai"
+  },
+  "1439": {
+    "skills": 4,
+    "qualification": 3,
+    "effort": 4,
+    "responsibility": 4,
+    "conditions": 3,
+    "note": "Paslaugų veiklos valdymas, klientų problemos, darbuotojų ir išteklių atsakomybė"
+  },
+  "2111": {
+    "skills": 5,
+    "qualification": 5,
+    "effort": 3,
+    "responsibility": 3,
+    "conditions": 2,
+    "note": "Sudėtingi fizikos modeliai ir tyrimai, aukšta mokslinė kvalifikacija, laboratorinis darbas"
+  },
+  "2112": {
+    "skills": 4,
+    "qualification": 4,
+    "effort": 3,
+    "responsibility": 3,
+    "conditions": 3,
+    "note": "Orų prognozių analizė, aukštasis išsilavinimas, sprendimų tikslumas ir budėjimai"
+  },
+  "2113": {
+    "skills": 4,
+    "qualification": 4,
+    "effort": 3,
+    "responsibility": 3,
+    "conditions": 4,
+    "note": "Cheminė analizė, aukštasis išsilavinimas, tyrimų patikimumas ir reagentų poveikis"
+  },
+  "2114": {
+    "skills": 4,
+    "qualification": 4,
+    "effort": 3,
+    "responsibility": 3,
+    "conditions": 4,
+    "note": "Geologinių duomenų analizė, aukštasis išsilavinimas ir lauko tyrimų sąlygos"
+  },
+  "2120": {
+    "skills": 5,
+    "qualification": 4,
+    "effort": 3,
+    "responsibility": 4,
+    "conditions": 1,
+    "note": "Sudėtingas matematinis modeliavimas, statistinių ir finansinių prognozių atsakomybė"
+  },
+  "2131": {
+    "skills": 4,
+    "qualification": 4,
+    "effort": 3,
+    "responsibility": 3,
+    "conditions": 3,
+    "note": "Biologinių procesų tyrimai, aukštasis išsilavinimas, mėginių ir tyrimų patikimumas"
+  },
+  "2132": {
+    "skills": 4,
+    "qualification": 4,
+    "effort": 3,
+    "responsibility": 3,
+    "conditions": 3,
+    "note": "Specialios agronomijos ir miškininkystės žinios, biologiniai ištekliai, darbas ūkiuose"
+  },
+  "2133": {
+    "skills": 4,
+    "qualification": 4,
+    "effort": 3,
+    "responsibility": 4,
+    "conditions": 3,
+    "note": "Aplinkos būklės vertinimas, taršos prevencijos sprendimai ir lauko tyrimai"
+  },
+  "2141": {
+    "skills": 4,
+    "qualification": 4,
+    "effort": 3,
+    "responsibility": 4,
+    "conditions": 3,
+    "note": "Gamybos sistemų projektavimas, technologijų išmanymas, kokybės ir saugos atsakomybė"
+  },
+  "2142": {
+    "skills": 4,
+    "qualification": 4,
+    "effort": 4,
+    "responsibility": 4,
+    "conditions": 4,
+    "note": "Konstrukcijų skaičiavimas, statinių saugos sprendimai ir darbas statybos objektuose"
+  },
+  "2143": {
+    "skills": 4,
+    "qualification": 4,
+    "effort": 3,
+    "responsibility": 4,
+    "conditions": 3,
+    "note": "Aplinkosaugos sistemų projektavimas, taršos kontrolė ir atsakomybė už techninius sprendimus"
+  },
+  "2144": {
+    "skills": 4,
+    "qualification": 4,
+    "effort": 3,
+    "responsibility": 4,
+    "conditions": 3,
+    "note": "Mechaninių sistemų projektavimas, sudėtingi skaičiavimai ir įrenginių saugos atsakomybė"
+  },
+  "2145": {
+    "skills": 4,
+    "qualification": 4,
+    "effort": 3,
+    "responsibility": 4,
+    "conditions": 4,
+    "note": "Cheminių procesų projektavimas, technologinė sauga ir pavojingų medžiagų aplinka"
+  },
+  "2146": {
+    "skills": 4,
+    "qualification": 4,
+    "effort": 4,
+    "responsibility": 4,
+    "conditions": 4,
+    "note": "Gavybos ir metalurgijos procesai, sudėtingi saugos sprendimai ir darbas gamybos objektuose"
+  },
+  "2149": {
+    "skills": 4,
+    "qualification": 4,
+    "effort": 3,
+    "responsibility": 4,
+    "conditions": 3,
+    "note": "Sudėtingų techninių sistemų analizė, projektavimo ir saugos sprendimų atsakomybė"
+  },
+  "2151": {
+    "skills": 4,
+    "qualification": 4,
+    "effort": 3,
+    "responsibility": 4,
+    "conditions": 4,
+    "note": "Elektros sistemų projektavimas, techniniai skaičiavimai ir elektros įrenginių sauga"
+  },
+  "2152": {
+    "skills": 4,
+    "qualification": 4,
+    "effort": 3,
+    "responsibility": 4,
+    "conditions": 2,
+    "note": "Elektroninių sistemų projektavimas, tikslūs bandymai ir atsakomybė už įrangos veikimą"
+  },
+  "2153": {
+    "skills": 4,
+    "qualification": 4,
+    "effort": 3,
+    "responsibility": 4,
+    "conditions": 3,
+    "note": "Ryšių sistemų projektavimas, tinklų patikimumas ir techninės išvykos"
+  },
+  "2161": {
+    "skills": 4,
+    "qualification": 5,
+    "effort": 4,
+    "responsibility": 4,
+    "conditions": 2,
+    "note": "Architekto kvalifikacija, kompleksinis projektavimas ir atsakomybė už statinių sprendinius"
+  },
+  "2162": {
+    "skills": 4,
+    "qualification": 5,
+    "effort": 3,
+    "responsibility": 4,
+    "conditions": 3,
+    "note": "Architekto kvalifikacija, kraštovaizdžio projektavimas, aplinkos sprendiniai ir išvykos"
+  },
+  "2163": {
+    "skills": 4,
+    "qualification": 4,
+    "effort": 3,
+    "responsibility": 3,
+    "conditions": 1,
+    "note": "Kūrybinis gaminių projektavimas, medžiagų ir funkcionalumo žinios, projektų terminai"
+  },
+  "2164": {
+    "skills": 4,
+    "qualification": 4,
+    "effort": 4,
+    "responsibility": 4,
+    "conditions": 3,
+    "note": "Teritorijų ir eismo planavimas, kompleksinė analizė, viešosios saugos ir aplinkos sprendimai"
+  },
+  "2165": {
+    "skills": 4,
+    "qualification": 4,
+    "effort": 3,
+    "responsibility": 3,
+    "conditions": 4,
+    "note": "Tikslūs geodeziniai matavimai, erdvinių duomenų patikimumas ir lauko darbai"
+  },
+  "2166": {
+    "skills": 4,
+    "qualification": 4,
+    "effort": 3,
+    "responsibility": 3,
+    "conditions": 1,
+    "note": "Vizualinė komunikacija, specialios dizaino žinios, kūrybinė įtampa ir projektų terminai"
+  },
+  "2211": {
+    "skills": 5,
+    "qualification": 5,
+    "effort": 4,
+    "responsibility": 5,
+    "conditions": 2,
+    "note": "Gydytojo kvalifikacija ir licencija, diagnostika, atsakomybė už pacientų gyvybę"
+  },
+  "2212": {
+    "skills": 5,
+    "qualification": 5,
+    "effort": 5,
+    "responsibility": 5,
+    "conditions": 3,
+    "note": "Specializuota medicininė kvalifikacija, sudėtingas gydymas, gyvybių atsakomybė ir budėjimai"
+  },
+  "2221": {
+    "skills": 4,
+    "qualification": 5,
+    "effort": 5,
+    "responsibility": 5,
+    "conditions": 3,
+    "note": "Licencijuota slauga, klinikiniai sprendimai, didelė fizinė ir emocinė apkrova, pacientų gyvybės"
+  },
+  "2222": {
+    "skills": 4,
+    "qualification": 5,
+    "effort": 5,
+    "responsibility": 5,
+    "conditions": 3,
+    "note": "Akušerijos licencija, motinos ir naujagimio gyvybės, didelė fizinė bei emocinė įtampa"
+  },
+  "2230": {
+    "skills": 4,
+    "qualification": 5,
+    "effort": 3,
+    "responsibility": 4,
+    "conditions": 2,
+    "note": "Specialus sveikatos srities pasirengimas, paciento būklės vertinimas ir gydymo sauga"
+  },
+  "2240": {
+    "skills": 4,
+    "qualification": 5,
+    "effort": 5,
+    "responsibility": 5,
+    "conditions": 4,
+    "note": "Skubios pagalbos kvalifikacija, gyvybių gelbėjimas, didelė fizinė ir emocinė apkrova, iškvietimai"
+  },
+  "2250": {
+    "skills": 4,
+    "qualification": 5,
+    "effort": 4,
+    "responsibility": 4,
+    "conditions": 4,
+    "note": "Veterinarijos kvalifikacija ir licencija, gyvūnų sveikata, fizinė apkrova ir biologinė rizika"
+  },
+  "2261": {
+    "skills": 4,
+    "qualification": 5,
+    "effort": 4,
+    "responsibility": 4,
+    "conditions": 2,
+    "note": "Odontologo kvalifikacija ir licencija, tikslus gydymas, pacientų sveikata ir statinė apkrova"
+  },
+  "2262": {
+    "skills": 4,
+    "qualification": 5,
+    "effort": 3,
+    "responsibility": 4,
+    "conditions": 2,
+    "note": "Farmacinė kvalifikacija, vaistų sauga, tikslumas ir nuolatinis pacientų konsultavimas"
+  },
+  "2263": {
+    "skills": 4,
+    "qualification": 4,
+    "effort": 3,
+    "responsibility": 4,
+    "conditions": 3,
+    "note": "Visuomenės ir darbuotojų sveikatos apsauga, rizikų vertinimas, patikros ir išvykos"
+  },
+  "2264": {
+    "skills": 4,
+    "qualification": 5,
+    "effort": 4,
+    "responsibility": 4,
+    "conditions": 3,
+    "note": "Kineziterapijos kvalifikacija, pacientų mobilizavimas, fizinė apkrova ir sveikatos atsakomybė"
+  },
+  "2265": {
+    "skills": 4,
+    "qualification": 5,
+    "effort": 3,
+    "responsibility": 4,
+    "conditions": 2,
+    "note": "Mitybos ir dietetikos žinios, individualūs sveikatos sprendimai ir pacientų konsultavimas"
+  },
+  "2266": {
+    "skills": 4,
+    "qualification": 5,
+    "effort": 4,
+    "responsibility": 4,
+    "conditions": 2,
+    "note": "Specializuota terapinė kvalifikacija, komunikacijos atkūrimas ir emocinis darbas su pacientais"
+  },
+  "2267": {
+    "skills": 4,
+    "qualification": 5,
+    "effort": 3,
+    "responsibility": 4,
+    "conditions": 2,
+    "note": "Optometrijos kvalifikacija, tikslūs regos tyrimai ir atsakomybė už paciento sveikatą"
+  },
+  "2269": {
+    "skills": 4,
+    "qualification": 5,
+    "effort": 4,
+    "responsibility": 4,
+    "conditions": 3,
+    "note": "Specializuota sveikatos kvalifikacija, diagnostika ar terapija, pacientų sauga ir emocinė įtampa"
+  },
+  "2310": {
+    "skills": 5,
+    "qualification": 5,
+    "effort": 4,
+    "responsibility": 3,
+    "conditions": 2,
+    "note": "Aukšta akademinė kvalifikacija, mokslinis ir pedagoginis darbas, studentų vertinimo atsakomybė"
+  },
+  "2320": {
+    "skills": 4,
+    "qualification": 4,
+    "effort": 4,
+    "responsibility": 4,
+    "conditions": 3,
+    "note": "Profesijos ir pedagogikos žinios, praktinio mokymo sauga ir intensyvus darbas su mokiniais"
+  },
+  "2330": {
+    "skills": 4,
+    "qualification": 5,
+    "effort": 4,
+    "responsibility": 4,
+    "conditions": 3,
+    "note": "Pedagogo kvalifikacija, ugdymo sprendimai, mokinių gerovė ir didelė emocinė apkrova"
+  },
+  "2341": {
+    "skills": 4,
+    "qualification": 5,
+    "effort": 4,
+    "responsibility": 4,
+    "conditions": 3,
+    "note": "Pedagogo kvalifikacija, vaikų ugdymas ir sauga, nuolatinis dėmesys bei emocinė apkrova"
+  },
+  "2342": {
+    "skills": 4,
+    "qualification": 5,
+    "effort": 5,
+    "responsibility": 4,
+    "conditions": 3,
+    "note": "Pedagogo kvalifikacija, mažų vaikų sauga, didelė fizinė ir emocinė apkrova"
+  },
+  "2351": {
+    "skills": 4,
+    "qualification": 4,
+    "effort": 3,
+    "responsibility": 4,
+    "conditions": 2,
+    "note": "Ugdymo metodų ir programų vertinimas, pedagoginės žinios ir svarbūs švietimo sprendimai"
+  },
+  "2352": {
+    "skills": 4,
+    "qualification": 5,
+    "effort": 5,
+    "responsibility": 4,
+    "conditions": 3,
+    "note": "Specialioji pedagoginė kvalifikacija, individuali pagalba, didelė emocinė ir fizinė apkrova"
+  },
+  "2353": {
+    "skills": 4,
+    "qualification": 4,
+    "effort": 3,
+    "responsibility": 3,
+    "conditions": 2,
+    "note": "Kalbos ir mokymo metodikos žinios, besimokančiųjų pažangos vertinimas ir bendravimo apkrova"
+  },
+  "2354": {
+    "skills": 4,
+    "qualification": 4,
+    "effort": 4,
+    "responsibility": 3,
+    "conditions": 2,
+    "note": "Muzikinės ir pedagoginės žinios, intensyvus individualus mokymas, klausos ir emocinė apkrova"
+  },
+  "2355": {
+    "skills": 4,
+    "qualification": 4,
+    "effort": 4,
+    "responsibility": 3,
+    "conditions": 2,
+    "note": "Meninio ugdymo žinios, praktinis mokymas, dėmesys mokinių pažangai ir emocinė apkrova"
+  },
+  "2356": {
+    "skills": 4,
+    "qualification": 4,
+    "effort": 3,
+    "responsibility": 3,
+    "conditions": 2,
+    "note": "IT ir mokymo metodikos žinios, praktinių užduočių aiškinimas ir mokymosi rezultatų atsakomybė"
+  },
+  "2359": {
+    "skills": 4,
+    "qualification": 4,
+    "effort": 4,
+    "responsibility": 4,
+    "conditions": 3,
+    "note": "Ugdymo ir socialinės pagalbos žinios, mokinių gerovė, individualus darbas ir emocinė apkrova"
+  },
+  "2411": {
+    "skills": 4,
+    "qualification": 4,
+    "effort": 3,
+    "responsibility": 4,
+    "conditions": 1,
+    "note": "Aukštasis išsilavinimas, atsakomybė už finansinę atskaitomybę, biuro darbas"
+  },
+  "2412": {
+    "skills": 4,
+    "qualification": 4,
+    "effort": 3,
+    "responsibility": 4,
+    "conditions": 1,
+    "note": "Finansų ir investicijų žinios, individualūs sprendimai ir atsakomybė už klientų lėšas"
+  },
+  "2413": {
+    "skills": 4,
+    "qualification": 4,
+    "effort": 3,
+    "responsibility": 4,
+    "conditions": 1,
+    "note": "Sudėtinga finansinių duomenų analizė, investicijų rizikos vertinimas ir svarbūs sprendimai"
+  },
+  "2421": {
+    "skills": 4,
+    "qualification": 4,
+    "effort": 3,
+    "responsibility": 4,
+    "conditions": 1,
+    "note": "Organizacijų analizė, procesų tobulinimas ir atsakomybė už svarbias vadybos rekomendacijas"
+  },
+  "2422": {
+    "skills": 4,
+    "qualification": 4,
+    "effort": 3,
+    "responsibility": 4,
+    "conditions": 1,
+    "note": "Politikos ir projektų analizė, viešieji ištekliai ir atsakingi administravimo sprendimai"
+  },
+  "2423": {
+    "skills": 4,
+    "qualification": 4,
+    "effort": 3,
+    "responsibility": 3,
+    "conditions": 2,
+    "note": "Personalo ir karjeros konsultavimas, jautrūs duomenys, atrankos sprendimai ir bendravimo apkrova"
+  },
+  "2424": {
+    "skills": 4,
+    "qualification": 4,
+    "effort": 3,
+    "responsibility": 3,
+    "conditions": 2,
+    "note": "Darbuotojų mokymo metodika, mokymosi poreikių vertinimas ir grupių ugdymas"
+  },
+  "2431": {
+    "skills": 4,
+    "qualification": 4,
+    "effort": 3,
+    "responsibility": 3,
+    "conditions": 2,
+    "note": "Rinkos analizė, kampanijų ir pardavimo planavimas, klientai bei projektų terminai"
+  },
+  "2432": {
+    "skills": 4,
+    "qualification": 4,
+    "effort": 4,
+    "responsibility": 3,
+    "conditions": 3,
+    "note": "Viešoji komunikacija, reputacijos atsakomybė, krizių situacijos ir nereguliarus režimas"
+  },
+  "2433": {
+    "skills": 4,
+    "qualification": 4,
+    "effort": 3,
+    "responsibility": 3,
+    "conditions": 3,
+    "note": "Techninės ar medicininės produktų žinios, konsultavimas, derybos ir išvykos"
+  },
+  "2434": {
+    "skills": 4,
+    "qualification": 4,
+    "effort": 3,
+    "responsibility": 3,
+    "conditions": 2,
+    "note": "IT produktų išmanymas, klientų poreikių analizė ir atsakomybė už tinkamus pasiūlymus"
+  },
+  "2511": {
+    "skills": 4,
+    "qualification": 4,
+    "effort": 3,
+    "responsibility": 4,
+    "conditions": 1,
+    "note": "Sudėtingų IT reikalavimų ir sistemų analizė, architektūros sprendimai ir duomenų atsakomybė"
+  },
+  "2512": {
+    "skills": 4,
+    "qualification": 4,
+    "effort": 3,
+    "responsibility": 3,
+    "conditions": 1,
+    "note": "Aukštasis išsilavinimas, programavimo ir sistemų kūrimo žinios, protinis darbas biure"
+  },
+  "2513": {
+    "skills": 4,
+    "qualification": 4,
+    "effort": 3,
+    "responsibility": 3,
+    "conditions": 1,
+    "note": "Saityno ir multimedijos programavimas, kūrybinis problemų sprendimas ir darbo terminai"
+  },
+  "2514": {
+    "skills": 4,
+    "qualification": 4,
+    "effort": 3,
+    "responsibility": 3,
+    "conditions": 1,
+    "note": "Taikomųjų programų kūrimas, algoritmų išmanymas ir atsakomybė už programų veikimą"
+  },
+  "2519": {
+    "skills": 4,
+    "qualification": 4,
+    "effort": 3,
+    "responsibility": 3,
+    "conditions": 1,
+    "note": "Programų kokybės vertinimas, sudėtingų klaidų analizė ir projektų rezultatų atsakomybė"
+  },
+  "2521": {
+    "skills": 4,
+    "qualification": 4,
+    "effort": 3,
+    "responsibility": 4,
+    "conditions": 1,
+    "note": "Duomenų bazių projektavimas, informacijos vientisumas ir svarbių duomenų apsauga"
+  },
+  "2522": {
+    "skills": 4,
+    "qualification": 4,
+    "effort": 3,
+    "responsibility": 4,
+    "conditions": 3,
+    "note": "Sudėtingų sistemų priežiūra, duomenų ir veiklos tęstinumo atsakomybė, budėjimai"
+  },
+  "2523": {
+    "skills": 4,
+    "qualification": 4,
+    "effort": 3,
+    "responsibility": 4,
+    "conditions": 3,
+    "note": "Tinklų projektavimas, ryšio patikimumas, gedimų šalinimas ir nereguliarus režimas"
+  },
+  "2529": {
+    "skills": 4,
+    "qualification": 4,
+    "effort": 4,
+    "responsibility": 4,
+    "conditions": 3,
+    "note": "IT saugos ir duomenų ekspertizė, incidentų analizė, kritinės informacijos apsauga ir budėjimai"
+  },
+  "2611": {
+    "skills": 4,
+    "qualification": 5,
+    "effort": 4,
+    "responsibility": 4,
+    "conditions": 3,
+    "note": "Teisininko kvalifikacija, sudėtingos bylos, žmonių teisių gynimas ir konfliktinės situacijos"
+  },
+  "2612": {
+    "skills": 5,
+    "qualification": 5,
+    "effort": 4,
+    "responsibility": 5,
+    "conditions": 3,
+    "note": "Teisėjo kvalifikacija, sudėtingi teisiniai sprendimai ir atsakomybė už žmonių teises bei laisvę"
+  },
+  "2619": {
+    "skills": 4,
+    "qualification": 5,
+    "effort": 3,
+    "responsibility": 4,
+    "conditions": 1,
+    "note": "Teisinė kvalifikacija, dokumentų ir atitikties vertinimas, svarbių teisinių pasekmių atsakomybė"
+  },
+  "2621": {
+    "skills": 4,
+    "qualification": 4,
+    "effort": 3,
+    "responsibility": 3,
+    "conditions": 2,
+    "note": "Archyvistikos ir muziejininkystės žinios, kultūros vertybių apsauga ir lankytojų aptarnavimas"
+  },
+  "2622": {
+    "skills": 4,
+    "qualification": 4,
+    "effort": 3,
+    "responsibility": 3,
+    "conditions": 2,
+    "note": "Informacijos paieškos ir sisteminimo žinios, fondų priežiūra ir pagalba skaitytojams"
+  },
+  "2631": {
+    "skills": 4,
+    "qualification": 4,
+    "effort": 3,
+    "responsibility": 4,
+    "conditions": 1,
+    "note": "Ekonominė analizė, sudėtingi modeliai ir atsakomybė už finansines bei veiklos rekomendacijas"
+  },
+  "2632": {
+    "skills": 4,
+    "qualification": 4,
+    "effort": 3,
+    "responsibility": 3,
+    "conditions": 3,
+    "note": "Socialinių ir kultūrinių reiškinių tyrimai, duomenų patikimumas, interviu bei lauko darbai"
+  },
+  "2633": {
+    "skills": 4,
+    "qualification": 5,
+    "effort": 3,
+    "responsibility": 3,
+    "conditions": 1,
+    "note": "Aukštas teorinis pasirengimas, istorinių ir politinių šaltinių analizė, tyrimų patikimumas"
+  },
+  "2634": {
+    "skills": 4,
+    "qualification": 5,
+    "effort": 4,
+    "responsibility": 4,
+    "conditions": 3,
+    "note": "Psichologo kvalifikacija, sudėtingi vertinimai, žmonių psichikos sveikata ir emocinė apkrova"
+  },
+  "2635": {
+    "skills": 4,
+    "qualification": 4,
+    "effort": 4,
+    "responsibility": 4,
+    "conditions": 3,
+    "note": "Socialinio darbo žinios, pažeidžiamų žmonių gerovė, krizinės situacijos ir didelė emocinė apkrova"
+  },
+  "2636": {
+    "skills": 4,
+    "qualification": 4,
+    "effort": 4,
+    "responsibility": 3,
+    "conditions": 3,
+    "note": "Teologinės ir sielovados žinios, parama netekčių metu ir didelė emocinė apkrova"
+  },
+  "2641": {
+    "skills": 4,
+    "qualification": 4,
+    "effort": 3,
+    "responsibility": 3,
+    "conditions": 1,
+    "note": "Kalbos ir kūrybos meistriškumas, tekstų tikslumas, intensyvus protinis darbas ir terminai"
+  },
+  "2642": {
+    "skills": 4,
+    "qualification": 4,
+    "effort": 4,
+    "responsibility": 3,
+    "conditions": 3,
+    "note": "Informacijos tikrinimas, viešosios informacijos atsakomybė, įtempti terminai ir išvykos"
+  },
+  "2643": {
+    "skills": 4,
+    "qualification": 4,
+    "effort": 4,
+    "responsibility": 3,
+    "conditions": 2,
+    "note": "Gilios kalbų žinios, tikslios prasmės perteikimas ir intensyvi dėmesio bei atminties apkrova"
+  },
+  "2651": {
+    "skills": 4,
+    "qualification": 4,
+    "effort": 3,
+    "responsibility": 3,
+    "conditions": 2,
+    "note": "Meninės ir restauravimo žinios, kūrybinis darbas, kūrinių bei kultūros vertybių atsakomybė"
+  },
+  "2652": {
+    "skills": 4,
+    "qualification": 4,
+    "effort": 4,
+    "responsibility": 3,
+    "conditions": 3,
+    "note": "Aukštas muzikinis meistriškumas, intensyvios repeticijos, emocinė ir sceninė apkrova"
+  },
+  "2653": {
+    "skills": 4,
+    "qualification": 4,
+    "effort": 4,
+    "responsibility": 3,
+    "conditions": 4,
+    "note": "Šokio ir choreografijos meistriškumas, didelė fizinė apkrova ir traumų rizika"
+  },
+  "2654": {
+    "skills": 4,
+    "qualification": 4,
+    "effort": 4,
+    "responsibility": 4,
+    "conditions": 3,
+    "note": "Kūrybiniai sprendimai, atlikėjų ir gamybos koordinavimas, biudžetai bei intensyvūs terminai"
+  },
+  "2655": {
+    "skills": 4,
+    "qualification": 4,
+    "effort": 4,
+    "responsibility": 3,
+    "conditions": 3,
+    "note": "Vaidybos meistriškumas, didelė emocinė ir sceninė apkrova, nereguliarus darbo režimas"
+  },
+  "2656": {
+    "skills": 3,
+    "qualification": 4,
+    "effort": 3,
+    "responsibility": 3,
+    "conditions": 3,
+    "note": "Profesinė kalba ir tiesioginio eterio tikslumas, dėmesio įtampa ir pamainos"
+  },
+  "2659": {
+    "skills": 4,
+    "qualification": 3,
+    "effort": 4,
+    "responsibility": 3,
+    "conditions": 3,
+    "note": "Specialūs atlikimo įgūdžiai, fizinė ir emocinė scenos apkrova, vakariniai renginiai"
+  },
+  "3111": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 3,
+    "responsibility": 2,
+    "conditions": 3,
+    "note": "Laboratoriniai matavimai, profesinės techninės žinios, mėginių tikslumas ir reagentai"
+  },
+  "3112": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 3,
+    "responsibility": 3,
+    "conditions": 4,
+    "note": "Statybų matavimai ir patikros, techninis pasirengimas, darbas objektuose"
+  },
+  "3113": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 3,
+    "responsibility": 4,
+    "conditions": 4,
+    "note": "Elektros įrenginių tikrinimas, techninė kvalifikacija ir atsakomybė už saugų veikimą"
+  },
+  "3114": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 3,
+    "responsibility": 3,
+    "conditions": 2,
+    "note": "Elektronikos matavimai ir gedimų paieška, profesinės žinios ir įrangos patikimumas"
+  },
+  "3115": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 3,
+    "responsibility": 3,
+    "conditions": 4,
+    "note": "Mechaninių įrenginių diagnostika, techninė kvalifikacija, įrangos priežiūra ir gamybinė rizika"
+  },
+  "3116": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 3,
+    "responsibility": 3,
+    "conditions": 4,
+    "note": "Cheminių procesų ir mėginių kontrolė, profesinė kvalifikacija ir cheminių medžiagų poveikis"
+  },
+  "3117": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 4,
+    "responsibility": 3,
+    "conditions": 4,
+    "note": "Gavybos ir metalurgijos matavimai, profesinė kvalifikacija, fizinė apkrova ir gamybinė rizika"
+  },
+  "3118": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 2,
+    "responsibility": 2,
+    "conditions": 1,
+    "note": "Techninis braižymas, profesinis pasirengimas, brėžinių tikslumas ir darbas biure"
+  },
+  "3119": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 3,
+    "responsibility": 3,
+    "conditions": 2,
+    "note": "Techninių procesų priežiūra, profesinės žinios, matavimai ir darbo rezultatų patikimumas"
+  },
+  "3121": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 4,
+    "responsibility": 4,
+    "conditions": 4,
+    "note": "Gavybos brigados priežiūra, darbų organizavimas, darbuotojų sauga ir pavojinga gamybinė aplinka"
+  },
+  "3122": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 4,
+    "responsibility": 4,
+    "conditions": 3,
+    "note": "Gamybos brigados valdymas, kokybės ir darbuotojų saugos atsakomybė, pamainos"
+  },
+  "3123": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 4,
+    "responsibility": 4,
+    "conditions": 4,
+    "note": "Statybos brigados valdymas, darbų kokybė, darbuotojų sauga ir darbas objektuose"
+  },
+  "3131": {
+    "skills": 4,
+    "qualification": 3,
+    "effort": 4,
+    "responsibility": 4,
+    "conditions": 3,
+    "note": "Elektrinės procesų valdymas, sudėtingų avarijų prevencija, saugos atsakomybė ir pamainos"
+  },
+  "3132": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 3,
+    "responsibility": 4,
+    "conditions": 4,
+    "note": "Valymo ir deginimo procesų kontrolė, sveikatos bei aplinkos apsauga, biologinė ir terminė rizika"
+  },
+  "3133": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 4,
+    "responsibility": 4,
+    "conditions": 5,
+    "note": "Cheminių procesų valdymas, avarijų prevencija, pamainos ir pavojingos medžiagos"
+  },
+  "3134": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 4,
+    "responsibility": 4,
+    "conditions": 5,
+    "note": "Naftos ir dujų procesų kontrolė, avarijų prevencija, degios medžiagos ir pamainos"
+  },
+  "3135": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 4,
+    "responsibility": 4,
+    "conditions": 4,
+    "note": "Lydymo procesų kontrolė, įrenginių sauga, karštis ir pamaininis darbas"
+  },
+  "3139": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 3,
+    "responsibility": 4,
+    "conditions": 3,
+    "note": "Automatizuotų procesų valdymas, įrangos ir gamybos tęstinumo atsakomybė, pamainos"
+  },
+  "3141": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 3,
+    "responsibility": 2,
+    "conditions": 3,
+    "note": "Biologinių mėginių paruošimas, profesinės laboratorinės žinios, tikslumas ir biologinis poveikis"
+  },
+  "3142": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 3,
+    "responsibility": 3,
+    "conditions": 4,
+    "note": "Žemės ūkio matavimai ir priežiūra, profesinės žinios, pasėlių būklė ir lauko darbai"
+  },
+  "3143": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 3,
+    "responsibility": 3,
+    "conditions": 4,
+    "note": "Miško išteklių apskaita ir priežiūra, techninės žinios, išvykos ir lauko sąlygos"
+  },
+  "3151": {
+    "skills": 4,
+    "qualification": 5,
+    "effort": 4,
+    "responsibility": 4,
+    "conditions": 4,
+    "note": "Laivų mechanikos kvalifikacija, avarijų prevencija, dideli įrenginiai ir darbas jūroje"
+  },
+  "3152": {
+    "skills": 4,
+    "qualification": 5,
+    "effort": 4,
+    "responsibility": 5,
+    "conditions": 4,
+    "note": "Laivavedžio kvalifikacija, navigacija, įgulos ir keleivių gyvybės, budėjimai jūroje"
+  },
+  "3153": {
+    "skills": 5,
+    "qualification": 5,
+    "effort": 4,
+    "responsibility": 5,
+    "conditions": 3,
+    "note": "Piloto licencija, sudėtingi skrydžio sprendimai, keleivių gyvybės ir nereguliarus režimas"
+  },
+  "3154": {
+    "skills": 5,
+    "qualification": 5,
+    "effort": 4,
+    "responsibility": 5,
+    "conditions": 3,
+    "note": "Skrydžių valdymo licencija, nuolatinė didelė dėmesio įtampa, žmonių gyvybės ir pamainos"
+  },
+  "3155": {
+    "skills": 4,
+    "qualification": 5,
+    "effort": 3,
+    "responsibility": 5,
+    "conditions": 3,
+    "note": "Speciali skrydžių saugos kvalifikacija, kritinės įrangos patikimumas, tikslumas ir budėjimai"
+  },
+  "3211": {
+    "skills": 4,
+    "qualification": 5,
+    "effort": 4,
+    "responsibility": 4,
+    "conditions": 3,
+    "note": "Medicininės įrangos kvalifikacija, diagnostikos tikslumas, pacientų sauga ir pamainos"
+  },
+  "3212": {
+    "skills": 3,
+    "qualification": 5,
+    "effort": 3,
+    "responsibility": 4,
+    "conditions": 3,
+    "note": "Biomedicininė kvalifikacija, diagnostinių mėginių tikslumas ir biologinė rizika"
+  },
+  "3213": {
+    "skills": 3,
+    "qualification": 5,
+    "effort": 3,
+    "responsibility": 4,
+    "conditions": 2,
+    "note": "Farmacinė kvalifikacija, tikslus vaistų paruošimas ir pacientų sauga prižiūrint vaistininkui"
+  },
+  "3214": {
+    "skills": 3,
+    "qualification": 5,
+    "effort": 3,
+    "responsibility": 4,
+    "conditions": 2,
+    "note": "Medicinos priemonių gamybos kvalifikacija, tikslus rankų darbas ir gydymo priemonių sauga"
+  },
+  "3221": {
+    "skills": 3,
+    "qualification": 4,
+    "effort": 5,
+    "responsibility": 4,
+    "conditions": 3,
+    "note": "Slaugos žinios, pacientų priežiūra prižiūrint specialistui, didelė fizinė ir emocinė apkrova"
+  },
+  "3222": {
+    "skills": 3,
+    "qualification": 4,
+    "effort": 5,
+    "responsibility": 4,
+    "conditions": 3,
+    "note": "Akušerijos žinios, pagalba motinai ir naujagimiui, didelė fizinė ir emocinė apkrova"
+  },
+  "3230": {
+    "skills": 3,
+    "qualification": 2,
+    "effort": 2,
+    "responsibility": 3,
+    "conditions": 2,
+    "note": "Praktinės tradicinės priežiūros žinios, bendravimas ir atsakomybė už teikiamą paslaugą"
+  },
+  "3240": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 4,
+    "responsibility": 3,
+    "conditions": 4,
+    "note": "Veterinarinis profesinis rengimas, gyvūnų priežiūra, fizinė apkrova ir biologinė rizika"
+  },
+  "3251": {
+    "skills": 3,
+    "qualification": 5,
+    "effort": 4,
+    "responsibility": 4,
+    "conditions": 3,
+    "note": "Burnos priežiūros kvalifikacija, pacientų sveikata, tikslūs veiksmai ir biologinis poveikis"
+  },
+  "3252": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 2,
+    "responsibility": 3,
+    "conditions": 2,
+    "note": "Medicininių duomenų tvarkymas, profesinės žinios, konfidencialumas ir lankytojų srautai"
+  },
+  "3253": {
+    "skills": 3,
+    "qualification": 4,
+    "effort": 3,
+    "responsibility": 4,
+    "conditions": 3,
+    "note": "Visuomenės sveikatos žinios, prevencijos priemonės, žmonių sveikata ir išvykos"
+  },
+  "3254": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 3,
+    "responsibility": 3,
+    "conditions": 2,
+    "note": "Optinių priemonių parinkimas, profesinės žinios, tikslumas ir klientų aptarnavimas"
+  },
+  "3255": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 4,
+    "responsibility": 4,
+    "conditions": 3,
+    "note": "Reabilitacijos ir masažo įgūdžiai, pacientų judėjimo pagalba, fizinė apkrova ir sveikatos sauga"
+  },
+  "3256": {
+    "skills": 3,
+    "qualification": 4,
+    "effort": 4,
+    "responsibility": 4,
+    "conditions": 3,
+    "note": "Medicininis pasirengimas, pagalba gydant, pacientų sauga ir fizinė bei emocinė apkrova"
+  },
+  "3257": {
+    "skills": 3,
+    "qualification": 4,
+    "effort": 3,
+    "responsibility": 4,
+    "conditions": 4,
+    "note": "Sveikatos ir darbo saugos patikros, rizikų vertinimas, darbuotojų apsauga ir išvykos į objektus"
+  },
+  "3258": {
+    "skills": 4,
+    "qualification": 5,
+    "effort": 5,
+    "responsibility": 5,
+    "conditions": 4,
+    "note": "Skubios pagalbos kvalifikacija, gyvybių gelbėjimas, didelė emocinė ir fizinė apkrova, iškvietimai"
+  },
+  "3259": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 3,
+    "responsibility": 3,
+    "conditions": 2,
+    "note": "Specialios sveikatinimo žinios, procedūrų tikslumas, higiena ir klientų aptarnavimas"
+  },
+  "3311": {
+    "skills": 3,
+    "qualification": 4,
+    "effort": 3,
+    "responsibility": 4,
+    "conditions": 1,
+    "note": "Finansinių sandorių žinios, rinkos analizė ir atsakomybė už reikšmingas klientų lėšas"
+  },
+  "3312": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 3,
+    "responsibility": 4,
+    "conditions": 1,
+    "note": "Kreditavimo taisyklių išmanymas, mokumo vertinimas ir finansinių sprendimų atsakomybė"
+  },
+  "3313": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 2,
+    "responsibility": 3,
+    "conditions": 1,
+    "note": "Profesinės apskaitos žinios, finansinių duomenų tikslumas, įprastas darbas biure"
+  },
+  "3314": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 3,
+    "responsibility": 3,
+    "conditions": 1,
+    "note": "Statistinių skaičiavimų ir duomenų apdorojimo įgūdžiai, tikslumas ir analitinė apkrova"
+  },
+  "3315": {
+    "skills": 3,
+    "qualification": 4,
+    "effort": 3,
+    "responsibility": 4,
+    "conditions": 3,
+    "note": "Specialios vertinimo žinios, finansinių išvadų atsakomybė ir turto apžiūros"
+  },
+  "3321": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 3,
+    "responsibility": 3,
+    "conditions": 2,
+    "note": "Draudimo produktų ir rizikų žinios, sutarčių tikslumas ir klientų konsultavimas"
+  },
+  "3322": {
+    "skills": 3,
+    "qualification": 2,
+    "effort": 3,
+    "responsibility": 3,
+    "conditions": 3,
+    "note": "Pardavimo ir derybų įgūdžiai, klientų užsakymai, rezultatų atsakomybė ir išvykos"
+  },
+  "3323": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 3,
+    "responsibility": 4,
+    "conditions": 1,
+    "note": "Pirkimų ir sutarčių išmanymas, derybos ir atsakomybė už reikšmingas organizacijos lėšas"
+  },
+  "3324": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 3,
+    "responsibility": 4,
+    "conditions": 1,
+    "note": "Prekybos sandorių išmanymas, derybos, dokumentų tikslumas ir didelių sandorių atsakomybė"
+  },
+  "3331": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 3,
+    "responsibility": 4,
+    "conditions": 3,
+    "note": "Muitinės ir transporto dokumentai, krovinių atitiktis, terminai ir nereguliarus režimas"
+  },
+  "3332": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 4,
+    "responsibility": 3,
+    "conditions": 3,
+    "note": "Renginių koordinavimas, dalyvių poreikiai, biudžetai ir didelė terminų bei bendravimo apkrova"
+  },
+  "3333": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 3,
+    "responsibility": 3,
+    "conditions": 2,
+    "note": "Įdarbinimo procedūros, sutarčių tikslumas, jautrūs duomenys ir klientų konsultavimas"
+  },
+  "3334": {
+    "skills": 3,
+    "qualification": 2,
+    "effort": 3,
+    "responsibility": 4,
+    "conditions": 3,
+    "note": "Turto sandorių išmanymas, klientų lėšų interesai, derybos ir objektų apžiūros"
+  },
+  "3339": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 3,
+    "responsibility": 3,
+    "conditions": 2,
+    "note": "Specializuotų paslaugų tarpininkavimas, sutarčių ir klientų interesų atsakomybė"
+  },
+  "3341": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 3,
+    "responsibility": 4,
+    "conditions": 1,
+    "note": "Raštinės procesų ir darbuotojų priežiūra, informacijos tikslumas ir konfidencialumas"
+  },
+  "3342": {
+    "skills": 3,
+    "qualification": 4,
+    "effort": 3,
+    "responsibility": 3,
+    "conditions": 3,
+    "note": "Teismo procedūrų žinios ir aukštasis pasirengimas, dokumentų tikslumas bei emocinė apkrova posėdžiuose"
+  },
+  "3343": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 3,
+    "responsibility": 3,
+    "conditions": 1,
+    "note": "Administravimo ir koordinavimo įgūdžiai, terminai, konfidenciali informacija ir projektų eiga"
+  },
+  "3344": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 4,
+    "responsibility": 3,
+    "conditions": 3,
+    "note": "Medicinos administravimo žinios, pacientų duomenys, srautų koordinavimas ir intensyvi emocinė apkrova"
+  },
+  "3351": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 4,
+    "responsibility": 4,
+    "conditions": 4,
+    "note": "Pasienio ir muitinės kontrolės rengimas, saugumo sprendimai, konfliktai ir lauko tarnyba"
+  },
+  "3352": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 3,
+    "responsibility": 4,
+    "conditions": 1,
+    "note": "Mokesčių taisyklių taikymas, duomenų tikrinimas ir atsakomybė už viešųjų lėšų apskaitą"
+  },
+  "3353": {
+    "skills": 3,
+    "qualification": 4,
+    "effort": 3,
+    "responsibility": 3,
+    "conditions": 3,
+    "note": "Aukštasis pasirengimas, socialinių išmokų taisyklės, gavėjų interesai ir sudėtingas konsultavimas"
+  },
+  "3354": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 3,
+    "responsibility": 3,
+    "conditions": 2,
+    "note": "Leidimų ir migracijos procedūrų išmanymas, dokumentų tikslumas ir žmonėms svarbūs sprendimai"
+  },
+  "3355": {
+    "skills": 4,
+    "qualification": 4,
+    "effort": 4,
+    "responsibility": 4,
+    "conditions": 4,
+    "note": "Tyrimo ir teisės žinios, žmonių teisių apsauga, emocinė įtampa ir pavojingos situacijos"
+  },
+  "3359": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 3,
+    "responsibility": 4,
+    "conditions": 3,
+    "note": "Specialios kontrolės procedūros, viešojo intereso apsauga, patikros ir išvykos"
+  },
+  "3411": {
+    "skills": 3,
+    "qualification": 4,
+    "effort": 3,
+    "responsibility": 3,
+    "conditions": 3,
+    "note": "Teisinių procedūrų žinios, bylų ir dokumentų tikslumas, jautrūs duomenys ir konfliktinės situacijos"
+  },
+  "3412": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 4,
+    "responsibility": 4,
+    "conditions": 3,
+    "note": "Individualios pagalbos įgūdžiai, pažeidžiamų žmonių gerovė, fizinė ir emocinė apkrova"
+  },
+  "3413": {
+    "skills": 3,
+    "qualification": 2,
+    "effort": 4,
+    "responsibility": 3,
+    "conditions": 3,
+    "note": "Sielovados ir bendravimo įgūdžiai, pagalba sunkiose situacijose ir emocinė apkrova"
+  },
+  "3421": {
+    "skills": 4,
+    "qualification": 2,
+    "effort": 4,
+    "responsibility": 2,
+    "conditions": 4,
+    "note": "Aukštas sportinis meistriškumas, intensyvi fizinė apkrova, varžybų įtampa ir traumų rizika"
+  },
+  "3422": {
+    "skills": 4,
+    "qualification": 3,
+    "effort": 4,
+    "responsibility": 4,
+    "conditions": 3,
+    "note": "Sporto mokymo kvalifikacija, sportuojančiųjų sauga, fizinė ir emocinė apkrova"
+  },
+  "3423": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 4,
+    "responsibility": 4,
+    "conditions": 4,
+    "note": "Instruktoriaus žinios, dalyvių sauga, fizinė apkrova ir aktyvi veikla įvairioje aplinkoje"
+  },
+  "3431": {
+    "skills": 3,
+    "qualification": 2,
+    "effort": 3,
+    "responsibility": 3,
+    "conditions": 3,
+    "note": "Fotografijos technika ir kompozicija, praktinis pasirengimas, įrangos atsakomybė ir išvykos"
+  },
+  "3432": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 3,
+    "responsibility": 3,
+    "conditions": 2,
+    "note": "Interjero ir medžiagų žinios, kūrybiniai sprendimai, užsakymų tikslumas ir objektų apžiūros"
+  },
+  "3433": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 3,
+    "responsibility": 3,
+    "conditions": 2,
+    "note": "Eksponatų ir fondų techninė priežiūra, profesiniai įgūdžiai ir kultūros vertybių apsauga"
+  },
+  "3434": {
+    "skills": 4,
+    "qualification": 3,
+    "effort": 4,
+    "responsibility": 4,
+    "conditions": 3,
+    "note": "Kulinarinis meistriškumas, maisto sauga, komandos priežiūra, karštis ir intensyvios pamainos"
+  },
+  "3435": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 3,
+    "responsibility": 3,
+    "conditions": 4,
+    "note": "Scenos ir renginių techniniai įgūdžiai, įrangos sauga, fizinė apkrova ir nereguliarus režimas"
+  },
+  "3511": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 3,
+    "responsibility": 4,
+    "conditions": 3,
+    "note": "IT įrangos eksploatavimas, svarbių sistemų prieinamumas, gedimų kontrolė ir pamainos"
+  },
+  "3512": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 3,
+    "responsibility": 3,
+    "conditions": 2,
+    "note": "IT gedimų nustatymas, naudotojų konsultavimas, įrangos ir duomenų priežiūra"
+  },
+  "3513": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 3,
+    "responsibility": 3,
+    "conditions": 4,
+    "note": "Tinklų įrengimas ir diagnostika, įrangos patikimumas, fiziniai montavimo darbai"
+  },
+  "3514": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 2,
+    "responsibility": 3,
+    "conditions": 1,
+    "note": "Svetainių techninė priežiūra, turinio ir funkcijų tikslumas, įprastas darbas biure"
+  },
+  "3521": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 3,
+    "responsibility": 3,
+    "conditions": 4,
+    "note": "Garso ir vaizdo technika, transliacijų patikimumas, įrangos kėlimas ir darbas renginiuose"
+  },
+  "3522": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 3,
+    "responsibility": 3,
+    "conditions": 4,
+    "note": "Ryšių įrangos diagnostika ir priežiūra, tinklo patikimumas, montavimas objektuose"
+  },
+  "4110": {
+    "skills": 2,
+    "qualification": 2,
+    "effort": 2,
+    "responsibility": 2,
+    "conditions": 1,
+    "note": "Baziniai raštinės įgūdžiai, vidurinis išsilavinimas, paprastos administracinės užduotys biure"
+  },
+  "4120": {
+    "skills": 2,
+    "qualification": 2,
+    "effort": 3,
+    "responsibility": 2,
+    "conditions": 1,
+    "note": "Bendras dokumentų ir susitikimų tvarkymas, kelių užduočių derinimas ir bendravimas"
+  },
+  "4131": {
+    "skills": 2,
+    "qualification": 3,
+    "effort": 2,
+    "responsibility": 2,
+    "conditions": 1,
+    "note": "Tekstų tvarkymo įgūdžiai, profesinis pasirengimas, tikslumas ir įprastas darbas biure"
+  },
+  "4132": {
+    "skills": 2,
+    "qualification": 2,
+    "effort": 2,
+    "responsibility": 2,
+    "conditions": 1,
+    "note": "Duomenų įvedimo įgūdžiai, įrašų tikslumas ir pasikartojantis darbas kompiuteriu"
+  },
+  "4211": {
+    "skills": 2,
+    "qualification": 3,
+    "effort": 3,
+    "responsibility": 3,
+    "conditions": 2,
+    "note": "Piniginių operacijų procedūros, lėšų ir duomenų tikslumas, nuolatinis klientų aptarnavimas"
+  },
+  "4212": {
+    "skills": 2,
+    "qualification": 2,
+    "effort": 3,
+    "responsibility": 3,
+    "conditions": 3,
+    "note": "Lošimų procedūrų išmanymas, pinigų apskaita, dėmesio įtampa ir naktinės pamainos"
+  },
+  "4213": {
+    "skills": 3,
+    "qualification": 2,
+    "effort": 3,
+    "responsibility": 3,
+    "conditions": 2,
+    "note": "Daiktų vertės ir paskolų procedūrų išmanymas, pinigų bei užstato apsauga, klientų aptarnavimas"
+  },
+  "4214": {
+    "skills": 2,
+    "qualification": 2,
+    "effort": 4,
+    "responsibility": 3,
+    "conditions": 3,
+    "note": "Skolų ir mokėjimų tvarkymas, klientų interesai, konfliktinis bendravimas ir išvykos"
+  },
+  "4221": {
+    "skills": 2,
+    "qualification": 3,
+    "effort": 3,
+    "responsibility": 3,
+    "conditions": 2,
+    "note": "Kelionių rezervavimo žinios, klientų užsakymų tikslumas ir kelių užduočių derinimas"
+  },
+  "4222": {
+    "skills": 2,
+    "qualification": 2,
+    "effort": 4,
+    "responsibility": 2,
+    "conditions": 3,
+    "note": "Informacijos teikimas, intensyvus bendravimas, konfliktinės užklausos ir pamainos"
+  },
+  "4223": {
+    "skills": 2,
+    "qualification": 2,
+    "effort": 3,
+    "responsibility": 2,
+    "conditions": 3,
+    "note": "Skambučių nukreipimas, greita reakcija, bendravimo apkrova ir pamaininis darbas"
+  },
+  "4224": {
+    "skills": 2,
+    "qualification": 3,
+    "effort": 3,
+    "responsibility": 3,
+    "conditions": 3,
+    "note": "Rezervacijų ir mokėjimų tvarkymas, svečių poreikiai, konfliktų sprendimas ir pamainos"
+  },
+  "4225": {
+    "skills": 2,
+    "qualification": 2,
+    "effort": 3,
+    "responsibility": 2,
+    "conditions": 2,
+    "note": "Informacijos paieška ir teikimas, nuolatinis lankytojų srautas ir dėmesio apkrova"
+  },
+  "4226": {
+    "skills": 2,
+    "qualification": 2,
+    "effort": 3,
+    "responsibility": 2,
+    "conditions": 2,
+    "note": "Lankytojų priėmimas, bendravimas, registravimas ir kelių užduočių derinimas"
+  },
+  "4227": {
+    "skills": 2,
+    "qualification": 2,
+    "effort": 3,
+    "responsibility": 2,
+    "conditions": 3,
+    "note": "Apklausų vykdymas, atsakymų tikslumas, intensyvus bendravimas ir išvykos"
+  },
+  "4229": {
+    "skills": 2,
+    "qualification": 2,
+    "effort": 4,
+    "responsibility": 3,
+    "conditions": 3,
+    "note": "Pacientų priėmimas, jautrių duomenų tikslumas, emocinė apkrova ir darbas su stresą patiriančiais žmonėmis"
+  },
+  "4311": {
+    "skills": 2,
+    "qualification": 3,
+    "effort": 2,
+    "responsibility": 3,
+    "conditions": 1,
+    "note": "Apskaitos procedūrų žinios, dokumentų ir finansinių įrašų tikslumas, darbas biure"
+  },
+  "4312": {
+    "skills": 2,
+    "qualification": 3,
+    "effort": 2,
+    "responsibility": 3,
+    "conditions": 1,
+    "note": "Finansinių ir statistinių dokumentų tvarkymas, profesinės žinios, tikslumas ir konfidencialumas"
+  },
+  "4313": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 3,
+    "responsibility": 3,
+    "conditions": 1,
+    "note": "Darbo užmokesčio taisyklių taikymas, skaičiavimų tikslumas, terminai ir jautrūs duomenys"
+  },
+  "4321": {
+    "skills": 2,
+    "qualification": 2,
+    "effort": 4,
+    "responsibility": 3,
+    "conditions": 3,
+    "note": "Atsargų ir krovinių apskaita, prekių kėlimas, materialinė atsakomybė ir sandėlio pamainos"
+  },
+  "4322": {
+    "skills": 2,
+    "qualification": 3,
+    "effort": 3,
+    "responsibility": 3,
+    "conditions": 1,
+    "note": "Užsakymų ir gamybos duomenų tvarkymas, tiekimo terminai ir atsakomybė už atsargų tikslumą"
+  },
+  "4323": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 4,
+    "responsibility": 4,
+    "conditions": 3,
+    "note": "Transporto srautų koordinavimas, saugus eismas, didelė dėmesio apkrova ir pamainos"
+  },
+  "4411": {
+    "skills": 2,
+    "qualification": 2,
+    "effort": 2,
+    "responsibility": 2,
+    "conditions": 2,
+    "note": "Fondų registravimas, leidinių priežiūra ir įprastas lankytojų aptarnavimas"
+  },
+  "4412": {
+    "skills": 2,
+    "qualification": 2,
+    "effort": 4,
+    "responsibility": 3,
+    "conditions": 4,
+    "note": "Siuntų ir išmokų pristatymas, atsakomybė už patikėtą turtą, fizinė apkrova ir lauko sąlygos"
+  },
+  "4413": {
+    "skills": 2,
+    "qualification": 3,
+    "effort": 3,
+    "responsibility": 2,
+    "conditions": 1,
+    "note": "Informacijos kodavimo ir korektūros įgūdžiai, nuolatinis tikslumas bei regos apkrova"
+  },
+  "4414": {
+    "skills": 2,
+    "qualification": 2,
+    "effort": 2,
+    "responsibility": 2,
+    "conditions": 1,
+    "note": "Raštingumas, nesudėtingų tekstų ir prašymų rengimas, įprastas darbas patalpose"
+  },
+  "4415": {
+    "skills": 2,
+    "qualification": 2,
+    "effort": 1,
+    "responsibility": 2,
+    "conditions": 1,
+    "note": "Paprastas dokumentų kopijavimas ir rūšiavimas, nedidelė apkrova įprastu biuro režimu"
+  },
+  "4416": {
+    "skills": 2,
+    "qualification": 3,
+    "effort": 2,
+    "responsibility": 3,
+    "conditions": 1,
+    "note": "Personalo dokumentų procedūros, darbuotojų duomenų tikslumas ir konfidencialumas"
+  },
+  "4419": {
+    "skills": 2,
+    "qualification": 2,
+    "effort": 3,
+    "responsibility": 2,
+    "conditions": 1,
+    "note": "Informacijos ir korespondencijos tvarkymas, tekstų tikslumas ir kelių užduočių derinimas"
+  },
+  "5111": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 4,
+    "responsibility": 4,
+    "conditions": 3,
+    "note": "Keleivių aptarnavimo ir saugos rengimas, emocinė bei fizinė apkrova, kelionės ir pamainos"
+  },
+  "5112": {
+    "skills": 2,
+    "qualification": 2,
+    "effort": 3,
+    "responsibility": 3,
+    "conditions": 3,
+    "note": "Bilietų kontrolė, pinigų apskaita, konfliktinis bendravimas ir darbas judančiame transporte"
+  },
+  "5113": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 3,
+    "responsibility": 4,
+    "conditions": 3,
+    "note": "Ekskursijų vedimo žinios, grupės sauga, nuolatinis bendravimas ir kelionės"
+  },
+  "5120": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 4,
+    "responsibility": 3,
+    "conditions": 3,
+    "note": "Profesinis maisto ruošimas, higienos atsakomybė, didelė fizinė apkrova, karštis ir pamainos"
+  },
+  "5131": {
+    "skills": 2,
+    "qualification": 2,
+    "effort": 4,
+    "responsibility": 3,
+    "conditions": 3,
+    "note": "Aptarnavimo įgūdžiai, užsakymų ir pinigų tikslumas, didelė fizinė bei bendravimo apkrova"
+  },
+  "5132": {
+    "skills": 2,
+    "qualification": 2,
+    "effort": 4,
+    "responsibility": 3,
+    "conditions": 3,
+    "note": "Gėrimų ruošimo įgūdžiai, pinigų ir higienos atsakomybė, stovimas darbas ir intensyvios pamainos"
+  },
+  "5141": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 4,
+    "responsibility": 2,
+    "conditions": 2,
+    "note": "Profesinis kirpimas, tikslūs rankų judesiai, ilgas stovėjimas ir nuolatinis bendravimas"
+  },
+  "5142": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 4,
+    "responsibility": 3,
+    "conditions": 2,
+    "note": "Grožio procedūrų kvalifikacija, higiena, klientų odos sauga ir ilgalaikė rankų bei kūno apkrova"
+  },
+  "5151": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 4,
+    "responsibility": 3,
+    "conditions": 3,
+    "note": "Valymo darbų koordinavimas, higienos ir komandos rezultatų atsakomybė, fizinė apkrova ir pamainos"
+  },
+  "5152": {
+    "skills": 3,
+    "qualification": 2,
+    "effort": 4,
+    "responsibility": 3,
+    "conditions": 3,
+    "note": "Namų ūkio organizavimas, patikėto turto priežiūra, kelių užduočių derinimas ir fizinis darbas"
+  },
+  "5153": {
+    "skills": 2,
+    "qualification": 2,
+    "effort": 3,
+    "responsibility": 3,
+    "conditions": 3,
+    "note": "Pastatų priežiūros įgūdžiai, turto apsauga, smulkūs remonto darbai ir iškvietimai"
+  },
+  "5161": {
+    "skills": 2,
+    "qualification": 2,
+    "effort": 2,
+    "responsibility": 2,
+    "conditions": 2,
+    "note": "Bendravimo ir individualių konsultacijų įgūdžiai, formalios profesinės kvalifikacijos nereikia"
+  },
+  "5162": {
+    "skills": 2,
+    "qualification": 2,
+    "effort": 4,
+    "responsibility": 3,
+    "conditions": 3,
+    "note": "Asmeninis aptarnavimas ir bendravimas, prižiūrimo žmogaus gerovė, emocinė apkrova ir lankstus režimas"
+  },
+  "5163": {
+    "skills": 2,
+    "qualification": 3,
+    "effort": 4,
+    "responsibility": 3,
+    "conditions": 4,
+    "note": "Laidojimo procedūros, pagarbus darbas su gedinčiaisiais, kūnų perkėlimas ir biologinė rizika"
+  },
+  "5164": {
+    "skills": 3,
+    "qualification": 2,
+    "effort": 4,
+    "responsibility": 3,
+    "conditions": 4,
+    "note": "Gyvūnų priežiūros įgūdžiai, gerovės atsakomybė, fizinė apkrova ir įkandimų rizika"
+  },
+  "5165": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 4,
+    "responsibility": 4,
+    "conditions": 3,
+    "note": "Vairavimo mokymo kvalifikacija, mokinio ir eismo sauga, nuolatinė dėmesio įtampa"
+  },
+  "5169": {
+    "skills": 2,
+    "qualification": 2,
+    "effort": 4,
+    "responsibility": 2,
+    "conditions": 3,
+    "note": "Asmeninio aptarnavimo įgūdžiai, fizinė ir emocinė apkrova, vakarinis bei naktinis darbas"
+  },
+  "5211": {
+    "skills": 2,
+    "qualification": 2,
+    "effort": 3,
+    "responsibility": 2,
+    "conditions": 4,
+    "note": "Prekybos ir pinigų skaičiavimo įgūdžiai, bendravimas, stovimas darbas ir lauko sąlygos"
+  },
+  "5212": {
+    "skills": 2,
+    "qualification": 2,
+    "effort": 3,
+    "responsibility": 3,
+    "conditions": 4,
+    "note": "Paprastas maisto pardavimas, higienos atsakomybė, stovimas darbas ir lauko sąlygos"
+  },
+  "5221": {
+    "skills": 3,
+    "qualification": 2,
+    "effort": 3,
+    "responsibility": 3,
+    "conditions": 2,
+    "note": "Prekybos organizavimas, prekių ir pinigų atsakomybė, klientų aptarnavimas"
+  },
+  "5222": {
+    "skills": 3,
+    "qualification": 2,
+    "effort": 4,
+    "responsibility": 4,
+    "conditions": 3,
+    "note": "Prekybos komandos priežiūra, pinigų ir prekių kontrolė, intensyvūs srautai ir pamainos"
+  },
+  "5223": {
+    "skills": 2,
+    "qualification": 2,
+    "effort": 3,
+    "responsibility": 2,
+    "conditions": 2,
+    "note": "Baziniai prekybos įgūdžiai, klientų aptarnavimas, prekių priežiūra ir stovimas darbas"
+  },
+  "5230": {
+    "skills": 2,
+    "qualification": 2,
+    "effort": 3,
+    "responsibility": 3,
+    "conditions": 2,
+    "note": "Kasos operacijos, atsakomybė už pinigus, nuolatinis dėmesys ir klientų srautai"
+  },
+  "5241": {
+    "skills": 2,
+    "qualification": 2,
+    "effort": 3,
+    "responsibility": 2,
+    "conditions": 2,
+    "note": "Demonstravimo įgūdžiai, ilgos pozos, dėmesys išraiškai ir darbas su užsakovais"
+  },
+  "5242": {
+    "skills": 2,
+    "qualification": 2,
+    "effort": 3,
+    "responsibility": 2,
+    "conditions": 2,
+    "note": "Prekių pristatymas, nuolatinis bendravimas, stovėjimas ir atsakomybė už demonstravimo priemones"
+  },
+  "5243": {
+    "skills": 2,
+    "qualification": 2,
+    "effort": 3,
+    "responsibility": 2,
+    "conditions": 4,
+    "note": "Pardavimo ir bendravimo įgūdžiai, prekių apsauga, vaikščiojimas ir darbas lauke"
+  },
+  "5244": {
+    "skills": 2,
+    "qualification": 2,
+    "effort": 4,
+    "responsibility": 2,
+    "conditions": 3,
+    "note": "Pardavimas telefonu ar internetu, intensyvus bendravimas, atmetimai ir emocinė apkrova"
+  },
+  "5245": {
+    "skills": 2,
+    "qualification": 3,
+    "effort": 3,
+    "responsibility": 3,
+    "conditions": 4,
+    "note": "Degalų ir kasos procedūros, sauga, klientų srautai, pamainos ir degių medžiagų aplinka"
+  },
+  "5246": {
+    "skills": 2,
+    "qualification": 2,
+    "effort": 3,
+    "responsibility": 3,
+    "conditions": 2,
+    "note": "Maisto išdavimo įgūdžiai, higiena, užsakymų tikslumas, stovėjimas ir klientų srautai"
+  },
+  "5249": {
+    "skills": 2,
+    "qualification": 2,
+    "effort": 3,
+    "responsibility": 3,
+    "conditions": 2,
+    "note": "Prekių ir nuomos paslaugų išmanymas, turto bei užsakymų atsakomybė ir klientų aptarnavimas"
+  },
+  "5311": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 5,
+    "responsibility": 4,
+    "conditions": 3,
+    "note": "Vaikų priežiūros pasirengimas, vaikų sauga, nuolatinis dėmesys, didelė fizinė ir emocinė apkrova"
+  },
+  "5312": {
+    "skills": 3,
+    "qualification": 2,
+    "effort": 4,
+    "responsibility": 4,
+    "conditions": 3,
+    "note": "Pagalbos mokiniams įgūdžiai, vaikų gerovė ir sauga, individualus dėmesys bei emocinė apkrova"
+  },
+  "5321": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 5,
+    "responsibility": 4,
+    "conditions": 3,
+    "note": "Priežiūros kvalifikacija, pacientų kėlimas ir higiena, sveikatos sauga, fizinė bei emocinė apkrova"
+  },
+  "5322": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 5,
+    "responsibility": 4,
+    "conditions": 3,
+    "note": "Asmens priežiūros pasirengimas, pažeidžiamų žmonių sauga, kėlimas, emocinė apkrova ir išvykos"
+  },
+  "5329": {
+    "skills": 2,
+    "qualification": 3,
+    "effort": 4,
+    "responsibility": 3,
+    "conditions": 4,
+    "note": "Sveikatos priežiūros ir higienos procedūros, fizinė apkrova, biologinių ir cheminių veiksnių poveikis"
+  },
+  "5411": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 5,
+    "responsibility": 5,
+    "conditions": 5,
+    "note": "Profesinis gelbėjimo rengimas, atsakomybė už gyvybes, didelė fizinė ir emocinė apkrova, ugnis"
+  },
+  "5412": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 4,
+    "responsibility": 5,
+    "conditions": 4,
+    "note": "Policijos rengimas, žmonių gyvybių ir viešosios saugos apsauga, fizinė bei emocinė įtampa"
+  },
+  "5413": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 4,
+    "responsibility": 4,
+    "conditions": 4,
+    "note": "Specialus pareigūno rengimas, suimtųjų sauga, konfliktai, emocinė apkrova ir smurto rizika"
+  },
+  "5414": {
+    "skills": 2,
+    "qualification": 3,
+    "effort": 3,
+    "responsibility": 4,
+    "conditions": 3,
+    "note": "Apsaugos rengimas, žmonių ir turto apsauga, budrumas, konfliktai ir pamainos"
+  },
+  "5419": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 5,
+    "responsibility": 5,
+    "conditions": 5,
+    "note": "Gelbėjimo įgūdžiai, žmonių gyvybės, didelė fizinė ir emocinė įtampa, pavojingos gelbėjimo sąlygos"
+  },
+  "6111": {
+    "skills": 3,
+    "qualification": 2,
+    "effort": 4,
+    "responsibility": 3,
+    "conditions": 4,
+    "note": "Augalų auginimo įgūdžiai, derliaus atsakomybė, didelė fizinė apkrova ir sezoniniai lauko darbai"
+  },
+  "6112": {
+    "skills": 3,
+    "qualification": 2,
+    "effort": 4,
+    "responsibility": 3,
+    "conditions": 4,
+    "note": "Vaismedžių priežiūros įgūdžiai, derliaus atsakomybė, fizinis darbas ir lauko sąlygos"
+  },
+  "6113": {
+    "skills": 3,
+    "qualification": 2,
+    "effort": 4,
+    "responsibility": 3,
+    "conditions": 4,
+    "note": "Sodininkystės ir augalų priežiūros įgūdžiai, fizinė apkrova, sezoninis darbas ir lauko sąlygos"
+  },
+  "6114": {
+    "skills": 3,
+    "qualification": 2,
+    "effort": 4,
+    "responsibility": 3,
+    "conditions": 4,
+    "note": "Skirtingų augalų priežiūros žinios, derliaus atsakomybė, fizinis darbas ir oro poveikis"
+  },
+  "6121": {
+    "skills": 3,
+    "qualification": 2,
+    "effort": 4,
+    "responsibility": 3,
+    "conditions": 4,
+    "note": "Gyvulių priežiūros žinios, gyvūnų gerovė, didelė fizinė apkrova ir biologinė rizika"
+  },
+  "6122": {
+    "skills": 3,
+    "qualification": 2,
+    "effort": 4,
+    "responsibility": 3,
+    "conditions": 4,
+    "note": "Paukščių priežiūros žinios, biologinė sauga, fizinis darbas, dulkės ir nereguliarus režimas"
+  },
+  "6123": {
+    "skills": 3,
+    "qualification": 2,
+    "effort": 3,
+    "responsibility": 3,
+    "conditions": 4,
+    "note": "Bitininkystės žinios, šeimų sveikata, avilių tvarkymas, lauko sąlygos ir įgėlimų rizika"
+  },
+  "6129": {
+    "skills": 3,
+    "qualification": 2,
+    "effort": 3,
+    "responsibility": 3,
+    "conditions": 4,
+    "note": "Specialių gyvūnų priežiūros žinios, gerovės atsakomybė, fizinis darbas ir biologinis poveikis"
+  },
+  "6130": {
+    "skills": 3,
+    "qualification": 2,
+    "effort": 4,
+    "responsibility": 3,
+    "conditions": 4,
+    "note": "Augalininkystės ir gyvulininkystės žinios, ūkio ištekliai, didelė fizinė apkrova ir lauko darbai"
+  },
+  "6210": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 4,
+    "responsibility": 3,
+    "conditions": 4,
+    "note": "Miško darbų profesiniai įgūdžiai, išteklių priežiūra, sunki fizinė apkrova ir traumų rizika"
+  },
+  "6221": {
+    "skills": 3,
+    "qualification": 2,
+    "effort": 4,
+    "responsibility": 3,
+    "conditions": 4,
+    "note": "Žuvų auginimo žinios, biologinių išteklių priežiūra, fizinis darbas prie vandens"
+  },
+  "6222": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 4,
+    "responsibility": 3,
+    "conditions": 4,
+    "note": "Žvejybos ir laivelių valdymo įgūdžiai, fizinė apkrova, lauko sąlygos ir skendimo rizika"
+  },
+  "6223": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 5,
+    "responsibility": 3,
+    "conditions": 5,
+    "note": "Jūrinės žvejybos rengimas, didelė fizinė ir emocinė apkrova, ilgi reisai ir pavojinga jūra"
+  },
+  "6224": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 3,
+    "responsibility": 4,
+    "conditions": 5,
+    "note": "Medžioklės rengimas, ginklų ir žmonių sauga, fizinis darbas bei pavojingų ginklų naudojimas"
+  },
+  "6310": {
+    "skills": 2,
+    "qualification": 1,
+    "effort": 4,
+    "responsibility": 2,
+    "conditions": 4,
+    "note": "Praktinis maisto auginimas savo ūkiui, didelė fizinė apkrova ir lauko sąlygos"
+  },
+  "6320": {
+    "skills": 2,
+    "qualification": 1,
+    "effort": 4,
+    "responsibility": 3,
+    "conditions": 4,
+    "note": "Praktinė gyvulių priežiūra savo ūkyje, gyvūnų gerovė, fizinė apkrova ir biologinė rizika"
+  },
+  "6330": {
+    "skills": 2,
+    "qualification": 1,
+    "effort": 4,
+    "responsibility": 3,
+    "conditions": 4,
+    "note": "Praktiniai mišriojo ūkio įgūdžiai, gyvūnų ir derliaus priežiūra, didelė fizinė apkrova lauke"
+  },
+  "6340": {
+    "skills": 2,
+    "qualification": 1,
+    "effort": 3,
+    "responsibility": 2,
+    "conditions": 4,
+    "note": "Praktiniai rinkimo ir žvejybos įgūdžiai, maisto atpažinimas, vaikščiojimas ir lauko sąlygos"
+  },
+  "7111": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 4,
+    "responsibility": 3,
+    "conditions": 4,
+    "note": "Įvairūs statybos amato įgūdžiai, konstrukcijų kokybė, didelė fizinė apkrova ir lauko darbai"
+  },
+  "7112": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 4,
+    "responsibility": 3,
+    "conditions": 4,
+    "note": "Profesiniai mūrijimo įgūdžiai, konstrukcijų kokybė, sunki fizinė apkrova ir statybos rizika"
+  },
+  "7113": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 4,
+    "responsibility": 2,
+    "conditions": 4,
+    "note": "Akmens apdirbimo meistriškumas, tikslumas, sunki fizinė apkrova, dulkės ir traumų rizika"
+  },
+  "7114": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 4,
+    "responsibility": 3,
+    "conditions": 4,
+    "note": "Betonavimo ir armavimo įgūdžiai, konstrukcijų kokybė, sunki fizinė apkrova ir lauko darbai"
+  },
+  "7115": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 4,
+    "responsibility": 2,
+    "conditions": 4,
+    "note": "Profesiniai medžio apdirbimo įgūdžiai, didelė fizinė apkrova ir traumų rizika statybose"
+  },
+  "7119": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 4,
+    "responsibility": 3,
+    "conditions": 5,
+    "note": "Montavimo ir griovimo įgūdžiai, konstrukcijų sauga, didelė fizinė apkrova ir darbas aukštyje"
+  },
+  "7121": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 4,
+    "responsibility": 3,
+    "conditions": 5,
+    "note": "Profesiniai stogų dengimo įgūdžiai, didelė fizinė apkrova, lauko darbai ir kritimo iš aukščio rizika"
+  },
+  "7122": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 4,
+    "responsibility": 2,
+    "conditions": 4,
+    "note": "Profesinis dangų klojimas, tikslumas, sunki fizinė apkrova ir ilgalaikis darbas nepatogioje pozoje"
+  },
+  "7123": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 4,
+    "responsibility": 2,
+    "conditions": 4,
+    "note": "Profesiniai tinkavimo įgūdžiai, paviršių kokybė, sunki fizinė apkrova ir statybos sąlygos"
+  },
+  "7124": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 4,
+    "responsibility": 3,
+    "conditions": 4,
+    "note": "Izoliavimo technologijos, pastatų apsauga, fizinė apkrova, dulkės ir darbas objektuose"
+  },
+  "7125": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 4,
+    "responsibility": 3,
+    "conditions": 4,
+    "note": "Profesinis stiklinimas, saugus stiklo tvirtinimas, sunkių detalių kėlimas ir pjūvių rizika"
+  },
+  "7126": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 4,
+    "responsibility": 3,
+    "conditions": 4,
+    "note": "Vamzdynų montavimo žinios, sistemų sandarumas, didelė fizinė apkrova ir darbas objektuose"
+  },
+  "7127": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 4,
+    "responsibility": 4,
+    "conditions": 4,
+    "note": "Šaldymo įrenginių kvalifikacija, saugus šaltnešių naudojimas, fizinė apkrova ir montavimo rizika"
+  },
+  "7131": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 4,
+    "responsibility": 2,
+    "conditions": 4,
+    "note": "Profesinis paviršių paruošimas ir dažymas, fizinė apkrova, medžiagų poveikis ir statybos sąlygos"
+  },
+  "7132": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 4,
+    "responsibility": 2,
+    "conditions": 5,
+    "note": "Profesinis purškimas ir lakavimas, ilgalaikė fizinė apkrova, pavojingi aerozoliai ir tirpikliai"
+  },
+  "7133": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 4,
+    "responsibility": 3,
+    "conditions": 5,
+    "note": "Konstrukcijų valymo įgūdžiai, fizinė apkrova, dulkės ir pavojingas darbas aukštyje"
+  },
+  "7211": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 4,
+    "responsibility": 3,
+    "conditions": 4,
+    "note": "Liejimo ir formavimo kvalifikacija, fizinė apkrova, karštas metalas ir nudegimų rizika"
+  },
+  "7212": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 4,
+    "responsibility": 3,
+    "conditions": 4,
+    "note": "Suvirinimo kvalifikacija, jungčių kokybė, fizinė apkrova, spinduliuotė ir dūmai"
+  },
+  "7213": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 4,
+    "responsibility": 3,
+    "conditions": 4,
+    "note": "Skardos formavimo įgūdžiai, gaminių kokybė, fizinė apkrova, triukšmas ir pjūvių rizika"
+  },
+  "7214": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 4,
+    "responsibility": 3,
+    "conditions": 5,
+    "note": "Metalinių konstrukcijų montavimas, tvirtinimo sauga, sunki fizinė apkrova ir darbas aukštyje"
+  },
+  "7215": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 4,
+    "responsibility": 4,
+    "conditions": 5,
+    "note": "Krovinių tvirtinimo ir kėlimo įgūdžiai, žmonių sauga, sunki fizinė apkrova ir aukštis"
+  },
+  "7221": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 4,
+    "responsibility": 2,
+    "conditions": 4,
+    "note": "Kalimo ir štampavimo meistriškumas, didelė fizinė apkrova, karštis ir traumų rizika"
+  },
+  "7222": {
+    "skills": 4,
+    "qualification": 3,
+    "effort": 3,
+    "responsibility": 3,
+    "conditions": 3,
+    "note": "Sudėtingų įrankių ir mechanizmų gamybos meistriškumas, tikslus remontas, įrangos atsakomybė ir triukšmas"
+  },
+  "7223": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 3,
+    "responsibility": 3,
+    "conditions": 4,
+    "note": "Staklių derinimo ir matavimo žinios, tikslumas, įrangos priežiūra ir pjovimo įrankių rizika"
+  },
+  "7224": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 3,
+    "responsibility": 2,
+    "conditions": 4,
+    "note": "Šlifavimo ir galandimo įgūdžiai, pasikartojanti rankų apkrova, dulkės bei kibirkštys"
+  },
+  "7231": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 4,
+    "responsibility": 3,
+    "conditions": 4,
+    "note": "Transporto priemonių diagnostika ir remontas, gedimų šalinimas, fizinė apkrova ir dirbtuvių rizika"
+  },
+  "7232": {
+    "skills": 4,
+    "qualification": 5,
+    "effort": 4,
+    "responsibility": 5,
+    "conditions": 3,
+    "note": "Aviacijos techninės priežiūros kvalifikacija, sudėtinga diagnostika, skrydžių sauga ir pamainos"
+  },
+  "7233": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 4,
+    "responsibility": 3,
+    "conditions": 4,
+    "note": "Mašinų diagnostikos ir remonto įgūdžiai, įrenginių patikimumas, fizinė apkrova ir traumų rizika"
+  },
+  "7234": {
+    "skills": 3,
+    "qualification": 2,
+    "effort": 2,
+    "responsibility": 2,
+    "conditions": 2,
+    "note": "Praktiniai mechanizmų taisymo įgūdžiai, smulkių gedimų šalinimas ir klientų turto priežiūra"
+  },
+  "7311": {
+    "skills": 4,
+    "qualification": 3,
+    "effort": 3,
+    "responsibility": 3,
+    "conditions": 2,
+    "note": "Tiksliosios mechanikos meistriškumas, kalibravimas, didelė dėmesio apkrova ir prietaisų patikimumas"
+  },
+  "7312": {
+    "skills": 4,
+    "qualification": 3,
+    "effort": 3,
+    "responsibility": 3,
+    "conditions": 2,
+    "note": "Instrumentų gamybos ir derinimo meistriškumas, klausos tikslumas ir vertingų instrumentų priežiūra"
+  },
+  "7313": {
+    "skills": 4,
+    "qualification": 3,
+    "effort": 3,
+    "responsibility": 3,
+    "conditions": 3,
+    "note": "Juvelyrikos meistriškumas, tikslus rankų darbas, tauriųjų medžiagų atsakomybė ir dulkės"
+  },
+  "7314": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 3,
+    "responsibility": 2,
+    "conditions": 4,
+    "note": "Keramikos amato žinios, rankų ir kūno apkrova, krosnių karštis bei dulkės"
+  },
+  "7315": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 4,
+    "responsibility": 2,
+    "conditions": 4,
+    "note": "Stiklo apdirbimo meistriškumas, didelė fizinė apkrova, karštis ir pjūvių rizika"
+  },
+  "7316": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 3,
+    "responsibility": 2,
+    "conditions": 2,
+    "note": "Dekoravimo ir graviravimo įgūdžiai, tikslus rankų darbas, regos apkrova ir gaminių kokybė"
+  },
+  "7317": {
+    "skills": 3,
+    "qualification": 2,
+    "effort": 3,
+    "responsibility": 2,
+    "conditions": 3,
+    "note": "Medžio ir pynimo amato įgūdžiai, pasikartojantys rankų judesiai, įrankiai ir dulkės"
+  },
+  "7318": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 4,
+    "responsibility": 2,
+    "conditions": 3,
+    "note": "Tekstilės ir odos amato kvalifikacija, tikslus rankų darbas, ilgalaikė statinė ir pasikartojanti apkrova"
+  },
+  "7319": {
+    "skills": 3,
+    "qualification": 2,
+    "effort": 3,
+    "responsibility": 2,
+    "conditions": 2,
+    "note": "Amato ir medžiagų išmanymas, gaminių kokybė, rankų apkrova ir darbas dirbtuvėse"
+  },
+  "7321": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 3,
+    "responsibility": 2,
+    "conditions": 2,
+    "note": "Spaudos formų paruošimo žinios, maketų tikslumas ir ilgalaikė dėmesio bei regos apkrova"
+  },
+  "7322": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 3,
+    "responsibility": 3,
+    "conditions": 4,
+    "note": "Spaudos įrenginių derinimas, tiražo kokybė, stovimas darbas, triukšmas ir mechanizmų rizika"
+  },
+  "7323": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 3,
+    "responsibility": 2,
+    "conditions": 3,
+    "note": "Įrišimo ir apdailos įgūdžiai, leidinių kokybė, rankų apkrova ir gamybinis triukšmas"
+  },
+  "7411": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 4,
+    "responsibility": 4,
+    "conditions": 4,
+    "note": "Elektros montavimo kvalifikacija, žmonių sauga, fizinė apkrova ir elektros traumų rizika"
+  },
+  "7412": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 4,
+    "responsibility": 4,
+    "conditions": 4,
+    "note": "Elektros įrangos diagnostika ir remontas, saugos atsakomybė, fizinė apkrova ir elektros rizika"
+  },
+  "7413": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 4,
+    "responsibility": 4,
+    "conditions": 5,
+    "note": "Elektros linijų kvalifikacija, tinklų ir žmonių sauga, fizinė apkrova, aukštis ir aukšta įtampa"
+  },
+  "7421": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 3,
+    "responsibility": 3,
+    "conditions": 2,
+    "note": "Elektronikos diagnostika, profesinės žinios, tikslus remontas ir atsakomybė už įrangą"
+  },
+  "7422": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 3,
+    "responsibility": 3,
+    "conditions": 4,
+    "note": "Ryšių sistemų montavimas ir remontas, tinklų patikimumas, fizinė apkrova ir darbas objektuose"
+  },
+  "7511": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 4,
+    "responsibility": 3,
+    "conditions": 4,
+    "note": "Mėsos ir žuvų apdorojimo įgūdžiai, maisto sauga, sunki fizinė apkrova, šaltis ir aštrūs įrankiai"
+  },
+  "7512": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 4,
+    "responsibility": 3,
+    "conditions": 3,
+    "note": "Kepimo ir konditerijos kvalifikacija, maisto sauga, ilgas stovėjimas, karštis ir ankstyvos pamainos"
+  },
+  "7513": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 4,
+    "responsibility": 3,
+    "conditions": 3,
+    "note": "Pieno apdorojimo technologijos, maisto sauga, fizinė apkrova, drėgmė ir pamainos"
+  },
+  "7514": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 3,
+    "responsibility": 3,
+    "conditions": 4,
+    "note": "Konservavimo technologijos, maisto sauga, fizinis darbas, karštis ir įrenginių rizika"
+  },
+  "7515": {
+    "skills": 3,
+    "qualification": 2,
+    "effort": 3,
+    "responsibility": 3,
+    "conditions": 2,
+    "note": "Produktų kokybės atpažinimas, maisto kokybės atsakomybė, dėmesio ir stovimo darbo apkrova"
+  },
+  "7516": {
+    "skills": 3,
+    "qualification": 2,
+    "effort": 3,
+    "responsibility": 2,
+    "conditions": 3,
+    "note": "Tabako apdorojimo įgūdžiai, kartotiniai judesiai, gaminių kokybė ir tabako dulkės"
+  },
+  "7521": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 4,
+    "responsibility": 2,
+    "conditions": 4,
+    "note": "Medienos paruošimo žinios, didelė fizinė apkrova, dulkės, triukšmas ir pjovimo rizika"
+  },
+  "7522": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 4,
+    "responsibility": 2,
+    "conditions": 4,
+    "note": "Baldų gamybos meistriškumas, tikslumas, fizinė apkrova ir medienos apdirbimo įrankių rizika"
+  },
+  "7523": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 3,
+    "responsibility": 3,
+    "conditions": 4,
+    "note": "Medienos staklių derinimas, įrangos ir gaminių kokybė, fizinis darbas, dulkės bei pjovimo rizika"
+  },
+  "7531": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 4,
+    "responsibility": 2,
+    "conditions": 2,
+    "note": "Siuvimo ir modeliavimo kvalifikacija, tikslumas, didelė ilgalaikė regos bei statinė kūno apkrova"
+  },
+  "7532": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 3,
+    "responsibility": 2,
+    "conditions": 3,
+    "note": "Lekalų ir sukirpimo žinios, medžiagų taupymas, tikslumas ir pasikartojanti kūno apkrova"
+  },
+  "7533": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 3,
+    "responsibility": 2,
+    "conditions": 2,
+    "note": "Siuvinėjimo ir siuvimo įgūdžiai, nuolatinis tikslumas, regos ir pasikartojančių judesių apkrova"
+  },
+  "7534": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 4,
+    "responsibility": 2,
+    "conditions": 4,
+    "note": "Apmušimo kvalifikacija, medžiagų parinkimas, didelė fizinė apkrova, įrankių ir klijų poveikis"
+  },
+  "7535": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 4,
+    "responsibility": 2,
+    "conditions": 5,
+    "note": "Odos ir kailių išdirbimo žinios, fizinė apkrova, pavojingos rauginimo medžiagos ir drėgmė"
+  },
+  "7536": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 3,
+    "responsibility": 2,
+    "conditions": 3,
+    "note": "Avalynės ir odos gaminių meistriškumas, tikslus rankų darbas, klijų poveikis ir statinė apkrova"
+  },
+  "7541": {
+    "skills": 4,
+    "qualification": 3,
+    "effort": 5,
+    "responsibility": 5,
+    "conditions": 5,
+    "note": "Profesinis nardymo rengimas, gelbėjimo atsakomybė, didelė fizinė ir emocinė apkrova po vandeniu"
+  },
+  "7542": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 4,
+    "responsibility": 5,
+    "conditions": 5,
+    "note": "Sprogdinimo kvalifikacija, itin tikslūs veiksmai, žmonių gyvybių apsauga ir sprogmenų pavojus"
+  },
+  "7543": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 3,
+    "responsibility": 3,
+    "conditions": 2,
+    "note": "Kokybės tikrinimo ir bandymų žinios, gaminių atitiktis, nuolatinis dėmesys ir stovimas darbas"
+  },
+  "7544": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 3,
+    "responsibility": 4,
+    "conditions": 5,
+    "note": "Kenkėjų naikinimo kvalifikacija, žmonių ir aplinkos apsauga, pavojingų cheminių medžiagų naudojimas"
+  },
+  "7549": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 3,
+    "responsibility": 2,
+    "conditions": 3,
+    "note": "Specialūs gamybos įgūdžiai, tikslios detalės, pasikartojanti rankų ir regos apkrova, dirbtuvės"
+  },
+  "8111": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 4,
+    "responsibility": 3,
+    "conditions": 4,
+    "note": "Kasybos mašinų valdymas, įrangos atsakomybė, fizinė apkrova, dulkės ir karjero pavojai"
+  },
+  "8112": {
+    "skills": 2,
+    "qualification": 3,
+    "effort": 3,
+    "responsibility": 3,
+    "conditions": 4,
+    "note": "Mineralų apdorojimo įrenginių valdymas, procesų kontrolė, dulkės, triukšmas ir traumų rizika"
+  },
+  "8113": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 4,
+    "responsibility": 4,
+    "conditions": 5,
+    "note": "Gręžimo įrangos kvalifikacija, avarijų prevencija, fizinė apkrova, slėgis ir pavojingos dujos"
+  },
+  "8114": {
+    "skills": 2,
+    "qualification": 3,
+    "effort": 3,
+    "responsibility": 3,
+    "conditions": 4,
+    "note": "Mineralinių gaminių įrenginių valdymas, mišinių kokybė, fizinis darbas, dulkės ir mechanizmų rizika"
+  },
+  "8121": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 4,
+    "responsibility": 3,
+    "conditions": 4,
+    "note": "Metalo apdorojimo procesų valdymas, įrangos sauga, fizinė apkrova, karštis ir triukšmas"
+  },
+  "8122": {
+    "skills": 2,
+    "qualification": 3,
+    "effort": 3,
+    "responsibility": 3,
+    "conditions": 5,
+    "note": "Paviršiaus dengimo procedūros, proceso kontrolė, dėmesio apkrova ir pavojingi elektrolitai"
+  },
+  "8131": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 4,
+    "responsibility": 4,
+    "conditions": 5,
+    "note": "Chemijos įrenginių kvalifikacija, avarijų prevencija, fizinė ir protinė apkrova, pavojingos medžiagos"
+  },
+  "8132": {
+    "skills": 2,
+    "qualification": 3,
+    "effort": 2,
+    "responsibility": 2,
+    "conditions": 3,
+    "note": "Fotografinių procesų įrangos valdymas, vaizdo kokybė, reagentai ir gamybinė aplinka"
+  },
+  "8141": {
+    "skills": 2,
+    "qualification": 3,
+    "effort": 3,
+    "responsibility": 3,
+    "conditions": 4,
+    "note": "Gumos gamybos ir apdorojimo procedūros, įrangos priežiūra, fizinis darbas, karštis ir garai"
+  },
+  "8142": {
+    "skills": 2,
+    "qualification": 3,
+    "effort": 3,
+    "responsibility": 3,
+    "conditions": 4,
+    "note": "Plastikų formavimo procedūros, gaminių kokybė, stovimas darbas, karštis ir įrenginių rizika"
+  },
+  "8143": {
+    "skills": 2,
+    "qualification": 2,
+    "effort": 3,
+    "responsibility": 2,
+    "conditions": 3,
+    "note": "Popierinių gaminių įrangos valdymas, pasikartojanti fizinė apkrova, triukšmas ir pamainos"
+  },
+  "8151": {
+    "skills": 2,
+    "qualification": 2,
+    "effort": 4,
+    "responsibility": 2,
+    "conditions": 3,
+    "note": "Pluošto ir siūlų įrangos valdymas, nuolatinė rankų bei stovimo darbo apkrova, dulkės ir triukšmas"
+  },
+  "8152": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 4,
+    "responsibility": 2,
+    "conditions": 3,
+    "note": "Audimo ir mezgimo mašinų derinimas, audinių kokybė, didelė pasikartojanti apkrova ir triukšmas"
+  },
+  "8153": {
+    "skills": 2,
+    "qualification": 3,
+    "effort": 4,
+    "responsibility": 2,
+    "conditions": 3,
+    "note": "Mašininio siuvimo kvalifikacija, tikslumas, didelė kartotinių judesių ir statinė apkrova, triukšmas"
+  },
+  "8154": {
+    "skills": 2,
+    "qualification": 3,
+    "effort": 4,
+    "responsibility": 3,
+    "conditions": 4,
+    "note": "Tekstilės apdorojimo procedūros, gaminių kokybė, fizinė apkrova, chemikalai, karštis ir drėgmė"
+  },
+  "8155": {
+    "skills": 2,
+    "qualification": 3,
+    "effort": 4,
+    "responsibility": 3,
+    "conditions": 5,
+    "note": "Odos ir kailių apdorojimo įranga, fizinė apkrova, pavojingi chemikalai ir drėgna aplinka"
+  },
+  "8156": {
+    "skills": 2,
+    "qualification": 3,
+    "effort": 4,
+    "responsibility": 2,
+    "conditions": 3,
+    "note": "Avalynės gamybos įranga, tikslūs pasikartojantys judesiai, statinė apkrova ir gamybinis triukšmas"
+  },
+  "8157": {
+    "skills": 2,
+    "qualification": 2,
+    "effort": 4,
+    "responsibility": 2,
+    "conditions": 3,
+    "note": "Skalbimo ir lyginimo įrangos įgūdžiai, didelė pasikartojanti fizinė apkrova, karštis ir drėgmė"
+  },
+  "8159": {
+    "skills": 2,
+    "qualification": 3,
+    "effort": 3,
+    "responsibility": 2,
+    "conditions": 3,
+    "note": "Tekstilės ir odos įrangos valdymas, gaminių tikslumas, kartotiniai judesiai ir triukšmas"
+  },
+  "8160": {
+    "skills": 2,
+    "qualification": 3,
+    "effort": 4,
+    "responsibility": 3,
+    "conditions": 3,
+    "note": "Maisto gamybos įrangos procedūros, higiena ir produktų sauga, fizinė apkrova bei pamainos"
+  },
+  "8171": {
+    "skills": 2,
+    "qualification": 3,
+    "effort": 3,
+    "responsibility": 3,
+    "conditions": 4,
+    "note": "Popieriaus gamybos įrangos valdymas, proceso kokybė, karštis, drėgmė ir mechanizmų rizika"
+  },
+  "8172": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 4,
+    "responsibility": 3,
+    "conditions": 4,
+    "note": "Medienos apdirbimo įrangos valdymas, įrangos sauga, fizinė apkrova, dulkės ir pjovimo rizika"
+  },
+  "8181": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 4,
+    "responsibility": 3,
+    "conditions": 4,
+    "note": "Stiklo ir keramikos įrangos valdymas, proceso kontrolė, fizinė apkrova, karštis ir dulkės"
+  },
+  "8182": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 3,
+    "responsibility": 4,
+    "conditions": 4,
+    "note": "Katilų ir slėginių įrenginių kvalifikacija, avarijų prevencija, budrumas, karštis ir pamainos"
+  },
+  "8183": {
+    "skills": 2,
+    "qualification": 2,
+    "effort": 3,
+    "responsibility": 2,
+    "conditions": 3,
+    "note": "Pakavimo ir ženklinimo įrangos įgūdžiai, tikslumas, kartotinė fizinė apkrova ir pamainos"
+  },
+  "8189": {
+    "skills": 2,
+    "qualification": 2,
+    "effort": 3,
+    "responsibility": 2,
+    "conditions": 3,
+    "note": "Įrenginių valdymo įgūdžiai, nustatytų procedūrų laikymasis, fizinė apkrova ir gamybinis triukšmas"
+  },
+  "8211": {
+    "skills": 2,
+    "qualification": 3,
+    "effort": 3,
+    "responsibility": 3,
+    "conditions": 3,
+    "note": "Mechaninių mazgų surinkimo įgūdžiai, montavimo kokybė, rankų apkrova ir gamybinės pamainos"
+  },
+  "8212": {
+    "skills": 2,
+    "qualification": 3,
+    "effort": 3,
+    "responsibility": 2,
+    "conditions": 3,
+    "note": "Elektrinių komponentų surinkimo procedūros, tikslumas, regos ir kartotinių judesių apkrova"
+  },
+  "8219": {
+    "skills": 2,
+    "qualification": 2,
+    "effort": 3,
+    "responsibility": 2,
+    "conditions": 3,
+    "note": "Gaminių surinkimo įgūdžiai, gaminių kokybė, kartotiniai judesiai ir gamybinė aplinka"
+  },
+  "8311": {
+    "skills": 3,
+    "qualification": 5,
+    "effort": 4,
+    "responsibility": 5,
+    "conditions": 3,
+    "note": "Mašinisto kvalifikacija, traukinių sauga, gyvybių atsakomybė, didelė dėmesio įtampa ir pamainos"
+  },
+  "8312": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 4,
+    "responsibility": 5,
+    "conditions": 4,
+    "note": "Geležinkelio operacijų rengimas, traukinių eismo sauga, fizinė bei dėmesio apkrova ir lauko darbai"
+  },
+  "8321": {
+    "skills": 2,
+    "qualification": 2,
+    "effort": 3,
+    "responsibility": 3,
+    "conditions": 4,
+    "note": "Motociklo valdymo įgūdžiai, eismo ir siuntų sauga, nuolatinis dėmesys bei lauko sąlygos"
+  },
+  "8322": {
+    "skills": 2,
+    "qualification": 2,
+    "effort": 3,
+    "responsibility": 3,
+    "conditions": 3,
+    "note": "Vairavimo įgūdžiai, keleivių ar krovinių atsakomybė, dėmesio apkrova ir nereguliarus režimas"
+  },
+  "8331": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 4,
+    "responsibility": 5,
+    "conditions": 3,
+    "note": "Profesinis keleivių vežimo rengimas, daugelio žmonių gyvybės, dėmesio bei emocinė įtampa ir pamainos"
+  },
+  "8332": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 4,
+    "responsibility": 4,
+    "conditions": 3,
+    "note": "Profesinis krovinių vežimo rengimas, sunkių transporto priemonių sauga, ilgos kelionės ir apkrova"
+  },
+  "8341": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 3,
+    "responsibility": 3,
+    "conditions": 4,
+    "note": "Žemės ir miškų ūkio mašinų kvalifikacija, įrangos ir išteklių apsauga, vibracija bei lauko darbai"
+  },
+  "8342": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 3,
+    "responsibility": 4,
+    "conditions": 4,
+    "note": "Sunkiosios technikos kvalifikacija, aplinkinių sauga, nuolatinis dėmesys, vibracija ir lauko darbai"
+  },
+  "8343": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 4,
+    "responsibility": 4,
+    "conditions": 5,
+    "note": "Kėlimo įrangos kvalifikacija, žmonių sauga, didelė dėmesio įtampa, kabantys kroviniai ir aukštis"
+  },
+  "8344": {
+    "skills": 2,
+    "qualification": 3,
+    "effort": 3,
+    "responsibility": 4,
+    "conditions": 4,
+    "note": "Krautuvų valdymo rengimas, aplinkinių ir krovinių sauga, dėmesio apkrova bei judančios technikos rizika"
+  },
+  "8350": {
+    "skills": 3,
+    "qualification": 3,
+    "effort": 4,
+    "responsibility": 3,
+    "conditions": 4,
+    "note": "Jūrinio darbo rengimas, laivo įrangos ir krovinių priežiūra, fizinė apkrova ir budėjimai jūroje"
+  },
+  "9111": {
+    "skills": 1,
+    "qualification": 1,
+    "effort": 4,
+    "responsibility": 1,
+    "conditions": 2,
+    "note": "Paprastos namų tvarkymo užduotys, didelė pasikartojanti fizinė apkrova ir nepatogios kūno padėtys"
+  },
+  "9112": {
+    "skills": 1,
+    "qualification": 1,
+    "effort": 4,
+    "responsibility": 1,
+    "conditions": 3,
+    "note": "Formalaus išsilavinimo nereikia, didelė fizinė valymo apkrova, pasikartojantys judesiai ir pamainos"
+  },
+  "9121": {
+    "skills": 2,
+    "qualification": 1,
+    "effort": 4,
+    "responsibility": 2,
+    "conditions": 3,
+    "note": "Praktiniai skalbimo ir lyginimo įgūdžiai, didelė rankų apkrova, karštis bei drėgmė"
+  },
+  "9122": {
+    "skills": 1,
+    "qualification": 1,
+    "effort": 4,
+    "responsibility": 2,
+    "conditions": 4,
+    "note": "Paprastos transporto plovimo užduotys, didelė fizinė apkrova, drėgmė ir lauko sąlygos"
+  },
+  "9123": {
+    "skills": 2,
+    "qualification": 3,
+    "effort": 4,
+    "responsibility": 2,
+    "conditions": 5,
+    "note": "Langų plovimo ir saugaus darbo rengimas, didelė fizinė apkrova ir kritimo iš aukščio pavojus"
+  },
+  "9129": {
+    "skills": 2,
+    "qualification": 1,
+    "effort": 4,
+    "responsibility": 2,
+    "conditions": 4,
+    "note": "Specialių paviršių valymo įgūdžiai, didelė fizinė apkrova, valymo priemonės ir slidūs paviršiai"
+  },
+  "9211": {
+    "skills": 1,
+    "qualification": 1,
+    "effort": 4,
+    "responsibility": 1,
+    "conditions": 4,
+    "note": "Paprastos augalų priežiūros užduotys, didelė fizinė apkrova ir sezoniniai lauko darbai"
+  },
+  "9212": {
+    "skills": 2,
+    "qualification": 1,
+    "effort": 4,
+    "responsibility": 2,
+    "conditions": 4,
+    "note": "Baziniai gyvulių priežiūros įgūdžiai, šėrimas ir tvarkymas, didelė fizinė apkrova ir biologinis poveikis"
+  },
+  "9213": {
+    "skills": 2,
+    "qualification": 1,
+    "effort": 4,
+    "responsibility": 2,
+    "conditions": 4,
+    "note": "Baziniai ūkio pagalbos įgūdžiai, augalų ir gyvulių priežiūra, sunki fizinė apkrova lauke"
+  },
+  "9214": {
+    "skills": 1,
+    "qualification": 1,
+    "effort": 4,
+    "responsibility": 1,
+    "conditions": 4,
+    "note": "Paprasti sodinimo ir ravėjimo darbai, didelė fizinė apkrova, nepatogios pozos ir lauko sąlygos"
+  },
+  "9215": {
+    "skills": 1,
+    "qualification": 1,
+    "effort": 4,
+    "responsibility": 1,
+    "conditions": 4,
+    "note": "Paprasti miško ir apželdinimo darbai, didelė fizinė apkrova, nelygus paviršius ir lauko sąlygos"
+  },
+  "9216": {
+    "skills": 2,
+    "qualification": 1,
+    "effort": 4,
+    "responsibility": 2,
+    "conditions": 4,
+    "note": "Baziniai žuvininkystės pagalbos įgūdžiai, fizinė apkrova, šaltis, drėgmė ir darbas prie vandens"
+  },
+  "9311": {
+    "skills": 1,
+    "qualification": 1,
+    "effort": 4,
+    "responsibility": 2,
+    "conditions": 5,
+    "note": "Paprastos gavybos pagalbinės užduotys, sunki fizinė apkrova, griūčių ir pavojingos gavybos aplinka"
+  },
+  "9312": {
+    "skills": 1,
+    "qualification": 1,
+    "effort": 4,
+    "responsibility": 2,
+    "conditions": 4,
+    "note": "Paprasti žemės ir infrastruktūros darbai, sunki fizinė apkrova, lauko sąlygos ir traumų rizika"
+  },
+  "9313": {
+    "skills": 1,
+    "qualification": 1,
+    "effort": 4,
+    "responsibility": 2,
+    "conditions": 4,
+    "note": "Paprasta pagalba statybose, medžiagų nešimas, sunki fizinė apkrova, dulkės ir traumų rizika"
+  },
+  "9321": {
+    "skills": 1,
+    "qualification": 1,
+    "effort": 3,
+    "responsibility": 1,
+    "conditions": 3,
+    "note": "Paprastas pakavimas rankomis, pasikartojantys judesiai, stovėjimas ir gamybinės pamainos"
+  },
+  "9329": {
+    "skills": 1,
+    "qualification": 1,
+    "effort": 4,
+    "responsibility": 2,
+    "conditions": 4,
+    "note": "Pagalbinės gamybos užduotys, didelė fizinė apkrova, medžiagų tvarkymas ir gamybinė rizika"
+  },
+  "9331": {
+    "skills": 2,
+    "qualification": 1,
+    "effort": 4,
+    "responsibility": 3,
+    "conditions": 4,
+    "note": "Pedalinės transporto priemonės valdymas, eismo sauga, didelė fizinė apkrova ir lauko sąlygos"
+  },
+  "9332": {
+    "skills": 2,
+    "qualification": 1,
+    "effort": 4,
+    "responsibility": 3,
+    "conditions": 4,
+    "note": "Gyvulių valdymo įgūdžiai, gyvūnų ir eismo sauga, fizinė apkrova ir lauko sąlygos"
+  },
+  "9333": {
+    "skills": 1,
+    "qualification": 1,
+    "effort": 4,
+    "responsibility": 2,
+    "conditions": 4,
+    "note": "Paprastas krovinių perkėlimas, patikėto turto priežiūra, sunki fizinė apkrova ir traumų rizika"
+  },
+  "9334": {
+    "skills": 1,
+    "qualification": 1,
+    "effort": 4,
+    "responsibility": 2,
+    "conditions": 2,
+    "note": "Paprastas lentynų pildymas, prekių tvarka, nuolatinis kėlimas, lankstymasis ir stovėjimas"
+  },
+  "9411": {
+    "skills": 2,
+    "qualification": 2,
+    "effort": 4,
+    "responsibility": 3,
+    "conditions": 3,
+    "note": "Standartinių patiekalų ruošimas, maisto higiena, didelė fizinė apkrova, karštis ir pamainos"
+  },
+  "9412": {
+    "skills": 1,
+    "qualification": 1,
+    "effort": 4,
+    "responsibility": 2,
+    "conditions": 3,
+    "note": "Paprasti virtuvės ir indų plovimo darbai, didelė fizinė apkrova, karštis, drėgmė ir pamainos"
+  },
+  "9510": {
+    "skills": 1,
+    "qualification": 1,
+    "effort": 3,
+    "responsibility": 1,
+    "conditions": 4,
+    "note": "Paprastos gatvės paslaugos, vaikščiojimas ir stovėjimas, oro bei eismo poveikis"
+  },
+  "9520": {
+    "skills": 2,
+    "qualification": 1,
+    "effort": 3,
+    "responsibility": 2,
+    "conditions": 4,
+    "note": "Baziniai pardavimo ir pinigų skaičiavimo įgūdžiai, bendravimas, stovėjimas ir lauko sąlygos"
+  },
+  "9611": {
+    "skills": 1,
+    "qualification": 1,
+    "effort": 4,
+    "responsibility": 2,
+    "conditions": 4,
+    "note": "Paprastas atliekų surinkimas, sunki fizinė apkrova, eismo, biologinė ir sužeidimų rizika"
+  },
+  "9612": {
+    "skills": 2,
+    "qualification": 1,
+    "effort": 4,
+    "responsibility": 2,
+    "conditions": 4,
+    "note": "Atliekų atpažinimo įgūdžiai, kartotinis kėlimas ir rūšiavimas, biologinis poveikis bei sužeidimų rizika"
+  },
+  "9613": {
+    "skills": 1,
+    "qualification": 1,
+    "effort": 4,
+    "responsibility": 1,
+    "conditions": 4,
+    "note": "Paprastas aplinkos valymas, didelė fizinė apkrova, sezoniniai darbai ir lauko sąlygos"
+  },
+  "9621": {
+    "skills": 1,
+    "qualification": 1,
+    "effort": 4,
+    "responsibility": 2,
+    "conditions": 3,
+    "note": "Paprastas siuntų ir bagažo pristatymas, patikėto turto priežiūra, ilgas vaikščiojimas ir nešimas"
+  },
+  "9622": {
+    "skills": 1,
+    "qualification": 1,
+    "effort": 4,
+    "responsibility": 2,
+    "conditions": 4,
+    "note": "Paprasti įvairūs pagalbiniai darbai, sunki fizinė apkrova, nepatogios pozos ir traumų rizika"
+  },
+  "9623": {
+    "skills": 2,
+    "qualification": 2,
+    "effort": 2,
+    "responsibility": 3,
+    "conditions": 3,
+    "note": "Baziniai rodmenų ir pinigų apskaitos įgūdžiai, duomenų ar lėšų atsakomybė ir išvykos"
+  },
+  "9624": {
+    "skills": 1,
+    "qualification": 1,
+    "effort": 4,
+    "responsibility": 2,
+    "conditions": 4,
+    "note": "Paprastas vandens ir malkų gabenimas, didelė fizinė apkrova, sunkių nešulių kėlimas ir lauko sąlygos"
+  },
+  "9629": {
+    "skills": 2,
+    "qualification": 1,
+    "effort": 2,
+    "responsibility": 2,
+    "conditions": 3,
+    "note": "Baziniai budėjimo ir aptarnavimo įgūdžiai, patikėto turto priežiūra ir pamaininis darbas"
+  }
+}

@@ -1,0 +1,25 @@
+<!--FFData content-->
+<FFData Version="1" CreatedByApp="DocumentFFData" CreatedByLogin="" CreatedOn="2026-09-30">
+  <Form FormDefId="{EB03E9EF-39B0-457F-8264-79E86F053009}">
+    <Pages Count="1">
+      <Page PageDefName="GPM313" PageNumber="1" xmlns="">
+        <Fields Count="14">
+          <Field Name="B_MM_ID">304401940</Field>
+          <Field Name="B_MM_Pavadinimas">UAB "AUKSINIS INKARAS"</Field>
+          <Field Name="B_ML_Metai">2023</Field>
+          <Field Name="B_ML_Menuo">10</Field>
+          <Field Name="G5">841,00</Field>
+          <Field Name="G6">168,20</Field>
+          <Field Name="G7">0,00</Field>
+          <Field Name="G8">71600,00</Field>
+          <Field Name="G9">0,00</Field>
+          <Field Name="G10">10740,00</Field>
+          <Field Name="G11">0,00</Field>
+          <Field Name="G12">0,00</Field>
+          <Field Name="B_FormNr" />
+          <Field Name="B_FormVerNr" />
+        </Fields>
+      </Page>
+    </Pages>
+  </Form>
+</FFData>

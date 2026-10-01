@@ -1,0 +1,656 @@
+{
+ "form": "SAM",
+ "version": "07",
+ "FormDefId": "{963BF380-47C3-4B69-A7F7-1B4593572CFE}",
+ "groups": {
+  "name": "Forma",
+  "min": "1",
+  "max": "1",
+  "pages": [
+   "SAM"
+  ],
+  "children": [
+   {
+    "name": "Priedas SAM3SD",
+    "min": "0",
+    "max": "9999",
+    "pages": [
+     "SAM3SD"
+    ],
+    "children": []
+   },
+   {
+    "name": "Priedas SAM3SDP",
+    "min": "0",
+    "max": "9999",
+    "pages": [
+     "SAM3SDP"
+    ],
+    "children": []
+   }
+  ]
+ },
+ "number_format": "decimal comma, e.g. 1500,00",
+ "date_format": "YYYY-MM-DD",
+ "encoding": "UTF-8",
+ "pages": {
+  "SAM": {
+   "occur": [
+    "1",
+    "1"
+   ],
+   "field_count": 27,
+   "rows_per_page": 0,
+   "header_fields": [
+    {
+     "name": "InsurerName",
+     "type": "Text",
+     "length": 68,
+     "required": false,
+     "readonly": false,
+     "comment": "Draudėjo pavadinimas"
+    },
+    {
+     "name": "InsurerCode",
+     "type": "Decimal",
+     "length": 7,
+     "required": false,
+     "readonly": false,
+     "comment": "Draudėjo kodas"
+    },
+    {
+     "name": "JuridicalPersonCode",
+     "type": "Decimal",
+     "length": 9,
+     "required": false,
+     "readonly": false,
+     "comment": "Draudėjo juridinio asmens kodas"
+    },
+    {
+     "name": "InsurerPhone",
+     "type": "Text",
+     "length": 15,
+     "required": false,
+     "readonly": false,
+     "comment": "Draudėjo tel. nr."
+    },
+    {
+     "name": "InsurerAddress",
+     "type": "Text",
+     "length": 68,
+     "required": false,
+     "readonly": false,
+     "comment": "Draudėjo adresas"
+    },
+    {
+     "name": "DocDate",
+     "type": "Date",
+     "length": 10,
+     "required": false,
+     "readonly": false,
+     "comment": "Pranešimo registracijos data"
+    },
+    {
+     "name": "DocNumber",
+     "type": "Text",
+     "length": 16,
+     "required": false,
+     "readonly": false,
+     "comment": "Pranešimo registracijos numeris"
+    },
+    {
+     "name": "CycleYear",
+     "type": "Decimal",
+     "length": 4,
+     "required": false,
+     "readonly": false,
+     "comment": "Ataskaitinio ketvirčio metai"
+    },
+    {
+     "name": "CycleMonth",
+     "type": "Decimal",
+     "length": 2,
+     "required": false,
+     "readonly": false,
+     "comment": "Ataskaitinis ketvirtis"
+    },
+    {
+     "name": "RevisedDocument",
+     "type": "Checkmark",
+     "required": false,
+     "readonly": false,
+     "comment": "Patikslintas pranešimas"
+    },
+    {
+     "name": "RevisedCycleYear",
+     "type": "Decimal",
+     "length": 4,
+     "required": false,
+     "readonly": false,
+     "comment": "Tikslinamo laikotarpio metai"
+    },
+    {
+     "name": "RevisedCycleMonth",
+     "type": "Decimal",
+     "length": 2,
+     "required": false,
+     "readonly": false,
+     "comment": "Tikslinamo laikotarpio"
+    },
+    {
+     "name": "Appendixes2",
+     "type": "Checkmark",
+     "required": false,
+     "readonly": false,
+     "comment": "Priedas SAM3SD"
+    },
+    {
+     "name": "Apdx2PageCount",
+     "type": "Decimal",
+     "length": 4,
+     "required": false,
+     "readonly": true,
+     "comment": "Priedo SAM3SD lapų skaičius"
+    },
+    {
+     "name": "Apdx2PersonCount",
+     "type": "Decimal",
+     "length": 5,
+     "required": false,
+     "readonly": false,
+     "comment": "Apdraustųjų skaičius priede SAM3SD"
+    },
+    {
+     "name": "Apdx2InsIncomeSum",
+     "type": "Decimal",
+     "length": 12,
+     "required": false,
+     "readonly": false,
+     "comment": "Pajamų, nuo kurių skaičiuojamos įmokos, suma priede SAM3SD"
+    },
+    {
+     "name": "Apdx2PaymentSum",
+     "type": "Decimal",
+     "length": 12,
+     "required": false,
+     "readonly": false,
+     "comment": "Įmokų suma priede SAM3SD"
+    },
+    {
+     "name": "Appendixes3",
+     "type": "Checkmark",
+     "required": false,
+     "readonly": false,
+     "comment": "Priedas SAM3SDP"
+    },
+    {
+     "name": "Apdx3PageCount",
+     "type": "Decimal",
+     "length": 4,
+     "required": false,
+     "readonly": true,
+     "comment": "Priedo SAM3SDP lapų skaičius"
+    },
+    {
+     "name": "Apdx3PersonCount",
+     "type": "Decimal",
+     "length": 5,
+     "required": false,
+     "readonly": false,
+     "comment": "Apdraustųjų skaičius priede SAM3SDP"
+    },
+    {
+     "name": "Apdx3InsIncomeSum",
+     "type": "Decimal",
+     "length": 12,
+     "required": false,
+     "readonly": false,
+     "comment": "Pajamų, nuo kurių skaičiuojamos įmokos, suma priede SAM3SDP"
+    },
+    {
+     "name": "Apdx3PaymentSum",
+     "type": "Decimal",
+     "length": 12,
+     "required": false,
+     "readonly": false,
+     "comment": "Įmokų suma priede SAM3SDP"
+    },
+    {
+     "name": "ApdxPageCountTotal",
+     "type": "Decimal",
+     "length": 4,
+     "required": false,
+     "readonly": true,
+     "comment": "Bendras priedų lapų skaičius"
+    },
+    {
+     "name": "ManagerFullName",
+     "type": "Text",
+     "length": 68,
+     "required": false,
+     "readonly": false,
+     "comment": "Vadovo ar įgalioto asmens vardas, pavardė"
+    },
+    {
+     "name": "PreparatorDetails",
+     "type": "Text",
+     "length": 68,
+     "required": false,
+     "readonly": false,
+     "comment": "Pranešimą užpildžiusio asmens vardas, pavardė, tel. nr., el. pašto adresas"
+    },
+    {
+     "name": "FormCode",
+     "type": "Text",
+     "length": 10,
+     "required": false,
+     "readonly": true,
+     "comment": "SAM"
+    },
+    {
+     "name": "FormVersion",
+     "type": "Text",
+     "length": 10,
+     "required": false,
+     "readonly": true,
+     "comment": "07"
+    }
+   ],
+   "row_fields": []
+  },
+  "SAM3SD": {
+   "occur": [
+    "0",
+    "9999"
+   ],
+   "field_count": 63,
+   "rows_per_page": 6,
+   "header_fields": [
+    {
+     "name": "InsIncomePage",
+     "type": "Decimal",
+     "length": 11,
+     "required": false,
+     "readonly": true,
+     "comment": "Iš viso lape pajamų, nuo kurių skaičiuojamos įmokos, suma"
+    },
+    {
+     "name": "PaymentPage",
+     "type": "Decimal",
+     "length": 11,
+     "required": false,
+     "readonly": true,
+     "comment": "Iš viso lape įmokų suma"
+    },
+    {
+     "name": "InsurerCode",
+     "type": "Decimal",
+     "length": 7,
+     "required": false,
+     "readonly": true,
+     "comment": "Draudėjo kodas"
+    },
+    {
+     "name": "PageNumber",
+     "type": "Decimal",
+     "length": 4,
+     "required": false,
+     "readonly": true,
+     "comment": "Lapo numeris"
+    },
+    {
+     "name": "PageTotal",
+     "type": "Decimal",
+     "length": 4,
+     "required": false,
+     "readonly": true,
+     "comment": "Bendras priedo lapų skaičius"
+    },
+    {
+     "name": "DocDate",
+     "type": "Date",
+     "length": 10,
+     "required": false,
+     "readonly": true
+    },
+    {
+     "name": "DocNumber",
+     "type": "Text",
+     "length": 16,
+     "required": false,
+     "readonly": true
+    },
+    {
+     "name": "FormCode",
+     "type": "Text",
+     "length": 10,
+     "required": false,
+     "readonly": true,
+     "comment": "SAM3SD"
+    },
+    {
+     "name": "FormVersion",
+     "type": "Text",
+     "length": 10,
+     "required": false,
+     "readonly": true,
+     "comment": "07"
+    }
+   ],
+   "row_fields": [
+    {
+     "name": "RowNumber_{N}",
+     "type": "Decimal",
+     "length": 5,
+     "required": false,
+     "readonly": true,
+     "comment": "Eil. nr."
+    },
+    {
+     "name": "PersonCode_{N}",
+     "type": "Decimal",
+     "length": 11,
+     "required": false,
+     "readonly": false,
+     "comment": "Apdraustojo asmens kodas"
+    },
+    {
+     "name": "InsuranceSeries_{N}",
+     "type": "Text",
+     "length": 2,
+     "required": false,
+     "readonly": false,
+     "comment": "Asmens socialinio draudimo numeris"
+    },
+    {
+     "name": "InsuranceNumber_{N}",
+     "type": "Decimal",
+     "length": 7,
+     "required": false,
+     "readonly": false,
+     "comment": "Asmens socialinio draudimo numeris"
+    },
+    {
+     "name": "InsIncomeSum_{N}",
+     "type": "Decimal",
+     "length": 11,
+     "required": false,
+     "readonly": false,
+     "comment": "Pajamų, nuo kurių skaičiuojamos įmokos, suma"
+    },
+    {
+     "name": "TaxRate_{N}",
+     "type": "Decimal",
+     "length": 5,
+     "required": false,
+     "readonly": false,
+     "comment": "Bendras tarifas"
+    },
+    {
+     "name": "PaymentSum_{N}",
+     "type": "Decimal",
+     "length": 11,
+     "required": false,
+     "readonly": false,
+     "comment": "Įmokų suma"
+    },
+    {
+     "name": "PersonFirstName_{N}",
+     "type": "Text",
+     "length": 68,
+     "required": false,
+     "readonly": false,
+     "comment": "Apdraustojo vardas"
+    },
+    {
+     "name": "PersonLastName_{N}",
+     "type": "Text",
+     "length": 68,
+     "required": false,
+     "readonly": false,
+     "comment": "Apdraustojo pavardė"
+    }
+   ]
+  },
+  "SAM3SDP": {
+   "occur": [
+    "0",
+    "9999"
+   ],
+   "field_count": 48,
+   "rows_per_page": 3,
+   "header_fields": [
+    {
+     "name": "InsIncomePage",
+     "type": "Decimal",
+     "length": 11,
+     "required": false,
+     "readonly": true,
+     "comment": "Iš viso lape pajamų, nuo kurių skaičiuojamos įmokos, suma"
+    },
+    {
+     "name": "PaymentPage",
+     "type": "Decimal",
+     "length": 11,
+     "required": false,
+     "readonly": true,
+     "comment": "Iš viso lape įmokų suma"
+    },
+    {
+     "name": "InsurerCode",
+     "type": "Decimal",
+     "length": 7,
+     "required": false,
+     "readonly": true,
+     "comment": "Draudėjo kodas"
+    },
+    {
+     "name": "PageNumber",
+     "type": "Decimal",
+     "length": 4,
+     "required": false,
+     "readonly": true,
+     "comment": "Lapo numeris"
+    },
+    {
+     "name": "PageTotal",
+     "type": "Decimal",
+     "length": 4,
+     "required": false,
+     "readonly": true,
+     "comment": "Bendras priedo lapų skaičius"
+    },
+    {
+     "name": "DocDate",
+     "type": "Date",
+     "length": 10,
+     "required": false,
+     "readonly": true
+    },
+    {
+     "name": "DocNumber",
+     "type": "Text",
+     "length": 16,
+     "required": false,
+     "readonly": true
+    },
+    {
+     "name": "FormCode",
+     "type": "Text",
+     "length": 10,
+     "required": false,
+     "readonly": true,
+     "comment": "SAM3SDP"
+    },
+    {
+     "name": "FormVersion",
+     "type": "Text",
+     "length": 10,
+     "required": false,
+     "readonly": true,
+     "comment": "07"
+    }
+   ],
+   "row_fields": [
+    {
+     "name": "RowNumber_{N}",
+     "type": "Decimal",
+     "length": 5,
+     "required": false,
+     "readonly": true,
+     "comment": "Eil. nr."
+    },
+    {
+     "name": "PersonCode_{N}",
+     "type": "Decimal",
+     "length": 11,
+     "required": false,
+     "readonly": false,
+     "comment": "Apdraustojo asmens kodas"
+    },
+    {
+     "name": "InsuranceSeries_{N}",
+     "type": "Text",
+     "length": 2,
+     "required": false,
+     "readonly": false,
+     "comment": "Asmens socialinio draudimo numeris"
+    },
+    {
+     "name": "InsuranceNumber_{N}",
+     "type": "Decimal",
+     "length": 7,
+     "required": false,
+     "readonly": false,
+     "comment": "Asmens socialinio draudimo numeris"
+    },
+    {
+     "name": "PersonFirstName_{N}",
+     "type": "Text",
+     "length": 68,
+     "required": false,
+     "readonly": false,
+     "comment": "Apdraustojo vardas"
+    },
+    {
+     "name": "PersonLastName_{N}",
+     "type": "Text",
+     "length": 68,
+     "required": false,
+     "readonly": false,
+     "comment": "Apdraustojo pavardė"
+    },
+    {
+     "name": "PeriodStartDate_{N}",
+     "type": "Date",
+     "length": 10,
+     "required": false,
+     "readonly": false,
+     "comment": "Valstybinio socialinio draudimo laikotarpio pradžia"
+    },
+    {
+     "name": "PeriodEndDate_{N}",
+     "type": "Date",
+     "length": 10,
+     "required": false,
+     "readonly": false,
+     "comment": "Valstybinio socialinio draudimo laikotarpio pabaiga"
+    },
+    {
+     "name": "InsIncomeSum_{N}",
+     "type": "Decimal",
+     "length": 11,
+     "required": false,
+     "readonly": false,
+     "comment": "Pajamų, nuo kurių skaičiuojamos įmokos, suma"
+    },
+    {
+     "name": "TaxRate_{N}",
+     "type": "Decimal",
+     "length": 5,
+     "required": false,
+     "readonly": false,
+     "comment": "Bendras tarifas"
+    },
+    {
+     "name": "PaymentSum_{N}",
+     "type": "Decimal",
+     "length": 11,
+     "required": false,
+     "readonly": false,
+     "comment": "Įmokų suma"
+    },
+    {
+     "name": "ReasonCode_{N}",
+     "type": "Text",
+     "length": 2,
+     "required": false,
+     "readonly": false,
+     "comment": "Pranešimo pateikimo priežasties kodas",
+     "list": [
+      "01",
+      "02",
+      "03",
+      "04",
+      "05",
+      "06",
+      "07",
+      "08",
+      "09",
+      "10"
+     ]
+    },
+    {
+     "name": "ReasonText_{N}",
+     "type": "Text",
+     "length": 65,
+     "required": false,
+     "readonly": false,
+     "comment": "Pranešimo pateikimo priežastis"
+    }
+   ]
+  }
+ },
+ "reason_codes": [
+  {
+   "code": "01",
+   "name": "valstybės tarnautojas/darbuotojas, gaunantis kompensaciją"
+  },
+  {
+   "code": "02",
+   "name": "karys savanoris ir aktyviojo rezervo karys"
+  },
+  {
+   "code": "03",
+   "name": "nuteistasis/asmuo, esantis social. ir psichol. reabil. įstaigoje"
+  },
+  {
+   "code": "04",
+   "name": "savivaldybės tarybos narys"
+  },
+  {
+   "code": "05",
+   "name": "asmuo, pašauktas į jaunesniųjų karininkų vadų mokymus"
+  },
+  {
+   "code": "06",
+   "name": "mažosios bendrijos vadovas"
+  },
+  {
+   "code": "07",
+   "name": "medicinos ekspertas/specialistas"
+  },
+  {
+   "code": "08",
+   "name": "išmoką apsk. draudėjas, nesusijęs su asm. darbo santykiais"
+  },
+  {
+   "code": "09",
+   "name": "asmuo, atlyg. einantis renk./skiriam. pareigas nuo 2022-01-01"
+  },
+  {
+   "code": "10",
+   "name": "nedraud. PSD asmuo, einant. renk./skiriam. pareig. nuo 2022-01-01"
+  }
+ ]
+}

@@ -27,6 +27,7 @@ import {
 import CloseIcon from "@mui/icons-material/Close";
 import WeekendIcon from "@mui/icons-material/Weekend";
 import { fixedAssetsApi } from "../api/fixedAssetsApi";
+import { invoicingApi } from "../api/invoicingApi";
 import DocumentImageDialog from "./DocumentImageDialog";
 import FixedAssetSaleDialog from "./FixedAssetSaleDialog";
 import {
@@ -288,10 +289,27 @@ export default function FixedAssetDetailDialog({
 
   const handleCancelDisposal = () => {
     const isSale = asset.status === "sold";
-    if (!window.confirm(isSale ? "Atšaukti pardavimą?" : "Atšaukti nurašymą?")) return;
-    runAction(() =>
-      isSale ? fixedAssetsApi.cancelSale(asset.id) : fixedAssetsApi.cancelWriteOff(asset.id),
-    );
+
+    if (isSale && asset.sale_invoice_owned) {
+      const otherLines = Math.max(0, (asset.sale_invoice_line_count || 1) - 1);
+      const text = otherLines > 0
+        ? `Pardavimo sąskaita ${asset.sale_invoice_number} bus anuliuota visa, kartu su kitomis ${otherLines} eilutėmis. Turtas grįš į eksploataciją. Jei kitos prekės ar paslaugos parduotos, išrašykite naują sąskaitą be šio turto. Tęsti?`
+        : `Pardavimo sąskaita ${asset.sale_invoice_number} bus anuliuota, turtas grįš į eksploataciją. Tęsti?`;
+      if (!window.confirm(text)) return;
+      runAction(() => invoicingApi.cancelInvoice(asset.sale_invoice));
+      return;
+    }
+
+    if (isSale) {
+      if (!window.confirm(
+        `Turtas bus atsietas nuo sąskaitos ${asset.sale_invoice_number}. Sąskaita liks galioti, jos eilutei bus grąžinta įprasta pajamų sąskaita. Tęsti?`,
+      )) return;
+      runAction(() => fixedAssetsApi.cancelSale(asset.id));
+      return;
+    }
+
+    if (!window.confirm("Atšaukti nurašymą?")) return;
+    runAction(() => fixedAssetsApi.cancelWriteOff(asset.id));
   };
 
   const renderInfo = () => {
@@ -599,7 +617,11 @@ export default function FixedAssetDetailDialog({
                 <>
                   {isClosed ? (
                     <Button onClick={handleCancelDisposal} disabled={busy} sx={{ textTransform: "none" }}>
-                      {asset.status === "sold" ? "Atšaukti pardavimą" : "Atšaukti nurašymą"}
+                      {asset.status !== "sold"
+                        ? "Atšaukti nurašymą"
+                        : asset.sale_invoice_owned
+                          ? "Anuliuoti pardavimo sąskaitą"
+                          : "Atsieti nuo sąskaitos"}
                     </Button>
                   ) : (
                     <>

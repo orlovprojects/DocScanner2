@@ -1,0 +1,443 @@
+{
+ "form": "12-SD",
+ "version": "05",
+ "FormDefId": "{A06213A3-FD5C-40AF-817D-C648AC8FF772}",
+ "groups": {
+  "name": "Forma",
+  "min": "1",
+  "max": "1",
+  "pages": [
+   "12-SD"
+  ],
+  "children": [
+   {
+    "name": "Tęsinys",
+    "min": "0",
+    "max": "9999",
+    "pages": [
+     "12-SD-T"
+    ],
+    "children": []
+   }
+  ]
+ },
+ "number_format": "decimal comma, e.g. 1500,00",
+ "date_format": "YYYY-MM-DD",
+ "encoding": "UTF-8",
+ "pages": {
+  "12-SD": {
+   "occur": [
+    "1",
+    "1"
+   ],
+   "field_count": 34,
+   "rows_per_page": 2,
+   "header_fields": [
+    {
+     "name": "PageNumber",
+     "type": "Decimal",
+     "length": 4,
+     "required": false,
+     "readonly": true,
+     "comment": "Lapo numeris"
+    },
+    {
+     "name": "PageTotal",
+     "type": "Decimal",
+     "length": 4,
+     "required": false,
+     "readonly": true,
+     "comment": "Bendras lapų skaičius pranešime"
+    },
+    {
+     "name": "InsurerName",
+     "type": "Text",
+     "length": 68,
+     "required": false,
+     "readonly": false,
+     "comment": "Draudėjo pavadinimas"
+    },
+    {
+     "name": "InsurerCode",
+     "type": "Decimal",
+     "length": 7,
+     "required": false,
+     "readonly": false,
+     "comment": "Draudėjo kodas"
+    },
+    {
+     "name": "JuridicalPersonCode",
+     "type": "Decimal",
+     "length": 9,
+     "required": false,
+     "readonly": false,
+     "comment": "Draudėjo juridinio asmens kodas"
+    },
+    {
+     "name": "InsurerPhone",
+     "type": "Text",
+     "length": 15,
+     "required": false,
+     "readonly": false,
+     "comment": "Draudėjo tel. nr."
+    },
+    {
+     "name": "InsurerAddress",
+     "type": "Text",
+     "length": 68,
+     "required": false,
+     "readonly": false,
+     "comment": "Draudėjo adresas"
+    },
+    {
+     "name": "DocDate",
+     "type": "Date",
+     "length": 10,
+     "required": false,
+     "readonly": false,
+     "comment": "Pranešimo registracijos data"
+    },
+    {
+     "name": "DocNumber",
+     "type": "Text",
+     "length": 16,
+     "required": false,
+     "readonly": false,
+     "comment": "Pranešimo registracijos numeris"
+    },
+    {
+     "name": "PersonCountTotal",
+     "type": "Decimal",
+     "length": 5,
+     "required": false,
+     "readonly": true,
+     "comment": "Iš viso apdraustųjų pranešime"
+    },
+    {
+     "name": "ManagerFullName",
+     "type": "Text",
+     "length": 68,
+     "required": false,
+     "readonly": false,
+     "comment": "Vadovo ar įgalioto asmens vardas, pavardė"
+    },
+    {
+     "name": "PreparatorDetails",
+     "type": "Text",
+     "length": 68,
+     "required": false,
+     "readonly": false,
+     "comment": "Pranešimą užpildžiusio asmens vardas, pavardė, tel. nr., el. pašto adresas"
+    },
+    {
+     "name": "FormCode",
+     "type": "Text",
+     "length": 10,
+     "required": false,
+     "readonly": true,
+     "comment": "12-SD"
+    },
+    {
+     "name": "FormVersion",
+     "type": "Text",
+     "length": 10,
+     "required": false,
+     "readonly": true,
+     "comment": "05"
+    }
+   ],
+   "row_fields": [
+    {
+     "name": "RowNumber_{N}",
+     "type": "Decimal",
+     "length": 5,
+     "required": false,
+     "readonly": true,
+     "comment": "Eil. nr."
+    },
+    {
+     "name": "PersonCode_{N}",
+     "type": "Decimal",
+     "length": 11,
+     "required": false,
+     "readonly": false,
+     "comment": "Apdraustojo asmens kodas"
+    },
+    {
+     "name": "InsuranceSeries_{N}",
+     "type": "Text",
+     "length": 2,
+     "required": false,
+     "readonly": false
+    },
+    {
+     "name": "InsuranceNumber_{N}",
+     "type": "Decimal",
+     "length": 7,
+     "required": false,
+     "readonly": false
+    },
+    {
+     "name": "InsuranceSuspendStart_{N}",
+     "type": "Date",
+     "length": 10,
+     "required": false,
+     "readonly": false,
+     "comment": "Nedraudiminio laikotarpio pradžia"
+    },
+    {
+     "name": "InsuranceSuspendEnd_{N}",
+     "type": "Date",
+     "length": 10,
+     "required": false,
+     "readonly": false,
+     "comment": "Nedraudiminio laikotarpio pabaiga"
+    },
+    {
+     "name": "PersonFirstName_{N}",
+     "type": "Text",
+     "length": 68,
+     "required": false,
+     "readonly": false,
+     "comment": "Apdraustojo vardas"
+    },
+    {
+     "name": "PersonLastName_{N}",
+     "type": "Text",
+     "length": 68,
+     "required": false,
+     "readonly": false,
+     "comment": "Apdraustojo pavardė"
+    },
+    {
+     "name": "ReasonCode_{N}",
+     "type": "Text",
+     "length": 2,
+     "required": false,
+     "readonly": false,
+     "comment": "Pranešimo pateikimo priežasties kodas",
+     "list": [
+      "01",
+      "02",
+      "03",
+      "04",
+      "05",
+      "06",
+      "07",
+      "08",
+      "09",
+      "10"
+     ]
+    },
+    {
+     "name": "ReasonText_{N}",
+     "type": "Text",
+     "length": 65,
+     "required": false,
+     "readonly": false,
+     "comment": "Pranešimo pateikimo priežastis"
+    }
+   ]
+  },
+  "12-SD-T": {
+   "occur": [
+    "0",
+    "9999"
+   ],
+   "field_count": 47,
+   "rows_per_page": 4,
+   "header_fields": [
+    {
+     "name": "PageNumber",
+     "type": "Decimal",
+     "length": 4,
+     "required": false,
+     "readonly": true,
+     "comment": "Lapo numeris"
+    },
+    {
+     "name": "PageTotal",
+     "type": "Decimal",
+     "length": 4,
+     "required": false,
+     "readonly": true,
+     "comment": "Bendras lapų skaičius pranešime"
+    },
+    {
+     "name": "InsurerCode",
+     "type": "Decimal",
+     "length": 7,
+     "required": false,
+     "readonly": true,
+     "comment": "Draudėjo kodas"
+    },
+    {
+     "name": "DocDate",
+     "type": "Date",
+     "length": 10,
+     "required": false,
+     "readonly": true
+    },
+    {
+     "name": "DocNumber",
+     "type": "Text",
+     "length": 16,
+     "required": false,
+     "readonly": true
+    },
+    {
+     "name": "FormCode",
+     "type": "Text",
+     "length": 10,
+     "required": false,
+     "readonly": true,
+     "comment": "12-SD-T"
+    },
+    {
+     "name": "FormVersion",
+     "type": "Text",
+     "length": 10,
+     "required": false,
+     "readonly": true,
+     "comment": "05"
+    }
+   ],
+   "row_fields": [
+    {
+     "name": "RowNumber_{N}",
+     "type": "Decimal",
+     "length": 5,
+     "required": false,
+     "readonly": true,
+     "comment": "Eil. nr."
+    },
+    {
+     "name": "PersonCode_{N}",
+     "type": "Decimal",
+     "length": 11,
+     "required": false,
+     "readonly": false,
+     "comment": "Apdraustojo asmens kodas"
+    },
+    {
+     "name": "InsuranceSeries_{N}",
+     "type": "Text",
+     "length": 2,
+     "required": false,
+     "readonly": false,
+     "comment": "Asmens socialinio draudimo numeris"
+    },
+    {
+     "name": "InsuranceNumber_{N}",
+     "type": "Decimal",
+     "length": 7,
+     "required": false,
+     "readonly": false,
+     "comment": "Asmens socialinio draudimo numeris"
+    },
+    {
+     "name": "InsuranceSuspendStart_{N}",
+     "type": "Date",
+     "length": 10,
+     "required": false,
+     "readonly": false,
+     "comment": "Nedraudiminio laikotarpio pradžia"
+    },
+    {
+     "name": "InsuranceSuspendEnd_{N}",
+     "type": "Date",
+     "length": 10,
+     "required": false,
+     "readonly": false,
+     "comment": "Nedraudiminio laikotarpio pabaiga"
+    },
+    {
+     "name": "PersonFirstName_{N}",
+     "type": "Text",
+     "length": 68,
+     "required": false,
+     "readonly": false,
+     "comment": "Apdraustojo vardas"
+    },
+    {
+     "name": "PersonLastName_{N}",
+     "type": "Text",
+     "length": 68,
+     "required": false,
+     "readonly": false,
+     "comment": "Apdraustojo pavardė"
+    },
+    {
+     "name": "ReasonCode_{N}",
+     "type": "Text",
+     "length": 2,
+     "required": false,
+     "readonly": false,
+     "comment": "Pranešimo pateikimo priežasties kodas",
+     "list": [
+      "01",
+      "02",
+      "03",
+      "04",
+      "05",
+      "06",
+      "07",
+      "08",
+      "09",
+      "10"
+     ]
+    },
+    {
+     "name": "ReasonText_{N}",
+     "type": "Text",
+     "length": 65,
+     "required": false,
+     "readonly": false,
+     "comment": "Pranešimo pateikimo priežastis"
+    }
+   ]
+  }
+ },
+ "reason_codes": [
+  {
+   "code": "01",
+   "name": "nemokamos atostogos"
+  },
+  {
+   "code": "02",
+   "name": "atostogos kvalifikacijai tobulinti"
+  },
+  {
+   "code": "03",
+   "name": "kūrybinės atostogos"
+  },
+  {
+   "code": "04",
+   "name": "mokymosi atostogos"
+  },
+  {
+   "code": "05",
+   "name": "neatvykimas administracijos leidimu"
+  },
+  {
+   "code": "06",
+   "name": "atostogos vaikui prižiūrėti (kitiems giminaičiams)"
+  },
+  {
+   "code": "07",
+   "name": "išduota medicininė pažyma (forma Nr. 094/a)"
+  },
+  {
+   "code": "08",
+   "name": "nušalinimas nuo darbo (pareigų)"
+  },
+  {
+   "code": "09",
+   "name": "pravaikšta"
+  },
+  {
+   "code": "10",
+   "name": "karo tarnyba"
+  }
+ ]
+}

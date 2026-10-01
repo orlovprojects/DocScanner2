@@ -3090,6 +3090,19 @@ class InvoiceWriteSerializer(serializers.ModelSerializer):
     def update(self, instance, validated_data):
         line_items_data = validated_data.pop("line_items", None)
 
+        # Pagal sąskaitą parduotas IT: eilutės ir sumos neliečiamos
+        from .models import FixedAsset
+
+        if FixedAsset.objects.filter(sale_invoice=instance).exists():
+            line_items_data = None
+            for field in (
+                "amount_wo_vat", "vat_amount", "amount_with_vat",
+                "invoice_discount_wo_vat", "invoice_discount_with_vat",
+                "currency", "vat_percent", "pvm_tipas", "invoice_type",
+                "invoice_date", "operation_date",
+            ):
+                validated_data.pop(field, None)
+
         # Draft kreditinė lieka teigiama.
         # Išrašyta kreditinė BD turi likti neigiama.
         effective_type = validated_data.get(

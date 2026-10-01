@@ -1,0 +1,3064 @@
+{
+ "form": "PT",
+ "version": "15",
+ "FormDefId": "{D166CF12-2209-4AFD-BF74-4B4038E33BC3}",
+ "groups": {
+  "name": "Forma",
+  "min": "1",
+  "max": "1",
+  "pages": [
+   "PT"
+  ],
+  "children": [
+   {
+    "name": "Priedas PT-1-SD",
+    "min": "0",
+    "max": "9999",
+    "pages": [
+     "PT-1-SD"
+    ],
+    "children": []
+   },
+   {
+    "name": "Priedas PT-2-SD",
+    "min": "0",
+    "max": "9999",
+    "pages": [
+     "PT-2-SD"
+    ],
+    "children": []
+   },
+   {
+    "name": "Priedas PT-9-SD",
+    "min": "0",
+    "max": "9999",
+    "pages": [
+     "PT-9-SD"
+    ],
+    "children": []
+   },
+   {
+    "name": "Priedas PT-12-SD",
+    "min": "0",
+    "max": "9999",
+    "pages": [
+     "PT-12-SD"
+    ],
+    "children": []
+   },
+   {
+    "name": "Priedas PT-13-SD",
+    "min": "0",
+    "max": "9999",
+    "pages": [
+     "PT-13-SD"
+    ],
+    "children": []
+   },
+   {
+    "name": "Priedas PT-SAM3SD",
+    "min": "0",
+    "max": "9999",
+    "pages": [
+     "PT-SAM3SD"
+    ],
+    "children": []
+   },
+   {
+    "name": "Priedas PT-SAM3SDP",
+    "min": "0",
+    "max": "9999",
+    "pages": [
+     "PT-SAM3SDP"
+    ],
+    "children": []
+   },
+   {
+    "name": "Priedas PT-NP-SD",
+    "min": "0",
+    "max": "9999",
+    "pages": [
+     "PT-NP-SD"
+    ],
+    "children": []
+   },
+   {
+    "name": "Priedas PT-SAM3SD-M",
+    "min": "0",
+    "max": "9999",
+    "pages": [
+     "PT-SAM3SD-M"
+    ],
+    "children": []
+   },
+   {
+    "name": "Priedas PT-NP-SD2",
+    "min": "0",
+    "max": "9999",
+    "pages": [
+     "PT-NP-SD2"
+    ],
+    "children": []
+   }
+  ]
+ },
+ "number_format": "decimal comma, e.g. 1500,00",
+ "date_format": "YYYY-MM-DD",
+ "encoding": "UTF-8",
+ "pages": {
+  "PT": {
+   "occur": [
+    "1",
+    "1"
+   ],
+   "field_count": 18,
+   "rows_per_page": 1,
+   "header_fields": [
+    {
+     "name": "PageNumber",
+     "type": "Decimal",
+     "length": 4,
+     "required": false,
+     "readonly": true,
+     "comment": "Lapo numeris"
+    },
+    {
+     "name": "PageTotal",
+     "type": "Decimal",
+     "length": 4,
+     "required": false,
+     "readonly": true,
+     "comment": "Bendras lapų skaičius"
+    },
+    {
+     "name": "InsurerName",
+     "type": "Text",
+     "length": 68,
+     "required": false,
+     "readonly": false,
+     "comment": "Draudėjo pavadinimas"
+    },
+    {
+     "name": "InsurerCode",
+     "type": "Decimal",
+     "length": 7,
+     "required": false,
+     "readonly": false,
+     "comment": "Draudėjo kodas"
+    },
+    {
+     "name": "JuridicalPersonCode",
+     "type": "Decimal",
+     "length": 9,
+     "required": false,
+     "readonly": false,
+     "comment": "Draudėjo juridinio asmens kodas"
+    },
+    {
+     "name": "InsurerPhone",
+     "type": "Text",
+     "length": 15,
+     "required": false,
+     "readonly": false,
+     "comment": "Draudėjo tel. nr."
+    },
+    {
+     "name": "InsurerAddress",
+     "type": "Text",
+     "length": 68,
+     "required": false,
+     "readonly": false,
+     "comment": "Draudėjo adresas"
+    },
+    {
+     "name": "DocDate",
+     "type": "Date",
+     "length": 10,
+     "required": false,
+     "readonly": false,
+     "comment": "Pranešimo registracijos data"
+    },
+    {
+     "name": "DocNumber",
+     "type": "Text",
+     "length": 16,
+     "required": false,
+     "readonly": false,
+     "comment": "Pranešimo registracijos numeris"
+    },
+    {
+     "name": "PTFormCode",
+     "type": "Text",
+     "length": 8,
+     "required": false,
+     "readonly": false,
+     "comment": "Tikslinamo SD pranešimo formos kodas",
+     "list": [
+      "1-SD",
+      "2-SD",
+      "9-SD",
+      "12-SD",
+      "13-SD",
+      "SAM3SD",
+      "SAM3SDP",
+      "NP-SD",
+      "SAM3SD-M",
+      "NP-SD2"
+     ]
+    },
+    {
+     "name": "InsIncomeSumDiff",
+     "type": "Decimal",
+     "length": 11,
+     "required": false,
+     "readonly": true,
+     "comment": "Pajamų, nuo kurių draudžiamos įmokos, suma didinama/mažinama"
+    },
+    {
+     "name": "PaymentSumDiff",
+     "type": "Decimal",
+     "length": 11,
+     "required": false,
+     "readonly": true,
+     "comment": "Valstybinio socialinio draudimo įmokų suma didinama.mažinama"
+    },
+    {
+     "name": "ManagerFullName",
+     "type": "Text",
+     "length": 68,
+     "required": false,
+     "readonly": false,
+     "comment": "Vadovo ar įgalioto asmens vardas, pavardė"
+    },
+    {
+     "name": "PreparatorDetails",
+     "type": "Text",
+     "length": 68,
+     "required": false,
+     "readonly": false,
+     "comment": "Pranešimą užpildžiusio asmens vardas, pavardė, tel. nr., el. pašto adresas"
+    },
+    {
+     "name": "FormCode",
+     "type": "Text",
+     "length": 10,
+     "required": false,
+     "readonly": true,
+     "comment": "PT"
+    },
+    {
+     "name": "FormVersion",
+     "type": "Text",
+     "length": 10,
+     "required": false,
+     "readonly": true,
+     "comment": "15"
+    }
+   ],
+   "row_fields": [
+    {
+     "name": "ReasonText_{N}",
+     "type": "Text",
+     "length": 104,
+     "required": false,
+     "readonly": false,
+     "comment": "Duomenų tikslinimo priežastis"
+    },
+    {
+     "name": "ReasonCode_{N}",
+     "type": "Text",
+     "length": 2,
+     "required": false,
+     "readonly": false,
+     "list": [
+      "01",
+      "02",
+      "03",
+      "04",
+      "05",
+      "06",
+      "07",
+      "08",
+      "99"
+     ]
+    }
+   ]
+  },
+  "PT-1-SD": {
+   "occur": [
+    "0",
+    "9999"
+   ],
+   "field_count": 45,
+   "rows_per_page": 2,
+   "header_fields": [
+    {
+     "name": "InsurerCode",
+     "type": "Decimal",
+     "length": 7,
+     "required": false,
+     "readonly": true,
+     "comment": "Draudėjo kodas"
+    },
+    {
+     "name": "PageNumber",
+     "type": "Decimal",
+     "length": 4,
+     "required": false,
+     "readonly": true,
+     "comment": "Lapo numeris"
+    },
+    {
+     "name": "PageTotal",
+     "type": "Decimal",
+     "length": 4,
+     "required": false,
+     "readonly": true,
+     "comment": "Bendras priedo lapų skaičius"
+    },
+    {
+     "name": "FormCode",
+     "type": "Text",
+     "length": 10,
+     "required": false,
+     "readonly": true,
+     "comment": "PT-1-SD"
+    },
+    {
+     "name": "FormVersion",
+     "type": "Text",
+     "length": 10,
+     "required": false,
+     "readonly": true,
+     "comment": "15"
+    },
+    {
+     "name": "DocDate",
+     "type": "Date",
+     "length": 10,
+     "required": false,
+     "readonly": true,
+     "comment": "Pranešimo registracijos data"
+    },
+    {
+     "name": "DocNumber",
+     "type": "Text",
+     "length": 16,
+     "required": false,
+     "readonly": true,
+     "comment": "Pranešimo registracijos numeris"
+    },
+    {
+     "name": "PTAction1",
+     "type": "Checkmark",
+     "required": false,
+     "readonly": false,
+     "comment": "Patikslinti duomenis"
+    },
+    {
+     "name": "PTAction2",
+     "type": "Checkmark",
+     "required": false,
+     "readonly": false,
+     "comment": "Pašalinti duomenis"
+    },
+    {
+     "name": "PTAction3",
+     "type": "Checkmark",
+     "required": false,
+     "readonly": false,
+     "comment": "Įrašyti duomenis"
+    },
+    {
+     "name": "RevisedCycleYear",
+     "type": "Decimal",
+     "length": 4,
+     "required": false,
+     "readonly": false,
+     "comment": "Tikslinamo laikotarpio metai"
+    },
+    {
+     "name": "RevisedCycleMonth",
+     "type": "Decimal",
+     "length": 2,
+     "required": false,
+     "readonly": false,
+     "comment": "Tikslinamo laikotarpio mėnuo"
+    },
+    {
+     "name": "U1.1",
+     "type": "Checkmark",
+     "required": false,
+     "readonly": false
+    },
+    {
+     "name": "U1.2",
+     "type": "Checkmark",
+     "required": false,
+     "readonly": false
+    },
+    {
+     "name": "PTActionGroup",
+     "type": "Radiogroup",
+     "required": true,
+     "readonly": false
+    },
+    {
+     "name": "U1Group",
+     "type": "Radiogroup",
+     "required": true,
+     "readonly": false
+    }
+   ],
+   "row_fields": [
+    {
+     "name": "PersonFirstName_{N}",
+     "type": "Text",
+     "length": 68,
+     "required": false,
+     "readonly": false,
+     "comment": "Apdraustojo vardas"
+    },
+    {
+     "name": "PersonLastName_{N}",
+     "type": "Text",
+     "length": 68,
+     "required": false,
+     "readonly": false,
+     "comment": "Apdraustojo pavardė"
+    },
+    {
+     "name": "PersonCode_{N}",
+     "type": "Decimal",
+     "length": 11,
+     "required": false,
+     "readonly": false,
+     "comment": "Apdraustojo asmens kodas"
+    },
+    {
+     "name": "PersonBirthDate_{N}",
+     "type": "Date",
+     "length": 10,
+     "required": false,
+     "readonly": false,
+     "comment": "Apdraustojo gimimo data"
+    },
+    {
+     "name": "InsuranceSeries_{N}",
+     "type": "Text",
+     "length": 2,
+     "required": false,
+     "readonly": false,
+     "comment": "Asmens socialinio draudimo numeris"
+    },
+    {
+     "name": "InsuranceNumber_{N}",
+     "type": "Decimal",
+     "length": 7,
+     "required": false,
+     "readonly": false,
+     "comment": "Asmens socialinio draudimo numeris"
+    },
+    {
+     "name": "PersonForeignCode_{N}",
+     "type": "Decimal",
+     "length": 11,
+     "required": false,
+     "readonly": false,
+     "comment": "Apdraustojo asmens užsienio kodas"
+    },
+    {
+     "name": "InsuranceStartDate_{N}",
+     "type": "Date",
+     "length": 10,
+     "required": false,
+     "readonly": true,
+     "comment": "Valstybinio socialinio draudimo pradžios data"
+    },
+    {
+     "name": "PersonProfession_1_{N}",
+     "type": "Decimal",
+     "length": 1,
+     "required": false,
+     "readonly": true,
+     "comment": "Apdraustojo profesija pagal Lietuvos profesijų klasifikatorių"
+    },
+    {
+     "name": "PersonProfession_2_{N}",
+     "type": "Decimal",
+     "length": 1,
+     "required": false,
+     "readonly": true,
+     "comment": "Apdraustojo profesija pagal Lietuvos profesijų klasifikatorių"
+    },
+    {
+     "name": "PersonProfession_3_{N}",
+     "type": "Decimal",
+     "length": 1,
+     "required": false,
+     "readonly": true,
+     "comment": "Apdraustojo profesija pagal Lietuvos profesijų klasifikatorių"
+    },
+    {
+     "name": "PersonProfession_4_{N}",
+     "type": "Decimal",
+     "length": 1,
+     "required": false,
+     "readonly": true,
+     "comment": "Apdraustojo profesija pagal Lietuvos profesijų klasifikatorių"
+    },
+    {
+     "name": "ReasonCode_{N}",
+     "type": "Text",
+     "length": 2,
+     "required": false,
+     "readonly": true,
+     "comment": "Pranešimo pateikimo priežasties kodas",
+     "list": [
+      "01",
+      "03",
+      "04",
+      "05",
+      "06",
+      "07",
+      "08",
+      "09",
+      "10",
+      "11",
+      "12",
+      "13",
+      "14",
+      "15",
+      "17",
+      "18",
+      "19",
+      "20",
+      "21",
+      "22",
+      "23",
+      "96",
+      "99"
+     ]
+    },
+    {
+     "name": "ReasonText_{N}",
+     "type": "Text",
+     "length": 65,
+     "required": false,
+     "readonly": true,
+     "comment": "Pranešimo pateikimo priežastis"
+    },
+    {
+     "name": "ReasonDetCode_{N}",
+     "type": "Text",
+     "length": 9,
+     "required": false,
+     "readonly": true,
+     "comment": "Pranešimo pateikimo priežasties patikslinimo kodas"
+    },
+    {
+     "name": "ReasonDetText_{N}",
+     "type": "Text",
+     "length": 58,
+     "required": false,
+     "readonly": true,
+     "comment": "Pranešimo pateikimo priežasties patikslinimas"
+    },
+    {
+     "name": "ReasonDetTypeCode_{N}",
+     "type": "Text",
+     "length": 3,
+     "required": false,
+     "readonly": true,
+     "comment": "Pranešimo pateikimo darbo sutarties rūšies kodo patikslinimas"
+    },
+    {
+     "name": "ReasonDetTypeText_{N}",
+     "type": "Text",
+     "length": 63,
+     "required": false,
+     "readonly": true,
+     "comment": "Pranešimo pateikimo darbo sutarties rūšies patikslinimas"
+    }
+   ]
+  },
+  "PT-2-SD": {
+   "occur": [
+    "0",
+    "9999"
+   ],
+   "field_count": 44,
+   "rows_per_page": 2,
+   "header_fields": [
+    {
+     "name": "PTAction1",
+     "type": "Checkmark",
+     "required": false,
+     "readonly": false,
+     "comment": "Patikslinti duomenis"
+    },
+    {
+     "name": "PTAction2",
+     "type": "Checkmark",
+     "required": false,
+     "readonly": false,
+     "comment": "Pašalinti duomenis"
+    },
+    {
+     "name": "PTAction3",
+     "type": "Checkmark",
+     "required": false,
+     "readonly": false,
+     "comment": "Įrašyti duomenis"
+    },
+    {
+     "name": "RevisedCycleYear",
+     "type": "Decimal",
+     "length": 4,
+     "required": false,
+     "readonly": false,
+     "comment": "Tikslinamo laikotarpio metai"
+    },
+    {
+     "name": "RevisedCycleMonth",
+     "type": "Decimal",
+     "length": 2,
+     "required": false,
+     "readonly": false,
+     "comment": "Tikslinamo laikotarpio mėnuo"
+    },
+    {
+     "name": "InsurerCode",
+     "type": "Decimal",
+     "length": 7,
+     "required": false,
+     "readonly": true,
+     "comment": "Draudėjo kodas"
+    },
+    {
+     "name": "DocDate",
+     "type": "Date",
+     "length": 10,
+     "required": false,
+     "readonly": true,
+     "comment": "Pranešimo registracijos data"
+    },
+    {
+     "name": "DocNumber",
+     "type": "Text",
+     "length": 16,
+     "required": false,
+     "readonly": true,
+     "comment": "Pranešimo registracijos numeris"
+    },
+    {
+     "name": "PageNumber",
+     "type": "Decimal",
+     "length": 4,
+     "required": false,
+     "readonly": true,
+     "comment": "Lapo numeris"
+    },
+    {
+     "name": "PageTotal",
+     "type": "Decimal",
+     "length": 4,
+     "required": false,
+     "readonly": true,
+     "comment": "Bendras priedo lapų skaičius"
+    },
+    {
+     "name": "FormCode",
+     "type": "Text",
+     "length": 10,
+     "required": false,
+     "readonly": true,
+     "comment": "PT-2-SD"
+    },
+    {
+     "name": "FormVersion",
+     "type": "Text",
+     "length": 10,
+     "required": false,
+     "readonly": true,
+     "comment": "15"
+    },
+    {
+     "name": "PTActionGroup",
+     "type": "Radiogroup",
+     "required": true,
+     "readonly": false
+    }
+   ],
+   "row_fields": [
+    {
+     "name": "PersonFirstName_{N}",
+     "type": "Text",
+     "length": 68,
+     "required": false,
+     "readonly": false,
+     "comment": "Apdraustojo vardas"
+    },
+    {
+     "name": "PersonLastName_{N}",
+     "type": "Text",
+     "length": 68,
+     "required": false,
+     "readonly": false,
+     "comment": "Apdraustojo pavardė"
+    },
+    {
+     "name": "PersonCode_{N}",
+     "type": "Decimal",
+     "length": 11,
+     "required": false,
+     "readonly": false,
+     "comment": "Apdraustojo asmens kodas"
+    },
+    {
+     "name": "InsuranceSeries_{N}",
+     "type": "Text",
+     "length": 2,
+     "required": false,
+     "readonly": false,
+     "comment": "Asmens socialinio draudimo numeris"
+    },
+    {
+     "name": "InsuranceNumber_{N}",
+     "type": "Decimal",
+     "length": 7,
+     "required": false,
+     "readonly": false,
+     "comment": "Asmens socialinio draudimo numeris"
+    },
+    {
+     "name": "InsuranceEndDate_{N}",
+     "type": "Date",
+     "length": 10,
+     "required": false,
+     "readonly": true,
+     "comment": "Valstybinio socialinio draudimo pabaigos data"
+    },
+    {
+     "name": "InsIncomeSum_{N}",
+     "type": "Decimal",
+     "length": 11,
+     "required": false,
+     "readonly": true,
+     "comment": "Pajamų, nuo kurių skaičiuojamos įmokos, suma Lt"
+    },
+    {
+     "name": "TaxRate_{N}",
+     "type": "Decimal",
+     "length": 5,
+     "required": false,
+     "readonly": true,
+     "comment": "Bendras tarifas"
+    },
+    {
+     "name": "PaymentSum_{N}",
+     "type": "Decimal",
+     "length": 11,
+     "required": false,
+     "readonly": true,
+     "comment": "Įmokų suma Lt"
+    },
+    {
+     "name": "Currency_{N}",
+     "type": "Text",
+     "length": 3,
+     "required": false,
+     "readonly": true,
+     "comment": "Valiuta"
+    },
+    {
+     "name": "ReasonCode_{N}",
+     "type": "Text",
+     "length": 2,
+     "required": false,
+     "readonly": true,
+     "comment": "Pranešimo pateikimo priežasties kodas",
+     "list": [
+      "02",
+      "03",
+      "04",
+      "05",
+      "06",
+      "07",
+      "08",
+      "09",
+      "10",
+      "11",
+      "12",
+      "13",
+      "14",
+      "16",
+      "17",
+      "18",
+      "19",
+      "20",
+      "21",
+      "22",
+      "23",
+      "96",
+      "99"
+     ]
+    },
+    {
+     "name": "ReasonText_{N}",
+     "type": "Text",
+     "length": 65,
+     "required": false,
+     "readonly": true,
+     "comment": "Pranešimo pateikimo priežastis"
+    },
+    {
+     "name": "ReasonDetCode_{N}",
+     "type": "Text",
+     "length": 9,
+     "required": false,
+     "readonly": true,
+     "comment": "Pranešimo pateikimo priežasties patikslinimo kodas"
+    },
+    {
+     "name": "ReasonDetText_{N}",
+     "type": "Text",
+     "length": 58,
+     "required": false,
+     "readonly": true,
+     "comment": "Pranešimo pateikimo priežasties patikslinimas"
+    },
+    {
+     "name": "LawActArticle_{N}",
+     "type": "Text",
+     "length": 5,
+     "required": false,
+     "readonly": true,
+     "comment": "Teisės akto straipsnis"
+    },
+    {
+     "name": "LawActPart_{N}",
+     "type": "Text",
+     "length": 1,
+     "required": false,
+     "readonly": true,
+     "comment": "Teisės akto straipsnio dalis"
+    },
+    {
+     "name": "LawActSubsection_{N}",
+     "type": "Text",
+     "length": 2,
+     "required": false,
+     "readonly": true,
+     "comment": "Teisės akto straipsnio dalies punktas"
+    },
+    {
+     "name": "CompensatedMonthsCount_{N}",
+     "type": "Decimal",
+     "length": 5,
+     "required": false,
+     "readonly": true,
+     "comment": "Kompensuojamų mėnesių skaičius"
+    }
+   ]
+  },
+  "PT-9-SD": {
+   "occur": [
+    "0",
+    "9999"
+   ],
+   "field_count": 32,
+   "rows_per_page": 2,
+   "header_fields": [
+    {
+     "name": "PTAction1",
+     "type": "Checkmark",
+     "required": false,
+     "readonly": false,
+     "comment": "Patikslinti duomenis"
+    },
+    {
+     "name": "PTAction2",
+     "type": "Checkmark",
+     "required": false,
+     "readonly": false,
+     "comment": "Pašalinti duomenis"
+    },
+    {
+     "name": "PTAction3",
+     "type": "Checkmark",
+     "required": false,
+     "readonly": false,
+     "comment": "Įrašyti duomenis"
+    },
+    {
+     "name": "RevisedCycleYear",
+     "type": "Decimal",
+     "length": 4,
+     "required": false,
+     "readonly": false,
+     "comment": "Tikslinamo laikotarpio metai"
+    },
+    {
+     "name": "RevisedCycleMonth",
+     "type": "Decimal",
+     "length": 2,
+     "required": false,
+     "readonly": false,
+     "comment": "Tikslinamo laikotarpio mėnuo"
+    },
+    {
+     "name": "InsurerCode",
+     "type": "Decimal",
+     "length": 7,
+     "required": false,
+     "readonly": true,
+     "comment": "Draudėjo kodas"
+    },
+    {
+     "name": "DocDate",
+     "type": "Date",
+     "length": 10,
+     "required": false,
+     "readonly": true,
+     "comment": "Pranešimo registracijos data"
+    },
+    {
+     "name": "DocNumber",
+     "type": "Text",
+     "length": 16,
+     "required": false,
+     "readonly": true,
+     "comment": "Pranešimo registracijos numeris"
+    },
+    {
+     "name": "PageNumber",
+     "type": "Decimal",
+     "length": 4,
+     "required": false,
+     "readonly": true,
+     "comment": "Lapo numeris"
+    },
+    {
+     "name": "PageTotal",
+     "type": "Decimal",
+     "length": 4,
+     "required": false,
+     "readonly": true,
+     "comment": "Bendras priedo lapų skaičius"
+    },
+    {
+     "name": "FormCode",
+     "type": "Text",
+     "length": 10,
+     "required": false,
+     "readonly": true,
+     "comment": "PT-9-SD"
+    },
+    {
+     "name": "FormVersion",
+     "type": "Text",
+     "length": 10,
+     "required": false,
+     "readonly": true,
+     "comment": "15"
+    },
+    {
+     "name": "PTActionGroup",
+     "type": "Radiogroup",
+     "required": true,
+     "readonly": false
+    }
+   ],
+   "row_fields": [
+    {
+     "name": "PersonFirstName_{N}",
+     "type": "Text",
+     "length": 68,
+     "required": false,
+     "readonly": false,
+     "comment": "Apdraustojo vardas"
+    },
+    {
+     "name": "PersonLastName_{N}",
+     "type": "Text",
+     "length": 68,
+     "required": false,
+     "readonly": false,
+     "comment": "Apdraustojo pavardė"
+    },
+    {
+     "name": "PersonCode_{N}",
+     "type": "Decimal",
+     "length": 11,
+     "required": false,
+     "readonly": false,
+     "comment": "Apdraustojo asmens kodas"
+    },
+    {
+     "name": "InsuranceSeries_{N}",
+     "type": "Text",
+     "length": 2,
+     "required": false,
+     "readonly": false,
+     "comment": "Asmens socialinio draudimo numeris"
+    },
+    {
+     "name": "InsuranceNumber_{N}",
+     "type": "Decimal",
+     "length": 7,
+     "required": false,
+     "readonly": false,
+     "comment": "Asmens socialinio draudimo numeris"
+    },
+    {
+     "name": "ReasonCode_{N}",
+     "type": "Text",
+     "length": 2,
+     "required": false,
+     "readonly": true,
+     "comment": "Pranešimo pateikimo priežasties kodas"
+    },
+    {
+     "name": "ReasonText_{N}",
+     "type": "Text",
+     "length": 64,
+     "required": false,
+     "readonly": true,
+     "comment": "Pranešimo pateikimo priežastis"
+    },
+    {
+     "name": "HolidayStartDate_{N}",
+     "type": "Date",
+     "length": 10,
+     "required": false,
+     "readonly": true,
+     "comment": "Atostogos suteiktos nuo"
+    },
+    {
+     "name": "HolidayEndDate_{N}",
+     "type": "Date",
+     "length": 10,
+     "required": false,
+     "readonly": true,
+     "comment": "Atostogos suteiktos iki"
+    },
+    {
+     "name": "HolidayCancelDate_{N}",
+     "type": "Date",
+     "length": 10,
+     "required": false,
+     "readonly": true,
+     "comment": "Atostogos atšauktos nuo"
+    },
+    {
+     "name": "ChildBirthDate_{N}",
+     "type": "Date",
+     "length": 10,
+     "required": false,
+     "readonly": true,
+     "comment": "Vaiko gimimo data"
+    },
+    {
+     "name": "ChildPersonCode_{N}",
+     "type": "Decimal",
+     "length": 11,
+     "required": false,
+     "readonly": true,
+     "comment": "Vaiko asmens kodas"
+    }
+   ]
+  },
+  "PT-12-SD": {
+   "occur": [
+    "0",
+    "9999"
+   ],
+   "field_count": 26,
+   "rows_per_page": 2,
+   "header_fields": [
+    {
+     "name": "PTAction1",
+     "type": "Checkmark",
+     "required": false,
+     "readonly": false,
+     "comment": "Patikslinti duomenis"
+    },
+    {
+     "name": "PTAction2",
+     "type": "Checkmark",
+     "required": false,
+     "readonly": false,
+     "comment": "Pašalinti duomenis"
+    },
+    {
+     "name": "PTAction3",
+     "type": "Checkmark",
+     "required": false,
+     "readonly": false,
+     "comment": "Įrašyti duomenis"
+    },
+    {
+     "name": "RevisedCycleYear",
+     "type": "Decimal",
+     "length": 4,
+     "required": false,
+     "readonly": false,
+     "comment": "Tikslinamo laikotarpio metai"
+    },
+    {
+     "name": "RevisedCycleMonth",
+     "type": "Decimal",
+     "length": 2,
+     "required": false,
+     "readonly": false,
+     "comment": "Tikslinamo laikotarpio mėnuo"
+    },
+    {
+     "name": "InsurerCode",
+     "type": "Decimal",
+     "length": 7,
+     "required": false,
+     "readonly": true,
+     "comment": "Draudėjo kodas"
+    },
+    {
+     "name": "DocDate",
+     "type": "Date",
+     "length": 10,
+     "required": false,
+     "readonly": true,
+     "comment": "Pranešimo registracijos data"
+    },
+    {
+     "name": "DocNumber",
+     "type": "Text",
+     "length": 16,
+     "required": false,
+     "readonly": true,
+     "comment": "Pranešimo registracijos numeris"
+    },
+    {
+     "name": "PageNumber",
+     "type": "Decimal",
+     "length": 4,
+     "required": false,
+     "readonly": true,
+     "comment": "Lapo numeris"
+    },
+    {
+     "name": "PageTotal",
+     "type": "Decimal",
+     "length": 4,
+     "required": false,
+     "readonly": true,
+     "comment": "Bendras priedo lapų skaičius"
+    },
+    {
+     "name": "FormCode",
+     "type": "Text",
+     "length": 10,
+     "required": false,
+     "readonly": true,
+     "comment": "PT-12-SD"
+    },
+    {
+     "name": "FormVersion",
+     "type": "Text",
+     "length": 10,
+     "required": false,
+     "readonly": true,
+     "comment": "15"
+    },
+    {
+     "name": "PTActionGroup",
+     "type": "Radiogroup",
+     "required": true,
+     "readonly": false
+    }
+   ],
+   "row_fields": [
+    {
+     "name": "PersonFirstName_{N}",
+     "type": "Text",
+     "length": 68,
+     "required": false,
+     "readonly": false,
+     "comment": "Apdraustojo vardas"
+    },
+    {
+     "name": "PersonLastName_{N}",
+     "type": "Text",
+     "length": 68,
+     "required": false,
+     "readonly": false,
+     "comment": "Apdraustojo pavardė"
+    },
+    {
+     "name": "PersonCode_{N}",
+     "type": "Decimal",
+     "length": 11,
+     "required": false,
+     "readonly": false,
+     "comment": "Apdraustojo asmens kodas"
+    },
+    {
+     "name": "InsuranceSeries_{N}",
+     "type": "Text",
+     "length": 2,
+     "required": false,
+     "readonly": false,
+     "comment": "Asmens socialinio draudimo numeris"
+    },
+    {
+     "name": "InsuranceNumber_{N}",
+     "type": "Decimal",
+     "length": 7,
+     "required": false,
+     "readonly": false,
+     "comment": "Asmens socialinio draudimo numeris"
+    },
+    {
+     "name": "InsuranceSuspendStart_{N}",
+     "type": "Date",
+     "length": 10,
+     "required": false,
+     "readonly": true,
+     "comment": "Nedraudiminio laikotarpio pradžia"
+    },
+    {
+     "name": "InsuranceSuspendEnd_{N}",
+     "type": "Date",
+     "length": 10,
+     "required": false,
+     "readonly": true,
+     "comment": "Nedraudiminio laikotarpio pabaiga"
+    },
+    {
+     "name": "ReasonCode_{N}",
+     "type": "Text",
+     "length": 2,
+     "required": false,
+     "readonly": true,
+     "comment": "Pranešimo pateikimo priežasties kodas",
+     "list": [
+      "01",
+      "02",
+      "03",
+      "04",
+      "05",
+      "06",
+      "07",
+      "08",
+      "09",
+      "10"
+     ]
+    },
+    {
+     "name": "ReasonText_{N}",
+     "type": "Text",
+     "length": 65,
+     "required": false,
+     "readonly": true,
+     "comment": "Pranešimo pateikimo priežastis"
+    }
+   ]
+  },
+  "PT-13-SD": {
+   "occur": [
+    "0",
+    "9999"
+   ],
+   "field_count": 32,
+   "rows_per_page": 2,
+   "header_fields": [
+    {
+     "name": "PTAction1",
+     "type": "Checkmark",
+     "required": false,
+     "readonly": false,
+     "comment": "Patikslinti duomenis"
+    },
+    {
+     "name": "PTAction2",
+     "type": "Checkmark",
+     "required": false,
+     "readonly": false,
+     "comment": "Pašalinti duomenis"
+    },
+    {
+     "name": "PTAction3",
+     "type": "Checkmark",
+     "required": false,
+     "readonly": false,
+     "comment": "Įrašyti duomenis"
+    },
+    {
+     "name": "RevisedCycleYear",
+     "type": "Decimal",
+     "length": 4,
+     "required": false,
+     "readonly": false,
+     "comment": "Tikslinamo laikotarpio metai"
+    },
+    {
+     "name": "RevisedCycleMonth",
+     "type": "Decimal",
+     "length": 2,
+     "required": false,
+     "readonly": false,
+     "comment": "Tikslinamo laikotarpio mėnuo"
+    },
+    {
+     "name": "InsurerCode",
+     "type": "Decimal",
+     "length": 7,
+     "required": false,
+     "readonly": true,
+     "comment": "Draudėjo kodas"
+    },
+    {
+     "name": "DocDate",
+     "type": "Date",
+     "length": 10,
+     "required": false,
+     "readonly": true,
+     "comment": "Pranešimo registracijos data"
+    },
+    {
+     "name": "DocNumber",
+     "type": "Text",
+     "length": 16,
+     "required": false,
+     "readonly": true,
+     "comment": "Pranešimo registracijos numeris"
+    },
+    {
+     "name": "PageNumber",
+     "type": "Decimal",
+     "length": 4,
+     "required": false,
+     "readonly": true,
+     "comment": "Lapo numeris"
+    },
+    {
+     "name": "PageTotal",
+     "type": "Decimal",
+     "length": 4,
+     "required": false,
+     "readonly": true,
+     "comment": "Bendras priedo lapų skaičius"
+    },
+    {
+     "name": "FormCode",
+     "type": "Text",
+     "length": 10,
+     "required": false,
+     "readonly": true,
+     "comment": "PT-13-SD"
+    },
+    {
+     "name": "FormVersion",
+     "type": "Text",
+     "length": 10,
+     "required": false,
+     "readonly": true,
+     "comment": "15"
+    },
+    {
+     "name": "PTActionGroup",
+     "type": "Radiogroup",
+     "required": true,
+     "readonly": false
+    }
+   ],
+   "row_fields": [
+    {
+     "name": "PersonFirstName_{N}",
+     "type": "Text",
+     "length": 68,
+     "required": false,
+     "readonly": false,
+     "comment": "Apdraustojo vardas"
+    },
+    {
+     "name": "PersonLastName_{N}",
+     "type": "Text",
+     "length": 68,
+     "required": false,
+     "readonly": false,
+     "comment": "Apdraustojo pavardė"
+    },
+    {
+     "name": "PersonCode_{N}",
+     "type": "Decimal",
+     "length": 11,
+     "required": false,
+     "readonly": false,
+     "comment": "Apdraustojo asmens kodas"
+    },
+    {
+     "name": "InsuranceSeries_{N}",
+     "type": "Text",
+     "length": 2,
+     "required": false,
+     "readonly": false,
+     "comment": "Asmens socialinio draudimo numeris"
+    },
+    {
+     "name": "InsuranceNumber_{N}",
+     "type": "Decimal",
+     "length": 7,
+     "required": false,
+     "readonly": false,
+     "comment": "Asmens socialinio draudimo numeris"
+    },
+    {
+     "name": "InsuranceStartDate_{N}",
+     "type": "Date",
+     "length": 10,
+     "required": false,
+     "readonly": true,
+     "comment": "Valstybinio socialinio draudimo pradžios data"
+    },
+    {
+     "name": "InsIncomeSum_{N}",
+     "type": "Decimal",
+     "length": 11,
+     "required": false,
+     "readonly": true,
+     "comment": "Pajamų, nuo kurių skaičiuojamos įmokos, suma Lt"
+    },
+    {
+     "name": "TaxRate_{N}",
+     "type": "Decimal",
+     "length": 5,
+     "required": false,
+     "readonly": true,
+     "comment": "Bendras tarifas"
+    },
+    {
+     "name": "PaymentSum_{N}",
+     "type": "Decimal",
+     "length": 11,
+     "required": false,
+     "readonly": true,
+     "comment": "Įmokų suma Lt"
+    },
+    {
+     "name": "Currency_{N}",
+     "type": "Text",
+     "length": 3,
+     "required": false,
+     "readonly": true,
+     "comment": "Valiuta"
+    },
+    {
+     "name": "ReasonCode_{N}",
+     "type": "Text",
+     "length": 2,
+     "required": false,
+     "readonly": true,
+     "comment": "Pranešimo pateikimo priežasties kodas",
+     "list": [
+      "01",
+      "02",
+      "03",
+      "04",
+      "05",
+      "06",
+      "07",
+      "08",
+      "09",
+      "10",
+      "11",
+      "12"
+     ]
+    },
+    {
+     "name": "ReasonText_{N}",
+     "type": "Text",
+     "length": 64,
+     "required": false,
+     "readonly": true,
+     "comment": "Pranešimo pateikimo priežastis"
+    }
+   ]
+  },
+  "PT-SAM3SD": {
+   "occur": [
+    "0",
+    "9999"
+   ],
+   "field_count": 27,
+   "rows_per_page": 2,
+   "header_fields": [
+    {
+     "name": "PTAction1",
+     "type": "Checkmark",
+     "required": false,
+     "readonly": false,
+     "comment": "Patikslinti duomenis"
+    },
+    {
+     "name": "PTAction2",
+     "type": "Checkmark",
+     "required": false,
+     "readonly": false,
+     "comment": "Pašalinti duomenis"
+    },
+    {
+     "name": "PTAction3",
+     "type": "Checkmark",
+     "required": false,
+     "readonly": false,
+     "comment": "Įrašyti duomenis"
+    },
+    {
+     "name": "RevisedCycleYear",
+     "type": "Decimal",
+     "length": 4,
+     "required": false,
+     "readonly": false,
+     "comment": "Tikslinamo laikotarpio metai"
+    },
+    {
+     "name": "RevisedCycleQuarter",
+     "type": "Decimal",
+     "length": 1,
+     "required": false,
+     "readonly": false,
+     "comment": "Tikslinamo laikotarpio ketvirtis"
+    },
+    {
+     "name": "RevisedCycleMonth",
+     "type": "Decimal",
+     "length": 2,
+     "required": false,
+     "readonly": false,
+     "comment": "Tikslinamo laikotarpio mėnuo"
+    },
+    {
+     "name": "InsurerCode",
+     "type": "Decimal",
+     "length": 7,
+     "required": false,
+     "readonly": true,
+     "comment": "Draudėjo kodas"
+    },
+    {
+     "name": "DocDate",
+     "type": "Date",
+     "length": 10,
+     "required": false,
+     "readonly": true,
+     "comment": "Pranešimo registracijos data"
+    },
+    {
+     "name": "DocNumber",
+     "type": "Text",
+     "length": 16,
+     "required": false,
+     "readonly": true,
+     "comment": "Pranešimo registracijos numeris"
+    },
+    {
+     "name": "PageNumber",
+     "type": "Decimal",
+     "length": 4,
+     "required": false,
+     "readonly": true,
+     "comment": "Lapo numeris"
+    },
+    {
+     "name": "PageTotal",
+     "type": "Decimal",
+     "length": 4,
+     "required": false,
+     "readonly": true,
+     "comment": "Bendras priedo lapų skaičius"
+    },
+    {
+     "name": "FormCode",
+     "type": "Text",
+     "length": 10,
+     "required": false,
+     "readonly": true,
+     "comment": "PT-SAM3SD"
+    },
+    {
+     "name": "FormVersion",
+     "type": "Text",
+     "length": 10,
+     "required": false,
+     "readonly": true,
+     "comment": "15"
+    },
+    {
+     "name": "PTActionGroup",
+     "type": "Radiogroup",
+     "required": true,
+     "readonly": false
+    }
+   ],
+   "row_fields": [
+    {
+     "name": "PersonFirstName_{N}",
+     "type": "Text",
+     "length": 68,
+     "required": false,
+     "readonly": false,
+     "comment": "Apdraustojo vardas"
+    },
+    {
+     "name": "PersonLastName_{N}",
+     "type": "Text",
+     "length": 68,
+     "required": false,
+     "readonly": false,
+     "comment": "Apdraustojo pavardė"
+    },
+    {
+     "name": "PersonCode_{N}",
+     "type": "Decimal",
+     "length": 11,
+     "required": false,
+     "readonly": false,
+     "comment": "Apdraustojo asmens kodas"
+    },
+    {
+     "name": "InsuranceSeries_{N}",
+     "type": "Text",
+     "length": 2,
+     "required": false,
+     "readonly": false,
+     "comment": "Asmens socialinio draudimo numeris"
+    },
+    {
+     "name": "InsuranceNumber_{N}",
+     "type": "Decimal",
+     "length": 7,
+     "required": false,
+     "readonly": false,
+     "comment": "Asmens socialinio draudimo numeris"
+    },
+    {
+     "name": "InsIncomeSum_{N}",
+     "type": "Decimal",
+     "length": 11,
+     "required": false,
+     "readonly": true,
+     "comment": "Pajamų, nuo kurių skaičiuojamos įmokos, suma Lt"
+    },
+    {
+     "name": "TaxRate_{N}",
+     "type": "Decimal",
+     "length": 5,
+     "required": false,
+     "readonly": true,
+     "comment": "Bendras tarifas"
+    },
+    {
+     "name": "PaymentSum_{N}",
+     "type": "Decimal",
+     "length": 11,
+     "required": false,
+     "readonly": true,
+     "comment": "Įmokų suma Lt"
+    },
+    {
+     "name": "Currency_{N}",
+     "type": "Text",
+     "length": 3,
+     "required": false,
+     "readonly": true,
+     "comment": "Valiuta"
+    }
+   ]
+  },
+  "PT-SAM3SDP": {
+   "occur": [
+    "0",
+    "9999"
+   ],
+   "field_count": 35,
+   "rows_per_page": 2,
+   "header_fields": [
+    {
+     "name": "PTAction1",
+     "type": "Checkmark",
+     "required": false,
+     "readonly": false,
+     "comment": "Patikslinti duomenis"
+    },
+    {
+     "name": "PTAction2",
+     "type": "Checkmark",
+     "required": false,
+     "readonly": false,
+     "comment": "Pašalinti duomenis"
+    },
+    {
+     "name": "PTAction3",
+     "type": "Checkmark",
+     "required": false,
+     "readonly": false,
+     "comment": "Įrašyti duomenis"
+    },
+    {
+     "name": "RevisedCycleYear",
+     "type": "Decimal",
+     "length": 4,
+     "required": false,
+     "readonly": false,
+     "comment": "Tikslinamo laikotarpio metai"
+    },
+    {
+     "name": "RevisedCycleQuarter",
+     "type": "Decimal",
+     "length": 1,
+     "required": false,
+     "readonly": false,
+     "comment": "Tikslinamo laikotarpio ketvirtis"
+    },
+    {
+     "name": "RevisedCycleMonth",
+     "type": "Decimal",
+     "length": 2,
+     "required": false,
+     "readonly": false,
+     "comment": "Tikslinamo laikotarpio mėnuo"
+    },
+    {
+     "name": "InsurerCode",
+     "type": "Decimal",
+     "length": 7,
+     "required": false,
+     "readonly": true,
+     "comment": "Draudėjo kodas"
+    },
+    {
+     "name": "DocDate",
+     "type": "Date",
+     "length": 10,
+     "required": false,
+     "readonly": true,
+     "comment": "Pranešimo registracijos data"
+    },
+    {
+     "name": "DocNumber",
+     "type": "Text",
+     "length": 16,
+     "required": false,
+     "readonly": true,
+     "comment": "Pranešimo registracijos numeris"
+    },
+    {
+     "name": "PageNumber",
+     "type": "Decimal",
+     "length": 4,
+     "required": false,
+     "readonly": true,
+     "comment": "Lapo numeris"
+    },
+    {
+     "name": "PageTotal",
+     "type": "Decimal",
+     "length": 4,
+     "required": false,
+     "readonly": true,
+     "comment": "Bendras priedo lapų skaičius"
+    },
+    {
+     "name": "FormCode",
+     "type": "Text",
+     "length": 10,
+     "required": false,
+     "readonly": true,
+     "comment": "PT-SAM3SDP"
+    },
+    {
+     "name": "FormVersion",
+     "type": "Text",
+     "length": 10,
+     "required": false,
+     "readonly": true,
+     "comment": "15"
+    },
+    {
+     "name": "PTActionGroup",
+     "type": "Radiogroup",
+     "required": true,
+     "readonly": false
+    }
+   ],
+   "row_fields": [
+    {
+     "name": "PersonFirstName_{N}",
+     "type": "Text",
+     "length": 68,
+     "required": false,
+     "readonly": false,
+     "comment": "Apdraustojo vardas"
+    },
+    {
+     "name": "PersonLastName_{N}",
+     "type": "Text",
+     "length": 68,
+     "required": false,
+     "readonly": false,
+     "comment": "Apdraustojo pavardė"
+    },
+    {
+     "name": "PersonCode_{N}",
+     "type": "Decimal",
+     "length": 11,
+     "required": false,
+     "readonly": false,
+     "comment": "Apdraustojo asmens kodas"
+    },
+    {
+     "name": "InsuranceSeries_{N}",
+     "type": "Text",
+     "length": 2,
+     "required": false,
+     "readonly": false,
+     "comment": "Asmens socialinio draudimo numeris"
+    },
+    {
+     "name": "InsuranceNumber_{N}",
+     "type": "Decimal",
+     "length": 7,
+     "required": false,
+     "readonly": false,
+     "comment": "Asmens socialinio draudimo numeris"
+    },
+    {
+     "name": "PeriodStartDate_{N}",
+     "type": "Date",
+     "length": 10,
+     "required": false,
+     "readonly": true,
+     "comment": "Valstybinio socialinio draudimo laikotarpio pradžia"
+    },
+    {
+     "name": "PeriodEndDate_{N}",
+     "type": "Date",
+     "length": 10,
+     "required": false,
+     "readonly": true,
+     "comment": "Valstybinio socialinio draudimo laikotarpio pabaiga"
+    },
+    {
+     "name": "InsIncomeSum_{N}",
+     "type": "Decimal",
+     "length": 11,
+     "required": false,
+     "readonly": true,
+     "comment": "Pajamų, nuo kurių skaičiuojamos įmokos, suma Lt"
+    },
+    {
+     "name": "TaxRate_{N}",
+     "type": "Decimal",
+     "length": 5,
+     "required": false,
+     "readonly": true,
+     "comment": "Bendras tarifas"
+    },
+    {
+     "name": "PaymentSum_{N}",
+     "type": "Decimal",
+     "length": 11,
+     "required": false,
+     "readonly": true,
+     "comment": "Įmokų suma Lt"
+    },
+    {
+     "name": "Currency_{N}",
+     "type": "Text",
+     "length": 3,
+     "required": false,
+     "readonly": true,
+     "comment": "Valiuta"
+    },
+    {
+     "name": "ReasonCode_{N}",
+     "type": "Text",
+     "length": 2,
+     "required": false,
+     "readonly": true,
+     "comment": "Pranešimo pateikimo priežasties kodas",
+     "list": [
+      "01",
+      "02",
+      "03",
+      "04",
+      "05",
+      "06",
+      "07",
+      "08",
+      "09",
+      "10",
+      "99"
+     ]
+    },
+    {
+     "name": "ReasonText_{N}",
+     "type": "Text",
+     "length": 65,
+     "required": false,
+     "readonly": true,
+     "comment": "Pranešimo pateikimo priežastis"
+    }
+   ]
+  },
+  "PT-NP-SD": {
+   "occur": [
+    "0",
+    "9999"
+   ],
+   "field_count": 88,
+   "rows_per_page": 12,
+   "header_fields": [
+    {
+     "name": "PageNumber",
+     "type": "Decimal",
+     "length": 4,
+     "required": false,
+     "readonly": true,
+     "comment": "Lapo numeris"
+    },
+    {
+     "name": "PageTotal",
+     "type": "Decimal",
+     "length": 4,
+     "required": false,
+     "readonly": true,
+     "comment": "Bendras priedo lapų skaičius"
+    },
+    {
+     "name": "FormCode",
+     "type": "Text",
+     "length": 10,
+     "required": false,
+     "readonly": true,
+     "comment": "PT-NP-SD"
+    },
+    {
+     "name": "FormVersion",
+     "type": "Text",
+     "length": 10,
+     "required": false,
+     "readonly": true,
+     "comment": "15"
+    },
+    {
+     "name": "InsurerCode",
+     "type": "Decimal",
+     "length": 7,
+     "required": false,
+     "readonly": true,
+     "comment": "Draudėjo kodas"
+    },
+    {
+     "name": "DocDate",
+     "type": "Date",
+     "length": 10,
+     "required": false,
+     "readonly": true,
+     "comment": "Pranešimo registracijos data"
+    },
+    {
+     "name": "DocNumber",
+     "type": "Text",
+     "length": 16,
+     "required": false,
+     "readonly": true,
+     "comment": "Pranešimo registracijos numeris"
+    },
+    {
+     "name": "PTAction1",
+     "type": "Checkmark",
+     "required": false,
+     "readonly": false,
+     "comment": "Patikslinti duomenis"
+    },
+    {
+     "name": "PTAction2",
+     "type": "Checkmark",
+     "required": false,
+     "readonly": false,
+     "comment": "Pašalinti duomenis"
+    },
+    {
+     "name": "PTAction3",
+     "type": "Checkmark",
+     "required": false,
+     "readonly": false,
+     "comment": "Įrašyti duomenis"
+    },
+    {
+     "name": "RevisedCycleYear",
+     "type": "Decimal",
+     "length": 4,
+     "required": false,
+     "readonly": false,
+     "comment": "Tikslinamo laikotarpio metai"
+    },
+    {
+     "name": "RevisedCycleMonth",
+     "type": "Decimal",
+     "length": 2,
+     "required": false,
+     "readonly": false,
+     "comment": "Tikslinamo laikotarpio mėnuo"
+    },
+    {
+     "name": "PTActionGroup",
+     "type": "Radiogroup",
+     "required": true,
+     "readonly": false
+    }
+   ],
+   "row_fields": [
+    {
+     "name": "PersonCode_{N}",
+     "type": "Decimal",
+     "length": 11,
+     "required": false,
+     "readonly": false,
+     "comment": "Apdraustojo asmens kodas"
+    },
+    {
+     "name": "InsuranceSeries_{N}",
+     "type": "Text",
+     "length": 2,
+     "required": false,
+     "readonly": false,
+     "comment": "Asmens socialinio draudimo numeris"
+    },
+    {
+     "name": "InsuranceNumber_{N}",
+     "type": "Decimal",
+     "length": 7,
+     "required": false,
+     "readonly": false,
+     "comment": "Asmens socialinio draudimo numeris"
+    },
+    {
+     "name": "PersonFirstName_{N}",
+     "type": "Text",
+     "length": 68,
+     "required": false,
+     "readonly": false,
+     "comment": "Apdraustojo vardas"
+    },
+    {
+     "name": "PersonLastName_{N}",
+     "type": "Text",
+     "length": 68,
+     "required": false,
+     "readonly": false,
+     "comment": "Apdraustojo pavardė"
+    },
+    {
+     "name": "A5_Series_{N}",
+     "type": "Text",
+     "length": 2,
+     "required": false,
+     "readonly": true
+    },
+    {
+     "name": "A5_Number_{N}",
+     "type": "Decimal",
+     "length": 7,
+     "required": false,
+     "readonly": true
+    },
+    {
+     "name": "A6_Start_{N}",
+     "type": "Date",
+     "length": 10,
+     "required": false,
+     "readonly": true
+    },
+    {
+     "name": "A7_End_{N}",
+     "type": "Date",
+     "length": 10,
+     "required": false,
+     "readonly": true
+    },
+    {
+     "name": "A8_Series_{N}",
+     "type": "Text",
+     "length": 2,
+     "required": false,
+     "readonly": true
+    },
+    {
+     "name": "A8_Number_{N}",
+     "type": "Decimal",
+     "length": 7,
+     "required": false,
+     "readonly": true
+    },
+    {
+     "name": "A9_Start_{N}",
+     "type": "Date",
+     "length": 10,
+     "required": false,
+     "readonly": true
+    },
+    {
+     "name": "A10_End_{N}",
+     "type": "Date",
+     "length": 10,
+     "required": false,
+     "readonly": true
+    },
+    {
+     "name": "B11_Start_{N}",
+     "type": "Date",
+     "length": 10,
+     "required": false,
+     "readonly": true
+    },
+    {
+     "name": "B12_End_{N}",
+     "type": "Date",
+     "length": 10,
+     "required": false,
+     "readonly": true
+    },
+    {
+     "name": "B21_Start_{N}",
+     "type": "Date",
+     "length": 10,
+     "required": false,
+     "readonly": true
+    },
+    {
+     "name": "B31_Start_{N}",
+     "type": "Date",
+     "length": 10,
+     "required": false,
+     "readonly": true
+    },
+    {
+     "name": "B32_End_{N}",
+     "type": "Date",
+     "length": 10,
+     "required": false,
+     "readonly": true
+    },
+    {
+     "name": "B41_Start_{N}",
+     "type": "Date",
+     "length": 10,
+     "required": false,
+     "readonly": true
+    },
+    {
+     "name": "B42_End_{N}",
+     "type": "Date",
+     "length": 10,
+     "required": false,
+     "readonly": true
+    },
+    {
+     "name": "J1_{N}",
+     "type": "Checkmark",
+     "required": false,
+     "readonly": true
+    },
+    {
+     "name": "J2_{N}",
+     "type": "Checkmark",
+     "required": false,
+     "readonly": true
+    },
+    {
+     "name": "J3_{N}",
+     "type": "Checkmark",
+     "required": false,
+     "readonly": true
+    },
+    {
+     "name": "B51_PaymentSum_{N}",
+     "type": "Decimal",
+     "length": 7,
+     "required": false,
+     "readonly": true
+    },
+    {
+     "name": "Currency_{N}",
+     "type": "Text",
+     "length": 3,
+     "required": false,
+     "readonly": true,
+     "comment": "Valiuta"
+    },
+    {
+     "name": "ReasonCode_{N}",
+     "type": "Text",
+     "length": 2,
+     "required": false,
+     "readonly": true,
+     "list": [
+      "01",
+      "02",
+      "03",
+      "04",
+      "05"
+     ]
+    },
+    {
+     "name": "ReasonText_{N}",
+     "type": "Text",
+     "length": 41,
+     "required": false,
+     "readonly": true
+    },
+    {
+     "name": "J_group_{N}",
+     "type": "Radiogroup",
+     "required": false,
+     "readonly": true
+    }
+   ]
+  },
+  "PT-SAM3SD-M": {
+   "occur": [
+    "0",
+    "9999"
+   ],
+   "field_count": 103,
+   "rows_per_page": 2,
+   "header_fields": [
+    {
+     "name": "PTAction1",
+     "type": "Checkmark",
+     "required": false,
+     "readonly": false,
+     "comment": "Patikslinti duomenis"
+    },
+    {
+     "name": "RevisedCycleYear",
+     "type": "Decimal",
+     "length": 4,
+     "required": false,
+     "readonly": false,
+     "comment": "Tikslinamo laikotarpio metai"
+    },
+    {
+     "name": "InsurerCode",
+     "type": "Decimal",
+     "length": 7,
+     "required": false,
+     "readonly": true,
+     "comment": "Draudėjo kodas"
+    },
+    {
+     "name": "DocDate",
+     "type": "Date",
+     "length": 10,
+     "required": false,
+     "readonly": true,
+     "comment": "Pranešimo registracijos data"
+    },
+    {
+     "name": "DocNumber",
+     "type": "Text",
+     "length": 16,
+     "required": false,
+     "readonly": true,
+     "comment": "Pranešimo registracijos numeris"
+    },
+    {
+     "name": "PageNumber",
+     "type": "Decimal",
+     "length": 4,
+     "required": false,
+     "readonly": true,
+     "comment": "Lapo numeris"
+    },
+    {
+     "name": "PageTotal",
+     "type": "Decimal",
+     "length": 4,
+     "required": false,
+     "readonly": true,
+     "comment": "Bendras priedo lapų skaičius"
+    },
+    {
+     "name": "FormCode",
+     "type": "Text",
+     "length": 11,
+     "required": false,
+     "readonly": true,
+     "comment": "PT-SAM3SD-M"
+    },
+    {
+     "name": "FormVersion",
+     "type": "Text",
+     "length": 10,
+     "required": false,
+     "readonly": true,
+     "comment": "15"
+    }
+   ],
+   "row_fields": [
+    {
+     "name": "PersonCode_{N}",
+     "type": "Decimal",
+     "length": 11,
+     "required": false,
+     "readonly": false,
+     "comment": "Apdraustojo asmens kodas"
+    },
+    {
+     "name": "InsuranceSeries_{N}",
+     "type": "Text",
+     "length": 2,
+     "required": false,
+     "readonly": false,
+     "comment": "Asmens socialinio draudimo numeris"
+    },
+    {
+     "name": "InsuranceNumber_{N}",
+     "type": "Decimal",
+     "length": 7,
+     "required": false,
+     "readonly": false,
+     "comment": "Asmens socialinio draudimo numeris"
+    },
+    {
+     "name": "Currency_{N}",
+     "type": "Text",
+     "length": 3,
+     "required": false,
+     "readonly": true,
+     "comment": "Valiuta"
+    },
+    {
+     "name": "PersonFirstName_{N}",
+     "type": "Text",
+     "length": 68,
+     "required": false,
+     "readonly": false,
+     "comment": "Apdraustojo vardas"
+    },
+    {
+     "name": "PersonLastName_{N}",
+     "type": "Text",
+     "length": 68,
+     "required": false,
+     "readonly": false,
+     "comment": "Apdraustojo pavardė"
+    },
+    {
+     "name": "RevisedCycleMonth_1_{N}",
+     "type": "Decimal",
+     "length": 2,
+     "required": false,
+     "readonly": true,
+     "comment": "Tikslinamo laikotarpio mėnuo"
+    },
+    {
+     "name": "InsIncomeSum_1_{N}",
+     "type": "Decimal",
+     "length": 11,
+     "required": false,
+     "readonly": true,
+     "comment": "Pajamų, nuo kurių skaičiuojamos įmokos, suma Lt"
+    },
+    {
+     "name": "TaxRate_1_{N}",
+     "type": "Decimal",
+     "length": 5,
+     "required": false,
+     "readonly": true,
+     "comment": "Bendras tarifas"
+    },
+    {
+     "name": "PaymentSum_1_{N}",
+     "type": "Decimal",
+     "length": 11,
+     "required": false,
+     "readonly": true,
+     "comment": "Įmokų suma Lt"
+    },
+    {
+     "name": "RevisedCycleMonth_2_{N}",
+     "type": "Decimal",
+     "length": 2,
+     "required": false,
+     "readonly": true,
+     "comment": "Tikslinamo laikotarpio mėnuo"
+    },
+    {
+     "name": "InsIncomeSum_2_{N}",
+     "type": "Decimal",
+     "length": 11,
+     "required": false,
+     "readonly": true,
+     "comment": "Pajamų, nuo kurių skaičiuojamos įmokos, suma Lt"
+    },
+    {
+     "name": "TaxRate_2_{N}",
+     "type": "Decimal",
+     "length": 5,
+     "required": false,
+     "readonly": true,
+     "comment": "Bendras tarifas"
+    },
+    {
+     "name": "PaymentSum_2_{N}",
+     "type": "Decimal",
+     "length": 11,
+     "required": false,
+     "readonly": true,
+     "comment": "Įmokų suma Lt"
+    },
+    {
+     "name": "RevisedCycleMonth_3_{N}",
+     "type": "Decimal",
+     "length": 2,
+     "required": false,
+     "readonly": true,
+     "comment": "Tikslinamo laikotarpio mėnuo"
+    },
+    {
+     "name": "InsIncomeSum_3_{N}",
+     "type": "Decimal",
+     "length": 11,
+     "required": false,
+     "readonly": true,
+     "comment": "Pajamų, nuo kurių skaičiuojamos įmokos, suma Lt"
+    },
+    {
+     "name": "TaxRate_3_{N}",
+     "type": "Decimal",
+     "length": 5,
+     "required": false,
+     "readonly": true,
+     "comment": "Bendras tarifas"
+    },
+    {
+     "name": "PaymentSum_3_{N}",
+     "type": "Decimal",
+     "length": 11,
+     "required": false,
+     "readonly": true,
+     "comment": "Įmokų suma Lt"
+    },
+    {
+     "name": "RevisedCycleMonth_4_{N}",
+     "type": "Decimal",
+     "length": 2,
+     "required": false,
+     "readonly": true,
+     "comment": "Tikslinamo laikotarpio mėnuo"
+    },
+    {
+     "name": "InsIncomeSum_4_{N}",
+     "type": "Decimal",
+     "length": 11,
+     "required": false,
+     "readonly": true,
+     "comment": "Pajamų, nuo kurių skaičiuojamos įmokos, suma Lt"
+    },
+    {
+     "name": "TaxRate_4_{N}",
+     "type": "Decimal",
+     "length": 5,
+     "required": false,
+     "readonly": true,
+     "comment": "Bendras tarifas"
+    },
+    {
+     "name": "PaymentSum_4_{N}",
+     "type": "Decimal",
+     "length": 11,
+     "required": false,
+     "readonly": true,
+     "comment": "Įmokų suma Lt"
+    },
+    {
+     "name": "RevisedCycleMonth_5_{N}",
+     "type": "Decimal",
+     "length": 2,
+     "required": false,
+     "readonly": true,
+     "comment": "Tikslinamo laikotarpio mėnuo"
+    },
+    {
+     "name": "InsIncomeSum_5_{N}",
+     "type": "Decimal",
+     "length": 11,
+     "required": false,
+     "readonly": true,
+     "comment": "Pajamų, nuo kurių skaičiuojamos įmokos, suma Lt"
+    },
+    {
+     "name": "TaxRate_5_{N}",
+     "type": "Decimal",
+     "length": 5,
+     "required": false,
+     "readonly": true,
+     "comment": "Bendras tarifas"
+    },
+    {
+     "name": "PaymentSum_5_{N}",
+     "type": "Decimal",
+     "length": 11,
+     "required": false,
+     "readonly": true,
+     "comment": "Įmokų suma Lt"
+    },
+    {
+     "name": "RevisedCycleMonth_6_{N}",
+     "type": "Decimal",
+     "length": 2,
+     "required": false,
+     "readonly": true,
+     "comment": "Tikslinamo laikotarpio mėnuo"
+    },
+    {
+     "name": "InsIncomeSum_6_{N}",
+     "type": "Decimal",
+     "length": 11,
+     "required": false,
+     "readonly": true,
+     "comment": "Pajamų, nuo kurių skaičiuojamos įmokos, suma Lt"
+    },
+    {
+     "name": "TaxRate_6_{N}",
+     "type": "Decimal",
+     "length": 5,
+     "required": false,
+     "readonly": true,
+     "comment": "Bendras tarifas"
+    },
+    {
+     "name": "PaymentSum_6_{N}",
+     "type": "Decimal",
+     "length": 11,
+     "required": false,
+     "readonly": true,
+     "comment": "Įmokų suma Lt"
+    },
+    {
+     "name": "RevisedCycleMonth_7_{N}",
+     "type": "Decimal",
+     "length": 2,
+     "required": false,
+     "readonly": true,
+     "comment": "Tikslinamo laikotarpio mėnuo"
+    },
+    {
+     "name": "InsIncomeSum_7_{N}",
+     "type": "Decimal",
+     "length": 11,
+     "required": false,
+     "readonly": true,
+     "comment": "Pajamų, nuo kurių skaičiuojamos įmokos, suma Lt"
+    },
+    {
+     "name": "TaxRate_7_{N}",
+     "type": "Decimal",
+     "length": 5,
+     "required": false,
+     "readonly": true,
+     "comment": "Bendras tarifas"
+    },
+    {
+     "name": "PaymentSum_7_{N}",
+     "type": "Decimal",
+     "length": 11,
+     "required": false,
+     "readonly": true,
+     "comment": "Įmokų suma Lt"
+    },
+    {
+     "name": "RevisedCycleMonth_8_{N}",
+     "type": "Decimal",
+     "length": 2,
+     "required": false,
+     "readonly": true,
+     "comment": "Tikslinamo laikotarpio mėnuo"
+    },
+    {
+     "name": "InsIncomeSum_8_{N}",
+     "type": "Decimal",
+     "length": 11,
+     "required": false,
+     "readonly": true,
+     "comment": "Pajamų, nuo kurių skaičiuojamos įmokos, suma Lt"
+    },
+    {
+     "name": "TaxRate_8_{N}",
+     "type": "Decimal",
+     "length": 5,
+     "required": false,
+     "readonly": true,
+     "comment": "Bendras tarifas"
+    },
+    {
+     "name": "PaymentSum_8_{N}",
+     "type": "Decimal",
+     "length": 11,
+     "required": false,
+     "readonly": true,
+     "comment": "Įmokų suma Lt"
+    },
+    {
+     "name": "RevisedCycleMonth_9_{N}",
+     "type": "Decimal",
+     "length": 2,
+     "required": false,
+     "readonly": true,
+     "comment": "Tikslinamo laikotarpio mėnuo"
+    },
+    {
+     "name": "InsIncomeSum_9_{N}",
+     "type": "Decimal",
+     "length": 11,
+     "required": false,
+     "readonly": true,
+     "comment": "Pajamų, nuo kurių skaičiuojamos įmokos, suma Lt"
+    },
+    {
+     "name": "TaxRate_9_{N}",
+     "type": "Decimal",
+     "length": 5,
+     "required": false,
+     "readonly": true,
+     "comment": "Bendras tarifas"
+    },
+    {
+     "name": "PaymentSum_9_{N}",
+     "type": "Decimal",
+     "length": 11,
+     "required": false,
+     "readonly": true,
+     "comment": "Įmokų suma Lt"
+    },
+    {
+     "name": "RevisedCycleMonth_10_{N}",
+     "type": "Decimal",
+     "length": 2,
+     "required": false,
+     "readonly": true,
+     "comment": "Tikslinamo laikotarpio mėnuo"
+    },
+    {
+     "name": "InsIncomeSum_10_{N}",
+     "type": "Decimal",
+     "length": 11,
+     "required": false,
+     "readonly": true,
+     "comment": "Pajamų, nuo kurių skaičiuojamos įmokos, suma Lt"
+    },
+    {
+     "name": "TaxRate_10_{N}",
+     "type": "Decimal",
+     "length": 5,
+     "required": false,
+     "readonly": true,
+     "comment": "Bendras tarifas"
+    },
+    {
+     "name": "PaymentSum_10_{N}",
+     "type": "Decimal",
+     "length": 11,
+     "required": false,
+     "readonly": true,
+     "comment": "Įmokų suma Lt"
+    },
+    {
+     "name": "RevisedCycleMonth_11_{N}",
+     "type": "Decimal",
+     "length": 2,
+     "required": false,
+     "readonly": true,
+     "comment": "Tikslinamo laikotarpio mėnuo"
+    },
+    {
+     "name": "InsIncomeSum_11_{N}",
+     "type": "Decimal",
+     "length": 11,
+     "required": false,
+     "readonly": true,
+     "comment": "Pajamų, nuo kurių skaičiuojamos įmokos, suma Lt"
+    },
+    {
+     "name": "TaxRate_11_{N}",
+     "type": "Decimal",
+     "length": 5,
+     "required": false,
+     "readonly": true,
+     "comment": "Bendras tarifas"
+    },
+    {
+     "name": "PaymentSum_11_{N}",
+     "type": "Decimal",
+     "length": 11,
+     "required": false,
+     "readonly": true,
+     "comment": "Įmokų suma Lt"
+    },
+    {
+     "name": "RevisedCycleMonth_12_{N}",
+     "type": "Decimal",
+     "length": 2,
+     "required": false,
+     "readonly": true,
+     "comment": "Tikslinamo laikotarpio mėnuo"
+    },
+    {
+     "name": "InsIncomeSum_12_{N}",
+     "type": "Decimal",
+     "length": 11,
+     "required": false,
+     "readonly": true,
+     "comment": "Pajamų, nuo kurių skaičiuojamos įmokos, suma Lt"
+    },
+    {
+     "name": "TaxRate_12_{N}",
+     "type": "Decimal",
+     "length": 5,
+     "required": false,
+     "readonly": true,
+     "comment": "Bendras tarifas"
+    },
+    {
+     "name": "PaymentSum_12_{N}",
+     "type": "Decimal",
+     "length": 11,
+     "required": false,
+     "readonly": true,
+     "comment": "Įmokų suma Lt"
+    },
+    {
+     "name": "InsIncomePage_{N}",
+     "type": "Decimal",
+     "length": 11,
+     "required": false,
+     "readonly": true,
+     "comment": "Iš viso lape pajamų, nuo kurių skaičiuojamos įmokos, suma"
+    },
+    {
+     "name": "PaymentPage_{N}",
+     "type": "Decimal",
+     "length": 11,
+     "required": false,
+     "readonly": true,
+     "comment": "Iš viso lape įmokų suma"
+    }
+   ]
+  },
+  "PT-NP-SD2": {
+   "occur": [
+    "0",
+    "9999"
+   ],
+   "field_count": 60,
+   "rows_per_page": 2,
+   "header_fields": [
+    {
+     "name": "PageNumber",
+     "type": "Decimal",
+     "length": 4,
+     "required": false,
+     "readonly": true,
+     "comment": "Lapo numeris"
+    },
+    {
+     "name": "PageTotal",
+     "type": "Decimal",
+     "length": 4,
+     "required": false,
+     "readonly": true,
+     "comment": "Bendras priedo lapų skaičius"
+    },
+    {
+     "name": "InsurerCode",
+     "type": "Decimal",
+     "length": 7,
+     "required": false,
+     "readonly": true,
+     "comment": "Draudėjo kodas"
+    },
+    {
+     "name": "DocDate",
+     "type": "Date",
+     "length": 10,
+     "required": false,
+     "readonly": true,
+     "comment": "Pranešimo registracijos data"
+    },
+    {
+     "name": "DocNumber",
+     "type": "Text",
+     "length": 16,
+     "required": false,
+     "readonly": true,
+     "comment": "Pranešimo registracijos numeris"
+    },
+    {
+     "name": "PTAction1",
+     "type": "Checkmark",
+     "required": false,
+     "readonly": false,
+     "comment": "Patikslinti duomenis"
+    },
+    {
+     "name": "PTAction2",
+     "type": "Checkmark",
+     "required": false,
+     "readonly": false,
+     "comment": "Pašalinti duomenis"
+    },
+    {
+     "name": "PTAction3",
+     "type": "Checkmark",
+     "required": false,
+     "readonly": false,
+     "comment": "Įrašyti duomenis"
+    },
+    {
+     "name": "RevisedCycleYear",
+     "type": "Decimal",
+     "length": 4,
+     "required": false,
+     "readonly": false,
+     "comment": "Tikslinamo laikotarpio metai"
+    },
+    {
+     "name": "RevisedCycleMonth",
+     "type": "Decimal",
+     "length": 2,
+     "required": false,
+     "readonly": false,
+     "comment": "Tikslinamo laikotarpio mėnuo"
+    },
+    {
+     "name": "FormCode",
+     "type": "Text",
+     "length": 10,
+     "required": false,
+     "readonly": true,
+     "comment": "PT-NP-SD2"
+    },
+    {
+     "name": "FormVersion",
+     "type": "Text",
+     "length": 10,
+     "required": false,
+     "readonly": true,
+     "comment": "15"
+    },
+    {
+     "name": "PTActionGroup",
+     "type": "Radiogroup",
+     "required": true,
+     "readonly": false
+    }
+   ],
+   "row_fields": [
+    {
+     "name": "PersonCode_{N}",
+     "type": "Decimal",
+     "length": 11,
+     "required": false,
+     "readonly": false,
+     "comment": "Apdraustojo asmens kodas"
+    },
+    {
+     "name": "InsuranceSeries_{N}",
+     "type": "Text",
+     "length": 2,
+     "required": false,
+     "readonly": false,
+     "comment": "Asmens socialinio draudimo numeris"
+    },
+    {
+     "name": "InsuranceNumber_{N}",
+     "type": "Decimal",
+     "length": 7,
+     "required": false,
+     "readonly": false,
+     "comment": "Asmens socialinio draudimo numeris"
+    },
+    {
+     "name": "PersonFirstName_{N}",
+     "type": "Text",
+     "length": 68,
+     "required": false,
+     "readonly": false,
+     "comment": "Apdraustojo vardas"
+    },
+    {
+     "name": "PersonLastName_{N}",
+     "type": "Text",
+     "length": 68,
+     "required": false,
+     "readonly": false,
+     "comment": "Apdraustojo pavardė"
+    },
+    {
+     "name": "A5_Start_{N}",
+     "type": "Date",
+     "length": 10,
+     "required": false,
+     "readonly": true
+    },
+    {
+     "name": "A6_End_{N}",
+     "type": "Date",
+     "length": 10,
+     "required": false,
+     "readonly": true
+    },
+    {
+     "name": "A7_{N}",
+     "type": "Checkmark",
+     "required": false,
+     "readonly": true
+    },
+    {
+     "name": "B1_Start_1_{N}",
+     "type": "Date",
+     "length": 10,
+     "required": false,
+     "readonly": true
+    },
+    {
+     "name": "B2_End_1_{N}",
+     "type": "Date",
+     "length": 10,
+     "required": false,
+     "readonly": true
+    },
+    {
+     "name": "B1_Start_2_{N}",
+     "type": "Date",
+     "length": 10,
+     "required": false,
+     "readonly": true
+    },
+    {
+     "name": "B2_End_2_{N}",
+     "type": "Date",
+     "length": 10,
+     "required": false,
+     "readonly": true
+    },
+    {
+     "name": "B1_Start_3_{N}",
+     "type": "Date",
+     "length": 10,
+     "required": false,
+     "readonly": true
+    },
+    {
+     "name": "B2_End_3_{N}",
+     "type": "Date",
+     "length": 10,
+     "required": false,
+     "readonly": true
+    },
+    {
+     "name": "B3_Start_{N}",
+     "type": "Date",
+     "length": 10,
+     "required": false,
+     "readonly": true
+    },
+    {
+     "name": "B4_End_{N}",
+     "type": "Date",
+     "length": 10,
+     "required": false,
+     "readonly": true
+    },
+    {
+     "name": "B5_Start_{N}",
+     "type": "Date",
+     "length": 10,
+     "required": false,
+     "readonly": true
+    },
+    {
+     "name": "B6_End_{N}",
+     "type": "Date",
+     "length": 10,
+     "required": false,
+     "readonly": true
+    },
+    {
+     "name": "J1_{N}",
+     "type": "Checkmark",
+     "required": false,
+     "readonly": true
+    },
+    {
+     "name": "J2_{N}",
+     "type": "Checkmark",
+     "required": false,
+     "readonly": true
+    },
+    {
+     "name": "J3_{N}",
+     "type": "Checkmark",
+     "required": false,
+     "readonly": true
+    },
+    {
+     "name": "B7_PaymentSum_{N}",
+     "type": "Decimal",
+     "length": 7,
+     "required": false,
+     "readonly": true
+    },
+    {
+     "name": "Currency_{N}",
+     "type": "Text",
+     "length": 3,
+     "required": false,
+     "readonly": true
+    },
+    {
+     "name": "ReasonCode_{N}",
+     "type": "Text",
+     "length": 2,
+     "required": false,
+     "readonly": true,
+     "list": [
+      "01",
+      "02",
+      "03",
+      "04",
+      "05",
+      "06"
+     ]
+    },
+    {
+     "name": "ReasonText_{N}",
+     "type": "Text",
+     "length": 40,
+     "required": false,
+     "readonly": true
+    },
+    {
+     "name": "J_group_{N}",
+     "type": "Radiogroup",
+     "required": false,
+     "readonly": true
+    }
+   ]
+  }
+ }
+}

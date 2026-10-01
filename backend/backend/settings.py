@@ -53,6 +53,15 @@ MAILGUN_INVOICE_FROM_EMAIL = "noreply@m.saskaituisrasymas.lt"
 MAILGUN_INVOICE_FROM_NAME = "DokSkenas"
 MAILGUN_INVOICE_WEBHOOK_SIGNING_KEY = os.getenv('MAILGUN_INVOICE_WEBHOOK_SIGNING_KEY', "")
 
+
+# esavitarna.lt (darbuotojų savitarna)
+SAVITARNA_HOSTS = ["esavitarna.lt", "www.esavitarna.lt"]
+SAVITARNA_BASE_URL = os.getenv("SAVITARNA_BASE_URL", "https://esavitarna.lt")
+MAILGUN_SAVITARNA_API_KEY = os.getenv("MAILGUN_SAVITARNA_API_KEY", MAILGUN_INVOICE_API_KEY)
+MAILGUN_SAVITARNA_DOMAIN = "m.esavitarna.lt"
+MAILGUN_SAVITARNA_API_URL = "https://api.eu.mailgun.net/v3"
+MAILGUN_SAVITARNA_FROM = "esavitarna.lt <noreply@m.esavitarna.lt>"
+
 DOKSKENAS_ANDROID_PACKAGE_NAME = os.getenv("DOKSKENAS_ANDROID_PACKAGE_NAME", "")
 
 PAYMENT_ENVIRONMENT = os.getenv("PAYMENT_ENVIRONMENT", default="production")
@@ -103,6 +112,7 @@ WAGTAIL_SITE_NAME = "DokSkenas"
 # Middleware
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    "docscanner_app.payroll.savitarna_auth.SavitarnaHostMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "corsheaders.middleware.CorsMiddleware",
     "django.middleware.common.CommonMiddleware",
@@ -113,6 +123,7 @@ MIDDLEWARE = [
 
     "wagtail.contrib.redirects.middleware.RedirectMiddleware",
 ]
+
 
 # Django REST Framework настройки
 REST_FRAMEWORK = {

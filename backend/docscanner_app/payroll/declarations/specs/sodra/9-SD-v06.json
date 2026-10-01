@@ -1,0 +1,253 @@
+{
+ "form": "9-SD",
+ "version": "06",
+ "FormDefId": "{07699928-F4D7-4577-A6A7-7727F0944B38}",
+ "groups": {
+  "name": "Forma",
+  "min": "1",
+  "max": "1",
+  "pages": [
+   "9-SD"
+  ],
+  "children": []
+ },
+ "number_format": "decimal comma, e.g. 1500,00",
+ "date_format": "YYYY-MM-DD",
+ "encoding": "UTF-8",
+ "pages": {
+  "9-SD": {
+   "occur": [
+    "1",
+    "1"
+   ],
+   "field_count": 23,
+   "rows_per_page": 1,
+   "header_fields": [
+    {
+     "name": "FormCode",
+     "type": "Text",
+     "length": 10,
+     "required": false,
+     "readonly": true,
+     "comment": "9-SD"
+    },
+    {
+     "name": "FormVersion",
+     "type": "Text",
+     "length": 10,
+     "required": false,
+     "readonly": true,
+     "comment": "06"
+    },
+    {
+     "name": "InsurerName",
+     "type": "Text",
+     "length": 68,
+     "required": false,
+     "readonly": false,
+     "comment": "Draudėjo pavadinimas"
+    },
+    {
+     "name": "InsurerCode",
+     "type": "Decimal",
+     "length": 7,
+     "required": false,
+     "readonly": false,
+     "comment": "Draudėjo kodas"
+    },
+    {
+     "name": "JuridicalPersonCode",
+     "type": "Decimal",
+     "length": 9,
+     "required": false,
+     "readonly": false,
+     "comment": "Draudėjo juridinio asmens kodas"
+    },
+    {
+     "name": "InsurerPhone",
+     "type": "Text",
+     "length": 15,
+     "required": false,
+     "readonly": false,
+     "comment": "Draudėjo tel. nr."
+    },
+    {
+     "name": "InsurerAddress",
+     "type": "Text",
+     "length": 68,
+     "required": false,
+     "readonly": false,
+     "comment": "Draudėjo adresas"
+    },
+    {
+     "name": "DocDate",
+     "type": "Date",
+     "length": 10,
+     "required": false,
+     "readonly": false,
+     "comment": "Pranešimo registracijos data"
+    },
+    {
+     "name": "DocNumber",
+     "type": "Text",
+     "length": 16,
+     "required": false,
+     "readonly": false,
+     "comment": "Pranešimo registracijos numeris"
+    },
+    {
+     "name": "PersonCode",
+     "type": "Decimal",
+     "length": 11,
+     "required": false,
+     "readonly": false,
+     "comment": "Apdraustojo asmens kodas"
+    },
+    {
+     "name": "InsuranceSeries",
+     "type": "Text",
+     "length": 2,
+     "required": false,
+     "readonly": false,
+     "comment": "Asmens socialinio draudimo numeris"
+    },
+    {
+     "name": "InsuranceNumber",
+     "type": "Decimal",
+     "length": 7,
+     "required": false,
+     "readonly": false,
+     "comment": "Asmens socialinio draudimo numeris"
+    },
+    {
+     "name": "PersonFirstName",
+     "type": "Text",
+     "length": 68,
+     "required": false,
+     "readonly": false,
+     "comment": "Apdraustojo vardas"
+    },
+    {
+     "name": "HolidayStartDate",
+     "type": "Date",
+     "length": 10,
+     "required": false,
+     "readonly": false,
+     "comment": "Atostogos suteiktos nuo"
+    },
+    {
+     "name": "HolidayEndDate",
+     "type": "Date",
+     "length": 10,
+     "required": false,
+     "readonly": false,
+     "comment": "Atostogos suteiktos iki"
+    },
+    {
+     "name": "HolidayCancelDate",
+     "type": "Date",
+     "length": 10,
+     "required": false,
+     "readonly": false,
+     "comment": "Atostogos atšauktos nuo"
+    },
+    {
+     "name": "ChildBirthDate",
+     "type": "Date",
+     "length": 10,
+     "required": false,
+     "readonly": false,
+     "comment": "Vaiko gimimo data"
+    },
+    {
+     "name": "ChildPersonCode",
+     "type": "Decimal",
+     "length": 11,
+     "required": false,
+     "readonly": false,
+     "comment": "Vaiko asmens kodas"
+    },
+    {
+     "name": "ManagerFullName",
+     "type": "Text",
+     "length": 68,
+     "required": false,
+     "readonly": false,
+     "comment": "Vadovo ar įgalioto asmens vardas, pavardė"
+    },
+    {
+     "name": "PreparatorDetails",
+     "type": "Text",
+     "length": 68,
+     "required": false,
+     "readonly": false,
+     "comment": "Pranešimą užpildžiusio asmens vardas, pavardė, tel. nr., el. pašto adresas"
+    },
+    {
+     "name": "PersonLastName",
+     "type": "Text",
+     "length": 68,
+     "required": false,
+     "readonly": false,
+     "comment": "Apdraustojo pavardė"
+    }
+   ],
+   "row_fields": [
+    {
+     "name": "ReasonText_{N}",
+     "type": "Text",
+     "length": 65,
+     "required": false,
+     "readonly": false
+    },
+    {
+     "name": "ReasonCode_{N}",
+     "type": "Text",
+     "length": 2,
+     "required": false,
+     "readonly": false,
+     "comment": "Pranešimo pateikimo priežasties kodas",
+     "list": [
+      "01",
+      "02",
+      "03",
+      "04",
+      "05",
+      "06",
+      "07"
+     ]
+    }
+   ]
+  }
+ },
+ "reason_codes": [
+  {
+   "code": "01",
+   "name": "tėvystės atostogos"
+  },
+  {
+   "code": "02",
+   "name": "atostogos vaikui prižiūrėti"
+  },
+  {
+   "code": "03",
+   "name": "atostogos vaikui prižiūrėti (DK 180 str. 2 d. iki 2017-06-30)"
+  },
+  {
+   "code": "04",
+   "name": "atostogos vaikui prižiūrėti (DK 134 str. 2 d. nuo 2017-07-01)"
+  },
+  {
+   "code": "05",
+   "name": "14 kalendorinių dienų atostogos (DK 132 str. 1d. nuo 2017-07-01)"
+  },
+  {
+   "code": "06",
+   "name": "tėvystės atostogos (DK 133 str. 2d. nuo 2018-01-01)"
+  },
+  {
+   "code": "07",
+   "name": "atostogos senelei (seneliui) vaikui prižiūrėti iki 3 metų"
+  }
+ ]
+}

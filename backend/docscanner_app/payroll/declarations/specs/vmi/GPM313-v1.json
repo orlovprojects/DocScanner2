@@ -1,0 +1,140 @@
+{
+ "form": "GPM313",
+ "version": "1",
+ "FormDefId": "{EB03E9EF-39B0-457F-8264-79E86F053009}",
+ "template_created": "2025-11-04",
+ "authority": "VMI",
+ "groups": {
+  "name": "Visa forma",
+  "pages": [
+   "GPM313"
+  ]
+ },
+ "number_format": "decimal comma",
+ "date_format": "YYYY-MM-DD",
+ "encoding": "UTF-8",
+ "pages": {
+  "GPM313": {
+   "occur": [
+    "1",
+    "1"
+   ],
+   "field_count": 14,
+   "rows_per_page": 0,
+   "header_fields": [
+    {
+     "name": "B_MM_ID",
+     "type": "Decimal",
+     "length": 11,
+     "comment": "1 - mokesčių mokėtojo identifikacinis numeris (įmonės kodas)"
+    },
+    {
+     "name": "B_MM_Pavadinimas",
+     "type": "Text",
+     "length": 116,
+     "comment": "2 - pavadinimas"
+    },
+    {
+     "name": "B_ML_Metai",
+     "type": "Decimal",
+     "length": 4,
+     "list": [
+      "2021",
+      "2022",
+      "2023",
+      "2024",
+      "2025",
+      "2026"
+     ],
+     "comment": "3 - metai"
+    },
+    {
+     "name": "B_ML_Menuo",
+     "type": "Decimal",
+     "length": 2,
+     "list": [
+      "1",
+      "2",
+      "3",
+      "4",
+      "5",
+      "6",
+      "7",
+      "8",
+      "9",
+      "10",
+      "11",
+      "12"
+     ],
+     "comment": "4 - mėnuo"
+    },
+    {
+     "name": "G5",
+     "type": "Decimal",
+     "length": 14,
+     "comment": "5 - su darbo santykiais susijusių A klasės išmokų suma, išmokėta per mėnesį (bruto, įskaitant ligos 1-2 d.)"
+    },
+    {
+     "name": "G6",
+     "type": "Decimal",
+     "length": 14,
+     "comment": "6 - GPM nuo su darbo santykiais susijusių išmokų, išmokėtų 1-15 d."
+    },
+    {
+     "name": "G7",
+     "type": "Decimal",
+     "length": 14,
+     "comment": "7 - GPM nuo išmokų, išmokėtų 16 d. - mėn. pabaigos"
+    },
+    {
+     "name": "G8",
+     "type": "Decimal",
+     "length": 14,
+     "comment": "8 - su darbo santykiais nesusijusių A klasės išmokų suma"
+    },
+    {
+     "name": "G9",
+     "type": "Decimal",
+     "length": 14,
+     "comment": "9 - jų GPM, išmokėtų 1-15 d."
+    },
+    {
+     "name": "G10",
+     "type": "Decimal",
+     "length": 14,
+     "comment": "10 - jų GPM, išmokėtų 16 d. - pabaigos"
+    },
+    {
+     "name": "G11",
+     "type": "Decimal",
+     "length": 14,
+     "comment": "11 - B klasės išmokos, nuo kurių išskaičiuotas GPM"
+    },
+    {
+     "name": "G12",
+     "type": "Decimal",
+     "length": 14,
+     "comment": "12 - GPM nuo B klasės išmokų"
+    },
+    {
+     "name": "B_FormNr",
+     "type": "Text",
+     "length": 6,
+     "comment": "konstanta GPM313"
+    },
+    {
+     "name": "B_FormVerNr",
+     "type": "Text",
+     "length": 2,
+     "comment": "konstanta 01"
+    }
+   ],
+   "row_fields": []
+  }
+ },
+ "notes": [
+  "Deklaruojama pagal IŠMOKĖJIMO mėnesį, terminas - iki kito mėnesio 15 d.",
+  "Teikiama ir tada, kai išmokų nebuvo, bet buvo darbuotojų (nuliai).",
+  "Tik suvestinės sumos - be darbuotojų sąrašo."
+ ]
+}

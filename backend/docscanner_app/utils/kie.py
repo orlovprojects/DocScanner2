@@ -38,7 +38,13 @@ KIE_TIMEOUT_SECONDS = float(os.getenv("KIE_TIMEOUT_SECONDS", "300"))
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "").strip().strip('"').strip("'")
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 OPENROUTER_LITE_MODEL = "google/gemini-3.1-flash-lite"
-OPENROUTER_LITE_PROVIDER = "google-ai-studio/flex"
+OPENROUTER_LITE_PROVIDER = os.getenv("OPENROUTER_LITE_PROVIDER", "google-ai-studio/flex").strip()
+
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip().strip('"').strip("'")
+DIRECT_FLEX_MODEL = "gemini-3.1-flash-lite"
+
+KIE_DEEPSEEK_URL = (os.getenv("KIE_DEEPSEEK_URL") or "https://api.kie.ai/openai/v1/responses").strip()
+KIE_DEEPSEEK_MODEL = (os.getenv("KIE_DEEPSEEK_MODEL") or "deepseek-v4-1-flash").strip()
 
 LLM_PRIMARY = os.getenv("LLM_PRIMARY", "kie").strip().lower()
 LLM_DIRECT_GEMINI_FALLBACK = os.getenv("LLM_DIRECT_GEMINI_FALLBACK", "1").strip().lower() in ("1", "true", "yes", "on")
@@ -166,10 +172,11 @@ def ask_kie(
     max_output_tokens: int = 20000,
     timeout_seconds: float | int | None = None,
     endpoint_url: str | None = None,
+    extra_payload: dict | None = None,
     logger: logging.Logger | None = None,
 ) -> str:
     """
-    Один запрос к KIE Gemini OpenAI-compatible endpoint.
+    Один запрос к KIE OpenAI-compatible endpoint.
     """
     log = logger or LOGGER
 
@@ -204,6 +211,10 @@ def ask_kie(
         "temperature": temperature,
         "max_tokens": max_output_tokens,
     }
+
+    if extra_payload:
+        payload.update(extra_payload)
+        payload = {k: v for k, v in payload.items() if v is not None}
 
     t0 = time.perf_counter()
 
@@ -355,6 +366,181 @@ def ask_openrouter(
 
     return result
 
+
+def ask_gemini_direct_flex(
+    text: str,
+    prompt: str,
+    model: str = DIRECT_FLEX_MODEL,
+    temperature: float = 1.0,
+    max_output_tokens: int = 20000,
+    timeout_seconds: float | int = 90,
+    logger: logging.Logger | None = None,
+) -> str:
+    """
+    Direct Gemini API, service_tier=flex (-50%), thinking minimal.
+    Без retry: 429/503/timeout → сразу следующий шаг цепочки.
+    """
+    from google import genai
+
+    log = logger or LOGGER
+
+    if not GEMINI_API_KEY:
+        raise RuntimeError("GEMINI_API_KEY not set in .env")
+
+    full_prompt = prompt + "\n\n" + text
+
+    log.info(
+        "[Gemini Flex] Request start model=%s len_text=%d len_prompt=%d timeout=%ss",
+        model,
+        len(text or ""),
+        len(prompt or ""),
+        timeout_seconds,
+    )
+
+    client = genai.Client(
+        api_key=GEMINI_API_KEY,
+        http_options={"timeout": int(float(timeout_seconds) * 1000)},
+    )
+
+    t0 = time.perf_counter()
+
+    resp = client.models.generate_content(
+        model=model,
+        contents=full_prompt,
+        config={
+            "service_tier": "flex",
+            "temperature": temperature,
+            "max_output_tokens": max_output_tokens,
+            "thinking_config": {"thinking_level": "minimal"},
+        },
+    )
+
+    elapsed = time.perf_counter() - t0
+
+    tier = None
+    try:
+        tier = resp.sdk_http_response.headers.get("x-gemini-service-tier")
+    except Exception:
+        pass
+
+    result = (resp.text or "").strip()
+
+    log.info(
+        "[Gemini Flex] OK len=%d elapsed=%.2fs tier=%s usage=%s preview=%r",
+        len(result),
+        elapsed,
+        tier,
+        getattr(resp, "usage_metadata", None),
+        result[:500].replace("\n", " "),
+    )
+
+    return result
+
+def _extract_text_from_responses_api(data: dict) -> str:
+    output = data.get("output")
+    if not output and isinstance(data.get("data"), dict):
+        output = data["data"].get("output")
+
+    parts = []
+    for item in output or []:
+        if not isinstance(item, dict) or item.get("type") != "message":
+            continue
+        for part in item.get("content") or []:
+            if isinstance(part, dict) and part.get("type") in ("output_text", "text") and part.get("text"):
+                parts.append(str(part["text"]))
+
+    if not parts and isinstance(data.get("output_text"), str):
+        parts.append(data["output_text"])
+
+    return "".join(parts).strip()
+
+
+def ask_kie_deepseek(
+    text: str,
+    prompt: str,
+    timeout_seconds: float | int = 90,
+    logger: logging.Logger | None = None,
+) -> str:
+    """
+    KIE DeepSeek V4.1 Flash через OpenAI Responses API, thinking выключен.
+    temperature / max_output_tokens моделью не поддерживаются.
+    """
+    log = logger or LOGGER
+
+    full_prompt = prompt + "\n\n" + text
+
+    log.info(
+        "[KIE DeepSeek] Request start model=%s len_text=%d len_prompt=%d timeout=%ss",
+        KIE_DEEPSEEK_MODEL,
+        len(text or ""),
+        len(prompt or ""),
+        timeout_seconds,
+    )
+
+    payload = {
+        "model": KIE_DEEPSEEK_MODEL,
+        "stream": False,
+        "input": [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "input_text",
+                        "text": full_prompt,
+                    }
+                ],
+            }
+        ],
+        "thinking": {"type": "disabled"},
+    }
+
+    t0 = time.perf_counter()
+
+    try:
+        resp = requests.post(
+            KIE_DEEPSEEK_URL,
+            headers=_kie_headers(),
+            json=payload,
+            timeout=float(timeout_seconds),
+        )
+    except requests.exceptions.Timeout as e:
+        raise KieAPIError(f"KIE DeepSeek timed out after {timeout_seconds}s") from e
+    except requests.exceptions.ConnectionError as e:
+        raise KieAPIError("KIE DeepSeek connection error") from e
+
+    elapsed = time.perf_counter() - t0
+
+    try:
+        data = resp.json()
+    except Exception:
+        raise KieAPIError(
+            f"KIE DeepSeek HTTP {resp.status_code} non-JSON response: {resp.text[:1000]}",
+            status_code=resp.status_code,
+        )
+
+    if resp.status_code >= 400:
+        msg = data.get("msg") or data.get("message") or data.get("error") or str(data)
+        raise KieAPIError(
+            f"KIE DeepSeek HTTP {resp.status_code}: {str(msg)[:1000]}",
+            status_code=resp.status_code,
+        )
+
+    _raise_if_kie_error(data, resp.status_code)
+
+    result = _extract_text_from_responses_api(data)
+    if not result:
+        raise KieAPIError(f"KIE DeepSeek returned no text: {str(data)[:1000]}")
+
+    log.info(
+        "[KIE DeepSeek] OK len=%d elapsed=%.2fs usage=%s credits=%s preview=%r",
+        len(result),
+        elapsed,
+        data.get("usage"),
+        data.get("credits_consumed"),
+        result[:500].replace("\n", " "),
+    )
+
+    return result
 
 CATALOG_MATCHING_PROMPT = """
 You match invoice line items to products from the user's product catalog.
@@ -539,6 +725,23 @@ Return only valid JSON in this exact structure:
 DIRECT_FALLBACK_MODEL = "gemini-3.1-flash-lite"
 
 
+def _notify_first_step_failed(tag: str, model: str, error, log: logging.Logger) -> None:
+    if not KIE_ERROR_TELEGRAM:
+        return
+
+    try:
+        _send_telegram(
+            f"⚠️ <b>{tag}: 1-я модель зафейлила</b>\n"
+            f"<b>Model:</b> <code>{model}</code>\n"
+            f"<b>Error:</b> {str(error)[:300]}\n\n"
+            f"Идем на fallback.",
+            dedup_key=f"llm_first_step_failed_{tag}",
+            dedup_ttl=300,
+        )
+    except Exception as tg_err:
+        log.warning("[%s] Failed to send Telegram notification: %s", tag, tg_err)
+
+
 def _ask_direct_lite_then_kie(
     *,
     text: str,
@@ -552,16 +755,40 @@ def _ask_direct_lite_then_kie(
     notify_telegram: bool = False,
 ) -> tuple[str, str]:
     """
-    1) OpenRouter gemini-3.1-flash-lite (google-ai-studio/flex)
-    2) direct gemini-3.1-flash-lite
-    3) KIE gemini-3-flash
+    1) direct gemini-3.1-flash-lite (flex)
+    2) OpenRouter gemini-3.1-flash-lite (OPENROUTER_LITE_PROVIDER, по умолчанию flex)
+    3) KIE DeepSeek V4.1 Flash (без thinking)
+    Telegram: всегда при фейле шага 1; при исчерпании цепочки — если notify_telegram.
     Returns: (response_text, source_model)
     """
     last_exc = None
+    first_label = f"direct {DIRECT_FLEX_MODEL} (flex)"
 
-    # 1) OpenRouter gemini-3.1-flash-lite (flex)
+    # 1) direct gemini-3.1-flash-lite (flex)
     try:
-        log.info("[%s] Attempt 1/3 OpenRouter %s (%s)", tag, OPENROUTER_LITE_MODEL, OPENROUTER_LITE_PROVIDER)
+        log.info("[%s] Attempt 1/3 %s", tag, first_label)
+        result = ask_gemini_direct_flex(
+            text=text,
+            prompt=prompt,
+            temperature=temperature,
+            max_output_tokens=max_output_tokens,
+            timeout_seconds=direct_timeout,
+            logger=log,
+        )
+        if result and result.strip():
+            return result, f"direct-{DIRECT_FLEX_MODEL}-flex"
+        log.warning("[%s] %s returned empty", tag, first_label)
+        _notify_first_step_failed(tag, first_label, "empty response", log)
+    except SoftTimeLimitExceeded:
+        raise
+    except Exception as e:
+        last_exc = e
+        log.warning("[%s] %s failed: %s", tag, first_label, e)
+        _notify_first_step_failed(tag, first_label, e, log)
+
+    # 2) OpenRouter gemini-3.1-flash-lite
+    try:
+        log.info("[%s] Attempt 2/3 OpenRouter %s (%s)", tag, OPENROUTER_LITE_MODEL, OPENROUTER_LITE_PROVIDER)
         result = ask_openrouter(
             text=text,
             prompt=prompt,
@@ -579,58 +806,31 @@ def _ask_direct_lite_then_kie(
         last_exc = e
         log.warning("[%s] OpenRouter %s failed: %s", tag, OPENROUTER_LITE_MODEL, e)
 
-    # 2) direct gemini-3.1-flash-lite
+    # 3) KIE DeepSeek V4.1 Flash
     try:
-        log.info("[%s] Attempt 2/3 direct %s", tag, DIRECT_FALLBACK_MODEL)
-        result = direct_gemini.ask_gemini_with_retry(
+        log.info("[%s] Attempt 3/3 KIE %s", tag, KIE_DEEPSEEK_MODEL)
+        result = ask_kie_deepseek(
             text=text,
             prompt=prompt,
-            model=DIRECT_FALLBACK_MODEL,
-            max_retries=0,
-            wait_seconds=0,
-            temperature=temperature,
-            max_output_tokens=max_output_tokens,
-            timeout_seconds=direct_timeout,
-            logger=log,
-        )
-        if result and result.strip():
-            return result, f"direct-{DIRECT_FALLBACK_MODEL}"
-        log.warning("[%s] Direct %s returned empty", tag, DIRECT_FALLBACK_MODEL)
-    except SoftTimeLimitExceeded:
-        raise
-    except Exception as e:
-        last_exc = e
-        log.warning("[%s] Direct %s failed: %s", tag, DIRECT_FALLBACK_MODEL, e)
-
-    # 3) KIE gemini-3-flash
-    try:
-        log.info("[%s] Attempt 3/3 KIE gemini-3-flash", tag)
-        result = ask_kie(
-            text=text,
-            prompt=prompt,
-            model="gemini-3-flash",
-            temperature=temperature,
-            max_output_tokens=max_output_tokens,
             timeout_seconds=kie_timeout,
-            endpoint_url=KIE_GEMINI_3_FLASH_URL,
             logger=log,
         )
         if result and result.strip():
-            return result, "kie-gemini"
-        log.warning("[%s] KIE gemini-3-flash returned empty", tag)
+            return result, f"kie-{KIE_DEEPSEEK_MODEL}"
+        log.warning("[%s] KIE %s returned empty", tag, KIE_DEEPSEEK_MODEL)
     except SoftTimeLimitExceeded:
         raise
     except Exception as e:
         last_exc = e
-        log.warning("[%s] KIE gemini-3-flash failed: %s", tag, e)
+        log.warning("[%s] KIE %s failed: %s", tag, KIE_DEEPSEEK_MODEL, e)
         if notify_telegram:
-            _notify_kie_api_error(e, "gemini-3-flash", log, attempt=3)
+            _notify_kie_api_error(e, KIE_DEEPSEEK_MODEL, log, attempt=3)
 
     if notify_telegram and KIE_ERROR_TELEGRAM:
         try:
             _send_telegram(
                 f"🚨 <b>{tag}: все попытки исчерпаны</b>\n"
-                f"<b>Chain:</b> <code>openrouter {OPENROUTER_LITE_MODEL} (flex) → direct {DIRECT_FALLBACK_MODEL} → kie gemini-3-flash</code>\n"
+                f"<b>Chain:</b> <code>{first_label} → openrouter {OPENROUTER_LITE_MODEL} ({OPENROUTER_LITE_PROVIDER}) → kie {KIE_DEEPSEEK_MODEL}</code>\n"
                 f"<b>Last error:</b> {str(last_exc)[:300]}",
                 dedup_key=f"llm_chain_exhausted_{tag}",
                 dedup_ttl=600,
@@ -639,7 +839,7 @@ def _ask_direct_lite_then_kie(
             pass
 
     raise ValueError(
-        f"{tag}: OpenRouter {OPENROUTER_LITE_MODEL} + direct {DIRECT_FALLBACK_MODEL} + KIE gemini-3-flash failed (last_err={last_exc})"
+        f"{tag}: {first_label} + OpenRouter {OPENROUTER_LITE_MODEL} + KIE {KIE_DEEPSEEK_MODEL} failed (last_err={last_exc})"
     ) from last_exc
 
 
@@ -650,7 +850,7 @@ def ask_catalog_matching_kie(
     logger: logging.Logger | None = None,
 ) -> str:
     """
-    Catalog matching: OpenRouter Gemini 3.1 Flash Lite (flex) → direct Gemini 3.1 Flash Lite → KIE 3 Flash.
+    Catalog matching: та же цепочка что и main — direct 3.1 Flash Lite (flex) → OpenRouter 3.1 Flash Lite (flex) → KIE DeepSeek V4.1 Flash.
     """
     log = logger or LOGGER
 
@@ -1014,7 +1214,7 @@ def _notify_kie_api_error(exc: Exception, model: str, log, *, attempt: int | Non
 def ask_llm_with_fallback(text: str, scan_type: str, user=None, logger: logging.Logger | None = None):
 
     """
-    (Mercury 2.5 - закомментирован) → OpenRouter gemini-3.1-flash-lite (flex) → direct gemini-3.1-flash-lite → KIE gemini-3-flash.
+    (Mercury 2.5 - закомментирован) → direct gemini-3.1-flash-lite (flex) → OpenRouter gemini-3.1-flash-lite (flex) → KIE DeepSeek V4.1 Flash.
     GPT fallback остается в process_uploaded_file_task.
     """
     log = logger or LOGGER
@@ -1046,7 +1246,7 @@ def ask_llm_with_fallback(text: str, scan_type: str, user=None, logger: logging.
     #     except Exception as e:
     #         log.warning("[LLM] Mercury 2.5 failed: %s → KIE chain", e)
 
-    log.info("[LLM] Chain: OpenRouter %s (flex) → direct %s → KIE gemini-3-flash", OPENROUTER_LITE_MODEL, DIRECT_FALLBACK_MODEL)
+    log.info("[LLM] Chain: direct %s (flex) → OpenRouter %s (%s) → KIE %s", DIRECT_FLEX_MODEL, OPENROUTER_LITE_MODEL, OPENROUTER_LITE_PROVIDER, KIE_DEEPSEEK_MODEL)
 
     result, source_model = _ask_direct_lite_then_kie(
         text=text,

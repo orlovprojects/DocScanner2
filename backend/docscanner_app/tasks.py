@@ -4333,13 +4333,28 @@ def split_multi_doc_task(self, doc_id: int, scan_type: str, split_depth: int = 1
                 logger.warning("[MULTI-DOC] Failed to settle skipped child %d: %s", child_id, e)
 
         for child_id, skip_ocr in processable:
+            # Обычный PDF-child ещё не считается второй попыткой split:
+            # он лишь результат текущего split.
+            #
+            # Если skip_ocr=True, значит документ уже был дополнительно
+            # разделён внутри одной страницы через separate_docs_on_single_page(),
+            # поэтому повышаем depth, чтобы не резать исходную страницу повторно.
+            child_split_depth = split_depth + 1 if skip_ocr else split_depth
+
             process_uploaded_file_task.apply_async(
-                args=[user.id, child_id, scan_type, split_depth + 1, skip_ocr],
+                args=[
+                    user.id,
+                    child_id,
+                    scan_type,
+                    child_split_depth,
+                    skip_ocr,
+                ],
             )
+
             logger.info(
                 "[MULTI-DOC] Scheduled doc_id=%d depth=%d skip_ocr=%s",
                 child_id,
-                split_depth + 1,
+                child_split_depth,
                 skip_ocr,
             )
 
@@ -6089,4 +6104,22 @@ def register_monthly_depreciation_task():
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # END - IT nusidevejimo Celery Beat
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# VAT cache cleanup
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@shared_task(name="docscanner_app.tasks.cleanup_vat_check_cache")
+def cleanup_vat_check_cache():
+    """Удаляет записи VIES-кэша старше 7 дней (TTL всё равно 24ч/6ч)."""
+    from .models import VatCheckCache
+    cutoff = timezone.now() - timedelta(days=7)
+    deleted, _ = VatCheckCache.objects.filter(checked_at__lt=cutoff).delete()
+    logger.info("[VAT-CACHE] Cleanup: deleted %d rows older than %s", deleted, cutoff)
+    return {"deleted": deleted}
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# END - VAT cache cleanup
 # ═══════════════════════════════════════════════════════════════════════════════

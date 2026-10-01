@@ -1594,6 +1594,7 @@ class CurrencyRate(models.Model):
 
 class Company(models.Model):
     im_kodas     = models.CharField(max_length=16, unique=True, blank=True, null=True)     # Идентификационный код фирмы
+    sodra_kodas  = models.CharField(max_length=10, blank=True, null=True, db_index=True)  # Sodros draudėjo kodas
     pavadinimas  = models.CharField(max_length=255, db_index=True, blank=True, null=True)  # Название фирмы
     normalized_pavadinimas = models.CharField(max_length=255, db_index=True, blank=True, null=True)
     ireg_data    = models.DateField(null=True, blank=True)          # Дата регистрации
@@ -6180,6 +6181,7 @@ class JournalEntry(models.Model):
     SOURCE_MANUAL = "manual"
     SOURCE_OPENING = "opening"
     SOURCE_FIXED_ASSET = "fixed_asset"
+    SOURCE_PAYROLL = "payroll"
     SOURCE_CHOICES = [
         (SOURCE_PURCHASE, "Pirkimas"),
         (SOURCE_SALE, "Pardavimas"),
@@ -6187,6 +6189,7 @@ class JournalEntry(models.Model):
         (SOURCE_MANUAL, "Rankinis"),
         (SOURCE_OPENING, "Pradiniai likučiai"),
         (SOURCE_FIXED_ASSET, "Ilgalaikis turtas"),
+        (SOURCE_PAYROLL, "Darbo užmokestis"),
     ]
 
     STATUS_DRAFT = "draft"
@@ -7081,3 +7084,808 @@ class FixedAssetOperation(models.Model):
 # ========================================================
 # END - Ilgalaikis turtas
 # ========================================================
+
+# ============================================================
+# DARBO UŽMOKESTIS (payroll)
+# ============================================================
+
+class PayrollParameter(models.Model):
+    """DU parametrai pagal datas (MMA, VDU, NPD, tarifai...). Bendri visoms įmonėms."""
+    key = models.CharField(max_length=40, db_index=True)
+    value = models.DecimalField(max_digits=14, decimal_places=4)
+    valid_from = models.DateField()
+    valid_to = models.DateField(null=True, blank=True)
+    is_preliminary = models.BooleanField(default=False)
+    source = models.CharField(max_length=255, blank=True, default="")
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ("key", "valid_from")
+        ordering = ["key", "valid_from"]
+
+    def __str__(self):
+        return f"{self.key}={self.value} nuo {self.valid_from}"
+
+
+class PayCode(models.Model):
+    """DU kodas (priskaitymas / išskaita / darbdavio įmoka) su apmokestinimo vėliavomis."""
+
+    CATEGORY_CHOICES = [
+        ("earning", "Priskaitymas"),
+        ("compensation", "Kompensacija / pašalpa"),
+        ("in_kind", "Pajamos natūra"),
+        ("deduction", "Išskaita"),
+        ("employer", "Darbdavio įmoka"),
+    ]
+    CALC_CHOICES = [
+        ("fixed", "Fiksuota suma"),
+        ("hourly", "Valandinis"),
+        ("multiplier", "Koeficientas"),
+        ("vdu_pct", "% nuo VDU"),
+        ("percent", "Procentas"),
+        ("manual", "Rankinis"),
+    ]
+    GPM_CHOICES = [
+        ("standard", "20 / 25 / 32 %"),
+        ("sick_15", "15 % (ligos išmoka)"),
+        ("exempt", "Neapmokestinama"),
+        ("limit", "Neapmokestinama iki metinio limito"),
+        ("dpn_rule", "Dienpinigių taisyklė"),
+    ]
+    SODRA_CHOICES = [
+        ("yes", "Taip"),
+        ("no", "Ne"),
+        ("limit", "Iki metinio limito - ne"),
+        ("aid_5mma", "Iki 5 MMA - ne"),
+    ]
+    VDU_CHOICES = [
+        ("regular", "Įtraukiama"),
+        ("quarterly_bonus", "Ketvirtinė premija"),
+        ("annual_bonus", "Metinė premija"),
+        ("excluded", "Neįtraukiama"),
+    ]
+
+    company = models.ForeignKey(
+        "CompanyProfile", null=True, blank=True, on_delete=models.CASCADE,
+        related_name="pay_codes", help_text="null = sisteminis kodas",
+    )
+    code = models.CharField(max_length=10)
+    name = models.CharField(max_length=150)
+    category = models.CharField(max_length=20, choices=CATEGORY_CHOICES)
+    calc_method = models.CharField(max_length=20, choices=CALC_CHOICES, default="manual")
+    multiplier = models.DecimalField(max_digits=6, decimal_places=3, null=True, blank=True)
+    vdu_pct = models.DecimalField(max_digits=6, decimal_places=2, null=True, blank=True)
+
+    gpm_mode = models.CharField(max_length=20, choices=GPM_CHOICES, default="standard")
+    vmi_income_code = models.CharField(max_length=4, null=True, blank=True)
+    in_monthly_npd_base = models.BooleanField(default=True)
+    sodra_mode = models.CharField(max_length=20, choices=SODRA_CHOICES, default="yes")
+    vdu_treatment = models.CharField(max_length=20, choices=VDU_CHOICES, default="regular")
+    annual_limit_key = models.CharField(max_length=20, null=True, blank=True)
+    declared_gpm313 = models.BooleanField(default=True)
+    sdup_total = models.BooleanField(default=False)
+    sdup_extra = models.BooleanField(default=False)
+    sdup_hours = models.CharField(max_length=10, default="none")
+
+    debit_account = models.CharField(max_length=10, null=True, blank=True)
+    credit_account = models.CharField(max_length=10, null=True, blank=True)
+
+    is_system = models.BooleanField(default=False)
+    active = models.BooleanField(default=True)
+    sort_order = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        ordering = ["sort_order", "code"]
+        constraints = [
+            models.UniqueConstraint(fields=["company", "code"], name="uniq_paycode_company_code"),
+            models.UniqueConstraint(
+                fields=["code"], condition=models.Q(company__isnull=True),
+                name="uniq_paycode_system_code",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.code} - {self.name}"
+
+
+
+
+class PayrollSettings(models.Model):
+    """Įmonės DU nustatymai (vienas CompanyProfile - vieni nustatymai)."""
+    NA_GROUP_CHOICES = [("I", "I"), ("II", "II"), ("III", "III"), ("IV", "IV")]
+ 
+    company = models.OneToOneField("CompanyProfile", on_delete=models.CASCADE, related_name="payroll_settings")
+    sodra_insurer_code = models.CharField(max_length=7, blank=True, default="")
+    na_group = models.CharField(max_length=3, choices=NA_GROUP_CHOICES, default="I")
+    na_rate = models.DecimalField(max_digits=5, decimal_places=2, default=Decimal("0.14"))
+    pays_gar_ilg = models.BooleanField(default=True)
+    sick_pay_pct = models.DecimalField(max_digits=5, decimal_places=2, default=Decimal("62.06"))
+ 
+    advance_enabled = models.BooleanField(default=False)
+    advance_day = models.PositiveSmallIntegerField(default=20)
+    salary_day = models.PositiveSmallIntegerField(default=10)
+ 
+    default_expense_account = models.CharField(max_length=10, default="6304")
+    collective_agreement = models.BooleanField(default=False)
+ 
+    edas_username = models.CharField(max_length=100, blank=True, default="")
+    edas_password = models.CharField(max_length=255, blank=True, default="")  # TODO: šifruoti
+    manager_name = models.CharField(max_length=68, blank=True, default="")
+    preparator_details = models.CharField(max_length=68, blank=True, default="")
+    manager_position = models.CharField(max_length=100, blank=True, default="direktorius")
+    representation_basis = models.CharField(max_length=150, blank=True, default="įmonės įstatai")
+    contract_city = models.CharField(max_length=100, blank=True, default="")
+    workplace_address = models.CharField(max_length=255, blank=True, default="")
+
+    vmi_ws_username = models.CharField(max_length=100, blank=True, default="")
+    vmi_ws_password = models.TextField(blank=True, default="")   # užšifruotas
+ 
+    updated_at = models.DateTimeField(auto_now=True)
+ 
+    def __str__(self):
+        return f"DU nustatymai: {self.company_id}"
+ 
+ 
+class WorkSchedule(models.Model):
+    """Savaitės darbo grafikas (valandos Pr..Sk). MVP: standartinis 5x8."""
+    company = models.ForeignKey("CompanyProfile", on_delete=models.CASCADE, related_name="work_schedules")
+    name = models.CharField(max_length=100)
+    mon = models.DecimalField(max_digits=4, decimal_places=2, default=Decimal("8"))
+    tue = models.DecimalField(max_digits=4, decimal_places=2, default=Decimal("8"))
+    wed = models.DecimalField(max_digits=4, decimal_places=2, default=Decimal("8"))
+    thu = models.DecimalField(max_digits=4, decimal_places=2, default=Decimal("8"))
+    fri = models.DecimalField(max_digits=4, decimal_places=2, default=Decimal("8"))
+    sat = models.DecimalField(max_digits=4, decimal_places=2, default=Decimal("0"))
+    sun = models.DecimalField(max_digits=4, decimal_places=2, default=Decimal("0"))
+    is_default = models.BooleanField(default=False)
+ 
+    def week(self):
+        return (self.mon, self.tue, self.wed, self.thu, self.fri, self.sat, self.sun)
+ 
+    def __str__(self):
+        return self.name
+ 
+ 
+class Position(models.Model):
+    company = models.ForeignKey("CompanyProfile", on_delete=models.CASCADE, related_name="positions")
+    name = models.CharField(max_length=150)
+    lpk_code = models.CharField(max_length=6, blank=True, default="")  # 1-SD ima pirmus 4 skaitmenis
+    expense_account = models.CharField(max_length=10, null=True, blank=True)
+    group = models.ForeignKey("PositionGroup", null=True, blank=True, on_delete=models.SET_NULL, related_name="positions")
+ 
+    class Meta:
+        ordering = ["name"]
+ 
+    def __str__(self):
+        return self.name
+ 
+ 
+class Employee(models.Model):
+    NPD_CHOICES = [
+        ("standard", "Taikyti (formulė)"),
+        ("none", "Netaikyti"),
+        ("d30_55", "30-55 % dalyvumo lygis"),
+        ("d0_25", "0-25 % dalyvumo lygis"),
+    ]
+    GRINDYS_EXEMPT_CHOICES = [
+        ("other_employer", "Dirba pas kitą darbdavį"),
+        ("pension", "Gauna senatvės / netekto darbingumo pensiją"),
+        ("under_24", "Jaunesnis nei 24 m."),
+        ("participation", "0-55 % dalyvumo lygis"),
+        ("childcare", "Gauna motinystės / tėvystės / vaiko priežiūros išmoką"),
+    ]
+    STATUS_CHOICES = [("active", "Dirba"), ("dismissed", "Atleistas")]
+ 
+    company = models.ForeignKey("CompanyProfile", on_delete=models.CASCADE, related_name="employees")
+    first_name = models.CharField(max_length=68)
+    last_name = models.CharField(max_length=68)
+    personal_code = models.CharField(max_length=11, blank=True, default="")  # TODO: šifruoti
+    birth_date = models.DateField(null=True, blank=True)
+    gender = models.CharField(max_length=1, choices=[("M", "Vyras"), ("F", "Moteris")], blank=True, default="")
+
+    is_foreigner = models.BooleanField(default=False)
+    foreign_code = models.CharField(max_length=11, blank=True, default="")
+    sd_series = models.CharField(max_length=2, blank=True, default="")
+    sd_number = models.CharField(max_length=7, blank=True, default="")
+ 
+    address = models.CharField(max_length=255, blank=True, default="")
+    email = models.EmailField(blank=True, default="")
+    phone = models.CharField(max_length=30, blank=True, default="")
+    iban = models.CharField(max_length=34, blank=True, default="")
+ 
+    npd_mode = models.CharField(max_length=10, choices=NPD_CHOICES, default="standard")
+    npd_request_date = models.DateField(null=True, blank=True)
+    progressive_gpm_request = models.BooleanField(default=False)
+    pension_accumulation = models.BooleanField(default=False)
+    grindys_exempt_reason = models.CharField(max_length=20, choices=GRINDYS_EXEMPT_CHOICES, null=True, blank=True)
+    single_parent = models.BooleanField(default=False)   # vienas augina vaiką (pailgintos atostogos)
+    has_disability = models.BooleanField(default=False)  # nustatytas dalyvumo lygis
+    data_status = models.CharField(max_length=20, default="complete",
+                                   choices=[("complete", "Užpildyta"), ("awaiting_employee", "Laukiama darbuotojo duomenų")])
+
+    account = models.ForeignKey("EmployeeAccount", null=True, blank=True, on_delete=models.SET_NULL, related_name="employees")
+    onboarding_token = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default="active")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+ 
+    class Meta:
+        ordering = ["last_name", "first_name"]
+        indexes = [models.Index(fields=["company", "status"])]
+ 
+    @property
+    def full_name(self):
+        return f"{self.first_name} {self.last_name}".strip()
+ 
+    def __str__(self):
+        return self.full_name
+ 
+ 
+class EmployeeChild(models.Model):
+    employee = models.ForeignKey(Employee, on_delete=models.CASCADE, related_name="children")
+    first_name = models.CharField(max_length=68, blank=True, default="")
+    birth_date = models.DateField()
+    personal_code = models.CharField(max_length=11, blank=True, default="")
+    has_disability = models.BooleanField(default=False)
+ 
+    class Meta:
+        ordering = ["birth_date"]
+ 
+ 
+class EmploymentContract(models.Model):
+    # Sodra 1-SD klasifikatorius (ReasonDetCode, kai ReasonCode = 01)
+    SODRA_TYPE_CHOICES = [
+        ("01", "Neterminuota"),
+        ("02", "Terminuota"),
+        ("03", "Laikinojo darbo"),
+        ("04", "Pameistrystės"),
+        ("05", "Projektinio darbo"),
+        ("06", "Darbo vietos dalijimosi"),
+        ("07", "Darbo keliems darbdaviams"),
+        ("08", "Sezoninio darbo"),
+    ]
+    STATUS_CHOICES = [("draft", "Juodraštis"), ("active", "Galioja"), ("terminated", "Nutraukta")]
+    # Nedarbo draudimas 2,03 %: terminuotos rūšys ir terminuoti potipiai (A40)
+    # Nedarbo draudimas 2,03 %: terminuotos rūšys ir terminuoti potipiai (A40)
+    FIXED_TERM_TYPES = {"02", "04", "05"}
+    FIXED_TERM_SUBTYPES = {"031", "061", "071", "081"}
+    OPEN_ENDED_SUBTYPES = {"032", "062", "072", "082"}
+    SUBTYPE_REQUIRED = {"03", "06", "07", "08"}
+    FIXED_TERM_SUBTYPES = {"031", "061", "071", "081"}
+    OPEN_ENDED_SUBTYPES = {"032", "062", "072", "082"}
+    SUBTYPE_REQUIRED = {"03", "06", "07", "08"}
+ 
+    employee = models.ForeignKey(Employee, on_delete=models.CASCADE, related_name="contracts")
+    number = models.CharField(max_length=50, blank=True, default="")
+    signed_date = models.DateField(null=True, blank=True)
+    start_date = models.DateField()
+    end_date = models.DateField(null=True, blank=True)
+    sodra_contract_type = models.CharField(max_length=2, choices=SODRA_TYPE_CHOICES, default="01")
+    sodra_contract_subtype = models.CharField(max_length=3, blank=True, default="")
+    probation_months = models.PositiveSmallIntegerField(default=0)
+    annual_leave_days = models.PositiveSmallIntegerField(default=20)  # 20 (5 d./sav.), 24 (6 d./sav.), 25, 30...
+    work_time_mode = models.CharField(max_length=2, default="01")  # SDUP: 01 nekintanti, 02 suminė, 03 lankstus, 04 suskaidyta, 05 individualus
+    extra_leave_days = models.PositiveSmallIntegerField(default=0)            # papildomai pagal sutartį
+    extended_leave_days = models.PositiveSmallIntegerField(null=True, blank=True)  # pailgintos pagal profesiją
+    seniority_since = models.DateField(null=True, blank=True)                 # nepertraukiamas stažas nuo
+    extra_terms = models.TextField(blank=True, default="")  # papildomos sutarties sąlygos (5 p.)
+
+    termination_date = models.DateField(null=True, blank=True)
+    termination_basis = models.JSONField(null=True, blank=True)  # {"article": "57", "part": "1", "point": "1"}
+    status = models.CharField(max_length=12, choices=STATUS_CHOICES, default="draft")
+    created_at = models.DateTimeField(auto_now_add=True)
+ 
+    class Meta:
+        ordering = ["-start_date"]
+ 
+    @property
+    def is_fixed_term(self):
+        if self.sodra_contract_type in self.FIXED_TERM_TYPES:
+            return True
+        if self.sodra_contract_subtype in self.FIXED_TERM_SUBTYPES:
+            return True
+        if self.sodra_contract_subtype in self.OPEN_ENDED_SUBTYPES:
+            return False
+        if self.sodra_contract_type in self.SUBTYPE_REQUIRED:
+            # potipis nenurodytas - sprendžiam pagal pabaigos datą
+            return self.end_date is not None
+        return False
+
+    def clean(self):
+        from django.core.exceptions import ValidationError
+        if self.sodra_contract_type in self.SUBTYPE_REQUIRED and not self.sodra_contract_subtype:
+            raise ValidationError({"sodra_contract_subtype": "Šiai sutarties rūšiai būtina nurodyti potipį (terminuota / neterminuota)"})
+            return True
+        if self.sodra_contract_subtype in self.FIXED_TERM_SUBTYPES:
+            return True
+        if self.sodra_contract_subtype in self.OPEN_ENDED_SUBTYPES:
+            return False
+        if self.sodra_contract_type in self.SUBTYPE_REQUIRED:
+            # potipis nenurodytas - sprendžiam pagal pabaigos datą
+            return self.end_date is not None
+        return False
+ 
+    def clean(self):
+        from django.core.exceptions import ValidationError
+        if self.sodra_contract_type in self.SUBTYPE_REQUIRED and not self.sodra_contract_subtype:
+            raise ValidationError({"sodra_contract_subtype": "Šiai sutarties rūšiai būtina nurodyti potipį (terminuota / neterminuota)"})
+ 
+    @property
+    def effective_end(self):
+        return self.termination_date or self.end_date
+ 
+    def __str__(self):
+        return f"{self.employee} nuo {self.start_date}"
+ 
+ 
+class ContractTerms(models.Model):
+    """Sutarties sąlygų versija (keičiasi nuo datos)."""
+    PAY_FORM_CHOICES = [("monthly", "Mėnesinė alga"), ("hourly", "Valandinis")]
+ 
+    contract = models.ForeignKey(EmploymentContract, on_delete=models.CASCADE, related_name="terms")
+    valid_from = models.DateField()
+    position = models.ForeignKey(Position, null=True, blank=True, on_delete=models.SET_NULL)
+    pay_form = models.CharField(max_length=10, choices=PAY_FORM_CHOICES, default="monthly")
+    base_amount = models.DecimalField(max_digits=12, decimal_places=2)
+    workload = models.DecimalField(max_digits=4, decimal_places=3, default=Decimal("1"))
+    full_time_hours = models.DecimalField(max_digits=5, decimal_places=2, default=Decimal("40"))  # visas etatas, val./sav.
+    schedule = models.ForeignKey(WorkSchedule, null=True, blank=True, on_delete=models.SET_NULL)
+ 
+    class Meta:
+        ordering = ["valid_from"]
+        unique_together = ("contract", "valid_from")
+
+
+
+class AbsenceEvent(models.Model):
+    KIND_CHOICES = [
+        ("vacation", "Kasmetinės atostogos"),
+        ("sick", "Liga"),
+        ("parent_day", "Mamadienis / tėvadienis"),
+        ("unpaid", "Nemokamos atostogos"),
+        ("truancy", "Pravaikšta"),
+        ("downtime", "Prastova"),
+        ("study", "Mokymosi atostogos"),
+        ("donor", "Donorystė"),
+        ("civic", "Valstybinės pareigos"),
+        ("standby", "Pasyvus budėjimas"),
+        ("paternity", "Tėvystės atostogos"),
+        ("childcare", "Vaiko priežiūros atostogos"),
+        ("maternity", "Nėštumo ir gimdymo atostogos"),
+        ("suspension", "Nušalinimas"),
+        ("business_trip", "Komandiruotė"),
+    ]
+    SOURCE_CHOICES = [("manual", "Rankinis"), ("request", "Prašymas"), ("sodra_xml", "Sodros XML")]
+    STATUS_CHOICES = [("requested", "Pateiktas"), ("approved", "Patvirtintas"), ("cancelled", "Atšauktas")]
+ 
+    employee = models.ForeignKey("Employee", on_delete=models.CASCADE, related_name="absences")
+    kind = models.CharField(max_length=20, choices=KIND_CHOICES)
+    start_date = models.DateField()
+    end_date = models.DateField()
+    work_days = models.DecimalField(max_digits=6, decimal_places=2, default=Decimal("0"))
+    pay_code = models.ForeignKey("PayCode", null=True, blank=True, on_delete=models.SET_NULL)
+ 
+    source = models.CharField(max_length=12, choices=SOURCE_CHOICES, default="manual")
+    status = models.CharField(max_length=12, choices=STATUS_CHOICES, default="approved")
+ 
+    sick_leave_number = models.CharField(max_length=30, blank=True, default="")
+    employer_pays_first_days = models.BooleanField(default=True)
+    parent_event = models.ForeignKey("self", null=True, blank=True, on_delete=models.SET_NULL,
+                                     related_name="continuations")
+    sodra_reason_code = models.CharField(max_length=3, blank=True, default="")  # 12-SD / 9-SD
+    child = models.ForeignKey("EmployeeChild", null=True, blank=True, on_delete=models.SET_NULL)
+    comment = models.CharField(max_length=255, blank=True, default="")
+ 
+    created_at = models.DateTimeField(auto_now_add=True)
+ 
+    class Meta:
+        ordering = ["-start_date"]
+        indexes = [models.Index(fields=["employee", "start_date", "end_date"])]
+ 
+    def __str__(self):
+        return f"{self.employee} {self.kind} {self.start_date}-{self.end_date}"
+ 
+ 
+class VacationAdjustment(models.Model):
+    """Rankinė atostogų likučio korekcija (pradinis likutis, pataisymai)."""
+    employee = models.ForeignKey("Employee", on_delete=models.CASCADE, related_name="vacation_adjustments")
+    date = models.DateField()
+    days = models.DecimalField(max_digits=6, decimal_places=2)
+    reason = models.CharField(max_length=255, blank=True, default="")
+ 
+    class Meta:
+        ordering = ["date"]
+ 
+ 
+class TimesheetMonth(models.Model):
+    STATUS_CHOICES = [("draft", "Juodraštis"), ("approved", "Patvirtintas"), ("locked", "Užrakintas")]
+ 
+    company = models.ForeignKey("CompanyProfile", on_delete=models.CASCADE, related_name="timesheets")
+    year = models.PositiveSmallIntegerField()
+    month = models.PositiveSmallIntegerField()
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default="draft")
+    approved_at = models.DateTimeField(null=True, blank=True)
+ 
+    class Meta:
+        unique_together = ("company", "year", "month")
+        ordering = ["-year", "-month"]
+ 
+ 
+class TimesheetEntry(models.Model):
+    HOUR_TYPE_CHOICES = [
+        ("normal", "Įprastos"),
+        ("night", "Naktis"),
+        ("overtime", "Viršvalandžiai"),
+        ("rest_day", "Poilsio diena"),
+        ("holiday", "Švenčių diena"),
+        ("ot_night", "Viršvalandžiai naktį"),
+        ("ot_rest", "Viršvalandžiai poilsio dieną"),
+        ("ot_holiday", "Viršvalandžiai švenčių dieną"),
+    ]
+ 
+    timesheet = models.ForeignKey(TimesheetMonth, on_delete=models.CASCADE, related_name="entries")
+    employee = models.ForeignKey("Employee", on_delete=models.CASCADE, related_name="timesheet_entries")
+    date = models.DateField()
+    code = models.CharField(max_length=5)       # DD, A, L, M, P, NA, PR ...
+    hours = models.DecimalField(max_digits=5, decimal_places=2, default=Decimal("0"))
+    hour_type = models.CharField(max_length=12, choices=HOUR_TYPE_CHOICES, default="normal")
+    is_manual = models.BooleanField(default=False)
+    event = models.ForeignKey(AbsenceEvent, null=True, blank=True, on_delete=models.SET_NULL)
+ 
+    class Meta:
+        ordering = ["employee", "date"]
+        indexes = [models.Index(fields=["timesheet", "employee"])]
+
+
+    @property
+    def is_fixed_term(self):
+        if self.sodra_contract_type in self.FIXED_TERM_TYPES:
+            return True
+        if self.sodra_contract_subtype in self.FIXED_TERM_SUBTYPES:
+            return True
+        if self.sodra_contract_subtype in self.OPEN_ENDED_SUBTYPES:
+            return False
+        if self.sodra_contract_type in self.SUBTYPE_REQUIRED:
+            # potipis nenurodytas - sprendžiam pagal pabaigos datą
+            return self.end_date is not None
+        return False
+
+    def clean(self):
+        from django.core.exceptions import ValidationError
+        if self.sodra_contract_type in self.SUBTYPE_REQUIRED and not self.sodra_contract_subtype:
+            raise ValidationError({"sodra_contract_subtype": "Šiai sutarties rūšiai būtina nurodyti potipį (terminuota / neterminuota)"})
+
+
+# ============================================================
+# DARBO UŽMOKESTIS - 4 dalis (skaičiavimas)
+# ============================================================
+
+class PayrollRun(models.Model):
+    KIND_CHOICES = [
+        ("regular", "Mėnesio DU"),
+        ("advance", "Avansas"),
+        ("final_settlement", "Galutinis atsiskaitymas"),
+        ("correction", "Korekcija"),
+    ]
+    STATUS_CHOICES = [
+        ("draft", "Juodraštis"),
+        ("checked", "Patikrinta"),
+        ("approved", "Patvirtinta"),
+        ("paid", "Išmokėta"),
+        ("closed", "Uždaryta"),
+    ]
+
+    company = models.ForeignKey("CompanyProfile", on_delete=models.CASCADE, related_name="payroll_runs")
+    year = models.PositiveSmallIntegerField()
+    month = models.PositiveSmallIntegerField()
+    kind = models.CharField(max_length=20, choices=KIND_CHOICES, default="regular")
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default="draft")
+    warnings = models.JSONField(default=list, blank=True)
+    journal_entry = models.ForeignKey("JournalEntry", null=True, blank=True, on_delete=models.SET_NULL,
+                                      related_name="payroll_runs")
+    approved_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL,
+                                    related_name="approved_payroll_runs")
+    approved_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-year", "-month", "-created_at"]
+        indexes = [models.Index(fields=["company", "year", "month"])]
+
+    def __str__(self):
+        return f"DU {self.year}-{self.month:02d} ({self.kind})"
+
+
+class PayrollLine(models.Model):
+    run = models.ForeignKey(PayrollRun, on_delete=models.CASCADE, related_name="lines")
+    employee = models.ForeignKey("Employee", on_delete=models.CASCADE, related_name="payroll_lines")
+    contract = models.ForeignKey("EmploymentContract", null=True, blank=True, on_delete=models.SET_NULL)
+    pay_code = models.ForeignKey("PayCode", on_delete=models.PROTECT)
+    quantity = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal("0"))
+    rate = models.DecimalField(max_digits=12, decimal_places=4, default=Decimal("0"))
+    amount = models.DecimalField(max_digits=12, decimal_places=2)
+    sodra_amount = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)  # Sodra apmokestinama dalis (SDUP)
+    accrual_month = models.DateField()                    # -> SAM
+    sodra_month = models.DateField(null=True, blank=True) # atostogos per mėnesių sandūrą
+    event = models.ForeignKey("AbsenceEvent", null=True, blank=True, on_delete=models.SET_NULL)
+    is_manual = models.BooleanField(default=False)
+    comment = models.CharField(max_length=255, blank=True, default="")
+
+    class Meta:
+        ordering = ["employee", "pay_code__sort_order"]
+        indexes = [models.Index(fields=["run", "employee"])]
+
+
+class PayrollEmployeeResult(models.Model):
+    run = models.ForeignKey(PayrollRun, on_delete=models.CASCADE, related_name="results")
+    employee = models.ForeignKey("Employee", on_delete=models.CASCADE, related_name="payroll_results")
+
+    gross = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0"))
+    sodra_base = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0"))
+    npd_applied = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal("0"))
+    npd_sick_part = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal("0"))
+    gpm = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal("0"))
+    gpm15 = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal("0"))
+    vsd = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal("0"))
+    psd = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal("0"))
+    kaupimas = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal("0"))
+    employer_vsd = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal("0"))
+    gar = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal("0"))
+    ilg = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal("0"))
+    grindys_vsd = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal("0"))
+    grindys_psd = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal("0"))
+    in_kind = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal("0"))
+    deductions = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal("0"))
+    advance_paid = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal("0"))
+    net = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0"))
+    payable = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0"))
+    daily_vdu = models.DecimalField(max_digits=12, decimal_places=4, default=Decimal("0"))
+    sam_tax_rate = models.DecimalField(max_digits=5, decimal_places=2, default=Decimal("0"))
+    sam_payment = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal("0"))
+    warnings = models.JSONField(default=list, blank=True)
+    calc_snapshot = models.JSONField(default=dict, blank=True)  # įvestis + parametrai - auditui / AI paaiškinimui
+
+    class Meta:
+        unique_together = ("run", "employee")
+
+
+class EmployeeYearTotals(models.Model):
+    """Metų kaupiniai (perskaičiuojami iš patvirtintų skaičiavimų + pradinių likučių)."""
+    employee = models.ForeignKey("Employee", on_delete=models.CASCADE, related_name="year_totals")
+    year = models.PositiveSmallIntegerField()
+    gross = models.DecimalField(max_digits=14, decimal_places=2, default=Decimal("0"))
+    vsd_base = models.DecimalField(max_digits=14, decimal_places=2, default=Decimal("0"))
+    gpm_taxable = models.DecimalField(max_digits=14, decimal_places=2, default=Decimal("0"))
+    limits_used = models.JSONField(default=dict, blank=True)  # {"DOV": 250, "SVD": 0}
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ("employee", "year")
+
+
+from django.core.validators import RegexValidator
+
+
+class PositionGroup(models.Model):
+    """Pareigybių grupė darbo apmokėjimo sistemoje (SDUP profGroupNum)."""
+    company = models.ForeignKey("CompanyProfile", on_delete=models.CASCADE, related_name="position_groups")
+    code = models.CharField(
+        max_length=15,
+        validators=[RegexValidator(r"^[a-zA-Z0-9.-]+$", "Tik lotyniškos raidės, skaičiai, taškas ir brūkšnys")],
+    )
+    name = models.CharField(max_length=150)
+    description = models.TextField(blank=True, default="")
+    skills = models.PositiveSmallIntegerField(default=3)
+    qualification = models.PositiveSmallIntegerField(default=3)
+    effort = models.PositiveSmallIntegerField(default=3)
+    responsibility = models.PositiveSmallIntegerField(default=3)
+    conditions = models.PositiveSmallIntegerField(default=3)
+    salary_min = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    salary_max = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["code"]
+        unique_together = ("company", "code")
+
+    @property
+    def total_score(self):
+        return self.skills + self.qualification + self.effort + self.responsibility + self.conditions
+
+    def __str__(self):
+        return f"{self.code} {self.name}"
+
+
+class DasDocument(models.Model):
+    """Patvirtinta darbo apmokėjimo sistemos versija."""
+    company = models.ForeignKey("CompanyProfile", on_delete=models.CASCADE, related_name="das_documents")
+    version = models.PositiveIntegerField()
+    approved_date = models.DateField()
+    manager_name = models.CharField(max_length=150, blank=True, default="")
+    html = models.TextField()
+    groups_snapshot = models.JSONField(default=list)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-version"]
+        unique_together = ("company", "version")
+
+
+
+    extra_terms = models.TextField(blank=True, default="")  # papildomos sutarties sąlygos (5 p.)
+
+
+class EmployeeDocument(models.Model):
+    """Darbo sutartys, susitarimai, įsakymai: sugeneruotas HTML ir (arba) įkeltas pasirašytas failas."""
+    KIND_CHOICES = [
+        ("contract", "Darbo sutartis"),
+        ("amendment", "Susitarimas dėl sutarties pakeitimo"),
+        ("order", "Įsakymas"),
+        ("request", "Prašymas"),
+        ("other", "Kita"),
+    ]
+    SIGN_CHOICES = [
+        ("paper", "Pasirašyta popieriuje"),
+        ("electronic", "Elektroniniu parašu"),
+        ("external", "Pasirašyta ne DokSkenas"),
+    ]
+
+    employee = models.ForeignKey("Employee", on_delete=models.CASCADE, related_name="documents")
+    contract = models.ForeignKey("EmploymentContract", null=True, blank=True, on_delete=models.CASCADE,
+                                 related_name="documents")
+    kind = models.CharField(max_length=20, choices=KIND_CHOICES, default="contract")
+    title = models.CharField(max_length=255, blank=True, default="")
+    number = models.CharField(max_length=50, blank=True, default="")
+    html = models.TextField(blank=True, default="")
+    file = models.FileField(upload_to="payroll/documents/%Y/%m/", null=True, blank=True)
+    file_name = models.CharField(max_length=255, blank=True, default="")
+    sign_method = models.CharField(max_length=12, choices=SIGN_CHOICES, default="paper")
+    employee_signed = models.BooleanField(default=False)
+    employer_signed = models.BooleanField(default=False)
+    signed_date = models.DateField(null=True, blank=True)
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL,
+                                   related_name="+")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    @property
+    def status(self):
+        if self.employee_signed and self.employer_signed:
+            return "signed"
+        if self.employee_signed or self.employer_signed:
+            return "partly_signed"
+        return "ready"
+
+
+class EmployeeAccount(models.Model):
+    """Darbuotojo prisijungimas prie esavitarna.lt (NE CustomUser). Vienas asmuo - gali būti keliose įmonėse."""
+    login = models.CharField(max_length=254, unique=True)   # el. paštas (mažosiomis) arba telefonas
+    password = models.CharField(max_length=128, blank=True, default="")  # make_password
+    is_active = models.BooleanField(default=True)
+    failed_attempts = models.PositiveSmallIntegerField(default=0)
+    locked_until = models.DateTimeField(null=True, blank=True)
+    last_login = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+ 
+    def __str__(self):
+        return self.login
+ 
+ 
+class EmployeeAccountToken(models.Model):
+    """Vienkartiniai kvietimo / slaptažodžio atkūrimo žetonai (DB saugomas tik SHA-256)."""
+    KIND_CHOICES = [("invite", "Kvietimas"), ("reset", "Slaptažodžio atkūrimas")]
+ 
+    account = models.ForeignKey(EmployeeAccount, on_delete=models.CASCADE, related_name="tokens")
+    employee = models.ForeignKey("Employee", null=True, blank=True, on_delete=models.CASCADE, related_name="+")
+    kind = models.CharField(max_length=10, choices=KIND_CHOICES)
+    token_hash = models.CharField(max_length=64, unique=True)
+    expires_at = models.DateTimeField()
+    used_at = models.DateTimeField(null=True, blank=True)
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL,
+                                   related_name="+")
+    created_at = models.DateTimeField(auto_now_add=True)
+ 
+ 
+class EmployeeSession(models.Model):
+    """Ilgalaikė sesija (slapukas esv_session, DB - tik SHA-256)."""
+    account = models.ForeignKey(EmployeeAccount, on_delete=models.CASCADE, related_name="sessions")
+    token_hash = models.CharField(max_length=64, unique=True)
+    active_employee = models.ForeignKey("Employee", null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
+    expires_at = models.DateTimeField()
+    last_seen = models.DateTimeField(auto_now=True)
+    ip = models.GenericIPAddressField(null=True, blank=True)
+    user_agent = models.CharField(max_length=255, blank=True, default="")
+    revoked = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+
+
+class EmployeeRequest(models.Model):
+    KIND_CHOICES = [
+        ("vacation", "Kasmetinės atostogos"),
+        ("parent_day", "Mamadienis / tėvadienis"),
+        ("unpaid", "Nemokamos atostogos"),
+        ("dismissal", "Darbo sutarties nutraukimas darbuotojo iniciatyva"),
+    ]
+    STATUS_CHOICES = [
+        ("pending", "Laukia"),
+        ("approved", "Patvirtinta"),
+        ("rejected", "Atmesta"),
+        ("cancelled", "Atšaukta"),
+    ]
+ 
+    employee = models.ForeignKey("Employee", on_delete=models.CASCADE, related_name="requests")
+    kind = models.CharField(max_length=20, choices=KIND_CHOICES)
+    start_date = models.DateField()
+    end_date = models.DateField()                      # nutraukimui = paskutinė darbo diena
+    work_days = models.DecimalField(max_digits=6, decimal_places=2, default=Decimal("0"))
+    comment = models.CharField(max_length=500, blank=True, default="")
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default="pending")
+    reject_reason = models.CharField(max_length=500, blank=True, default="")
+    decided_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL,
+                                   related_name="+")
+    decided_at = models.DateTimeField(null=True, blank=True)
+    absence_event = models.ForeignKey("AbsenceEvent", null=True, blank=True, on_delete=models.SET_NULL,
+                                      related_name="+")
+    html = models.TextField(blank=True, default="")     # prašymo tekstas (pateikimo metu)
+    submitted_ip = models.GenericIPAddressField(null=True, blank=True)
+    submitted_user_agent = models.CharField(max_length=255, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+ 
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [models.Index(fields=["employee", "status"])]
+
+
+
+
+class PayrollDeclaration(models.Model):
+    FORM_CHOICES = [("SAM", "SAM"), ("GPM313", "GPM313"), ("1-SD", "1-SD"), ("2-SD", "2-SD")]
+    STATUS_CHOICES = [
+        ("ready", "Paruošta"),
+        ("error", "Yra klaidų"),
+        ("submitted", "Pateikta"),
+        ("accepted", "Priimta"),
+        ("rejected", "Atmesta"),
+    ]
+ 
+    company = models.ForeignKey("CompanyProfile", on_delete=models.CASCADE, related_name="payroll_declarations")
+    form = models.CharField(max_length=10, choices=FORM_CHOICES)
+    year = models.PositiveSmallIntegerField(null=True, blank=True)
+    month = models.PositiveSmallIntegerField(null=True, blank=True)
+    contract = models.ForeignKey("EmploymentContract", null=True, blank=True, on_delete=models.CASCADE,
+                                 related_name="declarations")
+    content = models.TextField(blank=True, default="")          # .ffdata (UTF-8 XML)
+    errors = models.JSONField(default=list, blank=True)
+    manual_values = models.JSONField(default=dict, blank=True)  # GPM313 8-12 laukeliai
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default="ready")
+    deadline = models.DateField(null=True, blank=True)
+    external_id = models.CharField(max_length=64, blank=True, default="")  # Sodra docUID / VMI FileId
+    submitted_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    external_status = models.CharField(max_length=100, blank=True, default="")
+    external_message = models.TextField(blank=True, default="")
+    last_checked_at = models.DateTimeField(null=True, blank=True)
+ 
+    class Meta:
+        ordering = ["-year", "-month", "form"]
+        indexes = [models.Index(fields=["company", "form", "year", "month"])]
+
+
+
+class SyncState(models.Model):
+    """Išorinių duomenų sinchronizavimo būsena (pvz. "sodra_codes" - paskutinis apdorotas Sodros mėnuo)."""
+    name = models.CharField(max_length=50, unique=True)
+    last_year = models.PositiveSmallIntegerField(null=True, blank=True)
+    last_month = models.PositiveSmallIntegerField(null=True, blank=True)
+    last_checked_at = models.DateTimeField(null=True, blank=True)
+    last_changed_at = models.DateTimeField(null=True, blank=True)   # kada paskutinį kartą atsirado naujas mėnuo
+
+    def __str__(self):
+        return f"{self.name}: {self.last_year}-{self.last_month}"

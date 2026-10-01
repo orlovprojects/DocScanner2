@@ -2,6 +2,7 @@ import logging
 from decimal import Decimal, ROUND_HALF_UP
 
 from django.db import transaction
+from django.db.models import Q
 
 from ..models import (
     FixedAsset,
@@ -30,56 +31,197 @@ from .constants import (
 )
 from .depreciation import (
     _annotate_balances,
-    _period_amount,
     add_months,
-    depreciation_start_period,
+    first_allowed_period,
     month_start,
+    pending_depreciation,
 )
 from .services import FixedAssetError
 
 logger = logging.getLogger("docscanner_app")
 
 ZERO = Decimal("0.00")
+DEP = FixedAssetOperationType.DEPRECIATION
+ACC = DepreciationBook.ACCOUNTING
 
 
-def _check_depreciation_before_disposal(asset, disposal_date):
+# ═══════════════════════════════════════════════════════════
+# Bendra
+# ═══════════════════════════════════════════════════════════
+
+def _load_asset(pk):
+    return (
+        _annotate_balances(FixedAsset.objects.filter(pk=pk))
+        .select_related("group", "company_profile")
+        .get()
+    )
+
+
+def _disposal_catch_up(asset, disposal_date):
     """
-    Nusidėvėjimas turi būti užregistruotas iki mėnesio prieš nurašymą.
-    Nurašymo mėnesį nusidėvėjimas neskaičiuojamas.
+    Neužregistruotas nusidėvėjimas iki perleidimo mėnesio imtinai.
+    Baigiamas skaičiuoti nuo kito mėnesio po perleidimo pirmos dienos.
+    Grąžina [(period, amount), ...].
     """
     disposal_month = month_start(disposal_date)
-    start = depreciation_start_period(asset)
 
-    if start is None or not asset.useful_life_months:
-        return
-
-    if asset.last_period and asset.last_period >= disposal_month:
+    if asset.last_period and asset.last_period > disposal_month:
         raise FixedAssetError(
             f"Nusidėvėjimas užregistruotas už {asset.last_period:%Y-%m} - "
-            f"pirmiausia atšaukite nusidėvėjimą nuo {disposal_month:%Y-%m}"
+            f"pirmiausia atšaukite nusidėvėjimą nuo {add_months(disposal_month, 1):%Y-%m}"
         )
 
-    expected = add_months(asset.last_period, 1) if asset.last_period else start
+    return pending_depreciation(
+        asset,
+        disposal_month,
+        first_allowed_period(asset.company_profile_id),
+    )
 
-    if (
-        expected < disposal_month
-        and _period_amount(asset, expected, asset.base_cost, asset.accumulated) > ZERO
-    ):
+
+def _validate_disposal(asset, disposal_date, catch_up_total):
+    min_date = asset.operation_start_date or asset.purchase_date
+    if min_date and disposal_date < min_date:
         raise FixedAssetError(
-            f"Pirmiausia užregistruokite {expected:%Y-%m} nusidėvėjimą"
+            f"Perleidimo data negali būti ankstesnė už {min_date:%Y-%m-%d}"
         )
 
+    group = asset.group
+    if not group or not group.asset_account:
+        raise FixedAssetError("Turto grupei nenurodyta turto DK sąskaita")
+
+    if asset.accumulated + catch_up_total > ZERO and not group.accumulated_depreciation_account:
+        raise FixedAssetError("Turto grupei nenurodyta sukaupto nusidėvėjimo DK sąskaita")
+
+    if catch_up_total > ZERO and not group.depreciation_expense_account:
+        raise FixedAssetError("Turto grupei nenurodyta nusidėvėjimo sąnaudų DK sąskaita")
+
+    if asset.base_cost <= ZERO:
+        raise FixedAssetError("Turtas neturi įsigijimo savikainos")
+
+    return group
+
+
+def _create_disposal_entry(
+    *,
+    asset,
+    user,
+    entry_date,
+    document_number,
+    description,
+    catch_up_total,
+    close_lines,
+    counterparty_name="",
+    counterparty_code="",
+):
+    entry = JournalEntry.objects.create(
+        user=user,
+        company_profile=asset.company_profile,
+        source_type=JournalEntry.SOURCE_FIXED_ASSET,
+        entry_date=entry_date,
+        period=_period_from_date(entry_date),
+        document_number=document_number,
+        counterparty_name=counterparty_name,
+        counterparty_code=counterparty_code,
+        description=description,
+        currency="EUR",
+        status=JournalEntry.STATUS_DRAFT,
+    )
+
+    group = asset.group
+    lines = []
+    sort_order = 0
+
+    # Priskaičiuotas nusidėvėjimas iškart uždaromas, todėl 1247 jo nerodom:
+    # D sąnaudos, o likęs K turto sąskaita padengiama uždarymo eilutėse
+    if catch_up_total > ZERO:
+        sort_order = _add_line(
+            lines,
+            entry=entry,
+            side="D",
+            account_code=group.depreciation_expense_account,
+            amount=catch_up_total,
+            description=f"Nusidėvėjimas iki perleidimo: {asset.name}"[:255],
+            sort_order=sort_order,
+        )
+
+    for side, code, amount in close_lines:
+        if amount <= ZERO:
+            continue
+        sort_order = _add_line(
+            lines,
+            entry=entry,
+            side=side,
+            account_code=code,
+            amount=amount,
+            description=description,
+            sort_order=sort_order,
+        )
+
+    JournalEntryLine.objects.bulk_create(lines)
+    finalize_journal_entry(entry)
+
+    return entry
+
+
+def _create_catch_up_ops(asset, catch_up, entry, disposal_date):
+    if not catch_up:
+        return
+
+    FixedAssetOperation.objects.bulk_create([
+        FixedAssetOperation(
+            asset_id=asset.pk,
+            operation_type=DEP,
+            operation_date=disposal_date,
+            amount=amount,
+            book=ACC,
+            period=period,
+            journal_entry=entry,
+            description=f"Nusidėvėjimas už {period:%Y-%m} (perleidimo DK)",
+        )
+        for period, amount in catch_up
+    ])
+
+
+def _delete_disposal_operations(asset_id, operation_type):
+    """Perleidimo operacija + tame pačiame DK priskaičiuotas nusidėvėjimas."""
+    entry_ids = list(
+        FixedAssetOperation.objects
+        .filter(
+            asset_id=asset_id,
+            operation_type=operation_type,
+            journal_entry__isnull=False,
+        )
+        .values_list("journal_entry_id", flat=True)
+    )
+
+    FixedAssetOperation.objects.filter(
+        Q(asset_id=asset_id, operation_type=operation_type)
+        | Q(asset_id=asset_id, journal_entry_id__in=entry_ids)
+    ).delete()
+
+    JournalEntry.objects.filter(
+        pk__in=entry_ids,
+        source_type=JournalEntry.SOURCE_FIXED_ASSET,
+    ).delete()
+
+
+def _restore_status(asset):
+    return (
+        FixedAssetStatus.ACTIVE
+        if asset.operation_start_date
+        else FixedAssetStatus.DRAFT
+    )
+
+
+# ═══════════════════════════════════════════════════════════
+# Nurašymas
+# ═══════════════════════════════════════════════════════════
 
 @transaction.atomic
 def write_off_asset(asset, *, disposal_date, reason, comment="", user):
     # Užraktas atskirai: FOR UPDATE negalima su GROUP BY
     FixedAsset.objects.select_for_update().filter(pk=asset.pk).first()
-
-    asset = (
-        _annotate_balances(FixedAsset.objects.filter(pk=asset.pk))
-        .select_related("group", "company_profile")
-        .get()
-    )
+    asset = _load_asset(asset.pk)
 
     if asset.status not in (FixedAssetStatus.ACTIVE, FixedAssetStatus.DRAFT):
         raise FixedAssetError("Turtas jau nurašytas arba parduotas")
@@ -87,82 +229,41 @@ def write_off_asset(asset, *, disposal_date, reason, comment="", user):
     if reason not in WriteOffReason.values:
         raise FixedAssetError("Neteisinga nurašymo priežastis")
 
-    min_date = asset.operation_start_date or asset.purchase_date
-    if min_date and disposal_date < min_date:
-        raise FixedAssetError(
-            f"Nurašymo data negali būti ankstesnė už {min_date:%Y-%m-%d}"
-        )
-
     from ..opening_balances.services import is_before_cutover
     if is_before_cutover(asset.company_profile_id, disposal_date):
         raise FixedAssetError("Nurašymo data yra iki perėjimo datos")
 
-    group = asset.group
-    if not group or not group.asset_account:
-        raise FixedAssetError("Turto grupei nenurodyta turto DK sąskaita")
+    catch_up = _disposal_catch_up(asset, disposal_date)
+    catch_up_total = sum((a for _, a in catch_up), ZERO)
+    group = _validate_disposal(asset, disposal_date, catch_up_total)
 
-    if asset.accumulated > ZERO and not group.accumulated_depreciation_account:
-        raise FixedAssetError("Turto grupei nenurodyta sukaupto nusidėvėjimo DK sąskaita")
-
-    if asset.base_cost <= ZERO:
-        raise FixedAssetError("Turtas neturi įsigijimo savikainos")
-
-    _check_depreciation_before_disposal(asset, disposal_date)
-
-    residual = asset.base_cost - asset.accumulated
+    accumulated = asset.accumulated + catch_up_total
+    residual = asset.base_cost - accumulated
     reason_label = WriteOffReason(reason).label
     description = f"Nurašymas: {asset.name}"[:255]
 
-    entry = JournalEntry.objects.create(
+    entry = _create_disposal_entry(
+        asset=asset,
         user=user,
-        company_profile=asset.company_profile,
-        source_type=JournalEntry.SOURCE_FIXED_ASSET,
         entry_date=disposal_date,
-        period=_period_from_date(disposal_date),
         document_number=f"NUR-{asset.inventory_number or asset.pk}",
         description=description,
-        currency="EUR",
-        status=JournalEntry.STATUS_DRAFT,
+        catch_up_total=catch_up_total,
+        close_lines=[
+            ("D", group.accumulated_depreciation_account, asset.accumulated),
+            ("D", WRITE_OFF_LOSS_ACCOUNT, residual),
+            ("K", group.asset_account, asset.base_cost),
+        ],
     )
 
-    lines = []
-    sort_order = _add_line(
-        lines,
-        entry=entry,
-        side="D",
-        account_code=group.accumulated_depreciation_account,
-        amount=asset.accumulated,
-        description=description,
-        sort_order=0,
-    )
-    sort_order = _add_line(
-        lines,
-        entry=entry,
-        side="D",
-        account_code=WRITE_OFF_LOSS_ACCOUNT,
-        amount=residual,
-        description=description,
-        sort_order=sort_order,
-    )
-    _add_line(
-        lines,
-        entry=entry,
-        side="K",
-        account_code=group.asset_account,
-        amount=asset.base_cost,
-        description=description,
-        sort_order=sort_order,
-    )
-
-    JournalEntryLine.objects.bulk_create(lines)
-    finalize_journal_entry(entry)
+    _create_catch_up_ops(asset, catch_up, entry, disposal_date)
 
     op = FixedAssetOperation.objects.create(
         asset_id=asset.pk,
         operation_type=FixedAssetOperationType.WRITE_OFF,
         operation_date=disposal_date,
         amount=residual,
-        book=DepreciationBook.ACCOUNTING,
+        book=ACC,
         reason=reason,
         journal_entry=entry,
         description=f"{reason_label}: {comment}" if comment else reason_label,
@@ -174,10 +275,11 @@ def write_off_asset(asset, *, disposal_date, reason, comment="", user):
     )
 
     logger.info(
-        "Fixed asset %s written off date=%s residual=%s je=%s",
+        "Fixed asset %s written off date=%s residual=%s catch_up=%s je=%s",
         asset.pk,
         disposal_date,
         residual,
+        catch_up_total,
         entry.pk,
     )
 
@@ -191,23 +293,9 @@ def cancel_write_off(asset):
     if asset.status != FixedAssetStatus.WRITTEN_OFF:
         raise FixedAssetError("Turtas nenurašytas")
 
-    ops = asset.operations.filter(operation_type=FixedAssetOperationType.WRITE_OFF)
-    entry_ids = list(
-        ops.filter(journal_entry__isnull=False)
-        .values_list("journal_entry_id", flat=True)
-    )
+    _delete_disposal_operations(asset.pk, FixedAssetOperationType.WRITE_OFF)
 
-    ops.delete()
-    JournalEntry.objects.filter(
-        pk__in=entry_ids,
-        source_type=JournalEntry.SOURCE_FIXED_ASSET,
-    ).delete()
-
-    asset.status = (
-        FixedAssetStatus.ACTIVE
-        if asset.operation_start_date
-        else FixedAssetStatus.DRAFT
-    )
+    asset.status = _restore_status(asset)
     asset.disposal_date = None
     asset.save(update_fields=["status", "disposal_date", "updated_at"])
 
@@ -285,12 +373,7 @@ def sell_asset(asset, *, invoice, invoice_line=None, user):
 
     FixedAsset.objects.select_for_update().filter(pk=asset.pk).first()
     invoice = Invoice.objects.select_for_update().get(pk=invoice.pk)
-
-    asset = (
-        _annotate_balances(FixedAsset.objects.filter(pk=asset.pk))
-        .select_related("group", "company_profile")
-        .get()
-    )
+    asset = _load_asset(asset.pk)
 
     if asset.status not in (FixedAssetStatus.ACTIVE, FixedAssetStatus.DRAFT):
         raise FixedAssetError("Turtas jau nurašytas arba parduotas")
@@ -317,23 +400,9 @@ def sell_asset(asset, *, invoice, invoice_line=None, user):
 
     disposal_date = _invoice_entry_date(invoice)
 
-    min_date = asset.operation_start_date or asset.purchase_date
-    if min_date and disposal_date < min_date:
-        raise FixedAssetError(
-            f"Pardavimo data negali būti ankstesnė už {min_date:%Y-%m-%d}"
-        )
-
-    group = asset.group
-    if not group or not group.asset_account:
-        raise FixedAssetError("Turto grupei nenurodyta turto DK sąskaita")
-
-    if asset.accumulated > ZERO and not group.accumulated_depreciation_account:
-        raise FixedAssetError("Turto grupei nenurodyta sukaupto nusidėvėjimo DK sąskaita")
-
-    if asset.base_cost <= ZERO:
-        raise FixedAssetError("Turtas neturi įsigijimo savikainos")
-
-    _check_depreciation_before_disposal(asset, disposal_date)
+    catch_up = _disposal_catch_up(asset, disposal_date)
+    catch_up_total = sum((a for _, a in catch_up), ZERO)
+    group = _validate_disposal(asset, disposal_date, catch_up_total)
 
     # 1. Eilutė -> 5400 ir perkuriamas pardavimo DK (dar be turto ryšio)
     _set_invoice_income_account(invoice, invoice_line)
@@ -342,85 +411,46 @@ def sell_asset(asset, *, invoice, invoice_line=None, user):
         invoice_line = InvoiceLineItem.objects.get(pk=invoice_line.pk)
 
     sale_amount = get_invoice_sale_amount(invoice, invoice_line)
-    residual = asset.base_cost - asset.accumulated
+    accumulated = asset.accumulated + catch_up_total
+    residual = asset.base_cost - accumulated
 
-    # 2. Uždarymo DK
-    description = f"IT pardavimas: {asset.name}"[:255]
+    # 2. Uždarymo DK (su priskaičiuotu nusidėvėjimu)
+    # 1247 uždarom tik anksčiau užregistruotą sumą - priskaičiuota
+    # šiame DK iškart nurašoma per sąnaudas
+    if sale_amount >= residual:
+        close_lines = [
+            ("D", group.accumulated_depreciation_account, asset.accumulated),
+            ("D", SALE_GAIN_ACCOUNT, residual),
+            ("K", group.asset_account, asset.base_cost),
+        ]
+    else:
+        close_lines = [
+            ("D", group.accumulated_depreciation_account, asset.accumulated),
+            ("D", SALE_GAIN_ACCOUNT, sale_amount),
+            ("D", SALE_LOSS_ACCOUNT, residual - sale_amount),
+            ("K", group.asset_account, asset.base_cost),
+        ]
 
-    entry = JournalEntry.objects.create(
+    entry = _create_disposal_entry(
+        asset=asset,
         user=user,
-        company_profile=asset.company_profile,
-        source_type=JournalEntry.SOURCE_FIXED_ASSET,
         entry_date=disposal_date,
-        period=_period_from_date(disposal_date),
         document_number=invoice.full_number,
+        description=f"IT pardavimas: {asset.name}"[:255],
+        catch_up_total=catch_up_total,
+        close_lines=close_lines,
         counterparty_name=invoice.buyer_name or "",
         counterparty_code=invoice.buyer_id or "",
-        description=description,
-        currency="EUR",
-        status=JournalEntry.STATUS_DRAFT,
     )
 
-    lines = []
-    sort_order = _add_line(
-        lines,
-        entry=entry,
-        side="D",
-        account_code=group.accumulated_depreciation_account,
-        amount=asset.accumulated,
-        description=description,
-        sort_order=0,
-    )
-
-    if sale_amount >= residual:
-        sort_order = _add_line(
-            lines,
-            entry=entry,
-            side="D",
-            account_code=SALE_GAIN_ACCOUNT,
-            amount=residual,
-            description=description,
-            sort_order=sort_order,
-        )
-    else:
-        sort_order = _add_line(
-            lines,
-            entry=entry,
-            side="D",
-            account_code=SALE_GAIN_ACCOUNT,
-            amount=sale_amount,
-            description=description,
-            sort_order=sort_order,
-        )
-        sort_order = _add_line(
-            lines,
-            entry=entry,
-            side="D",
-            account_code=SALE_LOSS_ACCOUNT,
-            amount=residual - sale_amount,
-            description=description,
-            sort_order=sort_order,
-        )
-
-    _add_line(
-        lines,
-        entry=entry,
-        side="K",
-        account_code=group.asset_account,
-        amount=asset.base_cost,
-        description=description,
-        sort_order=sort_order,
-    )
-
-    JournalEntryLine.objects.bulk_create(lines)
-    finalize_journal_entry(entry)
+    _create_catch_up_ops(asset, catch_up, entry, disposal_date)
 
     op = FixedAssetOperation.objects.create(
         asset_id=asset.pk,
         operation_type=FixedAssetOperationType.SALE,
         operation_date=disposal_date,
         amount=sale_amount,
-        book=DepreciationBook.ACCOUNTING,
+        book=ACC,
         journal_entry=entry,
         description=f"Pardavimas pagal {invoice.full_number}",
     )
@@ -434,42 +464,61 @@ def sell_asset(asset, *, invoice, invoice_line=None, user):
     )
 
     logger.info(
-        "Fixed asset %s sold invoice=%s line=%s sale=%s residual=%s je=%s",
+        "Fixed asset %s sold invoice=%s line=%s sale=%s residual=%s catch_up=%s je=%s",
         asset.pk,
         invoice.pk,
         getattr(invoice_line, "pk", None),
         sale_amount,
         residual,
+        catch_up_total,
         entry.pk,
     )
 
     return op
 
 
+def _default_income_account(kind):
+    kind = str(kind or "").strip().lower()
+    return "5000" if kind in ("preke", "prekes", "1", "3") else "5001"
+
+
+def _revert_invoice_income_account(invoice, invoice_line):
+    """Atsiejus turtą, eilutei grąžinama įprasta pajamų sąskaita."""
+    from ..utils.journal_generators import sync_invoice_journal_entry
+
+    if invoice_line is not None:
+        line = InvoiceLineItem.objects.get(pk=invoice_line.pk)
+        InvoiceLineItem.objects.filter(pk=line.pk).update(
+            kredito_saskaita=_default_income_account(line.preke_paslauga or invoice.preke_paslauga)
+        )
+    else:
+        Invoice.objects.filter(pk=invoice.pk).update(
+            kredito_saskaita=_default_income_account(invoice.preke_paslauga)
+        )
+
+    invoice.refresh_from_db()
+    sync_invoice_journal_entry(invoice)
+
+
 @transaction.atomic
-def cancel_sale(asset):
+def cancel_sale(asset, *, revert_income=True):
     asset = FixedAsset.objects.select_for_update().get(pk=asset.pk)
 
     if asset.status != FixedAssetStatus.SOLD:
         raise FixedAssetError("Turtas neparduotas")
 
-    ops = asset.operations.filter(operation_type=FixedAssetOperationType.SALE)
-    entry_ids = list(
-        ops.filter(journal_entry__isnull=False)
-        .values_list("journal_entry_id", flat=True)
+    invoice = (
+        Invoice.objects.filter(pk=asset.sale_invoice_id).first()
+        if asset.sale_invoice_id else None
+    )
+    line = (
+        InvoiceLineItem.objects.filter(pk=asset.sale_invoice_line_id).first()
+        if asset.sale_invoice_line_id else None
     )
 
-    ops.delete()
-    JournalEntry.objects.filter(
-        pk__in=entry_ids,
-        source_type=JournalEntry.SOURCE_FIXED_ASSET,
-    ).delete()
+    _delete_disposal_operations(asset.pk, FixedAssetOperationType.SALE)
 
-    asset.status = (
-        FixedAssetStatus.ACTIVE
-        if asset.operation_start_date
-        else FixedAssetStatus.DRAFT
-    )
+    asset.status = _restore_status(asset)
     asset.disposal_date = None
     asset.sale_invoice = None
     asset.sale_invoice_line = None
@@ -480,6 +529,9 @@ def cancel_sale(asset):
         "sale_invoice_line",
         "updated_at",
     ])
+
+    if revert_income and invoice is not None and invoice.status != "cancelled":
+        _revert_invoice_income_account(invoice, line)
 
     return asset
 
@@ -551,6 +603,9 @@ def validate_invoice_fixed_assets(invoice):
             )
 
 
+# ═══════════════════════════════════════════════════════════
+# Patikra prieš išrašant sąskaitą
+# ═══════════════════════════════════════════════════════════
 
 def check_sale(asset, *, invoice_date=None, amount=None, invoice_type="", currency="EUR"):
     """Patikra prieš išrašant sąskaitą. Nieko nekuria."""
@@ -611,7 +666,7 @@ def check_sale(asset, *, invoice_date=None, amount=None, invoice_type="", curren
 
     if catch_up_total > ZERO:
         warnings.append(
-            f"Prieš pardavimą bus priskaičiuotas trūkstamas nusidėvėjimas {catch_up_total} EUR"
+            f"Bus priskaičiuotas nusidėvėjimas iki pardavimo mėnesio imtinai: {catch_up_total} EUR"
         )
 
     return {

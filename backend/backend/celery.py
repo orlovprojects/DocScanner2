@@ -44,7 +44,7 @@ app.conf.beat_schedule = {
         'schedule': crontab(minute='*/15'),
     },
     'sync-lt-companies-weekly': {
-        'task': 'docscanner_app.services.sync_lt_companies.sync_lt_companies_weekly',
+        'task': 'docscanner_app.tasks.sync_lt_companies_weekly',
         'schedule': crontab(hour=5, minute=0, day_of_week=1),
     },
     'send-onboarding-emails': {
@@ -54,6 +54,22 @@ app.conf.beat_schedule = {
     'send-trial-expired-emails': {
         'task': 'docscanner_app.tasks.send_trial_expired_emails',
         'schedule': crontab(hour=10, minute=15, day_of_week='1-5'),
+    },
+    "cleanup-vat-check-cache": {
+        "task": "docscanner_app.tasks.cleanup_vat_check_cache",
+        "schedule": crontab(minute=30, hour=4),
+    },
+    "check-sodra-form-versions": {
+        "task": "docscanner_app.payroll.form_versions.check_sodra_form_versions",
+        "schedule": crontab(hour=6, minute=0, day_of_week=1),
+    },
+    "sync-sodra-codes-weekly": {
+        "task": "docscanner_app.services.sync_lt_companies.sync_sodra_codes_weekly",
+        "schedule": crontab(hour=9, minute=0, day_of_week=1),
+    },
+    "poll-submitted-declarations": {
+        "task": "docscanner_app.payroll.declarations.tasks.poll_submitted_declarations",
+        "schedule": crontab(minute="*/30"),
     },
 }
 

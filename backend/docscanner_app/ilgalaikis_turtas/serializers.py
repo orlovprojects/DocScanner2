@@ -61,6 +61,21 @@ class FixedAssetSerializer(serializers.ModelSerializer):
     depreciation_start = serializers.SerializerMethodField()
     last_depreciation_period = serializers.SerializerMethodField()
     is_fully_depreciated = serializers.SerializerMethodField()
+    sale_invoice_owned = serializers.SerializerMethodField()
+    sale_invoice_number = serializers.SerializerMethodField()
+    sale_invoice_line_count = serializers.SerializerMethodField()
+
+    def get_sale_invoice_owned(self, obj):
+        line = obj.sale_invoice_line
+        return bool(line and line.fixed_asset_id == obj.pk)
+
+    def get_sale_invoice_number(self, obj):
+        invoice = obj.sale_invoice
+        return invoice.full_number if invoice else ""
+
+    def get_sale_invoice_line_count(self, obj):
+        invoice = obj.sale_invoice
+        return invoice.line_items.count() if invoice else 0
 
     def get_is_fully_depreciated(self, obj):
         accumulated = getattr(obj, "accumulated", None)
@@ -112,6 +127,9 @@ class FixedAssetSerializer(serializers.ModelSerializer):
             "depreciation_start",
             "last_depreciation_period",
             "is_fully_depreciated",
+            "sale_invoice_owned",
+            "sale_invoice_number",
+            "sale_invoice_line_count",
             "acquisition_cost",
             "salvage_value",
             "useful_life_months",
