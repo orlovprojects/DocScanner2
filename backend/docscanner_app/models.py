@@ -4562,6 +4562,7 @@ class PaymentAllocation(models.Model):
         ("document", "Dokumentas"),
         ("advance", "Avansas"),
         ("writeoff", "Nurašymas"),
+        ("payroll", "Darbo užmokestis"),
     ]
 
     # ── Транзакция (одна из двух или null при manual) ───
@@ -4660,6 +4661,10 @@ class PaymentAllocation(models.Model):
         on_delete=models.SET_NULL,
         related_name="payment_allocations",
         help_text="DK įrašas sukurtas patvirtinus susiejimą",
+    )
+
+    payroll_payment = models.ForeignKey(
+        "PayrollPayment", null=True, blank=True, on_delete=models.CASCADE, related_name="allocations",
     )
 
     created_at = models.DateTimeField(auto_now_add=True)
@@ -6462,6 +6467,10 @@ class JournalEntryLine(models.Model):
         related_name="journal_lines",
     )
 
+    employee = models.ForeignKey(
+        "Employee", null=True, blank=True, on_delete=models.SET_NULL, related_name="journal_lines",
+    )
+
     sort_order = models.PositiveIntegerField(default=0)
 
     class Meta:
@@ -7204,6 +7213,8 @@ class PayrollSettings(models.Model):
     advance_enabled = models.BooleanField(default=False)
     advance_day = models.PositiveSmallIntegerField(default=20)
     salary_day = models.PositiveSmallIntegerField(default=10)
+    advance_percent = models.PositiveSmallIntegerField(default=50)
+    payout_account = models.CharField(max_length=20, blank=True, default="")
  
     default_expense_account = models.CharField(max_length=10, default="6304")
     collective_agreement = models.BooleanField(default=False)
@@ -7303,6 +7314,8 @@ class Employee(models.Model):
     data_status = models.CharField(max_length=20, default="complete",
                                    choices=[("complete", "Užpildyta"), ("awaiting_employee", "Laukiama darbuotojo duomenų")])
 
+    pay_once_a_month = models.BooleanField(default=False)
+    advance_amount = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
     account = models.ForeignKey("EmployeeAccount", null=True, blank=True, on_delete=models.SET_NULL, related_name="employees")
     onboarding_token = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
     status = models.CharField(max_length=10, choices=STATUS_CHOICES, default="active")
@@ -7889,3 +7902,99 @@ class SyncState(models.Model):
 
     def __str__(self):
         return f"{self.name}: {self.last_year}-{self.last_month}"
+    
+
+
+class PayrollPayment(models.Model):
+    """
+    DU įsipareigojimas sumokėti: darbuotojui (atlyginimas / avansas), VMI (GPM), Sodrai, išskaitos gavėjui.
+    Sukuriamas tvirtinant DU (avansai - mėnesio viduryje). Apmokama per PaymentAllocation (kind="payroll"):
+    iš banko išrašo arba rankiniu būdu.
+    """
+    KIND_CHOICES = [
+        ("employee", "Atlyginimas"),
+        ("advance", "Avansas"),
+        ("gpm", "GPM (VMI)"),
+        ("sodra", "Sodra"),
+        ("deduction", "Išskaita"),
+    ]
+    STATUS_CHOICES = [
+        ("open", "Laukia"),
+        ("sent", "Išsiųsta į banką"),
+        ("partial", "Dalinai sumokėta"),
+        ("paid", "Sumokėta"),
+        ("cancelled", "Atšaukta"),
+    ]
+ 
+    company = models.ForeignKey("CompanyProfile", on_delete=models.CASCADE, related_name="payroll_payments")
+    run = models.ForeignKey("PayrollRun", null=True, blank=True, on_delete=models.CASCADE, related_name="payments")
+    employee = models.ForeignKey("Employee", null=True, blank=True, on_delete=models.CASCADE, related_name="payroll_payments")
+    kind = models.CharField(max_length=12, choices=KIND_CHOICES)
+    year = models.PositiveSmallIntegerField()
+    month = models.PositiveSmallIntegerField()
+ 
+    recipient_name = models.CharField(max_length=255, blank=True, default="")
+    recipient_iban = models.CharField(max_length=34, blank=True, default="")
+    recipient_code = models.CharField(max_length=20, blank=True, default="")
+    imokos_kodas = models.CharField(max_length=6, blank=True, default="")
+    purpose = models.CharField(max_length=140, blank=True, default="")
+    reference = models.CharField(max_length=35, blank=True, default="", db_index=True)
+ 
+    amount = models.DecimalField(max_digits=12, decimal_places=2)
+    paid_amount = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0"))
+    breakdown = models.JSONField(default=dict, blank=True)   # {"4480": .., "4484": ..} / {"4482": .., "4486": ..}
+    due_date = models.DateField(null=True, blank=True)
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default="open")
+    batch = models.ForeignKey("PayrollPaymentBatch", null=True, blank=True, on_delete=models.SET_NULL,
+                              related_name="payments")
+    sent_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+ 
+    class Meta:
+        ordering = ["due_date", "kind", "id"]
+        indexes = [
+            models.Index(fields=["company", "year", "month"]),
+            models.Index(fields=["company", "status"]),
+        ]
+ 
+    def __str__(self):
+        return f"{self.get_kind_display()} {self.year}-{self.month:02d}: {self.recipient_name} {self.amount}"
+ 
+    @property
+    def open_amount(self):
+        return max(self.amount - self.paid_amount, Decimal("0"))
+ 
+    def recalc(self, save=True):
+        total = Decimal("0")
+        for a in self.allocations.filter(status__in=("auto", "confirmed", "manual")):
+            total += a.amount or Decimal("0")
+        self.paid_amount = total
+        if self.status != "cancelled":
+            if total >= self.amount - Decimal("0.01"):
+                self.status = "paid"
+            elif total > 0:
+                self.status = "partial"
+            elif self.status not in ("sent",):
+                self.status = "open"
+        if save:
+            self.save(update_fields=["paid_amount", "status", "updated_at"])
+        return total
+ 
+ 
+class PayrollPaymentBatch(models.Model):
+    """Bankui paruoštas mokėjimų failas (pain.001) - auditui ir pakartotiniam atsisiuntimui."""
+    company = models.ForeignKey("CompanyProfile", on_delete=models.CASCADE, related_name="payroll_payment_batches")
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL,
+                                   related_name="+")
+    msg_id = models.CharField(max_length=35, unique=True)
+    debtor_iban = models.CharField(max_length=34)
+    debtor_account = models.CharField(max_length=20, blank=True, default="")   # 271x
+    execution_date = models.DateField()
+    count = models.PositiveIntegerField(default=0)
+    total = models.DecimalField(max_digits=14, decimal_places=2, default=Decimal("0"))
+    xml = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+ 
+    class Meta:
+        ordering = ["-created_at"]

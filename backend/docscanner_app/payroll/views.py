@@ -712,3 +712,137 @@ class VmiConnectionTestView(PayrollCompanyMixin, APIView):
         except Exception:  # noqa: BLE001
             ok, msg = False, "VMI paslauga nepasiekiama"
         return Response({"ok": ok, "message": msg})
+
+
+# ============================================================
+# Išmokėjimai
+# ============================================================
+
+def _payment_or_404(company, pk):
+    from docscanner_app.models import PayrollPayment
+    p = PayrollPayment.objects.filter(id=pk, company=company).first()
+    if p is None:
+        raise ValidationError("Mokėjimas nerastas")
+    return p
+
+
+def _payroll_alloc_or_404(company, pk):
+    from docscanner_app.models import PaymentAllocation
+    a = (PaymentAllocation.objects.filter(id=pk, kind="payroll", payroll_payment__company=company)
+         .select_related("payroll_payment", "outgoing_transaction").first())
+    if a is None:
+        raise ValidationError("Mokėjimo įrašas nerastas")
+    return a
+
+
+def _date_param(value, default=None):
+    try:
+        return _date.fromisoformat(str(value)) if value else default
+    except ValueError:
+        raise ValidationError("Neteisinga data")
+
+
+class PayrollPaymentsView(PayrollCompanyMixin, APIView):
+    """GET ?year=&month= - mėnesio išmokėjimai (darbuotojai, VMI, Sodra, išskaitos)."""
+
+    def get(self, request):
+        from .payments import payments_overview
+        today = _date.today()
+        y = int(request.query_params.get("year") or today.year)
+        m = int(request.query_params.get("month") or today.month)
+        return Response(payments_overview(self.get_company(), y, m))
+
+
+class PayrollPaymentMarkPaidView(PayrollCompanyMixin, APIView):
+    """POST {ids: [..] | id, payment_date, payment_account, amount?} - pažymėti sumokėta."""
+
+    def post(self, request):
+        from .payments import mark_paid
+        company = self.get_company()
+        ids = request.data.get("ids") or [request.data.get("id")]
+        pay_date = _date_param(request.data.get("payment_date"), _date.today())
+        account = request.data.get("payment_account") or ""
+        amount = request.data.get("amount") if len(ids) == 1 else None
+        done, errors = [], []
+        for pk in ids:
+            p = _payment_or_404(company, pk)
+            try:
+                mark_paid(p, request.user, pay_date, account, amount, request.data.get("note") or "")
+                done.append(p.id)
+            except ValueError as e:
+                errors.append({"id": p.id, "detail": str(e)})
+        return Response({"done": done, "errors": errors})
+
+
+class PayrollAllocationView(PayrollCompanyMixin, APIView):
+    """POST action=confirm | account (payment_account) ; DELETE - atmesti / pašalinti."""
+
+    def post(self, request, pk):
+        from .payments import confirm, set_account
+        a = _payroll_alloc_or_404(self.get_company(), pk)
+        action_ = request.data.get("action")
+        if action_ == "confirm":
+            confirm(a, request.user)
+        elif action_ == "account":
+            if not (request.data.get("payment_account") or "").strip():
+                raise ValidationError("Pasirinkite pinigų sąskaitą")
+            set_account(a, request.data["payment_account"])
+        else:
+            raise ValidationError("Neteisingas veiksmas")
+        return Response({"status": "ok"})
+
+    def delete(self, request, pk):
+        from .payments import remove
+        remove(_payroll_alloc_or_404(self.get_company(), pk))
+        return Response(status=drf_status.HTTP_204_NO_CONTENT)
+
+
+class PayrollAdvancesView(PayrollCompanyMixin, APIView):
+    """POST {year, month} - sukurti mėnesio avansus."""
+
+    def post(self, request):
+        from .payments import create_advances
+        try:
+            created, skipped = create_advances(self.get_company(), int(request.data["year"]), int(request.data["month"]))
+        except (KeyError, TypeError, ValueError) as e:
+            raise ValidationError(str(e) if isinstance(e, ValueError) else "Nurodykite metus ir mėnesį")
+        return Response({"created": len(created), "skipped": skipped})
+
+
+class PayrollPaymentLinkView(PayrollCompanyMixin, APIView):
+    """POST {transaction_id, amount?} - susieti banko išlaidą su DU mokėjimu rankiniu būdu."""
+
+    def post(self, request, pk):
+        from docscanner_app.models import OutgoingTransaction
+        from .payments import link_transaction
+        company = self.get_company()
+        p = _payment_or_404(company, pk)
+        txn = OutgoingTransaction.objects.filter(id=request.data.get("transaction_id"), company_profile=company).first()
+        if txn is None:
+            raise ValidationError("Banko operacija nerasta")
+        try:
+            a = link_transaction(p, txn, request.user, request.data.get("amount"))
+        except ValueError as e:
+            raise ValidationError(str(e))
+        return Response({"allocation_id": a.id})
+
+
+class PayrollPaymentFileView(PayrollCompanyMixin, APIView):
+    """POST {ids, execution_date, debtor_iban} -> pain.001 XML (atsisiuntimas). Klaidos - antraštėje X-Errors."""
+
+    def post(self, request):
+        from urllib.parse import quote
+        from .payments import create_batch
+        company = self.get_company()
+        try:
+            batch, errors = create_batch(company, request.user, request.data.get("ids") or [],
+                                         _date_param(request.data.get("execution_date"), _date.today()),
+                                         request.data.get("debtor_iban") or "")
+        except ValueError as e:
+            raise ValidationError(str(e))
+        resp = HttpResponse(batch.xml, content_type="application/xml; charset=utf-8")
+        resp["Content-Disposition"] = f'attachment; filename="DU_mokejimai_{batch.execution_date}.xml"'
+        resp["X-Batch-Id"] = str(batch.id)
+        resp["X-Errors"] = quote(" | ".join(errors))
+        resp["Access-Control-Expose-Headers"] = "X-Batch-Id, X-Errors, Content-Disposition"
+        return resp

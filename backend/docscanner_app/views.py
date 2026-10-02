@@ -9406,6 +9406,9 @@ class StatementDetailView(generics.RetrieveDestroyAPIView):
         stmt_id = instance.id  # сохраняем до удаления
 
         with transaction.atomic():
+            from .payroll.payments import detach_statement
+            detach_statement(instance)
+
             # ── 1. Собрать затронутые документы ──
             affected_invoice_ids = set()
             affected_purchase_ids = set()
@@ -9763,11 +9766,6 @@ def _build_txn_full(txn, direction_str, allocs):
         "category_account_credit": txn.category_account_credit or "",
     })
     return data
-
-
-# ═══════════════════════════════════════════════════════
-# Замены в views.py — банковские транзакции
-# ═══════════════════════════════════════════════════════
 
 
 # ── 1. TransactionListView.get() ──────────────────────

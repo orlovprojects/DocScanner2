@@ -1111,7 +1111,15 @@ export default function DocumentsTable({
               </>
             )}
 
-            <TableCell sx={{ fontWeight: 600 }}>Failas</TableCell>
+            <TableCell
+              sx={{
+                fontWeight: 600,
+                width: 260,
+                maxWidth: 260,
+              }}
+            >
+              Failas
+            </TableCell>
             <TableCell sx={{ fontWeight: 600 }}>Skaitmenizavimo tipas</TableCell>
             <TableCell sx={{ fontWeight: 600 }}>Pirkimas / pardavimas</TableCell>
             <TableCell sx={{ fontWeight: 600 }}>Statusas</TableCell>
@@ -1188,10 +1196,28 @@ export default function DocumentsTable({
                     )}
 
                     <TableCell
-                      sx={{ cursor: "pointer", color: "primary.main" }}
+                      sx={{
+                        cursor: "pointer",
+                        color: "primary.main",
+                        width: 260,
+                        maxWidth: 260,
+                        overflow: "hidden",
+                      }}
                       onClick={() => d.onClickPreview?.(d)}
                     >
-                      {d.original_filename}
+                      <Tooltip title={d.original_filename || ""} arrow>
+                        <Typography
+                          variant="body2"
+                          sx={{
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            whiteSpace: "nowrap",
+                            maxWidth: 260,
+                          }}
+                        >
+                          {d.original_filename}
+                        </Typography>
+                      </Tooltip>
                     </TableCell>
 
                     <TableCell>

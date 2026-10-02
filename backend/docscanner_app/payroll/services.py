@@ -23,7 +23,7 @@ from docscanner_app.models import (
 
 from .averages import BonusRecord, VduMonth
 from .gross import TermsSegment
-from .journal import build_journal, is_balanced, merge_journals, tax_lines
+from .journal import build_journal, is_balanced, merge_journals, merge_journals_by_employee, tax_lines
 from .parameters import get_params
 from .run import EmployeeMonthInput, Line, calculate_employee_month
 from .timesheet import Event, generate
@@ -188,6 +188,15 @@ def _insured_fraction(events, first, last, employed_from, employed_to):
 
 
 def _manual_lines(run, employee):
+    extra, deductions, advance = _manual_lines_base(run, employee)
+    from docscanner_app.models import PayrollPayment
+    planned = (PayrollPayment.objects
+               .filter(company=run.company, employee=employee, kind="advance", year=run.year, month=run.month)
+               .exclude(status="cancelled").aggregate(s=Sum("amount"))["s"] or Decimal("0"))
+    return extra, deductions, advance + planned
+
+
+def _manual_lines_base(run, employee):
     extra, deductions, advance = [], [], Decimal("0")
     for l in run.lines.filter(employee=employee, is_manual=True).select_related("pay_code"):
         line = Line(l.pay_code.code, l.amount, l.quantity, l.rate, l.comment)
@@ -408,15 +417,20 @@ def recalculate_run(run):
 # Patvirtinimas + DK
 # ============================================================
 
-def run_journal(run):
-    """Visų darbuotojų DK eilutės (subalansuotos), sąnaudų sąskaita pagal darbuotoją."""
-    journals = []
+def employee_journals(run):
+    """[(employee_id, darbuotojo DK eilutės)] - sąnaudų sąskaita pagal darbuotoją."""
+    out = []
     for res in run.results.select_related("employee"):
         lines = [Line(l.pay_code.code, l.amount)
                  for l in run.lines.filter(employee=res.employee).select_related("pay_code")]
         expense = (res.calc_snapshot or {}).get("expense_account", "6304")
-        journals.append(build_journal(lines, expense))
-    journal = merge_journals(journals)
+        out.append((res.employee_id, build_journal(lines, expense)))
+    return out
+
+
+def run_journal(run):
+    """Visų darbuotojų DK eilutės: 4480 / 4484 - kiekvienam darbuotojui atskirai, kitos - suvestinės."""
+    journal = merge_journals_by_employee(employee_journals(run))
     if not is_balanced(journal):
         raise ValueError("DU DK įrašas nesubalansuotas")
     return journal
@@ -435,6 +449,8 @@ def approve_run(run, user):
     run.approved_by = user
     run.approved_at = timezone.now()
     run.save(update_fields=["journal_entry", "status", "approved_by", "approved_at", "updated_at"])
+    from .payments import create_obligations_for_run
+    create_obligations_for_run(run)
     logger.info("DU patvirtintas: run=%s, JE #%s", run.id, je.id)
     if run.kind == "regular":
         from .savitarna_emails import notify_payslip
@@ -450,6 +466,8 @@ def reopen_run(run):
     """Atšaukti patvirtinimą: ištrinamas DK įrašas, statusas -> draft."""
     if run.status in ("paid", "closed"):
         raise ValueError("Išmokėto / uždaryto DU atidaryti negalima")
+    from .payments import delete_obligations_for_run
+    delete_obligations_for_run(run)
     je_id = run.journal_entry_id
     run.journal_entry = None
     run.status = "draft"
@@ -499,7 +517,7 @@ def write_journal_entry(run, journal, user):
         status=JournalEntry.STATUS_POSTED,
     )
     lines = []
-    for i, jl in enumerate(sorted(journal, key=lambda x: (x.credit > 0, x.account))):
+    for i, jl in enumerate(sorted(journal, key=lambda x: (x.credit > 0, x.account, x.employee_id or 0))):
         side = "D" if jl.debit > 0 else "K"
         lines.append(JournalEntryLine(
             entry=je, side=side,
@@ -508,6 +526,7 @@ def write_journal_entry(run, journal, user):
             amount=jl.debit if side == "D" else jl.credit,
             description=desc,
             sort_order=i,
+            employee_id=jl.employee_id,
         ))
     JournalEntryLine.objects.bulk_create(lines)
     finalize_journal_entry(je)
@@ -1393,9 +1412,9 @@ def declarations_overview(company, year, month):
 # ============================================================
 
 def _vmi_credentials(company):
-    from docscanner_app.utils.password_encryption import decrypt_password
+    from .crypto import decrypt
     st = _settings(company)
-    user, pw = (st.vmi_ws_username or "").strip(), decrypt_password(st.vmi_ws_password) or ""
+    user, pw = (st.vmi_ws_username or "").strip(), decrypt(st.vmi_ws_password)
     if not user or not pw:
         raise ValueError("DU nustatymuose įveskite VMI EDS žiniatinklio paslaugos prisijungimą")
     return user, pw

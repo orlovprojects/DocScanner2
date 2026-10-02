@@ -107,6 +107,7 @@ const MenesioDUPage = lazy(() => import("./pages/payroll/MenesioDUPage"));
 const DarboApmokejimoSistemaPage = lazy(() => import("./pages/payroll/DarboApmokejimoSistemaPage"));
 const PrasymaiPage = lazy(() => import("./pages/payroll/PrasymaiPage"));
 const DeklaracijosPage = lazy(() => import("./pages/payroll/DeklaracijosPage"));
+const IsmokejimaiPage = lazy(() => import("./pages/payroll/IsmokejimaiPage"));
 
 
 
@@ -295,7 +296,8 @@ function App() {
                 <Route path="/darbo-uzmokestis/atlyginimai" element={<PrivateRoute><MenesioDUPage /></PrivateRoute>} />
                 <Route path="/darbo-uzmokestis/apmokejimo-sistema" element={<PrivateRoute><DarboApmokejimoSistemaPage /></PrivateRoute>} />                      
                 <Route path="/darbo-uzmokestis/prasymai" element={<PrivateRoute><PrasymaiPage /></PrivateRoute>} />
-                <Route path="/darbo-uzmokestis/deklaracijos" element={<DeklaracijosPage />} />
+                <Route path="/darbo-uzmokestis/deklaracijos" element={<PrivateRoute><DeklaracijosPage /></PrivateRoute>} />
+                <Route path="/darbo-uzmokestis/ismokejimai" element={<PrivateRoute><IsmokejimaiPage /></PrivateRoute>} />
 
                 <Route path="/priminti-slaptazodi" element={<PasswordReset />} />
                 <Route path="/buhalterine-apskaita" element={<BuhalterinenApskaita />} />

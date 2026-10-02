@@ -354,6 +354,13 @@ class BankImportService:
                 )
 
 
+                # ── 10b. DU mokėjimai (atlyginimai, GPM, Sodra) ────────────
+                from ..payroll.payments import match_statement as match_payroll_statement
+                logger.info(
+                    "[BankImport] Payroll matching: %s",
+                    match_payroll_statement(self.user, self.company_profile, stmt),
+                )
+
                 # ── 11. Categories that do NOT require documents ───────────
 
                 # Bank fee / VMI / Sodra / salary → direct DK
@@ -521,6 +528,9 @@ class BankImportService:
         from ..utils.purchase_matching_signals import SignalPurchaseMatchingEngine
 
         with db_transaction.atomic():
+            from ..payroll.payments import detach_statement, match_statement as match_payroll_statement
+            detach_statement(stmt)
+
             # ── 1. Собрать затронутые документы ─────────────
             affected_invoice_ids = set()
             affected_purchase_ids = set()
@@ -611,6 +621,9 @@ class BankImportService:
                     self.company_profile,
                 ).classify_and_apply(all_txns)
 
+
+            # ── 5b. DU mokėjimai ───────────────────────────────────
+            match_payroll_statement(self.user, self.company_profile, stmt)
 
             # ── 6. Process categories without documents ────────────
             category_dk = BankCategoryJournalBuilder(
@@ -1077,6 +1090,13 @@ class PaymentService:
         """Юзер подтверждает proposed allocation."""
         from django.db.models import Q
 
+        payroll = PaymentAllocation.objects.filter(
+            id=allocation_id, kind="payroll", payroll_payment__company__user=self.user,
+        ).first()
+        if payroll:
+            from ..payroll.payments import confirm
+            return confirm(payroll, self.user)
+
         alloc = PaymentAllocation.objects.select_related(
             "incoming_transaction", "outgoing_transaction",
             "invoice", "purchase",
@@ -1120,6 +1140,13 @@ class PaymentService:
     def reject_allocation(self, allocation_id):
         """Юзер отклоняет proposed allocation."""
         from django.db.models import Q
+
+        payroll = PaymentAllocation.objects.filter(
+            id=allocation_id, kind="payroll", payroll_payment__company__user=self.user,
+        ).first()
+        if payroll:
+            from ..payroll.payments import remove
+            return remove(payroll)
 
         alloc = PaymentAllocation.objects.select_related(
             "incoming_transaction", "outgoing_transaction",

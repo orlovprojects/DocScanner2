@@ -250,6 +250,14 @@ function PersonTab({ emp, onSaved }) {
         <TextField label="Telefonas" value={f.phone} onChange={(e) => set({ phone: e.target.value })} fullWidth />
       </Stack>
       <TextField label="Banko sąskaita (IBAN)" value={f.iban} onChange={(e) => set({ iban: e.target.value.toUpperCase().replace(/\s/g, "") })} />
+      <FormControlLabel
+        control={<Checkbox checked={!!f.pay_once_a_month} onChange={(e) => set({ pay_once_a_month: e.target.checked })} />}
+        label="Atlyginimas mokamas kartą per mėnesį (darbuotojo prašymu)" />
+      {!f.pay_once_a_month && (
+        <TextField label="Avanso suma, €" value={f.advance_amount ?? ""} sx={{ maxWidth: 240 }}
+          onChange={(e) => set({ advance_amount: e.target.value.replace(",", ".") || null })}
+          helperText="Tuščia – pagal DU nustatymų procentą" />
+      )}
       <Divider sx={{ my: 1 }} />
       <TaxFields e={f} set={set} />
       {error && <Alert severity="error">{error}</Alert>}

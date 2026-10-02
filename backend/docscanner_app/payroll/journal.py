@@ -21,11 +21,15 @@ TAX_FIELDS = (
 DEFAULT_EXPENSE = "6304"
 
 
+EMPLOYEE_ACCOUNTS = ("4480", "4484")   # skola konkrečiam darbuotojui - DK eilutė su darbuotoju
+
+
 @dataclass
 class JournalLine:
     account: str
     debit: Decimal = ZERO
     credit: Decimal = ZERO
+    employee_id: int = None
 
 
 def tax_lines(taxes):
@@ -65,6 +69,31 @@ def merge_journals(journals):
         balances[jl.account] = balances.get(jl.account, ZERO) + jl.debit - jl.credit
     return [JournalLine(a, debit=b) if b > 0 else JournalLine(a, credit=-b)
             for a, b in balances.items() if b != 0]
+
+
+def merge_journals_by_employee(items):
+    """
+    items: [(employee_id, journal)] -> suvestinė, bet 4480 / 4484 paliekamos atskirai kiekvienam darbuotojui
+    (Skolos: kiek kuriam darbuotojui mokėtina).
+    """
+    balances = OrderedDict()
+    for emp_id, journal in items:
+        for jl in journal:
+            key = (jl.account, emp_id if jl.account in EMPLOYEE_ACCOUNTS else None)
+            balances[key] = balances.get(key, ZERO) + jl.debit - jl.credit
+    out = []
+    for (account, emp_id), b in balances.items():
+        if b > 0:
+            out.append(JournalLine(account, debit=b, employee_id=emp_id))
+        elif b < 0:
+            out.append(JournalLine(account, credit=-b, employee_id=emp_id))
+    return out
+
+
+def employee_credit(journal, account):
+    """Darbuotojo žurnale - sąskaitos kreditinis likutis (pvz. 4484 kompensacijos)."""
+    b = sum((jl.credit - jl.debit for jl in journal if jl.account == account), ZERO)
+    return b if b > 0 else ZERO
 
 
 def is_balanced(journal):

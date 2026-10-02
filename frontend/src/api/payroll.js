@@ -78,6 +78,15 @@ export const payrollApi = {
   submitDeclaration: (id) => api.post(`${P}/declarations/${id}/submit/`).then((r) => r.data),
   checkDeclaration: (id) => api.post(`${P}/declarations/${id}/check/`).then((r) => r.data),
   testVmi: () => api.post(`${P}/settings/test-vmi/`).then((r) => r.data),
+  // išmokėjimai
+  payments: (year, month) => api.get(`${P}/payments/`, { params: { year, month } }).then((r) => r.data),
+  markPaid: (data) => api.post(`${P}/payments/mark-paid/`, data).then((r) => r.data),
+  allocationAction: (id, data) => api.post(`${P}/payment-allocations/${id}/`, data).then((r) => r.data),
+  removeAllocation: (id) => api.delete(`${P}/payment-allocations/${id}/`),
+  createAdvances: (year, month) => api.post(`${P}/payments/advances/`, { year, month }).then((r) => r.data),
+  linkTransaction: (id, data) => api.post(`${P}/payments/${id}/link-transaction/`, data).then((r) => r.data),
+  bankAccounts: () => api.get("invoicing/bank-accounts/").then((r) => r.data),
+  paymentFile: (data) => api.post(`${P}/payments/file/`, data, { responseType: "blob" }),
   declarationStatus: (id, status, reason) => api.post(`${P}/declarations/${id}/status/`, { status, reason }).then((r) => r.data),
 
   // SDUP

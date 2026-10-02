@@ -281,6 +281,8 @@ from .payroll.views import (
     EmployeeRequestViewSet,
     DeclarationsView, DeclarationFileView, DeclarationStatusView,
     DeclarationSubmitView, DeclarationCheckView, VmiConnectionTestView,
+    PayrollPaymentsView, PayrollPaymentMarkPaidView, PayrollAllocationView, 
+    PayrollAdvancesView, PayrollPaymentLinkView,
 )
 
 
@@ -777,6 +779,11 @@ urlpatterns = [
     path("payroll/declarations/<int:pk>/submit/", DeclarationSubmitView.as_view(), name="payroll-declaration-submit"),
     path("payroll/declarations/<int:pk>/check/", DeclarationCheckView.as_view(), name="payroll-declaration-check"),
     path("payroll/settings/test-vmi/", VmiConnectionTestView.as_view(), name="payroll-settings-test-vmi"),
+    path("payroll/payments/", PayrollPaymentsView.as_view(), name="payroll-payments"),
+    path("payroll/payments/mark-paid/", PayrollPaymentMarkPaidView.as_view(), name="payroll-payments-mark-paid"),
+    path("payroll/payments/advances/", PayrollAdvancesView.as_view(), name="payroll-advances"),
+    path("payroll/payments/<int:pk>/link-transaction/", PayrollPaymentLinkView.as_view(), name="payroll-payment-link"),
+    path("payroll/payment-allocations/<int:pk>/", PayrollAllocationView.as_view(), name="payroll-payment-allocation"),
 
     #Darbuotoju savitarna
     path("savitarna/", include("docscanner_app.payroll.savitarna_urls")),

@@ -1,14 +1,15 @@
 import { useEffect, useState } from "react";
 import {
   Alert, Box, Button, Dialog, DialogActions, DialogContent, DialogTitle, Divider, FormControlLabel, IconButton,
-  Stack, Switch, TextField, Typography,
+  MenuItem, Stack, Switch, TextField, Typography,
 } from "@mui/material";
 import CloseIcon from "@mui/icons-material/Close";
 
 import { apiError, payrollApi } from "../../api/payroll";
 
 const FIELDS = ["sodra_insurer_code", "edas_username", "vmi_ws_username", "manager_name", "manager_position",
-  "representation_basis", "contract_city", "workplace_address", "advance_enabled", "advance_day", "salary_day"];
+  "representation_basis", "contract_city", "workplace_address", "advance_enabled", "advance_day", "salary_day",
+  "advance_percent", "payout_account"];
 
 function Section({ title, hint, children }) {
   return (
@@ -36,11 +37,13 @@ export default function PayrollSettingsDialog({ open, onClose, onSaved }) {
   const [pw, setPw] = useState({ edas: "", vmi: "" });
   const [isSet, setIsSet] = useState({ edas: false, vmi: false });
   const [vmiTest, setVmiTest] = useState(null);
+  const [accounts, setAccounts] = useState([]);
   const set = (v) => setF((s) => ({ ...s, ...v }));
 
   useEffect(() => {
     if (!open) return;
     setError(""); setPw({ edas: "", vmi: "" }); setVmiTest(null);
+    payrollApi.bankAccounts().then(setAccounts).catch(() => setAccounts([]));
     payrollApi.settings().then((s) => {
       setF(Object.fromEntries(FIELDS.map((k) => [k, s[k] ?? ""])));
       setIsSet({ edas: !!s.edas_password_set, vmi: !!s.vmi_ws_password_set });
@@ -155,9 +158,21 @@ export default function PayrollSettingsDialog({ open, onClose, onSaved }) {
                 <TextField label="Atlyginimas iki (kito mėn. diena)" type="number" value={f.salary_day}
                   onChange={(e) => set({ salary_day: e.target.value })} fullWidth />
               </Stack>
+              {f.advance_enabled && (
+                <TextField label="Avanso dydis, % nuo grynojo atlyginimo" type="number" value={f.advance_percent}
+                  onChange={(e) => set({ advance_percent: e.target.value })} inputProps={{ min: 1, max: 100 }}
+                  helperText="Darbuotojo kortelėje galima nurodyti konkrečią avanso sumą" />
+              )}
               <Typography variant="caption" color="text.secondary" mt={-1}>
                 Pagal DK darbo užmokestis mokamas du kartus per mėnesį, nebent darbuotojas prašo mokėti kartą.
               </Typography>
+              <TextField select label="Iš kurios sąskaitos mokama (numatytoji)" value={f.payout_account || ""}
+                onChange={(e) => set({ payout_account: e.target.value })} SelectProps={{ MenuProps: { disableScrollLock: true } }}
+                helperText="Siūloma žymint mokėjimus rankiniu būdu">
+                <MenuItem value="">Nepasirinkta</MenuItem>
+                {accounts.map((a) => <MenuItem key={a.key} value={a.account}>{a.label || a.bank} ({a.account}){a.iban ? ` · ${a.iban}` : ""}</MenuItem>)}
+                <MenuItem value="2720">Kasa (2720)</MenuItem>
+              </TextField>
             </Section>
 
             {error && <Alert severity="error">{error}</Alert>}

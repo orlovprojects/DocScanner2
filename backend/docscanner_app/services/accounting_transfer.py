@@ -122,6 +122,10 @@ def create_je_for_allocation(allocation):
     if allocation.status == "proposed":
         return None
 
+    if allocation.kind == "payroll":
+        from ..payroll.payments import create_je
+        return create_je(allocation)
+
     # Не дублировать
     if allocation.journal_entry_id:
         return allocation.journal_entry

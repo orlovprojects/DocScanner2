@@ -55,3 +55,16 @@ class JournalTests(TestCase):
         m = merge_journals([a, b])
         self.assertTrue(is_balanced(m))
         self.assertEqual(len(m), 5)
+
+
+class EmployeeJournalTests(TestCase):
+
+    def test_employee_accounts_kept_separate(self):
+        from docscanner_app.payroll.journal import JournalLine, is_balanced, merge_journals_by_employee
+        a = [JournalLine("6304", debit=D("100")), JournalLine("4480", credit=D("80")), JournalLine("4481", credit=D("20"))]
+        b = [JournalLine("6304", debit=D("50")), JournalLine("4480", credit=D("40")), JournalLine("4481", credit=D("10"))]
+        j = merge_journals_by_employee([(1, a), (2, b)])
+        self.assertTrue(is_balanced(j))
+        self.assertEqual(sorted((l.account, l.employee_id, l.credit) for l in j if l.account == "4480"),
+                         [("4480", 1, D("80")), ("4480", 2, D("40"))])
+        self.assertEqual([(l.account, l.credit) for l in j if l.account == "4481"], [("4481", D("30"))])
