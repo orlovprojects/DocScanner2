@@ -476,30 +476,61 @@ SODRA_FILE_URL = "https://atvira.sodra.lt/imones/downloads/{y}/daily-{y}-{m:02d}
 SODRA_STALE_DAYS = 60
 SODRA_HEADERS = {"User-Agent": "DokSkenas/1.0"}
 
+def _iter_json_array(text, chunk_size=1 << 20):
+    """JSON masyvo [{...}, {...}] skaitymas dalimis - nekraunant viso failo į atmintį."""
+    decoder = _json.JSONDecoder()
+    buf, started = "", False
+    while True:
+        chunk = text.read(chunk_size)
+        buf += chunk
+        while True:
+            buf = buf.lstrip()
+            if not started:
+                if not buf:
+                    break
+                if buf[0] != "[":
+                    raise ValueError("JSON turi būti masyvas")
+                buf, started = buf[1:], True
+                continue
+            buf = buf.lstrip(", \r\n\t")
+            if buf.startswith("]"):
+                return
+            if not buf:
+                break
+            try:
+                obj, idx = decoder.raw_decode(buf)
+            except _json.JSONDecodeError:
+                if not chunk:
+                    raise
+                break
+            yield obj
+            buf = buf[idx:]
+        if not chunk:
+            return
 
-def _read_sodra_records(raw):
+
+def _iter_sodra_records(raw):
     if raw[:2] == b"PK":
-        with _zipfile.ZipFile(io.BytesIO(raw)) as z:
-            names = [n for n in z.namelist() if n.lower().endswith(".json")]
-            if not names:
-                raise ValueError("ZIP archyve nėra JSON failo")
-            raw = z.read(names[0])
-    data = _json.loads(raw.decode("utf-8-sig"))
-    if not isinstance(data, list):
-        raise ValueError("JSON turi būti masyvas")
-    return data
+        z = _zipfile.ZipFile(io.BytesIO(raw))
+        names = [n for n in z.namelist() if n.lower().endswith(".json")]
+        if not names:
+            raise ValueError("ZIP archyve nėra JSON failo")
+        fp = z.open(names[0])
+    else:
+        fp = io.BytesIO(raw)
+    yield from _iter_json_array(io.TextIOWrapper(fp, encoding="utf-8-sig"))
 
 
 def sync_sodra_codes(raw):
     """
-    Užpildo Company.sodra_kodas pagal jarCode (= im_kodas).
+    Užpildo Company.sodra_kodas pagal jarCode (= im_kodas). Failas skaitomas srautu.
     Draudėjai be jarCode (ambasados, fiziniai asmenys) praleidžiami.
     Grąžina (pranešimas, atnaujinta įmonių).
     """
-    records = _read_sodra_records(raw)
     latest = {}  # jarCode -> (month, code)
-    skipped = 0
-    for r in records:
+    skipped = total = 0
+    for r in _iter_sodra_records(raw):
+        total += 1
         jar = str(r.get("jarCode") or "").strip()
         code = str(r.get("code") or "").strip()
         if not jar or not code:
@@ -508,17 +539,17 @@ def sync_sodra_codes(raw):
         month = int(r.get("month") or 0)
         if jar not in latest or month >= latest[jar][0]:
             latest[jar] = (month, code)
-    if records and not latest:
+    if total and not latest:
         raise ValueError("Faile nerasta laukų code / jarCode - galbūt pasikeitė formatas")
 
     updated = 0
     batch = []
     now = timezone.now()
-    qs = Company.objects.filter(im_kodas__in=latest.keys()).only("id", "im_kodas", "sodra_kodas")
+    qs = Company.objects.exclude(im_kodas__isnull=True).only("id", "im_kodas", "sodra_kodas")
     for c in qs.iterator(chunk_size=5000):
-        code = latest[c.im_kodas][1]
-        if c.sodra_kodas != code:
-            c.sodra_kodas = code
+        hit = latest.get(c.im_kodas)
+        if hit and c.sodra_kodas != hit[1]:
+            c.sodra_kodas = hit[1]
             c.last_synced_at = now
             batch.append(c)
         if len(batch) >= 2000:
@@ -528,7 +559,7 @@ def sync_sodra_codes(raw):
     if batch:
         Company.objects.bulk_update(batch, ["sodra_kodas", "last_synced_at"])
         updated += len(batch)
-    msg = (f"sync_sodra_codes: done. Insurers with jarCode: {len(latest)}, "
+    msg = (f"sync_sodra_codes: done. Records: {total}, insurers with jarCode: {len(latest)}, "
            f"updated: {updated}, without jarCode: {skipped}")
     logger.info(msg)
     return msg, updated
