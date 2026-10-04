@@ -14,6 +14,7 @@ def get_real_ip(request):
 
 def verify_turnstile(token, ip):
     if not token:
+        logger.warning(f"Turnstile: tokeno nėra (IP {ip})")
         return False
     try:
         r = requests.post(
@@ -21,7 +22,10 @@ def verify_turnstile(token, ip):
             data={"secret": settings.TURNSTILE_SECRET, "response": token, "remoteip": ip},
             timeout=5,
         )
-        return r.json().get("success", False)
+        data = r.json()
+        if not data.get("success"):
+            logger.warning(f"Turnstile atmetė: {data.get('error-codes')} hostname={data.get('hostname')} IP={ip} token_len={len(token)}")
+        return data.get("success", False)
     except Exception as e:
         logger.error(f"Turnstile klaida: {e}")
         return False
