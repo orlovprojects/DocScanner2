@@ -895,9 +895,28 @@ function SkolosTab({ activeProfileId, period, dateFrom, dateTo }) {
       color: "#DC2626",
       icon: <BusinessIcon sx={{ fontSize: 20 }} />,
     },
+    employee: {
+      label: "Skolos darbuotojams",
+      description: "Priskaičiuotas, bet dar neišmokėtas darbo užmokestis (4480, 4484).",
+      searchPlaceholder: "Ieškoti darbuotojo...",
+      empty: "Skolų darbuotojams nėra",
+      counterpartyLabel: "Darbuotojas",
+      color: "#7C3AED",
+      icon: <PersonIcon sx={{ fontSize: 20 }} />,
+    },
+    tax: {
+      label: "Mokesčiai nuo DU",
+      description: "Mokėtinas GPM (VMI) ir Sodros įmokos (4481, 4482, 4486).",
+      searchPlaceholder: "Ieškoti...",
+      empty: "Mokėtinų mokesčių nėra",
+      counterpartyLabel: "Gavėjas",
+      color: "#D97706",
+      icon: <AccountBalanceIcon sx={{ fontSize: 20 }} />,
+    },
   };
 
   const currentCfg = typeConfig[activeType];
+  const isPayroll = activeType === "employee" || activeType === "tax";
 
   const getRowKey = (row) => `cp:${row.counterparty_id ?? "none"}`;
 
@@ -1087,7 +1106,7 @@ function SkolosTab({ activeProfileId, period, dateFrom, dateTo }) {
                 </Box>
               ) : invoices.length === 0 ? (
                 <Typography sx={{ fontSize: 13, color: "text.disabled", py: 1 }}>
-                  Neapmokėtų sąskaitų nerasta
+                  {isPayroll ? "Atvirų mokėjimų nerasta" : "Neapmokėtų sąskaitų nerasta"}
                 </Typography>
               ) : (
                 <TableContainer
@@ -1102,8 +1121,8 @@ function SkolosTab({ activeProfileId, period, dateFrom, dateTo }) {
                   <Table size="small">
                     <TableHead>
                       <TableRow>
-                        <TableCell sx={{ fontSize: 11, fontWeight: 800 }}>Dokumentas</TableCell>
-                        <TableCell sx={{ fontSize: 11, fontWeight: 800 }}>Data</TableCell>
+                        <TableCell sx={{ fontSize: 11, fontWeight: 800 }}>{isPayroll ? "Mokėjimas" : "Dokumentas"}</TableCell>
+                        <TableCell sx={{ fontSize: 11, fontWeight: 800 }}>{isPayroll ? "Terminas" : "Data"}</TableCell>
                         {!isMobile && <TableCell sx={{ fontSize: 11, fontWeight: 800 }} align="right">Suma</TableCell>}
                         {!isMobile && <TableCell sx={{ fontSize: 11, fontWeight: 800 }} align="right">Apmokėta</TableCell>}
                         <TableCell sx={{ fontSize: 11, fontWeight: 800 }} align="right">Likutis</TableCell>
@@ -1135,10 +1154,13 @@ function SkolosTab({ activeProfileId, period, dateFrom, dateTo }) {
                                   {invoice.document_number || "—"}
                                 </Typography>
                               ) : (
-                                <Typography sx={{ fontSize: 13, fontWeight: 700 }}>{invoice.document_number || "—"}</Typography>
+                                <>
+                                  <Typography sx={{ fontSize: 13, fontWeight: 700 }}>{invoice.document_number || "—"}</Typography>
+                                  {invoice.description && <Typography sx={{ fontSize: 11, color: "text.secondary" }}>{invoice.description}</Typography>}
+                                </>
                               )}
                             </TableCell>
-                            <TableCell sx={{ fontSize: 13 }}>{fmtDate(invoice.invoice_date)}</TableCell>
+                            <TableCell sx={{ fontSize: 13, color: invoice.overdue ? "error.main" : undefined, fontWeight: invoice.overdue ? 800 : undefined }}>{fmtDate(invoice.invoice_date)}</TableCell>
                             {!isMobile && <TableCell align="right" sx={{ fontSize: 13 }}>{fmtMoney(invoice.amount_with_vat)}</TableCell>}
                             {!isMobile && <TableCell align="right" sx={{ fontSize: 13 }}>{fmtMoney(invoice.paid_amount)}</TableCell>}
                             <TableCell align="right" sx={{ fontSize: 13, fontWeight: 800 }}>{fmtMoney(invoice.balance)}</TableCell>
@@ -1164,7 +1186,7 @@ function SkolosTab({ activeProfileId, period, dateFrom, dateTo }) {
       <Box sx={{ mb: 2 }}>
         <Typography sx={{ fontSize: 18, fontWeight: 800 }}>Skolos</Typography>
         <Typography sx={{ fontSize: 13, color: "text.secondary", mt: 0.25 }}>
-          Atviros pirkėjų ir tiekėjų sąskaitos periodo pabaigai.
+          Atviros skolos periodo pabaigai: pirkėjai, tiekėjai, darbuotojai ir mokesčiai nuo DU.
         </Typography>
       </Box>
 
@@ -1182,6 +1204,8 @@ function SkolosTab({ activeProfileId, period, dateFrom, dateTo }) {
         >
           <Tab value="customer" label="Pirkėjų skolos" />
           <Tab value="supplier" label="Skolos tiekėjams" />
+          <Tab value="employee" label="Darbuotojams" />
+          <Tab value="tax" label="Mokesčiai nuo DU" />
         </Tabs>
       </Paper>
 
@@ -1233,10 +1257,10 @@ function SkolosTab({ activeProfileId, period, dateFrom, dateTo }) {
                 <TableRow>
                   <TableCell sx={{ width: 36 }} />
                   <TableCell sx={{ fontWeight: 800, fontSize: 12 }}>{currentCfg.counterpartyLabel}</TableCell>
-                  {!isMobile && <TableCell sx={{ fontWeight: 800, fontSize: 12 }}>Naujausia sąskaita</TableCell>}
-                  {!isMobile && <TableCell sx={{ fontWeight: 800, fontSize: 12 }} align="right">Sąskaitų</TableCell>}
-                  {!isMobile && <TableCell sx={{ fontWeight: 800, fontSize: 12 }} align="right">Suma</TableCell>}
-                  {!isMobile && <TableCell sx={{ fontWeight: 800, fontSize: 12 }} align="right">Apmokėta</TableCell>}
+                  {!isMobile && <TableCell sx={{ fontWeight: 800, fontSize: 12 }}>{isPayroll ? "Paskutinis įrašas" : "Naujausia sąskaita"}</TableCell>}
+                  {!isMobile && <TableCell sx={{ fontWeight: 800, fontSize: 12 }} align="right">{isPayroll ? "Įrašų" : "Sąskaitų"}</TableCell>}
+                  {!isMobile && <TableCell sx={{ fontWeight: 800, fontSize: 12 }} align="right">{isPayroll ? "Priskaičiuota" : "Suma"}</TableCell>}
+                  {!isMobile && <TableCell sx={{ fontWeight: 800, fontSize: 12 }} align="right">{isPayroll ? "Sumokėta" : "Apmokėta"}</TableCell>}
                   <TableCell sx={{ fontWeight: 800, fontSize: 12 }} align="right">Likutis</TableCell>
                 </TableRow>
               </TableHead>

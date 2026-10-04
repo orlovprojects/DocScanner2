@@ -1,6 +1,7 @@
 // src/pages/PasswordReset.jsx
 
-import { useState, useMemo, useEffect, useCallback } from "react";
+import { useState, useMemo, useEffect, useCallback, useRef } from "react";
+import { Turnstile } from "@marsidev/react-turnstile";
 import { useNavigate } from "react-router-dom";
 import { Helmet } from "react-helmet";
 import {
@@ -125,6 +126,13 @@ export default function PasswordReset() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const [cfToken, setCfToken] = useState("");
+  const turnstileRef = useRef(null);
+
+  const resetTurnstile = () => {
+    setCfToken("");
+    turnstileRef.current?.reset();
+  };
 
   // Cooldown laikmatis (naujo kodo užklausai)
   const [cooldownSeconds, setCooldownSeconds] = useState(0);
@@ -189,9 +197,14 @@ export default function PasswordReset() {
     const emailErr = validateEmail(email);
     if (emailErr) return;
 
+    if (!cfToken) {
+      setError("Vyksta saugumo patikra, palaukite kelias sekundes ir bandykite dar kartą.");
+      return;
+    }
+
     try {
       setLoading(true);
-      const data = await requestPasswordReset(email);
+      const data = await requestPasswordReset(email, cfToken).finally(resetTurnstile);
 
       setSuccess(data.message || "Kodas išsiųstas į jūsų el. paštą.");
       setCooldownSeconds((data.cooldown_minutes || 3) * 60);
@@ -243,7 +256,7 @@ export default function PasswordReset() {
       }
 
       if (errData?.expired) {
-        setError("Kodo galiojimo laikas baigėsi. Užklaukite naują kodą.");
+        setError(errData?.error || "Kodo galiojimo laikas baigėsi. Užklaukite naują kodą.");
         setActiveStep(0);
         setCooldownSeconds(0);
         return;
@@ -322,12 +335,17 @@ export default function PasswordReset() {
   const handleResendCode = async () => {
     if (cooldownSeconds > 0) return;
 
+    if (!cfToken) {
+      setError("Vyksta saugumo patikra, palaukite kelias sekundes ir bandykite dar kartą.");
+      return;
+    }
+
     setError("");
     setSuccess("");
 
     try {
       setLoading(true);
-      const data = await requestPasswordReset(email);
+      const data = await requestPasswordReset(email, cfToken).finally(resetTurnstile);
       setSuccess("Naujas kodas išsiųstas!");
       setCooldownSeconds((data.cooldown_minutes || 3) * 60);
       setAttemptsRemaining(3);
@@ -415,6 +433,15 @@ export default function PasswordReset() {
               {success}
             </Alert>
           )}
+
+          <Turnstile
+            ref={turnstileRef}
+            siteKey={import.meta.env.VITE_TURNSTILE_SITE_KEY}
+            options={{ appearance: "interaction-only" }}
+            onSuccess={setCfToken}
+            onExpire={() => setCfToken("")}
+            onError={() => setCfToken("")}
+          />
 
           {/* ═══════════════════════════════════════════════════════════════════ */}
           {/* STEP 0: Email Input */}

@@ -1248,39 +1248,97 @@ def build_sam_declaration(company, year, month):
     return build_sam(_insurer(company), year, month, rows)
 
 
+def _payment_dates(payment):
+    """[(data, suma)] - faktiniai mokėjimai; jei jų nėra - planinė data. Grąžina (sąrašas, planinė?)."""
+    allocs = [(a.effective_payment_date, a.amount)
+              for a in payment.allocations.filter(status__in=("auto", "confirmed", "manual"))
+              if a.effective_payment_date]
+    if allocs:
+        return sorted(allocs), False
+    return [(payment.due_date, payment.amount)], True
+
+
+def _employee_months(company, run, st):
+    """Patvirtintas DU -> EmployeeMonth kiekvienam darbuotojui (su faktinėmis išmokėjimo datomis)."""
+    from docscanner_app.models import PayrollPayment
+    from .gpm313_attribution import EmployeeMonth
+
+    first, last = month_bounds(run.year, run.month)
+    ny, nm = (run.year + (run.month == 12), run.month % 12 + 1)
+    planned_salary = date(ny, nm, min(st.salary_day or 10, 28))
+    terminated = dict(EmploymentContract.objects.filter(
+        employee__company=company, termination_date__gte=first, termination_date__lte=last,
+    ).values_list("employee_id", "termination_date"))
+
+    out = []
+    for res in run.results.select_related("employee"):
+        e = res.employee
+        exempt = Decimal(str((res.calc_snapshot or {}).get("income_exempt", "0")))
+        planned = False
+
+        advances = []
+        for p in PayrollPayment.objects.filter(company=company, employee=e, kind="advance", year=run.year,
+                                               month=run.month).exclude(status="cancelled"):
+            dates, pl = _payment_dates(p)
+            advances += dates
+            planned = planned or pl
+
+        main = run.payments.filter(employee=e, kind="employee").first()
+        if main:
+            dates, pl = _payment_dates(main)
+            final = dates[-1][0]
+            planned = planned or pl
+        elif advances:
+            final = max(d for d, _ in advances)
+        else:   # DU patvirtintas prieš išmokėjimų modulį
+            final = terminated.get(e.id) or planned_salary
+            planned = True
+        out.append(EmployeeMonth(run.year, run.month, e.full_name, res.gross - exempt, res.gpm + res.gpm15,
+                                 final, advances, planned))
+    return out
+
+
 def gpm313_totals(company, year, month):
-    """Sumos pagal IŠMOKĖJIMO mėnesį: praeito mėnesio DU (mokama salary_day) + atleistųjų šio mėnesio galutinis."""
+    """
+    5-7 laukeliai pagal FAKTINES išmokėjimo datas (banko išrašas / rankinė žyma), jei jų nėra - pagal planines.
+    Avansas, kai likutis išmokamas kitą mėnesį per 10 d. d., deklaruojamas jo išmokėjimo mėnesį (GPM 0),
+    visas GPM - paskutinės dalies mėnesį.
+    """
+    from .gpm313_attribution import attribute
+
     st = _settings(company)
-    warnings = []
+    warnings, planned_names = [], []
     g5 = g6 = g7 = Decimal("0")
 
-    def add(res, day):
-        nonlocal g5, g6, g7
-        exempt = Decimal(str((res.calc_snapshot or {}).get("income_exempt", "0")))
-        g5 += res.gross - exempt
-        if day <= 15:
-            g6 += res.gpm + res.gpm15
-        else:
-            g7 += res.gpm + res.gpm15
+    for back in (0, 1, 2):
+        y, m = year, month - back
+        while m < 1:
+            y, m = y - 1, m + 12
+        run = _closed_run(company, y, m)
+        if not run:
+            if back == 1:
+                warnings.append(f"{y}-{m:02d} atlyginimai nepatvirtinti - jų išmokos neįtrauktos")
+            continue
+        for em in _employee_months(company, run, st):
+            parts, warns = attribute(em)
+            hit = False
+            for (py, pm), income, gpm, day in parts:
+                if (py, pm) != (year, month):
+                    continue
+                hit = True
+                g5 += income
+                if day <= 15:
+                    g6 += gpm
+                else:
+                    g7 += gpm
+            if hit:
+                warnings += warns
+                if em.planned:
+                    planned_names.append(em.name)
 
-    py, pm = (year - 1, 12) if month == 1 else (year, month - 1)
-    prev = _closed_run(company, py, pm)
-    if prev:
-        gone = _dismissed_in(prev)
-        for res in prev.results.all():
-            if res.employee_id not in gone:
-                add(res, st.salary_day)
-    else:
-        warnings.append(f"{py}-{pm:02d} atlyginimai nepatvirtinti - jų išmokos neįtrauktos")
-    cur = _closed_run(company, year, month)
-    if cur:
-        for c in EmploymentContract.objects.filter(employee__company=company, termination_date__year=year,
-                                                   termination_date__month=month):
-            res = cur.results.filter(employee=c.employee).first()
-            if res:
-                add(res, c.termination_date.day)
-    if st.advance_enabled:
-        warnings.append("Mokamas avansas - patikrinkite 5-7 laukelius (avanso išmokos priskiriamos jų išmokėjimo mėnesiui)")
+    if planned_names:
+        warnings.append("Ne visi mokėjimai pažymėti (banko išrašas neįkeltas) - naudojamos planinės datos: "
+                        + ", ".join(sorted(set(planned_names))[:10]))
     return {"g5": g5, "g6": g6, "g7": g7}, warnings
 
 

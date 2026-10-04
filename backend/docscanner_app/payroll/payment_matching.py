@@ -236,11 +236,8 @@ def match_all(txns, obligations):
 
 
 def gpm_due_date(pay_date):
-    """GPM: išmokėta 1-15 d. -> iki to mėnesio pabaigos; 16-31 d. -> iki kito mėnesio 15 d."""
-    if pay_date.day <= 15:
-        nxt = date(pay_date.year + (pay_date.month == 12), pay_date.month % 12 + 1, 1)
-        return date.fromordinal(nxt.toordinal() - 1)
-    return date(pay_date.year + (pay_date.month == 12), pay_date.month % 12 + 1, 15)
+    from .gpm313_attribution import gpm_due_date as _due
+    return _due(pay_date)
 
 
 def split_proportionally(amount, breakdown):

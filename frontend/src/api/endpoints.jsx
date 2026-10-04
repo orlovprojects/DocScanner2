@@ -186,13 +186,14 @@ export const subscription_status = async () => {
 //   }
 // };
 
-export const register = async (email, password, registration_source) => {
+export const register = async (email, password, registration_source, cf_token) => {
   try {
     const { data } = await publicApi.post(
       'register/',
       {
         email,
         password,
+        cf_token,
         ...(registration_source ? { registration_source } : {}),
       },
       { headers: { 'Content-Type': 'application/json' } }
@@ -205,8 +206,8 @@ export const register = async (email, password, registration_source) => {
 };
 
 // === Password Reset ===
-export const requestPasswordReset = async (email) => {
-  const { data } = await publicApi.post('password-reset/request/', { email });
+export const requestPasswordReset = async (email, cf_token) => {
+  const { data } = await publicApi.post('password-reset/request/', { email, cf_token });
   return data;
 };
 

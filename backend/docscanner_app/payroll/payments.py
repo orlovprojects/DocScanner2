@@ -72,8 +72,17 @@ def create_obligations_for_run(run):
     gpm = s4482 = s4486 = ZERO
     out = []
 
+    first, last = date(y, m, 1), _clip(y, m, 31)
+    from docscanner_app.models import EmploymentContract
+    terminated = dict(EmploymentContract.objects.filter(
+        employee__company=run.company, termination_date__gte=first, termination_date__lte=last,
+    ).values_list("employee_id", "termination_date"))
+    pay_dates = []
+
     for res in run.results.select_related("employee"):
         e = res.employee
+        emp_pay_date = terminated.get(e.id) or pay_date      # atleidžiamam - atsiskaitymo diena
+        pay_dates.append(emp_pay_date)
         gpm += res.gpm + res.gpm15
         s4486 += res.psd + res.grindys_psd
         s4482 += res.vsd + res.kaupimas + res.employer_vsd + res.gar + res.ilg + res.grindys_vsd
@@ -84,21 +93,21 @@ def create_obligations_for_run(run):
                 run.company, run, "employee", y, m, res.payable, employee=e,
                 recipient_name=e.full_name, recipient_iban=(e.iban or "").replace(" ", ""),
                 purpose=f"Darbo užmokestis už {y}-{m:02d}",
-                breakdown={k: v for k, v in br.items() if Decimal(v)}, due_date=pay_date,
+                breakdown={k: v for k, v in br.items() if Decimal(v)}, due_date=emp_pay_date,
             ))
         for l in run.lines.filter(employee=e, pay_code__code__in=DEDUCTION_CODES).select_related("pay_code"):
             out.append(_create(
                 run.company, run, "deduction", y, m, l.amount, employee=e,
                 recipient_name=(l.comment or l.pay_code.name)[:255],
                 purpose=f"{l.pay_code.name}: {e.full_name}"[:140],
-                breakdown={"4494": str(l.amount)}, due_date=pay_date,
+                breakdown={"4494": str(l.amount)}, due_date=emp_pay_date,
             ))
 
     if gpm > 0:
         out.append(_create(
             run.company, run, "gpm", y, m, gpm, recipient_name=VMI_NAME, recipient_code=VMI_CODE,
             imokos_kodas="1311", purpose=f"GPM už {y}-{m:02d}", breakdown={"4481": str(gpm)},
-            due_date=gpm_due_date(pay_date),
+            due_date=min(gpm_due_date(d) for d in pay_dates) if pay_dates else gpm_due_date(pay_date),
         ))
     if s4482 + s4486 > 0:
         out.append(_create(

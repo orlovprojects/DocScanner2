@@ -81,9 +81,9 @@ class PaymentMatchingTests(TestCase):
         self.assertEqual([x.status for x in r], ["auto", "none"])
 
     def test_gpm_due_date(self):
-        self.assertEqual(gpm_due_date(date(2026, 10, 10)), date(2026, 10, 31))
-        self.assertEqual(gpm_due_date(date(2026, 10, 20)), date(2026, 11, 15))
-        self.assertEqual(gpm_due_date(date(2026, 12, 20)), date(2027, 1, 15))
+        self.assertEqual(gpm_due_date(date(2026, 10, 10)), date(2026, 10, 15))
+        self.assertEqual(gpm_due_date(date(2026, 10, 20)), date(2026, 10, 31))
+        self.assertEqual(gpm_due_date(date(2026, 12, 20)), date(2026, 12, 31))
 
     def test_split(self):
         self.assertEqual(split_proportionally(D("100.00"), {"4482": "300", "4486": "100"}),

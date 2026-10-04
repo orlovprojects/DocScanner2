@@ -1,6 +1,6 @@
 # utils/password_reset.py
 
-import random
+import secrets
 import logging
 from datetime import timedelta
 from email.utils import formataddr
@@ -11,6 +11,7 @@ from django.template.loader import render_to_string
 from django.core.mail import EmailMultiAlternatives
 from ..emails import _get_hostinger_connection
 from django.contrib.auth import get_user_model
+from .turnstile import verify_turnstile, get_real_ip
 
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
@@ -33,7 +34,7 @@ MAX_FAILED_ATTEMPTS = 3           # Maksimalus neteisingų bandymų skaičius
 # ═══════════════════════════════════════════════════════════════════════════════
 def generate_reset_code():
     """Sugeneruoja 7 skaitmenų atsitiktinį kodą."""
-    return ''.join([str(random.randint(0, 9)) for _ in range(7)])
+    return ''.join(secrets.choice('0123456789') for _ in range(7))
 
 
 def validate_email_format(email):
@@ -164,6 +165,14 @@ def password_reset_request(request):
             status=status.HTTP_400_BAD_REQUEST
         )
 
+    client_ip = get_real_ip(request)
+    if not verify_turnstile(request.data.get("cf_token"), client_ip):
+        logger.warning(f"[PASSWORD RESET] Turnstile nepraeitas, IP: {client_ip}")
+        return Response(
+            {"error": "Patvirtinkite, kad nesate robotas."},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
     # Visada grąžiname sėkmės žinutę (saugumo sumetimais)
     success_response = Response({
         "message": "Jei toks el. paštas egzistuoja, išsiuntėme patvirtinimo kodą.",
@@ -179,9 +188,7 @@ def password_reset_request(request):
     # Tikriname ar paskyra aktyvi
     if not user.is_active:
         logger.warning(f"[PASSWORD RESET] Paskyra užblokuota: {email}")
-        return Response({
-            "error": "Ši paskyra yra užblokuota. Susisiekite su mumis.",
-        }, status=status.HTTP_403_FORBIDDEN)
+        return success_response
 
     # Tikriname cooldown (3 minutės tarp užklausų)
     if user.pswd_code_sent:
@@ -250,17 +257,10 @@ def password_reset_verify(request):
             status=status.HTTP_400_BAD_REQUEST
         )
 
-    # Tikrinimas ar paskyra aktyvi
-    if not user.is_active:
+    # Neatskleidžiame, ar paskyra egzistuoja / aktyvi / turi kodą
+    if not user.is_active or not user.pswd_reset_code or not user.pswd_code_sent:
         return Response(
-            {"error": "Ši paskyra yra užblokuota. Susisiekite su mumis."},
-            status=status.HTTP_403_FORBIDDEN
-        )
-
-    # Tikrinimas ar yra išsiųstas kodas
-    if not user.pswd_reset_code or not user.pswd_code_sent:
-        return Response(
-            {"error": "Pirmiausia užklaukite atkūrimo kodą."},
+            {"error": "Neteisingas el. paštas arba kodas."},
             status=status.HTTP_400_BAD_REQUEST
         )
 
@@ -284,18 +284,17 @@ def password_reset_verify(request):
         remaining_attempts = MAX_FAILED_ATTEMPTS - user.pswd_reset_attempts
 
         if user.pswd_reset_attempts >= MAX_FAILED_ATTEMPTS:
-            # Blokuojame paskyrą
-            user.is_active = False
+            # Kodą anuliuojame, paskyros NEblokuojame (pswd_code_sent paliekame - cooldown galioja)
             user.pswd_reset_code = None
-            user.pswd_code_sent = None
-            user.save(update_fields=['is_active', 'pswd_reset_code', 'pswd_code_sent', 'pswd_reset_attempts'])
+            user.pswd_reset_attempts = 0
+            user.save(update_fields=['pswd_reset_code', 'pswd_reset_attempts'])
 
-            logger.warning(f"[PASSWORD RESET] Paskyra užblokuota po {MAX_FAILED_ATTEMPTS} bandymų: {email}")
+            logger.warning(f"[PASSWORD RESET] Kodas anuliuotas po {MAX_FAILED_ATTEMPTS} bandymų: {email}")
 
             return Response({
-                "error": "Per daug neteisingų bandymų. Paskyra užblokuota.",
-                "blocked": True,
-            }, status=status.HTTP_403_FORBIDDEN)
+                "error": "Per daug neteisingų bandymų. Užklaukite naują kodą.",
+                "expired": True,
+            }, status=status.HTTP_400_BAD_REQUEST)
 
         user.save(update_fields=['pswd_reset_attempts'])
 
@@ -375,17 +374,10 @@ def password_reset_confirm(request):
             status=status.HTTP_400_BAD_REQUEST
         )
 
-    # Tikrinimas ar paskyra aktyvi
-    if not user.is_active:
+    # Neatskleidžiame, ar paskyra egzistuoja / aktyvi / turi kodą
+    if not user.is_active or not user.pswd_reset_code or not user.pswd_code_sent:
         return Response(
-            {"error": "Ši paskyra yra užblokuota. Susisiekite su mumis."},
-            status=status.HTTP_403_FORBIDDEN
-        )
-
-    # Tikrinimas ar yra kodas
-    if not user.pswd_reset_code or not user.pswd_code_sent:
-        return Response(
-            {"error": "Pirmiausia užklaukite atkūrimo kodą."},
+            {"error": "Neteisingas el. paštas arba kodas."},
             status=status.HTTP_400_BAD_REQUEST
         )
 
@@ -408,15 +400,14 @@ def password_reset_confirm(request):
         remaining_attempts = MAX_FAILED_ATTEMPTS - user.pswd_reset_attempts
 
         if user.pswd_reset_attempts >= MAX_FAILED_ATTEMPTS:
-            user.is_active = False
             user.pswd_reset_code = None
-            user.pswd_code_sent = None
-            user.save(update_fields=['is_active', 'pswd_reset_code', 'pswd_code_sent', 'pswd_reset_attempts'])
+            user.pswd_reset_attempts = 0
+            user.save(update_fields=['pswd_reset_code', 'pswd_reset_attempts'])
 
             return Response({
-                "error": "Per daug neteisingų bandymų. Paskyra užblokuota.",
-                "blocked": True,
-            }, status=status.HTTP_403_FORBIDDEN)
+                "error": "Per daug neteisingų bandymų. Užklaukite naują kodą.",
+                "expired": True,
+            }, status=status.HTTP_400_BAD_REQUEST)
 
         user.save(update_fields=['pswd_reset_attempts'])
 

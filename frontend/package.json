@@ -14,6 +14,7 @@
     "@chakra-ui/react": "^3.2.0",
     "@emotion/react": "^11.13.5",
     "@emotion/styled": "^11.13.5",
+    "@marsidev/react-turnstile": "^1.6.1",
     "@mui/icons-material": "^6.1.10",
     "@mui/material": "^6.1.10",
     "@mui/x-date-pickers": "^8.14.0",

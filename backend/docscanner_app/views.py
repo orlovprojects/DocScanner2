@@ -27,6 +27,7 @@ from django.utils.html import strip_tags
 from django.db.models import F, Value
 from django.db.models.functions import Coalesce
 from django.urls import reverse
+from .utils.turnstile import verify_turnstile
 
 
 from django.core.files.base import ContentFile
@@ -4192,7 +4193,7 @@ def create_trial_subscription(user):
 def get_client_ip(request):
     x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
     if x_forwarded_for:
-        return x_forwarded_for.split(',')[0].strip()
+        return x_forwarded_for.split(',')[-1].strip()
     return request.META.get('REMOTE_ADDR')
 
 @api_view(['POST'])
@@ -4203,6 +4204,11 @@ def register(request):
     Регистрация нового пользователя и создание триал-подписки.
     """
     logger.info("Получен запрос на регистрацию нового пользователя.")
+
+    client_ip = get_client_ip(request)
+    if not verify_turnstile(request.data.get("cf_token"), client_ip):
+        logger.warning(f"Turnstile nepraeitas, IP: {client_ip}")
+        return Response({"error": "Patvirtinkite, kad nesate robotas."}, status=400)
 
     # Удаление cookies с токенами
     if 'access_token' in request.COOKIES:
@@ -5074,6 +5080,11 @@ def contact_form(request):
 
     if not vardas or not email or len(zinute) < 10:
         return Response({"detail": "Klaida formoje"}, status=status.HTTP_400_BAD_REQUEST)
+
+    client_ip = get_client_ip(request)
+    if not verify_turnstile(request.data.get("cf_token"), client_ip):
+        logger.warning(f"Contact Turnstile nepraeitas, IP: {client_ip}")
+        return Response({"detail": "Patvirtinkite, kad nesate robotas."}, status=status.HTTP_400_BAD_REQUEST)
 
     ok = siusti_kontakto_laiska(vardas=vardas, email=email, zinute=zinute, tema=None)
     if ok:
@@ -19736,6 +19747,149 @@ def _counterparty_balances(profile, debt_type, as_of_date=None, search=""):
     return rows
 
 
+# ═══════════════════════════════════════════════════════════
+# Skolos: darbuotojams (4480, 4484) ir mokesčiai nuo DU (4481, 4482, 4486)
+# ═══════════════════════════════════════════════════════════
+ 
+PAYROLL_DEBT_TYPES = ("employee", "tax")
+EMPLOYEE_DEBT_PREFIXES = ("4480", "4484")
+TAX_DEBT_GROUPS = {
+    "vmi": ("VMI – gyventojų pajamų mokestis", "1311", ("4481",), ("gpm",)),
+    "sodra": ("Sodra – VSD ir PSD įmokos", "252", ("4482", "4486"), ("sodra",)),
+}
+COUNTERPARTY_TYPE = {"customer": "pirkejas", "supplier": "tiekejas", "employee": "darbuotojas", "tax": "mokestis"}
+ 
+ 
+def _payroll_debt_lines(profile, prefixes, as_of_date=None):
+    q = Q()
+    for prefix in prefixes:
+        q |= Q(account_code__startswith=prefix)
+    qs = JournalEntryLine.objects.filter(
+        q,
+        entry__company_profile=profile,
+        entry__status__in=[
+            JournalEntry.STATUS_DRAFT,
+            JournalEntry.STATUS_POSTED,
+            JournalEntry.STATUS_NEEDS_REVIEW,
+        ],
+    )
+    if as_of_date:
+        qs = qs.filter(entry__entry_date__lte=as_of_date)
+    return qs
+ 
+ 
+def _employee_balances(profile, as_of_date=None, search=""):
+    """Skola kiekvienam darbuotojui: K (priskaičiuota) − D (išmokėta)."""
+    qs = _payroll_debt_lines(profile, EMPLOYEE_DEBT_PREFIXES, as_of_date)
+    if search:
+        qs = qs.filter(Q(employee__first_name__icontains=search) | Q(employee__last_name__icontains=search))
+ 
+    grouped = qs.values("employee_id", "employee__first_name", "employee__last_name").annotate(
+        increased=Coalesce(Sum("amount", filter=Q(side="K")), DEBT_ZERO),
+        decreased=Coalesce(Sum("amount", filter=Q(side="D")), DEBT_ZERO),
+        doc_count=Count("entry", distinct=True),
+        newest_date=Max("entry__entry_date"),
+    )
+    rows = []
+    for r in grouped:
+        balance = r["increased"] - r["decreased"]
+        if abs(balance) <= DEBT_TOLERANCE:
+            continue
+        name = f"{r['employee__first_name'] or ''} {r['employee__last_name'] or ''}".strip()
+        rows.append({
+            "counterparty_id": r["employee_id"],
+            "counterparty_name": name or "Be darbuotojo (senesni suvestiniai DU įrašai)",
+            "counterparty_code": "",
+            "total_invoiced": r["increased"],
+            "total_paid": r["decreased"],
+            "balance": balance,
+            "invoice_count": r["doc_count"] or 0,
+            "newest_invoice_date": r["newest_date"],
+        })
+    return rows
+ 
+ 
+def _tax_balances(profile, as_of_date=None, search=""):
+    """Mokėtinas GPM (VMI) ir Sodros įmokos."""
+    rows = []
+    for key, (label, code, prefixes, _kinds) in TAX_DEBT_GROUPS.items():
+        if search and search.lower() not in label.lower():
+            continue
+        agg = _payroll_debt_lines(profile, prefixes, as_of_date).aggregate(
+            increased=Coalesce(Sum("amount", filter=Q(side="K")), DEBT_ZERO),
+            decreased=Coalesce(Sum("amount", filter=Q(side="D")), DEBT_ZERO),
+            doc_count=Count("entry", distinct=True),
+            newest_date=Max("entry__entry_date"),
+        )
+        balance = agg["increased"] - agg["decreased"]
+        if abs(balance) <= DEBT_TOLERANCE:
+            continue
+        rows.append({
+            "counterparty_id": key,
+            "counterparty_name": label,
+            "counterparty_code": f"Įmokos kodas {code}",
+            "total_invoiced": agg["increased"],
+            "total_paid": agg["decreased"],
+            "balance": balance,
+            "invoice_count": agg["doc_count"] or 0,
+            "newest_invoice_date": agg["newest_date"],
+        })
+    return rows
+ 
+ 
+def _payroll_debt_items(profile, debt_type, raw_cp, as_of_date=None):
+    """Išskleista eilutė: atviri DU mokėjimai (iš „Išmokėjimai“) arba DK įrašai be darbuotojo."""
+    from .models import PayrollPayment
+ 
+    if debt_type == "employee" and raw_cp in ("", "none"):
+        # Senesni suvestiniai DU įrašai (be darbuotojo) - rodom DK įrašų likučius
+        lines = _payroll_debt_lines(profile, EMPLOYEE_DEBT_PREFIXES, as_of_date).filter(employee__isnull=True)
+        out = []
+        for r in (lines.values("entry_id", "entry__document_number", "entry__entry_date")
+                  .annotate(increased=Coalesce(Sum("amount", filter=Q(side="K")), DEBT_ZERO),
+                            decreased=Coalesce(Sum("amount", filter=Q(side="D")), DEBT_ZERO))
+                  .order_by("-entry__entry_date", "-entry_id")):
+            amount = r["increased"] - r["decreased"]
+            if abs(amount) <= DEBT_TOLERANCE:
+                continue
+            out.append({
+                "id": r["entry_id"], "kind": "entry", "source_type": "payroll",
+                "document_number": r["entry__document_number"] or f"DK #{r['entry_id']}",
+                "description": "",
+                "invoice_date": r["entry__entry_date"].isoformat() if r["entry__entry_date"] else None,
+                "amount_with_vat": str(r["increased"]), "paid_amount": str(r["decreased"]),
+                "balance": str(amount), "payment_status": "credit" if amount < 0 else "entry",
+                "document_preview_url": None,
+            })
+        return out
+ 
+    qs = PayrollPayment.objects.filter(company=profile).exclude(status__in=("paid", "cancelled"))
+    if debt_type == "employee":
+        try:
+            qs = qs.filter(employee_id=int(raw_cp), kind__in=("employee", "advance", "deduction"))
+        except (TypeError, ValueError):
+            return []
+    else:
+        group = TAX_DEBT_GROUPS.get(raw_cp)
+        if not group:
+            return []
+        qs = qs.filter(kind__in=group[3])
+    if as_of_date:
+        qs = qs.filter(Q(year__lt=as_of_date.year) | Q(year=as_of_date.year, month__lte=as_of_date.month))
+ 
+    today = date.today()
+    return [{
+        "id": p.id, "kind": "payroll", "source_type": "payroll",
+        "document_number": p.reference or f"DU #{p.id}",
+        "description": f"{p.get_kind_display()} · {p.purpose}",
+        "invoice_date": p.due_date.isoformat() if p.due_date else None,
+        "amount_with_vat": str(p.amount), "paid_amount": str(p.paid_amount), "balance": str(p.open_amount),
+        "payment_status": "partially_paid" if p.paid_amount > 0 else "unpaid",
+        "overdue": bool(p.due_date and p.due_date < today),
+        "document_preview_url": None,
+    } for p in qs.order_by("due_date", "id")]
+
+
 def _preview_url_getter(request):
     """Tas pats document_preview_url kaip DK įrašų sąraše (JournalEntrySerializer)."""
     field = JournalEntrySerializer(context={"request": request}).fields.get("document_preview_url")
@@ -19774,11 +19928,8 @@ def apskaita_skolos(request):
         return Response({"detail": "Nepasirinktas įmonės profilis."}, status=400)
 
     debt_type = request.query_params.get("type", "customer")
-    if debt_type not in DEBT_ACCOUNTS:
-        return Response(
-            {"detail": "Netinkamas skolos tipas. Naudokite customer arba supplier."},
-            status=400,
-        )
+    if debt_type not in DEBT_ACCOUNTS and debt_type not in PAYROLL_DEBT_TYPES:
+        return Response({"detail": "Netinkamas skolos tipas."}, status=400)
 
     search = request.query_params.get("search", "").strip()
     as_of_date = _parse_iso_date(request.query_params.get("as_of"))
@@ -19793,7 +19944,12 @@ def apskaita_skolos(request):
     except ValueError:
         offset = 0
 
-    rows = _counterparty_balances(profile, debt_type, as_of_date, search)
+    if debt_type == "employee":
+        rows = _employee_balances(profile, as_of_date, search)
+    elif debt_type == "tax":
+        rows = _tax_balances(profile, as_of_date, search)
+    else:
+        rows = _counterparty_balances(profile, debt_type, as_of_date, search)
 
     total_balance = sum((r["balance"] for r in rows if r["balance"] > 0), Decimal("0"))
     total_overpaid = sum((-r["balance"] for r in rows if r["balance"] < 0), Decimal("0"))
@@ -19813,7 +19969,7 @@ def apskaita_skolos(request):
         "counterparty_id": r["counterparty_id"],
         "counterparty_name": r["counterparty_name"],
         "counterparty_code": r["counterparty_code"],
-        "counterparty_type": "pirkejas" if debt_type == "customer" else "tiekejas",
+        "counterparty_type": COUNTERPARTY_TYPE.get(debt_type, "tiekejas"),
         "total_invoiced": str(r["total_invoiced"]),
         "total_paid": str(r["total_paid"]),
         "balance": str(r["balance"]),
@@ -19856,11 +20012,18 @@ def apskaita_skolos_invoices(request):
         return Response({"detail": "Nepasirinktas įmonės profilis."}, status=400)
 
     debt_type = request.query_params.get("type", "customer")
-    if debt_type not in DEBT_ACCOUNTS:
-        return Response(
-            {"detail": "Netinkamas skolos tipas. Naudokite customer arba supplier."},
-            status=400,
-        )
+    if debt_type not in DEBT_ACCOUNTS and debt_type not in PAYROLL_DEBT_TYPES:
+        return Response({"detail": "Netinkamas skolos tipas."}, status=400)
+
+    if debt_type in PAYROLL_DEBT_TYPES:
+        return Response({
+            "type": debt_type,
+            "results": _payroll_debt_items(
+                profile, debt_type,
+                request.query_params.get("counterparty_id", "").strip(),
+                _parse_iso_date(request.query_params.get("as_of")),
+            ),
+        })
 
     raw_cp = request.query_params.get("counterparty_id", "").strip()
     if not raw_cp:

@@ -1,5 +1,6 @@
 // src/pages/Contact.jsx
-import { useState } from 'react';
+import { useState, useRef } from 'react';
+import { Turnstile } from '@marsidev/react-turnstile';
 import { Helmet } from 'react-helmet';
 import {
   Container,
@@ -94,6 +95,8 @@ const Contact = () => {
   const [errors, setErrors] = useState({});
   const [status, setStatus] = useState({ type: null, msg: '' });
   const [loading, setLoading] = useState(false);
+  const [cfToken, setCfToken] = useState('');
+  const turnstileRef = useRef(null);
 
   const validate = () => {
     const e = {};
@@ -116,11 +119,15 @@ const Contact = () => {
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!validate()) return;
+    if (!cfToken) {
+      setStatus({ type: 'error', msg: 'Vyksta saugumo patikra, palaukite kelias sekundes ir bandykite dar kartą.' });
+      return;
+    }
     setLoading(true);
     setStatus({ type: null, msg: '' });
 
     try {
-      const { data } = await publicApi.post('/api/contact/', values);
+      const { data } = await publicApi.post('/api/contact/', { ...values, cf_token: cfToken });
       setStatus({ type: 'success', msg: data?.detail || 'Žinutė išsiųsta. Ačiū!' });
       setValues({
         name: '',
@@ -138,6 +145,8 @@ const Contact = () => {
       setStatus({ type: 'error', msg });
     } finally {
       setLoading(false);
+      setCfToken('');
+      turnstileRef.current?.reset();
     }
   };
 
@@ -274,6 +283,15 @@ const Contact = () => {
                       </Typography>
                     )}
                   </Box>
+
+                  <Turnstile
+                    ref={turnstileRef}
+                    siteKey={import.meta.env.VITE_TURNSTILE_SITE_KEY}
+                    options={{ appearance: 'interaction-only' }}
+                    onSuccess={setCfToken}
+                    onExpire={() => setCfToken('')}
+                    onError={() => setCfToken('')}
+                  />
 
                   {status.type && (
                     <Alert

@@ -88,12 +88,12 @@ const AuthProvider = ({ children }) => {
   };
 
   // Регистрация
-  const register_user = async (email, password, Cpassword, registration_source) => {
+  const register_user = async (email, password, Cpassword, registration_source, cf_token) => {
       console.log("Starting registration process...");
       if (password !== Cpassword) {
           throw new Error('Slaptažodžiai nesutampa');
       }
-      await register(email, password, registration_source);
+      await register(email, password, registration_source, cf_token);
       const success = await login(email, password);
       if (success) {
           setIsAuthenticated(true);

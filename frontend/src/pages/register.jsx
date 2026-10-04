@@ -14,6 +14,7 @@ import {
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 import CancelIcon from "@mui/icons-material/Cancel";
 import { gtmPush } from "../gtm";
+import { Turnstile } from "@marsidev/react-turnstile";
 
 // Meta Pixel
 import { track, ensureFbqReady } from "../metaPixel";
@@ -55,6 +56,8 @@ export default function Register() {
 
   const [loading, setLoading] = useState(false);
   const [backendError, setBackendError] = useState("");
+  const [cfToken, setCfToken] = useState("");
+  const turnstileRef = useRef(null);
 
   const nav = useNavigate();
   const { register_user } = useAuth();
@@ -100,10 +103,15 @@ export default function Register() {
 
     if (emailErrNow || passErrsNow.length > 0 || cpassErrNow) return;
 
+    if (!cfToken) {
+      setBackendError("Vyksta saugumo patikra, palaukite kelias sekundes ir bandykite dar kartą.");
+      return;
+    }
+
     try {
       setLoading(true);
       const regSource = sessionStorage.getItem("reg_source") || "";
-      await register_user(email, password, Cpassword, regSource);
+      await register_user(email, password, Cpassword, regSource, cfToken);
 
       // ✅ только после успешной регистрации
       if (!firedRef.current) {
@@ -161,6 +169,8 @@ export default function Register() {
       }
 
       setBackendError(String(msg));
+      setCfToken("");
+      turnstileRef.current?.reset();
     } finally {
       setLoading(false);
     }
@@ -284,6 +294,15 @@ export default function Register() {
             error={!!cpassError}
             helperText={cpassError || " "}
             fullWidth
+          />
+
+          <Turnstile
+            ref={turnstileRef}
+            siteKey={import.meta.env.VITE_TURNSTILE_SITE_KEY}
+            options={{ appearance: "interaction-only" }}
+            onSuccess={setCfToken}
+            onExpire={() => setCfToken("")}
+            onError={() => setCfToken("")}
           />
 
           <Button

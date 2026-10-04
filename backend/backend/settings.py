@@ -27,6 +27,8 @@ SITE_URL_BACKEND = os.getenv("SITE_URL_BACKEND", "http://localhost:8000")
 
 WAGTAILADMIN_BASE_URL = os.environ.get('WAGTAILADMIN_BASE_URL')
 
+TURNSTILE_SECRET = os.getenv("TURNSTILE_SECRET", "")
+
 # Медиафайлы
 MEDIA_URL = '/media/'
 MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
