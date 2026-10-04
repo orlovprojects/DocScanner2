@@ -1,6 +1,12 @@
 from django.contrib import admin
 from .models import BankStatement, IncomingTransaction, OutgoingTransaction, PaymentAllocation, AdClick
+from .models import BlockedEmail
 
+
+@admin.register(BlockedEmail)
+class BlockedEmailAdmin(admin.ModelAdmin):
+    list_display = ("email", "note", "created_at")
+    search_fields = ("email", "note")
 
 
 

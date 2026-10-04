@@ -16,6 +16,7 @@ ALLOWED_HOSTS = os.getenv("ALLOWED_HOSTS", "").split(",")
 
 # Пользовательская модель
 AUTH_USER_MODEL = 'docscanner_app.CustomUser'
+AUTHENTICATION_BACKENDS = ["docscanner_app.auth_backends.CaseInsensitiveEmailBackend"]
 
 # Google Vision credentials
 GOOGLE_CREDENTIALS_PATH = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")

@@ -626,6 +626,28 @@ class CreditUsageLog(models.Model):
         return f"User {self.user_id} | -{self.credits_used} cr | {self.document_filename}{status}"
 
 
+class BlockedEmail(models.Model):
+    email = models.CharField(
+        max_length=254,
+        unique=True,
+        help_text="El. paštas (jonas@gmail.com) arba visas domenas (@domenas.lt). Normalizuojama automatiškai.",
+    )
+    note = models.CharField(max_length=255, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Užblokuotas el. paštas"
+        verbose_name_plural = "Užblokuoti el. paštai"
+
+    def save(self, *args, **kwargs):
+        from .utils.registration_guard import canonical_email
+        self.email = canonical_email(self.email)
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return self.email
+
+
 
 #Cache proverenyx PVM kodov 
 class VatCheckCache(models.Model):

@@ -28,6 +28,7 @@ from django.db.models import F, Value
 from django.db.models.functions import Coalesce
 from django.urls import reverse
 from .utils.turnstile import verify_turnstile
+from .utils.registration_guard import check_registration, normalize_email
 
 
 from django.core.files.base import ContentFile
@@ -4210,6 +4211,15 @@ def register(request):
         logger.warning(f"Turnstile nepraeitas, IP: {client_ip}")
         return Response({"error": "Patvirtinkite, kad nesate robotas."}, status=400)
 
+    reg_check = check_registration(request.data.get("email"), client_ip)
+    if reg_check:
+        msg, code = reg_check
+        logger.warning(f"Registracija atmesta ({code}): {request.data.get('email')} IP: {client_ip} - {msg}")
+        return Response({"error": msg}, status=code)
+
+    data = request.data.copy()
+    data["email"] = normalize_email(data.get("email"))
+
     # Удаление cookies с токенами
     if 'access_token' in request.COOKIES:
         logger.info("Удаляем access_token из cookies.")
@@ -4220,7 +4230,7 @@ def register(request):
         del request.COOKIES['refresh_token']
 
     try:
-        serializer = CustomUserSerializer(data=request.data)
+        serializer = CustomUserSerializer(data=data)
         if serializer.is_valid():
             logger.info("Данные пользователя валидны.")
 

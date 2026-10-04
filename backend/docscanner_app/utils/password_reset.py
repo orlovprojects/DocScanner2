@@ -179,9 +179,8 @@ def password_reset_request(request):
         "cooldown_minutes": CODE_RESEND_COOLDOWN_MINUTES,
     }, status=status.HTTP_200_OK)
 
-    try:
-        user = User.objects.get(email=email)
-    except User.DoesNotExist:
+    user = User.objects.filter(email__iexact=email).order_by("id").first()
+    if not user:
         logger.info(f"[PASSWORD RESET] Vartotojas nerastas: {email}")
         return success_response
 
@@ -249,9 +248,8 @@ def password_reset_verify(request):
             status=status.HTTP_400_BAD_REQUEST
         )
 
-    try:
-        user = User.objects.get(email=email)
-    except User.DoesNotExist:
+    user = User.objects.filter(email__iexact=email).order_by("id").first()
+    if not user:
         return Response(
             {"error": "Neteisingas el. paštas arba kodas."},
             status=status.HTTP_400_BAD_REQUEST
@@ -366,9 +364,8 @@ def password_reset_confirm(request):
             status=status.HTTP_400_BAD_REQUEST
         )
 
-    try:
-        user = User.objects.get(email=email)
-    except User.DoesNotExist:
+    user = User.objects.filter(email__iexact=email).order_by("id").first()
+    if not user:
         return Response(
             {"error": "Neteisingas el. paštas arba kodas."},
             status=status.HTTP_400_BAD_REQUEST
