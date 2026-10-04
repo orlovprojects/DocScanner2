@@ -104,7 +104,7 @@ export default function Register() {
     if (emailErrNow || passErrsNow.length > 0 || cpassErrNow) return;
 
     if (!cfToken) {
-      setBackendError("Vyksta saugumo patikra, palaukite kelias sekundes ir bandykite dar kartą.");
+      setBackendError("Patvirtinkite, kad nesate robotas");
       return;
     }
 

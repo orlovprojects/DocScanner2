@@ -120,7 +120,7 @@ const Contact = () => {
     e.preventDefault();
     if (!validate()) return;
     if (!cfToken) {
-      setStatus({ type: 'error', msg: 'Vyksta saugumo patikra, palaukite kelias sekundes ir bandykite dar kartą.' });
+      setStatus({ type: 'error', msg: 'Patvirtinkite, kad nesate robotas' });
       return;
     }
     setLoading(true);

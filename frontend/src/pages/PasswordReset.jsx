@@ -198,7 +198,7 @@ export default function PasswordReset() {
     if (emailErr) return;
 
     if (!cfToken) {
-      setError("Vyksta saugumo patikra, palaukite kelias sekundes ir bandykite dar kartą.");
+      setError("Patvirtinkite, kad nesate robotas");
       return;
     }
 
@@ -336,7 +336,7 @@ export default function PasswordReset() {
     if (cooldownSeconds > 0) return;
 
     if (!cfToken) {
-      setError("Vyksta saugumo patikra, palaukite kelias sekundes ir bandykite dar kartą.");
+      setError("Patvirtinkite, kad nesate robotas");
       return;
     }
 
@@ -434,14 +434,16 @@ export default function PasswordReset() {
             </Alert>
           )}
 
-          <Turnstile
-            ref={turnstileRef}
-            siteKey={import.meta.env.VITE_TURNSTILE_SITE_KEY}
-            options={{ appearance: "interaction-only" }}
-            onSuccess={setCfToken}
-            onExpire={() => setCfToken("")}
-            onError={() => setCfToken("")}
-          />
+          {(activeStep === 0 || (activeStep === 1 && cooldownSeconds === 0)) && (
+            <Turnstile
+              ref={turnstileRef}
+              siteKey={import.meta.env.VITE_TURNSTILE_SITE_KEY}
+              options={{ appearance: "interaction-only" }}
+              onSuccess={setCfToken}
+              onExpire={() => setCfToken("")}
+              onError={() => setCfToken("")}
+            />
+          )}
 
           {/* ═══════════════════════════════════════════════════════════════════ */}
           {/* STEP 0: Email Input */}
