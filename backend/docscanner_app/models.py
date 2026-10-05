@@ -7235,6 +7235,9 @@ class PayrollSettings(models.Model):
     advance_enabled = models.BooleanField(default=False)
     advance_day = models.PositiveSmallIntegerField(default=20)
     salary_day = models.PositiveSmallIntegerField(default=10)
+    summed_period_months = models.PositiveSmallIntegerField(default=3)   # apskaitinis laikotarpis 1-3 mėn.
+    summed_period_anchor = models.PositiveSmallIntegerField(default=1)   # nuo kurio mėnesio (1 = ketvirčiais)
+    roster_publish_days = models.PositiveSmallIntegerField(default=10)   # juodraštis sudaromas likus N d.
     advance_percent = models.PositiveSmallIntegerField(default=50)
     payout_account = models.CharField(max_length=20, blank=True, default="")
  
@@ -7341,6 +7344,8 @@ class Employee(models.Model):
     account = models.ForeignKey("EmployeeAccount", null=True, blank=True, on_delete=models.SET_NULL, related_name="employees")
     onboarding_token = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
     status = models.CharField(max_length=10, choices=STATUS_CHOICES, default="active")
+    tags = models.ManyToManyField("EmployeeTag", blank=True, related_name="employees")
+    summed_overtime_to_vacation = models.BooleanField(default=False)   # suminė: viršytas laikas x1,5 prie atostogų
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
  
@@ -7465,6 +7470,8 @@ class ContractTerms(models.Model):
     workload = models.DecimalField(max_digits=4, decimal_places=3, default=Decimal("1"))
     full_time_hours = models.DecimalField(max_digits=5, decimal_places=2, default=Decimal("40"))  # visas etatas, val./sav.
     schedule = models.ForeignKey(WorkSchedule, null=True, blank=True, on_delete=models.SET_NULL)
+    WORK_REGIME_CHOICES = [("standard", "Standartinė"), ("summed", "Suminė darbo laiko apskaita")]
+    work_regime = models.CharField(max_length=10, choices=WORK_REGIME_CHOICES, default="standard")
  
     class Meta:
         ordering = ["valid_from"]
@@ -8020,3 +8027,166 @@ class PayrollPaymentBatch(models.Model):
  
     class Meta:
         ordering = ["-created_at"]
+
+
+
+class EmployeeTag(models.Model):
+    """Darbuotojų žymos grafikų taisyklėms: „Naujokai“, „Turi krautuvo teises“..."""
+    company = models.ForeignKey("CompanyProfile", on_delete=models.CASCADE, related_name="employee_tags")
+    name = models.CharField(max_length=60)
+    color = models.CharField(max_length=9, blank=True, default="")
+ 
+    class Meta:
+        ordering = ["name"]
+        unique_together = ("company", "name")
+ 
+    def __str__(self):
+        return self.name
+ 
+ 
+class ShiftType(models.Model):
+    """Pamainos tipas: „Diena 7-19“, „Naktis 19-7“."""
+    company = models.ForeignKey("CompanyProfile", on_delete=models.CASCADE, related_name="shift_types")
+    name = models.CharField(max_length=60)
+    code = models.CharField(max_length=4)                 # grafike: D / N / R
+    start_time = models.TimeField()
+    end_time = models.TimeField()                         # <= start - baigiasi kitą dieną
+    break_minutes = models.PositiveSmallIntegerField(default=0)
+    color = models.CharField(max_length=9, blank=True, default="")
+    is_active = models.BooleanField(default=True)
+    order = models.PositiveSmallIntegerField(default=0)
+ 
+    class Meta:
+        ordering = ["order", "start_time"]
+ 
+    def __str__(self):
+        return self.name
+ 
+ 
+class ScheduleRule(models.Model):
+    """Grafiko taisyklė iš katalogo (payroll/roster/catalog.py)."""
+    company = models.ForeignKey("CompanyProfile", on_delete=models.CASCADE, related_name="schedule_rules")
+    kind = models.CharField(max_length=30)
+    target = models.JSONField(default=dict, blank=True)    # {"employees": [], "positions": [], "position_groups": [], "tags": []}
+    target2 = models.JSONField(default=dict, blank=True)   # poroms
+    params = models.JSONField(default=dict, blank=True)    # n, min, max, shifts, weekdays, date_from...
+    hard = models.BooleanField(default=True)               # Būtina / Pageidautina
+    weight = models.PositiveSmallIntegerField(default=3)   # 1-5 pageidautinoms
+    is_active = models.BooleanField(default=True)
+    valid_from = models.DateField(null=True, blank=True)
+    valid_to = models.DateField(null=True, blank=True)
+    note = models.CharField(max_length=255, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+ 
+    class Meta:
+        ordering = ["kind", "id"]
+ 
+ 
+class ShiftPreference(models.Model):
+    """Darbuotojo pageidavimas (savitarna arba buhalteris): nenori / nori dirbti, laisva diena."""
+    KIND_CHOICES = [("avoid", "Nenori dirbti"), ("want", "Nori dirbti"), ("day_off", "Prašo laisvos dienos")]
+    employee = models.ForeignKey("Employee", on_delete=models.CASCADE, related_name="shift_preferences")
+    date = models.DateField()
+    kind = models.CharField(max_length=10, choices=KIND_CHOICES)
+    shift_type = models.ForeignKey(ShiftType, null=True, blank=True, on_delete=models.CASCADE)
+    comment = models.CharField(max_length=255, blank=True, default="")
+    source = models.CharField(max_length=12, default="savitarna")
+    created_at = models.DateTimeField(auto_now_add=True)
+ 
+    class Meta:
+        ordering = ["date"]
+        indexes = [models.Index(fields=["employee", "date"])]
+ 
+ 
+class Roster(models.Model):
+    """Mėnesio pamainų grafikas."""
+    STATUS_CHOICES = [("draft", "Juodraštis"), ("published", "Paskelbtas"), ("editing", "Keičiamas")]
+    company = models.ForeignKey("CompanyProfile", on_delete=models.CASCADE, related_name="rosters")
+    year = models.PositiveSmallIntegerField()
+    month = models.PositiveSmallIntegerField()
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default="draft")
+    version = models.PositiveIntegerField(default=0)        # +1 kiekvieną kartą paskelbus
+    published_at = models.DateTimeField(null=True, blank=True)
+    published_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL,
+                                     related_name="+")
+    generated_at = models.DateTimeField(null=True, blank=True)
+    cost = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
+    summary = models.JSONField(default=dict, blank=True)    # balansai, įspėjimai, kas neįvykdyta
+    published_snapshot = models.JSONField(default=list, blank=True)   # paskutinė paskelbta versija
+    pending_reason = models.CharField(max_length=255, blank=True, default="")
+    updated_at = models.DateTimeField(auto_now=True)
+ 
+    class Meta:
+        unique_together = ("company", "year", "month")
+ 
+ 
+class RosterShift(models.Model):
+    roster = models.ForeignKey(Roster, on_delete=models.CASCADE, related_name="shifts")
+    employee = models.ForeignKey("Employee", on_delete=models.CASCADE, related_name="roster_shifts")
+    date = models.DateField()
+    shift_type = models.ForeignKey(ShiftType, null=True, blank=True, on_delete=models.SET_NULL)
+    start = models.DateTimeField()
+    end = models.DateTimeField()
+    break_minutes = models.PositiveSmallIntegerField(default=0)
+    locked = models.BooleanField(default=False)             # perplanuojant nekeičiama
+    source = models.CharField(max_length=10, default="manual")   # auto / manual
+ 
+    class Meta:
+        ordering = ["date", "start"]
+        indexes = [models.Index(fields=["employee", "date"])]
+ 
+ 
+class RosterAck(models.Model):
+    """Darbuotojas susipažino su grafiku (savitarna) - įrodymas VDI."""
+    roster = models.ForeignKey(Roster, on_delete=models.CASCADE, related_name="acks")
+    employee = models.ForeignKey("Employee", on_delete=models.CASCADE, related_name="roster_acks")
+    version = models.PositiveIntegerField()
+    acknowledged_at = models.DateTimeField(auto_now_add=True)
+ 
+    class Meta:
+        unique_together = ("roster", "employee", "version")
+
+
+
+class RosterSlot(models.Model):
+    """Pamainų plano langelis: kurią dieną kokia pamaina ir kiek žmonių reikia."""
+    roster = models.ForeignKey("Roster", on_delete=models.CASCADE, related_name="slots")
+    date = models.DateField()
+    shift_type = models.ForeignKey("ShiftType", on_delete=models.CASCADE)
+    min_staff = models.PositiveSmallIntegerField(default=1)
+    max_staff = models.PositiveSmallIntegerField(null=True, blank=True)
+ 
+    class Meta:
+        ordering = ["date", "shift_type__start_time"]
+        unique_together = ("roster", "date", "shift_type")
+ 
+ 
+class RosterWeekTemplate(models.Model):
+    """Savaitės šablonas: [{weekday: 0-6, shift_type_id, min, max}]."""
+    company = models.ForeignKey("CompanyProfile", on_delete=models.CASCADE, related_name="roster_week_templates")
+    name = models.CharField(max_length=80)
+    items = models.JSONField(default=list)
+    created_at = models.DateTimeField(auto_now_add=True)
+ 
+    class Meta:
+        ordering = ["name"]
+
+
+
+class RosterChange(models.Model):
+    """Paskelbto grafiko pakeitimas (istorija VDI): kas, kada, kodėl ir ką pakeitė."""
+    roster = models.ForeignKey("Roster", on_delete=models.CASCADE, related_name="changes")
+    version = models.PositiveIntegerField()                    # versija, kurioje pakeitimas paskelbtas
+    employee = models.ForeignKey("Employee", on_delete=models.CASCADE, related_name="roster_changes")
+    date = models.DateField()
+    old = models.JSONField(null=True, blank=True)
+    new = models.JSONField(null=True, blank=True)
+    reason = models.CharField(max_length=255, blank=True, default="")
+    late = models.BooleanField(default=False)                  # įspėta vėliau nei prieš 2 darbo dienas
+    changed_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL,
+                                   related_name="+")
+    changed_at = models.DateTimeField(auto_now_add=True)
+ 
+    class Meta:
+        ordering = ["-version", "employee_id", "date"]
+ 

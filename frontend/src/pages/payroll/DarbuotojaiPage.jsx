@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import {
+  Autocomplete,
   Alert, Box, Button, Checkbox, Chip, Dialog, DialogContent, DialogTitle, Divider, FormControl,
   FormControlLabel, IconButton, InputAdornment, InputLabel, MenuItem, Paper, Radio, RadioGroup, Select,
   Stack, Switch, Tab, Table, TableBody, TableCell, TableHead, TableRow, Tabs, TextField, ToggleButton,
@@ -258,11 +259,23 @@ function PersonTab({ emp, onSaved }) {
           onChange={(e) => set({ advance_amount: e.target.value.replace(",", ".") || null })}
           helperText="Tuščia – pagal DU nustatymų procentą" />
       )}
+      <TagsField value={f.tags || []} onChange={(tags) => set({ tags })} />
       <Divider sx={{ my: 1 }} />
       <TaxFields e={f} set={set} />
       {error && <Alert severity="error">{error}</Alert>}
       <Box><Button variant="contained" onClick={save}>Išsaugoti pakeitimus</Button></Box>
     </Stack>
+  );
+}
+
+function TagsField({ value, onChange }) {
+  const [tags, setTags] = useState([]);
+  useEffect(() => { payrollApi.tags().then((r) => setTags(Array.isArray(r) ? r : r.results || [])).catch(() => {}); }, []);
+  if (!tags.length) return null;
+  return (
+    <Autocomplete multiple options={tags} getOptionLabel={(t) => t.name} value={tags.filter((t) => value.includes(t.id))}
+      onChange={(_, v) => onChange(v.map((t) => t.id))} isOptionEqualToValue={(a, b) => a.id === b.id}
+      renderInput={(p) => <TextField {...p} label="Žymos (darbo grafikams)" />} />
   );
 }
 
@@ -278,7 +291,8 @@ function ContractTab({ emp, contract, onChanged }) {
   const saveChange = async () => {
     try {
       await payrollApi.createTerms({ contract: contract.id, valid_from: change.valid_from, position: current?.position,
-        pay_form: change.pay_form, base_amount: change.base_amount, workload: change.workload });
+        pay_form: change.pay_form, base_amount: change.base_amount, workload: change.workload,
+        work_regime: change.work_regime });
       setChange(null); onChanged("Atlyginimo pakeitimas išsaugotas");
     } catch (e) { setError(apiError(e)); }
   };
@@ -300,11 +314,12 @@ function ContractTab({ emp, contract, onChanged }) {
             <Typography>
               {current?.pay_form === "hourly" ? `${money(current.base_amount)} / val.` : `${money(current?.base_amount)} / mėn.`}
               {current && Number(current.workload) !== 1 && ` · ${String(current.workload).replace(".", ",")} etato`}
+              {current?.work_regime === "summed" && " · suminė darbo laiko apskaita"}
             </Typography>
           </Box>
           {contract.status !== "terminated" && (
             <Stack direction="row" gap={1} alignItems="flex-start">
-              <Button variant="outlined" onClick={() => setChange({ valid_from: today(), pay_form: current?.pay_form || "monthly", base_amount: current?.base_amount || "", workload: String(current?.workload || "1") })}>Keisti atlyginimą</Button>
+              <Button variant="outlined" onClick={() => setChange({ valid_from: today(), pay_form: current?.pay_form || "monthly", base_amount: current?.base_amount || "", workload: String(current?.workload || "1"), work_regime: current?.work_regime || "standard" })}>Keisti sąlygas</Button>
               <Button color="error" onClick={() => setDismiss({ date: today(), basis: "55" })}>Nutraukti sutartį</Button>
             </Stack>
           )}
@@ -316,7 +331,7 @@ function ContractTab({ emp, contract, onChanged }) {
 
       {change && (
         <Paper variant="outlined" sx={{ p: 2 }}>
-          <Typography fontWeight={600} mb={2}>Naujas atlyginimas</Typography>
+          <Typography fontWeight={600} mb={2}>Naujos sutarties sąlygos</Typography>
           <Stack direction={{ xs: "column", sm: "row" }} gap={2}>
             <TextField label="Galioja nuo" type="date" value={change.valid_from} InputLabelProps={{ shrink: true }} onChange={(e) => setChange({ ...change, valid_from: e.target.value })} />
             <TextField label={change.pay_form === "hourly" ? "Už valandą" : "Alga per mėnesį"} type="number" value={change.base_amount} onChange={(e) => setChange({ ...change, base_amount: e.target.value })}
@@ -326,6 +341,14 @@ function ContractTab({ emp, contract, onChanged }) {
               <Select label="Darbo krūvis" value={change.workload} MenuProps={MENU_PROPS} onChange={(e) => setChange({ ...change, workload: e.target.value })}>
                 <MenuItem value="1">Visas etatas</MenuItem><MenuItem value="0.75">0,75 etato</MenuItem>
                 <MenuItem value="0.5">Pusė etato</MenuItem><MenuItem value="0.25">0,25 etato</MenuItem>
+              </Select>
+            </FormControl>
+            <FormControl sx={{ minWidth: 220 }}>
+              <InputLabel>Darbo laiko apskaita</InputLabel>
+              <Select label="Darbo laiko apskaita" value={change.work_regime || "standard"} MenuProps={MENU_PROPS}
+                onChange={(e) => setChange({ ...change, work_regime: e.target.value })}>
+                <MenuItem value="standard">Standartinė (5 d. per savaitę)</MenuItem>
+                <MenuItem value="summed">Suminė (pagal pamainų grafiką)</MenuItem>
               </Select>
             </FormControl>
           </Stack>

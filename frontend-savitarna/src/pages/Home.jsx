@@ -5,6 +5,7 @@ import FavoriteBorderIcon from "@mui/icons-material/FavoriteBorder";
 import ReceiptLongOutlinedIcon from "@mui/icons-material/ReceiptLongOutlined";
 import DescriptionOutlinedIcon from "@mui/icons-material/DescriptionOutlined";
 import PersonOutlineIcon from "@mui/icons-material/PersonOutline";
+import CalendarMonthOutlinedIcon from "@mui/icons-material/CalendarMonthOutlined";
 import { useLocation, useNavigate } from "react-router-dom";
 
 import { api, apiError, days } from "../api";
@@ -52,6 +53,13 @@ export default function Home() {
         )}
       </Paper>
 
+      {home?.roster?.pending_ack?.map((p) => (
+        <Alert key={`${p.year}-${p.month}`} severity="warning"
+          action={<Button color="inherit" onClick={() => nav(`/grafikas?y=${p.year}&m=${p.month}`)}>Peržiūrėti</Button>}>
+          Paskelbtas {p.year}-{String(p.month).padStart(2, "0")} darbo grafikas - patvirtinkite, kad susipažinote
+        </Alert>
+      ))}
+      {home?.roster && <Big icon={<CalendarMonthOutlinedIcon />} onClick={() => nav("/grafikas")}>Mano grafikas</Big>}
       {!readOnly && <Big icon={<BeachAccessOutlinedIcon />} onClick={() => nav("/prasymas/vacation")}>Noriu atostogų</Big>}
       {!readOnly && pd?.days > 0 && <Big icon={<FavoriteBorderIcon />} onClick={() => nav("/prasymas/parent_day")}>Mamadienis / tėvadienis</Big>}
       <Big icon={<ReceiptLongOutlinedIcon />} onClick={() => nav("/algalapiai")}>Mano algalapiai</Big>

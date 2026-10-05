@@ -120,6 +120,10 @@ SYSTEM_PAY_CODES = [
     _code("VRP", "Viršvalandžiai poilsio dieną", "earning", calc="multiplier", mult=D("2"), order=24),
     _code("VRN", "Viršvalandžiai naktį", "earning", calc="multiplier", mult=D("2"), order=25),
     _code("VRF", "Viršvalandžiai švenčių dieną", "earning", calc="multiplier", mult=D("2.5"), order=26),
+    _code("SAV", "Suminė apskaita: viršyta laikotarpio norma (+50 %)", "earning", calc="multiplier",
+          mult=D("0.5"), order=27),
+    _code("SAN", "Suminė apskaita: neįvykdyta norma dėl grafiko (50 %)", "earning", calc="multiplier",
+          mult=D("0.5"), order=28),
 
     # --- B. Pagal VDU (į VDU neįtraukiama) ---
     _code("ATO", "Atostoginiai", "earning", calc="vdu_pct", vdu_pct=D("100"), vdu="excluded", order=30),

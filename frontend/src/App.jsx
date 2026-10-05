@@ -108,6 +108,7 @@ const DarboApmokejimoSistemaPage = lazy(() => import("./pages/payroll/DarboApmok
 const PrasymaiPage = lazy(() => import("./pages/payroll/PrasymaiPage"));
 const DeklaracijosPage = lazy(() => import("./pages/payroll/DeklaracijosPage"));
 const IsmokejimaiPage = lazy(() => import("./pages/payroll/IsmokejimaiPage"));
+const GrafikaiPage = lazy(() => import("./pages/payroll/GrafikaiPage"));
 
 
 
@@ -298,6 +299,7 @@ function App() {
                 <Route path="/darbo-uzmokestis/prasymai" element={<PrivateRoute><PrasymaiPage /></PrivateRoute>} />
                 <Route path="/darbo-uzmokestis/deklaracijos" element={<PrivateRoute><DeklaracijosPage /></PrivateRoute>} />
                 <Route path="/darbo-uzmokestis/ismokejimai" element={<PrivateRoute><IsmokejimaiPage /></PrivateRoute>} />
+                <Route path="/darbo-uzmokestis/grafikai" element={<PrivateRoute><GrafikaiPage /></PrivateRoute>} />
 
                 <Route path="/priminti-slaptazodi" element={<PasswordReset />} />
                 <Route path="/buhalterine-apskaita" element={<BuhalterinenApskaita />} />

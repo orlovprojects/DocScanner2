@@ -20,6 +20,8 @@ class TermsSegment:
     base_amount: Decimal      # alga arba valandinis įkainis
     workload: Decimal = Decimal("1")
     week: tuple = STANDARD_WEEK
+    daily_hours: dict = None      # suminė apskaita: {data: valandos pagal grafiką} vietoj savaitės šablono
+    summed: bool = False          # sutartyje - suminė darbo laiko apskaita
 
 
 @dataclass
@@ -54,12 +56,12 @@ def _day_hours(d, week, workload):
     return h
 
 
-def _worked(d_from, d_to, week, workload, absent):
+def _worked(d_from, d_to, week, workload, absent, daily_hours=None):
     days, hours = 0, ZERO
     d = d_from
     while d <= d_to:
         if d not in absent:
-            h = _day_hours(d, week, workload)
+            h = daily_hours.get(d, ZERO) if daily_hours is not None else _day_hours(d, week, workload)
             if h > 0:
                 days += 1
                 hours += h
@@ -91,7 +93,7 @@ def calc_base_pay(year, month, segments, absent_dates=frozenset(), employed_from
         s_from, s_to = max(seg.valid_from, lo), min(seg.valid_to, hi)
         if s_from > s_to:
             continue
-        days, hours = _worked(s_from, s_to, seg.week, seg.workload, absent)
+        days, hours = _worked(s_from, s_to, seg.week, seg.workload, absent, seg.daily_hours)
         res.worked_days += days
         res.worked_hours += hours
 

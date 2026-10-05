@@ -210,7 +210,7 @@ const CATEGORY_THEME = {
 // ══════════════════════════════════════════
 
 const IMG_EXTS = new Set([
-  ".png", ".jpg", ".jpeg", ".jpe", ".webp", ".bmp",
+  ".png", ".jpg", ".jpeg", ".jpe", ".jfif", ".webp", ".bmp",
   ".tif", ".tiff", ".heic", ".heif", ".avif", ".gif",
 ]);
 

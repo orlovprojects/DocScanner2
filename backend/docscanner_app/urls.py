@@ -283,6 +283,9 @@ from .payroll.views import (
     DeclarationSubmitView, DeclarationCheckView, VmiConnectionTestView,
     PayrollPaymentsView, PayrollPaymentMarkPaidView, PayrollAllocationView, 
     PayrollAdvancesView, PayrollPaymentLinkView,
+    EmployeeTagViewSet, ShiftTypeViewSet, ScheduleRuleViewSet, ShiftPreferenceViewSet,
+    RosterView, RosterActionView, RosterCatalogView,
+    
 )
 
 
@@ -307,6 +310,10 @@ router.register(r"payroll/run-lines", PayrollLineViewSet, basename="payroll-run-
 router.register(r"payroll/position-groups", PositionGroupViewSet, basename="payroll-position-group")
 router.register(r"payroll/documents", EmployeeDocumentViewSet, basename="payroll-document")
 router.register(r"payroll/requests", EmployeeRequestViewSet, basename="payroll-request")
+router.register(r"payroll/employee-tags", EmployeeTagViewSet, basename="payroll-employee-tags")
+router.register(r"payroll/shift-types", ShiftTypeViewSet, basename="payroll-shift-types")
+router.register(r"payroll/schedule-rules", ScheduleRuleViewSet, basename="payroll-schedule-rules")
+router.register(r"payroll/shift-preferences", ShiftPreferenceViewSet, basename="payroll-shift-preferences")
 
 
 urlpatterns = [
@@ -784,6 +791,9 @@ urlpatterns = [
     path("payroll/payments/advances/", PayrollAdvancesView.as_view(), name="payroll-advances"),
     path("payroll/payments/<int:pk>/link-transaction/", PayrollPaymentLinkView.as_view(), name="payroll-payment-link"),
     path("payroll/payment-allocations/<int:pk>/", PayrollAllocationView.as_view(), name="payroll-payment-allocation"),
+    path("payroll/roster/", RosterView.as_view(), name="payroll-roster"),
+    path("payroll/roster/action/", RosterActionView.as_view(), name="payroll-roster-action"),
+    path("payroll/roster/catalog/", RosterCatalogView.as_view(), name="payroll-roster-catalog"),
 
     #Darbuotoju savitarna
     path("savitarna/", include("docscanner_app.payroll.savitarna_urls")),

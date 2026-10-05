@@ -5,6 +5,7 @@ import { useAuth } from "./auth";
 import Layout from "./components/Layout";
 import Anketa from "./pages/Anketa";
 import ForgotPassword from "./pages/ForgotPassword";
+import Grafikas from "./pages/Grafikas";
 import Home from "./pages/Home";
 import Invite from "./pages/Invite";
 import Login from "./pages/Login";
@@ -39,6 +40,7 @@ export default function App() {
       <Route path="/prasymas/:kind" element={<Private><RequestForm /></Private>} />
       <Route path="/kiti-prasymai" element={<Private><OtherRequests /></Private>} />
       <Route path="/algalapiai" element={<Private><Payslips /></Private>} />
+      <Route path="/grafikas" element={<Private><Grafikas /></Private>} />
       <Route path="/algalapiai/:run" element={<Private><PayslipDetail /></Private>} />
       <Route path="/" element={<Private><Home /></Private>} />
       <Route path="*" element={<Navigate to="/" replace />} />

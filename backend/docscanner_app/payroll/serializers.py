@@ -29,11 +29,11 @@ class PayrollSettingsSerializer(serializers.ModelSerializer):
         return bool(obj.vmi_ws_password)
 
     def update(self, instance, data):
-        from docscanner_app.utils.password_encryption import encrypt_password
+        from .crypto import encrypt
         for f in ("edas_password", "vmi_ws_password"):
             pw = data.pop(f, None)
             if pw:
-                setattr(instance, f, encrypt_password(pw))
+                setattr(instance, f, encrypt(pw))
         return super().update(instance, data)
 
 
@@ -81,7 +81,7 @@ class ContractTermsSerializer(serializers.ModelSerializer):
     class Meta:
         model = ContractTerms
         fields = ["id", "contract", "valid_from", "position", "position_name", "pay_form",
-                  "base_amount", "workload", "full_time_hours", "schedule"]
+                  "base_amount", "workload", "full_time_hours", "schedule", "work_regime"]
 
 
 class EmploymentContractSerializer(serializers.ModelSerializer):
@@ -304,3 +304,58 @@ class EmployeeRequestSerializer(serializers.ModelSerializer):
         fields = ["id", "employee", "employee_name", "kind", "kind_label", "start_date", "end_date", "work_days",
                   "comment", "answer", "status", "status_label", "reject_reason", "decided_at", "created_at"]
         read_only_fields = fields
+
+
+# ============================================================
+# Pamainų grafikai
+# ============================================================
+
+from docscanner_app.models import EmployeeTag, ScheduleRule, ShiftPreference, ShiftType  # noqa: E402
+
+
+class EmployeeTagSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = EmployeeTag
+        exclude = ["company"]
+
+
+class ShiftTypeSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ShiftType
+        exclude = ["company"]
+
+    def validate(self, attrs):
+        from datetime import date as _d, datetime as _dt, timedelta as _td
+        start, end = attrs.get("start_time"), attrs.get("end_time")
+        if start and end:
+            a, b = _dt.combine(_d.today(), start), _dt.combine(_d.today(), end)
+            if b <= a:
+                b += _td(days=1)
+            mins = (b - a).total_seconds() / 60 - (attrs.get("break_minutes") or 0)
+            if mins > 12 * 60:
+                raise serializers.ValidationError("Pamaina negali būti ilgesnė nei 12 val. (be pertraukos)")
+        return attrs
+
+
+class ScheduleRuleSerializer(serializers.ModelSerializer):
+    label = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ScheduleRule
+        exclude = ["company"]
+
+    def get_label(self, obj):
+        from .roster.services import rule_label
+        return rule_label(obj)
+
+    def validate_kind(self, v):
+        from .roster.catalog import RULES
+        if v not in RULES:
+            raise serializers.ValidationError("Nežinoma taisyklė")
+        return v
+
+
+class ShiftPreferenceSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ShiftPreference
+        fields = "__all__"

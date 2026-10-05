@@ -11,6 +11,7 @@ from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from django.utils import timezone
 from django.http import FileResponse, HttpResponse, JsonResponse
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 
@@ -846,3 +847,130 @@ class PayrollPaymentFileView(PayrollCompanyMixin, APIView):
         resp["X-Errors"] = quote(" | ".join(errors))
         resp["Access-Control-Expose-Headers"] = "X-Batch-Id, X-Errors, Content-Disposition"
         return resp
+
+
+# ============================================================
+# Pamainų grafikai
+# ============================================================
+
+class _CompanyCrud(PayrollCompanyMixin, viewsets.ModelViewSet):
+    model = None
+
+    def get_queryset(self):
+        return self.model.objects.filter(company=self.get_company())
+
+    def perform_create(self, serializer):
+        serializer.save(company=self.get_company())
+
+
+class EmployeeTagViewSet(_CompanyCrud):
+    from docscanner_app.models import EmployeeTag as model  # noqa
+    from .serializers import EmployeeTagSerializer as serializer_class  # noqa
+
+
+class ShiftTypeViewSet(_CompanyCrud):
+    from docscanner_app.models import ShiftType as model  # noqa
+    from .serializers import ShiftTypeSerializer as serializer_class  # noqa
+
+
+class ScheduleRuleViewSet(_CompanyCrud):
+    from docscanner_app.models import ScheduleRule as model  # noqa
+    from .serializers import ScheduleRuleSerializer as serializer_class  # noqa
+
+
+class ShiftPreferenceViewSet(PayrollCompanyMixin, viewsets.ModelViewSet):
+    from .serializers import ShiftPreferenceSerializer as serializer_class  # noqa
+
+    def get_queryset(self):
+        from docscanner_app.models import ShiftPreference
+        qs = ShiftPreference.objects.filter(employee__company=self.get_company())
+        if self.request.query_params.get("year"):
+            qs = qs.filter(date__year=self.request.query_params["year"], date__month=self.request.query_params.get("month"))
+        return qs
+
+    def perform_create(self, serializer):
+        if serializer.validated_data["employee"].company_id != self.get_company().id:
+            raise ValidationError("Darbuotojas nerastas")
+        serializer.save(source="manual")
+
+
+class RosterCatalogView(APIView):
+    def get(self, request):
+        from .roster.catalog import GROUPS, LAW, RULES
+        return Response({
+            "groups": [{"key": k, "label": l} for k, l in GROUPS],
+            "rules": [{"kind": k, "group": g, "label": l, "template": t, "params": p}
+                      for k, (g, l, t, p) in RULES.items()],
+            "law": LAW,
+        })
+
+
+class RosterView(PayrollCompanyMixin, APIView):
+    """GET ?year=&month= - mėnesio grafikas (tinklelis, pažeidimai, balansai, variantai)."""
+
+    def get(self, request):
+        from .roster.services import get_roster, roster_view
+        y, m = int(request.query_params["year"]), int(request.query_params["month"])
+        return Response(roster_view(get_roster(self.get_company(), y, m)))
+
+
+class RosterActionView(PayrollCompanyMixin, APIView):
+    """
+    POST {year, month, action}:
+      generate            - sudaryti variantus (fone)
+      apply   {index}     - pritaikyti variantą
+      cell    {employee_id, date, shift_type_id|null, locked?}
+      publish             - paskelbti darbuotojams (savitarna)
+    """
+
+    def post(self, request):
+        from .roster import services as rs
+        from .roster.tasks import generate_roster_task
+        roster = rs.get_roster(self.get_company(), int(request.data["year"]), int(request.data["month"]))
+        action_ = request.data.get("action")
+        try:
+            if action_ == "generate":
+                rs.precheck(roster.company, roster.year, roster.month)
+                summary = dict(roster.summary or {}, state="queued", error="", queued_at=timezone.now().isoformat())
+                roster.summary = summary
+                roster.save(update_fields=["summary", "updated_at"])
+                generate_roster_task.delay(roster.id)
+                return Response({"state": "queued"})
+            if action_ == "apply":
+                rs.apply_variant(roster, int(request.data.get("index", 0)))
+            elif action_ == "cell":
+                rs.set_cell(roster, int(request.data["employee_id"]), _date.fromisoformat(request.data["date"]),
+                            request.data.get("shift_type_id"), request.data.get("locked"))
+            elif action_ == "slot":
+                rs.slot_set(roster, _date.fromisoformat(request.data["date"]), int(request.data["shift_type_id"]),
+                            request.data.get("min"), request.data.get("max"))
+            elif action_ == "plan_from_rules":
+                rs.plan_from_rules(roster)
+            elif action_ == "copy_prev_plan":
+                rs.copy_prev_plan(roster)
+            elif action_ == "template_save":
+                rs.template_save(roster, request.data.get("name") or "", _date.fromisoformat(request.data["week_start"]))
+            elif action_ == "template_apply":
+                dates = request.data.get("dates")
+                rs.template_apply(roster, int(request.data["template_id"]),
+                                  {_date.fromisoformat(x) for x in dates} if dates else None)
+            elif action_ == "publish":
+                try:
+                    res = rs.publish(roster, request.user, confirm_late=bool(request.data.get("confirm_late")))
+                except rs.LateChangeError as e:
+                    return Response({"late_changes": e.items, "roster": rs.roster_view(roster)}, status=409)
+                return Response(dict(res, roster=rs.roster_view(roster)))
+            elif action_ == "unlock":
+                rs.unlock(roster, request.data.get("reason"), request.data.get("comment") or "")
+            elif action_ == "suggest":
+                return Response({"candidates": rs.suggest(roster, _date.fromisoformat(request.data["date"]),
+                                                          int(request.data["shift_type_id"]),
+                                                          request.data.get("exclude_employee_id"))})
+            elif action_ == "replace":
+                rs.replace(roster, _date.fromisoformat(request.data["date"]), int(request.data["shift_type_id"]),
+                           int(request.data["to_employee_id"]), request.data.get("from_employee_id"))
+            else:
+                raise ValidationError("Neteisingas veiksmas")
+        except (ValueError, KeyError) as e:
+            raise ValidationError(str(e))
+        return Response(rs.roster_view(roster))

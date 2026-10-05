@@ -108,3 +108,14 @@ def notify_payslip(employee, year, month):
     return _send(employee.email, f"Atsiskaitymo lapelis už {year}-{month:02d}",
                  f"Sveiki, {employee.first_name},\nJūsų atsiskaitymo lapelis už {year}-{month:02d} jau paruoštas.",
                  "Peržiūrėti", f"{base_url()}/algalapiai")
+
+
+def notify_roster(employee, year, month, changed=False, lines=None):
+    from .savitarna_auth import base_url
+    what = "pakeistas" if changed else "paskelbtas"
+    body = (f"Sveiki, {employee.first_name},\nJūsų {year}-{month:02d} darbo grafikas {what}. "
+            "Peržiūrėkite jį ir patvirtinkite, kad susipažinote.")
+    if lines:
+        body += "\n\nPakeitimai:\n" + "\n".join(f"• {x}" for x in lines[:15])
+    return _send(employee.email, f"Darbo grafikas {year}-{month:02d} {what}", body,
+                 "Peržiūrėti grafiką", f"{base_url()}/grafikas?y={year}&m={month}")

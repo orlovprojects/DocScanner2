@@ -55,12 +55,14 @@ class Day:
     hours: Decimal = ZERO                 # darbo valandos
     scheduled_hours: Decimal = ZERO       # pagal grafiką
     event: Event = None
+    norm_hours: Decimal = ZERO            # pagal standartinę savaitę (suminei: atostogos skaičiuojamos darbo dienomis)
     extra: dict = field(default_factory=dict)   # {"night": 2, "overtime": 1 ...}
 
 
 @dataclass
 class Timesheet:
     days: list
+    summed: bool = False                  # suminė apskaita (dienos iš pamainų grafiko)
 
     def by_code(self, code):
         return [d for d in self.days if d.code == code]
@@ -83,7 +85,10 @@ class Timesheet:
                 if d.scheduled_hours > 0 and d.event and d.event.kind not in WORKED_EVENTS}
 
     def event_workdays(self, kind):
-        """Grafiko darbo dienos, patenkančios į nurodytos rūšies įvykius."""
+        """Grafiko darbo dienos, patenkančios į nurodytos rūšies įvykius.
+        Suminei apskaitai kasmetinės atostogos skaičiuojamos darbo dienomis (standartinė savaitė)."""
+        if self.summed and kind == "vacation":
+            return [d for d in self.days if d.event and d.event.kind == kind and d.norm_hours > 0]
         return [d for d in self.days if d.event and d.event.kind == kind and d.scheduled_hours > 0]
 
     def extra_hours(self, hour_type):
@@ -100,37 +105,49 @@ def _scheduled(d, week, workload):
 
 
 def generate(year, month, *, week=STANDARD_WEEK, workload=Decimal("1"),
-             employed_from=None, employed_to=None, events=(), overrides=None):
+             employed_from=None, employed_to=None, events=(), overrides=None,
+             daily_schedule=None, daily_extra=None):
     """
     overrides: {date: {"code": ..., "hours": ..., "extra": {...}}} - rankiniai pakeitimai.
+    daily_schedule: suminė apskaita - {data: valandos pagal pamainų grafiką} vietoj savaitės šablono.
+    daily_extra: {data: {"night": .., "holiday": ..}} iš pamainų (taikoma tik dirbtoms dienoms).
     """
     overrides = overrides or {}
+    summed = daily_schedule is not None
     first = date(year, month, 1)
     d = first
     days = []
     while d.month == month:
         employed = (employed_from is None or d >= employed_from) and (employed_to is None or d <= employed_to)
-        sched = _scheduled(d, week, workload) if employed else ZERO
+        norm_h = _scheduled(d, week, workload) if employed else ZERO
+        if summed:
+            sched = daily_schedule.get(d, ZERO) if employed else ZERO
+        else:
+            sched = norm_h
 
         if not employed:
             day = Day(d, NE)
+        elif sched > 0:
+            day = Day(d, FD, hours=sched, scheduled_hours=sched)
         elif is_holiday(d):
             day = Day(d, S)
-        elif sched == 0:
-            day = Day(d, P)
         else:
-            day = Day(d, FD, hours=sched, scheduled_hours=sched)
+            day = Day(d, P)
+        day.norm_hours = norm_h
 
         if employed:
             for ev in events:
                 if ev.start <= d <= ev.end:
                     day.event = ev
-                    if day.code == FD:
+                    if day.code == FD or (summed and ev.kind == "vacation" and norm_h > 0):
                         code = EVENT_CODES.get(ev.kind, "?")
                         day.code = code
                         if ev.kind not in WORKED_EVENTS:
                             day.hours = ZERO
                     break
+
+        if summed and daily_extra and day.code == FD and d in daily_extra:
+            day.extra.update(daily_extra[d])
 
         ov = overrides.get(d)
         if ov:
@@ -141,16 +158,21 @@ def generate(year, month, *, week=STANDARD_WEEK, workload=Decimal("1"),
 
         days.append(day)
         d += timedelta(days=1)
-    return Timesheet(days)
+    return Timesheet(days, summed=summed)
 
 
-def employer_sick_days(event, week=STANDARD_WEEK, workload=Decimal("1")):
+def employer_sick_days(event, week=STANDARD_WEEK, workload=Decimal("1"), daily_schedule=None):
     """
     Darbdavys moka už pirmąsias 2 kalendorines nedarbingumo dienas,
-    sutampančias su grafiko darbo dienomis. Tęsiniui - 0.
+    sutampančias su grafiko darbo dienomis (suminei - su pamainų grafiku). Tęsiniui - 0.
     """
     if event.is_continuation:
         return 0
+
+    def works(d):
+        if daily_schedule is not None:
+            return daily_schedule.get(d, ZERO) > 0
+        return _scheduled(d, week, workload) > 0
+
     return sum(1 for i in range(2)
-               if _scheduled(event.start + timedelta(days=i), week, workload) > 0
-               and event.start + timedelta(days=i) <= event.end)
+               if works(event.start + timedelta(days=i)) and event.start + timedelta(days=i) <= event.end)

@@ -39,6 +39,7 @@ const IMAGE_EXTS = [
   ".jpg",
   ".jpeg",
   ".jpe",
+  ".jfif",
   ".webp",
   ".bmp",
   ".tif",

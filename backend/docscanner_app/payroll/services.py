@@ -98,7 +98,8 @@ def _segments(contract):
     for i, t in enumerate(terms):
         valid_to = terms[i + 1].valid_from - timedelta(days=1) if i + 1 < len(terms) else end
         week = terms_week(t)
-        segs.append(TermsSegment(t.valid_from, valid_to, t.pay_form, t.base_amount, t.workload, week))
+        segs.append(TermsSegment(t.valid_from, valid_to, t.pay_form, t.base_amount, t.workload, week,
+                                 summed=getattr(t, "work_regime", "standard") == "summed"))
     return segs
 
 
@@ -318,6 +319,9 @@ def build_employee_input(run, employee, settings):
         vacation_settlement_days=_vacation_settlement(employee, contract, employed_to),
         gpm_taxable_ytd=gpm_ytd, vsd_base_ytd=vsd_ytd, limits_used_ytd=limits,
     )
+    if any(sg.summed for sg in segments):
+        from .roster.services import apply_roster
+        apply_roster(inp, employee, contract, settings)
     return inp, contract
 
 
@@ -451,6 +455,8 @@ def approve_run(run, user):
     run.save(update_fields=["journal_entry", "status", "approved_by", "approved_at", "updated_at"])
     from .payments import create_obligations_for_run
     create_obligations_for_run(run)
+    from .roster.services import close_period_vacation
+    close_period_vacation(run)
     logger.info("DU patvirtintas: run=%s, JE #%s", run.id, je.id)
     if run.kind == "regular":
         from .savitarna_emails import notify_payslip
@@ -468,6 +474,8 @@ def reopen_run(run):
         raise ValueError("Išmokėto / uždaryto DU atidaryti negalima")
     from .payments import delete_obligations_for_run
     delete_obligations_for_run(run)
+    from .roster.services import undo_period_vacation
+    undo_period_vacation(run)
     je_id = run.journal_entry_id
     run.journal_entry = None
     run.status = "draft"

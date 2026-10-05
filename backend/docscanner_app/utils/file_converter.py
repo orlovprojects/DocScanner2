@@ -91,7 +91,7 @@ WKHTMLTOIMAGE_PATH      = None
 # Расширения
 BROWSER_SAFE_EXT = {'.png', '.jpg', '.jpeg', '.webp', '.avif'}
 IMG_EXTS = {
-    '.png', '.jpg', '.jpeg', '.jpe', '.webp', '.bmp', '.tif', '.tiff',
+    '.png', '.jpg', '.jpeg', '.jpe', '.jfif', '.webp', '.bmp', '.tif', '.tiff',
     '.heic', '.heif', '.hif', '.heifs', '.avif'
 }
 OFFICE_EXTS = {'.doc', '.docx', '.xls', '.xlsx'}
@@ -162,7 +162,7 @@ def _save_same_format(img: Image.Image, prefer_ext: str) -> Tuple[bytes, str]:
     if e in {'.png'}:
         out.save(buf, format='PNG', optimize=True, compress_level=PNG_COMPRESS)
         return buf.getvalue(), '.png'
-    if e in {'.jpg', '.jpeg', '.jpe'}:
+    if e in {'.jpg', '.jpeg', '.jpe', '.jfif'}:
         out.save(buf, format='JPEG', quality=JPG_QUALITY, optimize=True)
         return buf.getvalue(), '.jpg'
     if e == '.webp':

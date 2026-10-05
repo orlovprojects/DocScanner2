@@ -2924,7 +2924,7 @@ CLOUD_RETRY_DELAY_SECONDS      = 300                      # 5 min
 # Поддерживаемые форматы (всё что умеет normalize_any, БЕЗ архивов)
 CLOUD_ALLOWED_EXT = {
     ".pdf",
-    ".jpg", ".jpeg", ".jpe", ".png", ".tiff", ".tif",
+    ".jpg", ".jpeg", ".jpe", ".jfif", ".png", ".tiff", ".tif",
     ".webp", ".bmp", ".heic", ".heif", ".avif", ".gif",
     ".doc", ".docx", ".xls", ".xlsx",
 }
@@ -6123,3 +6123,8 @@ def cleanup_vat_check_cache():
 # ═══════════════════════════════════════════════════════════════════════════════
 # END - VAT cache cleanup
 # ═══════════════════════════════════════════════════════════════════════════════
+
+# DU modulio užduotys (įdėtuose moduliuose - Celery jų automatiškai neranda)
+from .payroll.roster.tasks import auto_draft_rosters, generate_roster_task  # noqa: E402,F401
+from .payroll.declarations.tasks import poll_submitted_declarations  # noqa: E402,F401
+from .payroll.form_versions import check_sodra_form_versions  # noqa: E402,F401

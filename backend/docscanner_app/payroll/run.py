@@ -40,6 +40,7 @@ class EmployeeMonthInput:
     segments: list                           # TermsSegment
     events: list = field(default_factory=list)       # timesheet.Event
     overrides: dict = field(default_factory=dict)    # tabelio rankiniai pakeitimai
+    roster_extra: dict = field(default_factory=dict) # suminė: naktinės / šventinės val. iš pamainų
     employed_from: date = None
     employed_to: date = None
 
@@ -125,7 +126,7 @@ def _build_lines(inp, P, ts, primary, daily_vdu, warnings):
 
     for ev in {id(e): e for e in inp.events if e.kind == "sick"}.values():
         if ev.start.year == inp.year and ev.start.month == inp.month:
-            n = employer_sick_days(ev, primary.week, primary.workload)
+            n = employer_sick_days(ev, primary.week, primary.workload, primary.daily_hours)
             if n:
                 lines.append(Line("LIG", pay_by_days(daily_vdu, n, inp.sick_pay_pct), Decimal(n), q2(daily_vdu)))
 
@@ -248,7 +249,8 @@ def calculate_employee_month(P, inp):
     primary = sorted(inp.segments, key=lambda s: s.valid_from)[-1]
     ts = generate(inp.year, inp.month, week=primary.week, workload=primary.workload,
                   employed_from=inp.employed_from, employed_to=inp.employed_to,
-                  events=inp.events, overrides=inp.overrides)
+                  events=inp.events, overrides=inp.overrides,
+                  daily_schedule=primary.daily_hours, daily_extra=inp.roster_extra)
 
     vdu = _vdu(inp, P, primary)
     warnings.extend(vdu.notes)

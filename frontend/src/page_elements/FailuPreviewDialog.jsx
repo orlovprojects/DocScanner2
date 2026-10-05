@@ -13,7 +13,7 @@ import Box from "@mui/material/Box";
 import ZoomableImage from "../pages/ZoomableImage";
 
 const IMG_EXTS = new Set([
-  ".png", ".jpg", ".jpeg", ".jpe", ".webp", ".bmp",
+  ".png", ".jpg", ".jpeg", ".jpe", ".jfif", ".webp", ".bmp",
   ".tif", ".tiff", ".heic", ".heif", ".avif", ".gif",
 ]);
 const PDF_EXTS = new Set([".pdf"]);

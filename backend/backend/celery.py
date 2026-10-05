@@ -71,6 +71,10 @@ app.conf.beat_schedule = {
         "task": "docscanner_app.payroll.declarations.tasks.poll_submitted_declarations",
         "schedule": crontab(minute="*/30"),
     },
+    "auto-draft-rosters": {
+        "task": "docscanner_app.payroll.roster.tasks.auto_draft_rosters",
+        "schedule": crontab(hour=6, minute=30),
+    },
 }
 
 

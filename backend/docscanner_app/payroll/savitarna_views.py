@@ -210,10 +210,12 @@ class HomeView(SavitarnaView):
         vac = payroll_services.vacation_for(emp, today)
         days, per = parent_day_entitlement(
             [ChildInfo(c.birth_date, c.has_disability) for c in emp.children.all()], today)
+        from .roster.services import my_roster_flags
         return Response({
             "vacation_balance": str(vac.balance) if vac else None,
             "parent_days": {"days": days, "period_months": per},
             "data_status": emp.data_status,
+            "roster": my_roster_flags(emp),
         })
 
 
@@ -398,3 +400,44 @@ class PayslipDetailView(SavitarnaView):
             "gross": str(d.gross), "net": str(d.net), "payable": str(d.payable),
             "worked_days": d.worked_days, "worked_hours": str(d.worked_hours),
         })
+
+
+# ============================================================
+# Darbo grafikas (suminė apskaita)
+# ============================================================
+
+class MyRosterView(SavitarnaView):
+    """GET ?year=&month= - mano grafikas; POST {action: ack | overtime_choice | pref_add | pref_delete}"""
+    permission_classes = [HasActiveEmployee]
+
+    def get(self, request):
+        from .roster.services import my_roster
+        today = timezone.localdate()
+        y = int(request.query_params.get("year") or today.year)
+        m = int(request.query_params.get("month") or today.month)
+        return Response(my_roster(request.user.employee, y, m))
+
+    def post(self, request):
+        from .roster import services as rs
+        emp = request.user.employee
+        if getattr(emp, "read_only", False):
+            raise ValidationError("Tik peržiūra")
+        a = request.data.get("action")
+        try:
+            if a == "ack":
+                rs.acknowledge(emp, int(request.data["roster_id"]))
+            elif a == "overtime_choice":
+                emp.summed_overtime_to_vacation = bool(request.data.get("to_vacation"))
+                emp.save(update_fields=["summed_overtime_to_vacation"])
+            elif a == "pref_add":
+                rs.add_preference(emp, date.fromisoformat(request.data["date"]), request.data["kind"],
+                                  request.data.get("shift_type_id"), request.data.get("comment") or "")
+            elif a == "pref_delete":
+                rs.delete_preference(emp, int(request.data["id"]))
+            else:
+                raise ValidationError("Neteisingas veiksmas")
+        except (KeyError, ValueError) as e:
+            raise ValidationError(str(e))
+        today = timezone.localdate()
+        return Response(rs.my_roster(emp, int(request.data.get("year") or today.year),
+                                     int(request.data.get("month") or today.month)))

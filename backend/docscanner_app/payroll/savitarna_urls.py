@@ -19,4 +19,5 @@ urlpatterns = [
     path("requests/<int:pk>/cancel/", v.RequestCancelView.as_view()),
     path("payslips/", v.PayslipListView.as_view()),
     path("payslips/<int:run_id>/", v.PayslipDetailView.as_view()),
+    path("roster/", v.MyRosterView.as_view()),
 ]
