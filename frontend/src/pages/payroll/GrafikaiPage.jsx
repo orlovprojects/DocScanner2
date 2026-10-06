@@ -207,10 +207,13 @@ function RosterTab({ year, month }) {
               <tr>
                 <Box component="th" sx={{ position: "sticky", left: 0, bgcolor: "background.paper", zIndex: 2, minWidth: 210, textAlign: "left", px: "8px !important" }}>Darbuotojas</Box>
                 {data.days.map((d) => (
-                  <Box component="th" key={d.date} sx={{ minWidth: 34, bgcolor: d.holiday ? "rgba(229,72,77,0.08)" : d.weekday >= 5 ? "action.hover" : undefined }}>
-                    <div>{Number(d.date.slice(8))}</div>
-                    <Box sx={{ fontWeight: 400, color: d.holiday ? "error.main" : "text.secondary" }}>{WD[d.weekday]}</Box>
-                  </Box>
+                  <Tooltip key={d.date} title={d.holiday ? d.holiday_name : d.pre_holiday ? "Prieššventinė diena - darbo laikas trumpinamas 1 val." : ""}>
+                    <Box component="th" sx={{ minWidth: 34, bgcolor: d.holiday ? "rgba(229,72,77,0.08)" : d.weekday >= 5 ? "action.hover" : undefined }}>
+                      <div>{Number(d.date.slice(8))}</div>
+                      <Box sx={{ fontWeight: 400, color: d.holiday ? "error.main" : "text.secondary" }}>{WD[d.weekday]}</Box>
+                      {d.pre_holiday && <Box sx={{ fontSize: 9, color: "warning.main", fontWeight: 700 }}>−1 val.</Box>}
+                    </Box>
+                  </Tooltip>
                 ))}
               </tr>
               {types.map((t) => (

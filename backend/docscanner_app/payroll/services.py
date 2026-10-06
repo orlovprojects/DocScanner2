@@ -1000,8 +1000,50 @@ def request_preview(employee, kind, start, end):
         problem = parent_day_quota(ent, taken, new)
         if problem:
             errors.append(problem)
+        # suminė apskaita: jei grafikas paskelbtas - mamadienis tik tą dieną, kai pagal grafiką dirbama
+        from .roster.services import is_summed_on, published_shift_dates, roster_published_for
+        if is_summed_on(employee, start) and roster_published_for(employee, start):
+            shifts = published_shift_dates(employee, start, end)
+            off = [d for d in new if d not in shifts]
+            if off:
+                errors.append("Pagal paskelbtą grafiką " + ", ".join(d.strftime("%m-%d") for d in off) +
+                              " nedirbate – mamadienis / tėvadienis suteikiamas tik darbo dieną (pamainai)")
+            elif new:
+                warnings.append("Patvirtinus prašymą, jūsų pamaina bus pakeista – vadovas paskirs pakaitinį darbuotoją")
     out.update(errors=errors, warnings=warnings)
     return out
+
+
+def parent_day_status(employee, on=None):
+    """Savitarnai: kiek mamadienių priklauso, kiek jau panaudota / laukia šį laikotarpį, kada kitas laikotarpis."""
+    from .averages import ChildInfo, parent_day_entitlement
+    on = on or timezone.localdate()
+    days, per = parent_day_entitlement([ChildInfo(c.birth_date, c.has_disability) for c in employee.children.all()], on)
+    if not days:
+        return {"days": 0, "period_months": 0}
+    if per == 1:
+        p_start = on.replace(day=1)
+        label = "šį mėnesį"
+    else:
+        p_start = date(on.year, (on.month - 1) // 3 * 3 + 1, 1)
+        label = "šį ketvirtį"
+    p_end = month_bounds(*(((p_start.year, p_start.month + per - 1) if p_start.month + per - 1 <= 12
+                            else (p_start.year + 1, p_start.month + per - 13))))[1]
+    taken = []
+    for ev in AbsenceEvent.objects.filter(employee=employee, kind="parent_day", status="approved",
+                                          start_date__lte=p_end, end_date__gte=p_start):
+        taken += [ev.start_date + timedelta(days=i) for i in range((ev.end_date - ev.start_date).days + 1)
+                  if p_start <= ev.start_date + timedelta(days=i) <= p_end and (ev.start_date + timedelta(days=i)).weekday() < 5]
+    pending = []
+    for r in EmployeeRequest.objects.filter(employee=employee, kind="parent_day", status="pending",
+                                            start_date__lte=p_end, end_date__gte=p_start):
+        pending += [r.start_date + timedelta(days=i) for i in range((r.end_date - r.start_date).days + 1)
+                    if p_start <= r.start_date + timedelta(days=i) <= p_end and (r.start_date + timedelta(days=i)).weekday() < 5]
+    remaining = max(days - len(taken) - len(pending), 0)
+    return {"days": days, "period_months": per, "period_label": label,
+            "period_start": p_start.isoformat(), "period_end": p_end.isoformat(),
+            "used": [d.isoformat() for d in sorted(taken)], "pending": [d.isoformat() for d in sorted(pending)],
+            "remaining": remaining, "next_period_start": (p_end + timedelta(days=1)).isoformat()}
 
 
 def _company_name(company):
@@ -1052,6 +1094,13 @@ def approve_request(req, user, answer=None):
             work_days=req.work_days, source="request", status="approved", comment="Prašymas esavitarna.lt",
         )
         req.absence_event = ev
+        from .roster.services import is_summed_on, published_shift_dates, roster_published_for
+        if is_summed_on(req.employee, req.start_date) and roster_published_for(req.employee, req.start_date):
+            hit = published_shift_dates(req.employee, req.start_date, req.end_date)
+            if hit:
+                warnings.append("Darbuotojas tomis dienomis turi pamainas pagal paskelbtą grafiką (" +
+                                ", ".join(d.strftime("%m-%d") for d in sorted(hit)) +
+                                "). Atrakinkite grafiką ir paskirkite pakaitinį darbuotoją („Siūlyti pakaitinį“).")
     else:  # nutraukimas DK 55
         c = _active_contract(req.employee, req.end_date, req.end_date) or \
             req.employee.contracts.exclude(status="draft").order_by("-start_date").first()

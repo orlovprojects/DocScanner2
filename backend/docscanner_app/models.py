@@ -7634,6 +7634,10 @@ class PayrollRun(models.Model):
     class Meta:
         ordering = ["-year", "-month", "-created_at"]
         indexes = [models.Index(fields=["company", "year", "month"])]
+        constraints = [
+            models.UniqueConstraint(fields=["company", "year", "month", "kind"],
+                                    condition=models.Q(kind="regular"), name="uniq_payroll_regular_run"),
+        ]
 
     def __str__(self):
         return f"DU {self.year}-{self.month:02d} ({self.kind})"
@@ -7852,6 +7856,7 @@ class EmployeeRequest(models.Model):
         ("parent_day", "Mamadienis / tėvadienis"),
         ("unpaid", "Nemokamos atostogos"),
         ("dismissal", "Darbo sutarties nutraukimas darbuotojo iniciatyva"),
+        ("pay_info", "Informacija apie darbo užmokestį"),
     ]
     STATUS_CHOICES = [
         ("pending", "Laukia"),
@@ -7866,6 +7871,7 @@ class EmployeeRequest(models.Model):
     end_date = models.DateField()                      # nutraukimui = paskutinė darbo diena
     work_days = models.DecimalField(max_digits=6, decimal_places=2, default=Decimal("0"))
     comment = models.CharField(max_length=500, blank=True, default="")
+    answer = models.TextField(blank=True, default="")   # atsakymas į „pay_info“ prašymą
     status = models.CharField(max_length=10, choices=STATUS_CHOICES, default="pending")
     reject_reason = models.CharField(max_length=500, blank=True, default="")
     decided_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL,

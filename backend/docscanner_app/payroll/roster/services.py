@@ -443,6 +443,17 @@ def _history(roster):
     return sorted(out.values(), key=lambda x: -x["version"])
 
 
+def _days_info(first, last):
+    from ..work_calendar import holidays, is_pre_holiday
+    names = {**holidays(first.year), **holidays(last.year)}
+    out = []
+    for i in range((last - first).days + 1):
+        d = first + timedelta(days=i)
+        out.append({"date": d.isoformat(), "weekday": d.weekday(), "holiday": d in names,
+                    "holiday_name": names.get(d, ""), "pre_holiday": is_pre_holiday(d) and d not in names})
+    return out
+
+
 def get_roster(company, y, m):
     from docscanner_app.models import Roster
     roster, _ = Roster.objects.get_or_create(company=company, year=y, month=m)
@@ -609,8 +620,7 @@ def roster_view(roster):
         "id": roster.id, "year": roster.year, "month": roster.month, "status": roster.status,
         "version": roster.version, "published_at": roster.published_at,
         "publish_deadline": (first - timedelta(days=7)).isoformat(),
-        "days": [{"date": (first + timedelta(days=i)).isoformat(), "weekday": (first + timedelta(days=i)).weekday(),
-                  "holiday": is_holiday(first + timedelta(days=i))} for i in range((last - first).days + 1)],
+        "days": _days_info(first, last),
         "shift_types": [{"id": s.id, "name": s.name, "code": s.code, "start": s.start_time.strftime("%H:%M"),
                          "end": s.end_time.strftime("%H:%M"), "color": s.color}
                         for s in ShiftType.objects.filter(company=roster.company, is_active=True)],
@@ -797,7 +807,69 @@ def my_roster_flags(employee):
             or r.changes.filter(employee=employee, version=r.version).exists()
         if mine and not r.acks.filter(employee=employee, version=r.version).exists():
             pending.append({"year": r.year, "month": r.month})
-    return {"enabled": True, "pending_ack": pending}
+    from ..services import _settings
+    st = _settings(employee.company)
+    (y1, m1), (y2, m2) = period_bounds(today.year, today.month, st.summed_period_months or 3, st.summed_period_anchor or 1)
+    return {"enabled": True, "pending_ack": pending,
+            "overtime_to_vacation": bool(getattr(employee, "summed_overtime_to_vacation", False)),
+            "period": f"{y1}-{m1:02d} – {y2}-{m2:02d}"}
+
+
+ABSENCE_SHORT = {"vacation": "Atost.", "sick": "Liga", "unpaid": "Nemok.", "business_trip": "Komand.",
+                 "study": "Mokym.", "maternity": "NG", "paternity": "Tėvyst.", "childcare": "VP",
+                 "downtime": "Prast.", "donor": "Donor."}
+
+
+def _parent_label(employee, short=False):
+    g = (employee.gender or "").upper()
+    if g == "F":
+        return "Mamad." if short else "Mamadienis"
+    if g == "M":
+        return "Tėvad." if short else "Tėvadienis"
+    return "Laisva d." if short else "Mamadienis / tėvadienis"
+
+
+def _absence_info(employee, first, last):
+    """{data: {"kind", "short", "label"}} - kas tą dieną (atostogos, mamadienis, liga...)."""
+    from docscanner_app.models import AbsenceEvent
+    out = {}
+    for e in AbsenceEvent.objects.filter(employee=employee, status="approved", start_date__lte=last, end_date__gte=first):
+        if e.kind in WORKED_EVENTS:
+            continue
+        label = _parent_label(employee) if e.kind == "parent_day" else e.get_kind_display()
+        short = _parent_label(employee, True) if e.kind == "parent_day" else ABSENCE_SHORT.get(e.kind, "Nėra")
+        d = max(e.start_date, first)
+        while d <= min(e.end_date, last):
+            out[d.isoformat()] = {"kind": e.kind, "short": short, "label": label}
+            d += timedelta(days=1)
+    return out
+
+
+def _requested_info(employee, first, last):
+    """Laukiantys prašymai (dar nepatvirtinti) - rodomi grafike punktyru."""
+    from docscanner_app.models import EmployeeRequest
+    out = {}
+    for r in EmployeeRequest.objects.filter(employee=employee, status="pending", kind__in=("vacation", "parent_day", "unpaid"),
+                                            start_date__lte=last, end_date__gte=first):
+        label = _parent_label(employee) if r.kind == "parent_day" else r.get_kind_display()
+        d = max(r.start_date, first)
+        while d <= min(r.end_date, last):
+            out[d.isoformat()] = {"kind": r.kind, "label": f"{label} (laukia patvirtinimo)"}
+            d += timedelta(days=1)
+    return out
+
+
+def published_shift_dates(employee, first, last):
+    return {s.day for s in published_shifts(employee, first, last)}
+
+
+def is_summed_on(employee, d):
+    return _is_summed(employee, d, d)
+
+
+def roster_published_for(employee, d):
+    from docscanner_app.models import Roster
+    return Roster.objects.filter(company=employee.company, year=d.year, month=d.month, version__gte=1).exists()
 
 
 def my_roster(employee, y, m):
@@ -830,7 +902,10 @@ def my_roster(employee, y, m):
         "version": roster.version if roster else None,
         "acknowledged": bool(roster and roster.acks.filter(employee=employee, version=roster.version).exists()),
         "shifts": shifts, "total_hours": str(total), "changes": changes,
+        "holidays": {x["date"]: x["holiday_name"] for x in _days_info(first, last) if x["holiday"]},
         "absences": sorted(d.isoformat() for d in _absence_dates(employee, first, last)),
+        "absence_info": _absence_info(employee, first, last),
+        "requested": _requested_info(employee, first, last),
         "period": f"{y1}-{m1:02d} – {y2}-{m2:02d}",
         "overtime_to_vacation": bool(getattr(employee, "summed_overtime_to_vacation", False)),
         "shift_types": [{"id": t.id, "name": t.name, "code": t.code} for t in ShiftType.objects.filter(company=employee.company, is_active=True)],

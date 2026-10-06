@@ -117,7 +117,7 @@ class LoginView(PublicView):
             acc.save(update_fields=["failed_attempts", "locked_until"])
             raise generic
         employees = [e for e in acc.employees.select_related("company") if employee_access_allowed(e)]
-        emp = employees[0] if len(employees) == 1 else None
+        emp = _default_employee(employees)
         resp = Response(_me(acc, emp))
         create_session(resp, acc, request, emp)
         return resp
@@ -161,9 +161,10 @@ class PasswordResetConfirmView(PublicView):
         t.used_at = timezone.now()
         t.save(update_fields=["used_at"])
         EmployeeSession.objects.filter(account=acc).update(revoked=True)  # atsijungti visur
-        employees = list(acc.employees.all())
-        resp = Response(_me(acc, employees[0] if len(employees) == 1 else None))
-        create_session(resp, acc, request, employees[0] if len(employees) == 1 else None)
+        employees = [e for e in acc.employees.select_related("company") if employee_access_allowed(e)]
+        emp = _default_employee(employees)
+        resp = Response(_me(acc, emp))
+        create_session(resp, acc, request, emp)
         return resp
 
 
@@ -171,14 +172,33 @@ class PasswordResetConfirmView(PublicView):
 # Aš / įmonės pasirinkimas
 # ============================================================
 
+def _default_employee(employees):
+    """Vienintelė darbovietė arba vienintelė DABARTINĖ (buvusios - tik peržiūrai, pasirenkamos per „Įmonė“)."""
+    if len(employees) == 1:
+        return employees[0]
+    active = [e for e in employees if e.status != "dismissed"]
+    return active[0] if len(active) == 1 else None
+
+
+def _employment_info(e):
+    info = {"id": e.id, "company": _company_name(e.company), "status": e.status,
+            "read_only": e.status == "dismissed", "ended": None, "access_until": None}
+    if e.status == "dismissed":
+        c = e.contracts.order_by("-start_date").first()
+        end = c.effective_end if c else None
+        if end:
+            info["ended"] = end.isoformat()
+            info["access_until"] = (end + timedelta(days=92)).isoformat()
+    return info
+
+
 def _me(acc, emp):
-    employments = [{"id": e.id, "company": _company_name(e.company), "status": e.status,
-                    "read_only": e.status == "dismissed"}
-                   for e in acc.employees.select_related("company") if employee_access_allowed(e)]
+    employments = sorted((_employment_info(e) for e in acc.employees.select_related("company")
+                          if employee_access_allowed(e)), key=lambda x: (x["read_only"], x["company"]))
     data = {"login": acc.login, "employments": employments, "employee": None}
     if emp:
         data["employee"] = {
-            "id": emp.id, "first_name": emp.first_name, "last_name": emp.last_name,
+            "id": emp.id, "first_name": emp.first_name, "last_name": emp.last_name, "gender": emp.gender,
             "company": _company_name(emp.company), "data_status": emp.data_status,
             "read_only": emp.status == "dismissed",
         }
@@ -208,12 +228,10 @@ class HomeView(SavitarnaView):
         emp = request.user.employee
         today = timezone.localdate()
         vac = payroll_services.vacation_for(emp, today)
-        days, per = parent_day_entitlement(
-            [ChildInfo(c.birth_date, c.has_disability) for c in emp.children.all()], today)
         from .roster.services import my_roster_flags
         return Response({
             "vacation_balance": str(vac.balance) if vac else None,
-            "parent_days": {"days": days, "period_months": per},
+            "parent_days": payroll_services.parent_day_status(emp, today),
             "data_status": emp.data_status,
             "roster": my_roster_flags(emp),
         })
@@ -325,8 +343,17 @@ class RequestListView(SavitarnaView):
     permission_classes = [HasActiveEmployee]
 
     def get(self, request):
-        qs = EmployeeRequest.objects.filter(employee=request.user.employee)[:50]
-        return Response([_req_json(r) for r in qs])
+        qs = EmployeeRequest.objects.filter(employee=request.user.employee)
+        if "limit" not in request.query_params:          # senas formatas (pagrindinis ekranas)
+            return Response([_req_json(r) for r in qs[:50]])
+        try:
+            limit = max(1, min(int(request.query_params.get("limit", 10)), 50))
+            offset = max(0, int(request.query_params.get("offset", 0)))
+        except ValueError:
+            raise ValidationError("Neteisingi parametrai")
+        items = list(qs[offset:offset + limit + 1])
+        return Response({"results": [_req_json(r) for r in items[:limit]], "has_more": len(items) > limit,
+                         "next_offset": offset + limit})
 
     def post(self, request):
         emp = request.user.employee
