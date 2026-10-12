@@ -116,7 +116,7 @@ When identifying buyer/seller:
 - Look for "pardavėjas" / "tiekėjas" label→ this is SELLER
 - "Savarankiškas sąskaitų išrašymas" (self-billing) and "Atvirkštinis PVM" (reverse charge) do NOT swap roles: pirkėjas is still buyer, pardavėjas/tiekėjas is still seller
 - Don't rely on position (left/right/top/bottom) when labels are available
-- When no pirkejas/pardavejas/tiekejas labels and can not identify sides by other criteria, check a footer. Seller is usually mentioned in a footer.
+- When no pirkėjas/pardavėjas/tiekėjas labels are present, identify the invoice issuer as SELLER by cross-checking all available clues: who issued the invoice ("Sąskaitą išrašė"), issuer name/signature, invoice logo/branding/watermark, IBAN/bank/SWIFT details, contact details, and payment or late-payment instructions. If only one party has an IBAN/bank account shown and there are no explicit role labels, that party is very likely the SELLER. The other party is BUYER. Also, check a footer. Seller is often mentioned in a footer. Do not determine roles only from left/right position.
 
 When extracting company codes and VAT codes:
 - "Įm. kodas" or "Įmonės kodas" → this is company registration code → put in seller_id / buyer_id (usually 9-digit code)
@@ -388,7 +388,7 @@ When identifying buyer/seller:
 - Look for "pardavėjas" / "tiekėjas" label→ this is SELLER
 - "Savarankiškas sąskaitų išrašymas" (self-billing) and "Atvirkštinis PVM" (reverse charge) do NOT swap roles: pirkėjas is still buyer, pardavėjas/tiekėjas is still seller
 - Don't rely on position (left/right/top/bottom) when labels are available
-- When no pirkejas/pardavejas/tiekejas labels and can not identify sides by other criteria, check a footer. Seller is usually mentioned in a footer.
+- When no pirkėjas/pardavėjas/tiekėjas labels are present, identify the invoice issuer as SELLER by cross-checking all available clues: who issued the invoice ("Sąskaitą išrašė"), issuer name/signature, invoice logo/branding/watermark, IBAN/bank/SWIFT details, contact details, and payment or late-payment instructions. If only one party has an IBAN/bank account shown and there are no explicit role labels, that party is very likely the SELLER. The other party is BUYER. Also, check a footer. Seller is often mentioned in a footer. Do not determine roles only from left/right position.
 
 When extracting company codes and VAT codes:
 - "Įm. kodas" or "Įmonės kodas" → this is company registration code → put in seller_id / buyer_id (usually 9-digit code)
@@ -783,7 +783,7 @@ ADDITIONAL RULES
   Look for "pardavėjas" / "tiekėjas" label→ this is SELLER
   "Savarankiškas sąskaitų išrašymas" (self-billing) and "Atvirkštinis PVM" (reverse charge) do NOT swap roles: pirkėjas is still buyer, pardavėjas/tiekėjas is still seller
   Don't rely on position (left/right/top/bottom) when labels are available
-  When no pirkejas/pardavejas/tiekejas labels and can not identify sides by other criteria, check a footer. Seller is usually mentioned in a footer.
+  When no pirkėjas/pardavėjas/tiekėjas labels are present, identify the invoice issuer as SELLER by cross-checking all available clues: who issued the invoice ("Sąskaitą išrašė"), issuer name/signature, invoice logo/branding/watermark, IBAN/bank/SWIFT details, contact details, and payment or late-payment instructions. If only one party has an IBAN/bank account shown and there are no explicit role labels, that party is very likely the SELLER. The other party is BUYER. Also, check a footer. Seller is often mentioned in a footer. Do not determine roles only from left/right position.
 - If due_date is not stated in the document, but invoice date and payment terms like number of days for payment are mentioned, calculate the due date by adding the payment period to the invoice date.
 - In line items, always always try to take price after discount (without VAT) if such price is provided in the document. Use up to 4 decimal places for prices if needed. Do not round numbers.
 - Delete country names from addresses.
