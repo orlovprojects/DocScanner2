@@ -12,6 +12,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from django.utils import timezone
+from decimal import Decimal
 from django.http import FileResponse, HttpResponse, JsonResponse
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 
@@ -46,6 +47,49 @@ class PayrollCompanyMixin:
     def check_employee(self, employee):
         if employee is not None and employee.company_id != self.get_company().id:
             raise PermissionDenied("Darbuotojas priklauso kitai įmonei")
+
+    def assert_company_relations(self, data):
+        """Visi susiję objektai (FK / M2M) naujuose duomenyse turi priklausyti aktyviai įmonei (SEC-01)."""
+        company_id = self.get_company().id
+        for key, value in (data or {}).items():
+            items = value if isinstance(value, (list, tuple, set)) else [value]
+            for obj in items:
+                owner = _owner_company_id(obj)
+                if owner is _SKIP or owner is None:      # ne įmonės objektas arba bendras (pvz. sisteminis DU kodas)
+                    continue
+                if owner != company_id:
+                    raise PermissionDenied("Susietas įrašas priklauso kitai įmonei")
+
+    def get_serializer(self, *args, **kwargs):
+        ser = super().get_serializer(*args, **kwargs)
+        original_save, view = ser.save, self
+
+        def save(**extra):
+            view.assert_company_relations({**getattr(ser, "validated_data", {}), **extra})
+            return original_save(**extra)
+
+        ser.save = save
+        return ser
+
+
+_SKIP = object()
+
+
+def _owner_company_id(obj, depth=0):
+    """Kuriai įmonei priklauso objektas: tiesiai (company) arba per darbuotoją / sutartį / DU / grafiką."""
+    from django.db.models import Model
+    from docscanner_app.models import CompanyProfile
+    if not isinstance(obj, Model) or depth > 4:
+        return _SKIP
+    if isinstance(obj, CompanyProfile):
+        return obj.id
+    if hasattr(obj, "company_id"):
+        return obj.company_id
+    for attr in ("employee", "contract", "run", "roster"):
+        if hasattr(obj, f"{attr}_id"):
+            rel = getattr(obj, attr, None)
+            return _owner_company_id(rel, depth + 1) if rel is not None else _SKIP
+    return _SKIP
 
 
 # ---------- Nustatymai / žinynai ----------
@@ -108,10 +152,18 @@ class EmployeeViewSet(PayrollCompanyMixin, viewsets.ModelViewSet):
             qs = qs.filter(status=p["status"])
         if p.get("q"):
             qs = qs.filter(Q(first_name__icontains=p["q"]) | Q(last_name__icontains=p["q"]))
-        return qs.prefetch_related("contracts__terms__position", "children")
+        return qs.select_related("account").prefetch_related("contracts__terms__position", "children")  # PERF-01
 
     def perform_create(self, serializer):
         serializer.save(company=self.get_company())
+
+    def list(self, request, *args, **kwargs):
+        """Sąrašas + lentelės laukai (sutartis, darbo laikas, atostogos, šiandien, eSavitarna, ko trūksta)."""
+        from .employees_table import employees_table
+        qs = list(self.filter_queryset(self.get_queryset()).prefetch_related("contracts__terms__position__group"))
+        data = self.get_serializer(qs, many=True).data
+        extra = employees_table(self.get_company(), qs)
+        return Response([dict(row, table=extra.get(row["id"], {})) for row in data])
 
     @action(detail=True, methods=["post"])
     def invite(self, request, pk=None):
@@ -201,7 +253,10 @@ class ContractTermsViewSet(PayrollCompanyMixin, viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         self.check_employee(serializer.validated_data["contract"].employee)
-        serializer.save()
+        payroll_services.ensure_position_group(serializer.save())
+
+    def perform_update(self, serializer):
+        payroll_services.ensure_position_group(serializer.save())
 
 
 # ---------- Įvykiai ----------
@@ -222,13 +277,37 @@ class AbsenceEventViewSet(PayrollCompanyMixin, viewsets.ModelViewSet):
         return qs
 
     def _save(self, serializer):
-        self.check_employee(serializer.validated_data.get("employee", getattr(serializer.instance, "employee", None)))
+        emp = serializer.validated_data.get("employee", getattr(serializer.instance, "employee", None))
+        self.check_employee(emp)
+        v, inst = serializer.validated_data, serializer.instance
+        kind = v.get("kind", getattr(inst, "kind", None))
+        start = v.get("start_date", getattr(inst, "start_date", None))
+        end = v.get("end_date", getattr(inst, "end_date", None))
+        if kind == "business_trip" or getattr(inst, "kind", None) == "business_trip":
+            raise ValidationError("Komandiruotės kuriamos ir keičiamos skiltyje „Komandiruotės“.")
+        if v.get("status", getattr(inst, "status", "approved")) == "approved" and kind != "vacation_prepaid":
+            errors = payroll_services.validate_absence(emp, kind, start, end, exclude_id=getattr(inst, "id", None))
+            if errors:
+                raise ValidationError(errors)
+        old_range = (inst.start_date, inst.end_date) if inst is not None else None
         obj = serializer.save()
         obj.work_days = work_days_between(obj.start_date, obj.end_date)
         obj.save(update_fields=["work_days"])
+        payroll_services.sync_absence_declarations(obj)
+        payroll_services.sync_roster_absence(obj, old_range)
 
     perform_create = _save
     perform_update = _save
+
+    def perform_destroy(self, instance):
+        if instance.kind == "business_trip":
+            raise ValidationError("Tai komandiruotė – ją atšaukite skiltyje „Komandiruotės“ "
+                                  "(kartu bus pašalintas avansas ir įsakymas).")
+        if instance.declarations.filter(status__in=("submitted", "accepted")).exists():
+            raise ValidationError("Apie šį nebuvimą jau pranešta Sodrai. Vietoj ištrynimo pakeiskite pabaigos datą - "
+                                  "bus paruoštas patikslinimas.")
+        payroll_services.release_roster_absence(instance)        # pašalintos pamainos grąžinamos į grafiką
+        instance.delete()
 
 
 # ---------- Tabelis ----------
@@ -242,8 +321,8 @@ class TimesheetView(PayrollCompanyMixin, APIView):
 
     def _month(self, d):
         tm, _ = TimesheetMonth.objects.get_or_create(company=self.get_company(), year=d.year, month=d.month)
-        if tm.status == "locked":
-            raise ValidationError("Tabelis užrakintas")
+        if tm.status in ("approved", "locked"):
+            raise ValidationError("Tabelis patvirtintas – norėdami keisti, atšaukite patvirtinimą")
         return tm
 
     def get(self, request):
@@ -251,9 +330,81 @@ class TimesheetView(PayrollCompanyMixin, APIView):
             year, month = int(request.query_params["year"]), int(request.query_params["month"])
         except (KeyError, ValueError):
             raise ValidationError("Nurodykite year ir month")
-        return Response(payroll_services.timesheet_for(self.get_company(), year, month))
+        data = payroll_services.timesheet_for(self.get_company(), year, month,
+                                              with_meta=request.query_params.get("meta") == "1")
+        if isinstance(data, dict) and isinstance(data.get("meta"), dict):
+            from .roster.repair import roster_stale_flag
+            data["meta"]["roster_stale"] = roster_stale_flag(self.get_company(), year, month)   # Faktas: „grafikas nebeatitinka“
+        return Response(data)
 
     def post(self, request):
+        act = request.data.get("action")
+        if act == "trip_choice":                      # laikotarpio pabaiga: kelionių valandos - poilsiu ar viršvalandžiais
+            from .roster.services import period_cfg, period_settlement
+            from .roster.period import is_last_month
+            emp = Employee.objects.filter(id=request.data.get("employee"), company=self.get_company()).first()
+            choice = request.data.get("choice")
+            if emp is None or choice not in ("rest", "overtime"):
+                raise ValidationError("Neteisingi duomenys")
+            y, m = int(request.data["year"]), int(request.data["month"])
+            first, last = _date(y, m, 1), payroll_services.month_bounds(y, m)[1]
+            contract = payroll_services._active_contract(emp, first, last)
+            if contract is None:
+                raise ValidationError("Darbuotojas neturi sutarties")
+            months, anchor = period_cfg(contract, payroll_services._settings(self.get_company()))
+            if not is_last_month(y, m, months, anchor):
+                raise ValidationError("Pasirinkti galima tik paskutinį apskaitinio laikotarpio mėnesį")
+            tm = self._month(first)
+            choices = dict(getattr(tm, "period_trip_choices", None) or {})
+            out = period_settlement(emp, contract, y, m, months, anchor)      # trip_hours nepriklauso nuo pasirinkimo
+            hours = out[0].trip_hours if out else 0
+            choices[str(emp.id)] = {"choice": choice, "hours": str(hours)}
+            tm.period_trip_choices = choices
+            tm.save(update_fields=["period_trip_choices"])
+            return Response({"ok": True, "hours": str(hours)})
+        if act in ("approve", "reopen"):
+            try:
+                payroll_services.timesheet_set_status(self.get_company(), int(request.data["year"]),
+                                                      int(request.data["month"]), act == "approve",
+                                                      note=request.data.get("note") or "")
+            except payroll_services.TimesheetIssuesError as e:
+                return Response({"detail": str(e), "issues": e.issues, "need_note": e.need_note}, status=409)
+            except ValueError as e:
+                raise ValidationError(str(e))
+            return Response({"ok": True})
+        if act in ("preview_actual", "set_actual"):    # faktinis laikas „nuo-iki“ -> valandos
+            emp = Employee.objects.filter(id=request.data.get("employee"), company=self.get_company()).first()
+            if emp is None:
+                raise ValidationError("Darbuotojas nerastas")
+            d = _date.fromisoformat(request.data["date"])
+            try:
+                r, rest = payroll_services.actual_hours(emp, d, request.data["start"], request.data["end"],
+                                                        request.data.get("break_minutes") or 0, request.data.get("break_start"))
+            except (ValueError, KeyError) as e:
+                raise ValidationError(str(e) or "Patikrinkite laiką")
+            if r["hours"] > 24 or r["hours"] <= 0:
+                raise ValidationError("Patikrinkite laiką (0–24 val.)")
+            if act == "set_actual":
+                tm = self._month(d)
+                detail = {"start": str(request.data["start"])[:5], "end": str(request.data["end"])[:5],
+                          "break": int(request.data.get("break_minutes") or 0),
+                          "break_start": str(request.data.get("break_start") or "")[:5] or None}
+                TimesheetEntry.objects.update_or_create(timesheet=tm, employee=emp, date=d, hour_type="normal",
+                                                        defaults={"code": "FD", "hours": r["hours"], "is_manual": True,
+                                                                  "detail": detail})
+                for k in ("night", "holiday", "overtime", "ot_night", "rest_day"):
+                    if r[k] > 0:
+                        TimesheetEntry.objects.update_or_create(timesheet=tm, employee=emp, date=d, hour_type=k,
+                                                                defaults={"code": "FD", "hours": r[k], "is_manual": True})
+                    else:
+                        TimesheetEntry.objects.filter(timesheet=tm, employee=emp, date=d, hour_type=k).delete()
+            return Response({"rest_day": rest, **{k: str(v) for k, v in r.items()}})
+        if act == "reset_day":                         # grąžinti dieną pagal grafiką / kalendorių
+            d = _date.fromisoformat(request.data["date"])
+            tm = self._month(d)
+            TimesheetEntry.objects.filter(timesheet=tm, employee_id=request.data.get("employee"), date=d,
+                                          employee__company=self.get_company(), is_manual=True).delete()
+            return Response({"ok": True})
         emp = Employee.objects.filter(id=request.data.get("employee"), company=self.get_company()).first()
         if emp is None:
             raise ValidationError("Darbuotojas nerastas")
@@ -310,10 +461,14 @@ class PayrollRunViewSet(PayrollCompanyMixin, viewsets.ReadOnlyModelViewSet):
     def approve(self, request, pk=None):
         run = self.get_object()
         try:
-            payroll_services.approve_run(run, request.user)
+            payroll_services.approve_run(run, request.user, request.data.get("advance_decisions"))
+        except payroll_services.AdvanceDecisionRequired as e:
+            return Response({"advances": e.items}, status=409)
         except ValueError as e:
             raise ValidationError(str(e))
-        return Response(PayrollRunSerializer(run).data)
+        data = PayrollRunSerializer(run).data
+        data["warnings"] = getattr(run, "_approve_warnings", [])
+        return Response(data)
 
     @action(detail=True, methods=["post"])
     def reopen(self, request, pk=None):
@@ -375,6 +530,9 @@ class PayrollLineViewSet(PayrollCompanyMixin, viewsets.ModelViewSet):
 
     def perform_update(self, serializer):
         self._check(serializer.instance.run, serializer.instance.employee)
+        # perkeliant į kitą DU / darbuotoją - tikrinamas ir naujasis
+        self._check(serializer.validated_data.get("run", serializer.instance.run),
+                    serializer.validated_data.get("employee", serializer.instance.employee))
         serializer.save()
 
     def perform_destroy(self, instance):
@@ -414,6 +572,28 @@ class PositionGroupViewSet(PayrollCompanyMixin, viewsets.ModelViewSet):
     @action(detail=False, methods=["get"])
     def check(self, request):
         return Response(payroll_services.groups_check(self.get_company()))
+
+    def list(self, request, *args, **kwargs):
+        payroll_services.refresh_auto_ranges(self.get_company())      # automatinės ribos - visada aktualios
+        return super().list(request, *args, **kwargs)
+
+    @action(detail=True, methods=["post"])
+    def merge(self, request, pk=None):
+        """POST {target: id} - šios grupės pareigos perkeliamos į tikslinę grupę."""
+        try:
+            warn = payroll_services.merge_groups(self.get_company(), int(pk), int(request.data["target"]))
+        except (KeyError, ValueError, PositionGroup.DoesNotExist) as e:
+            raise ValidationError(str(e) or "Grupė nerasta")
+        return Response({"ok": True, "warning": warn})
+
+    @action(detail=False, methods=["post"])
+    def split(self, request):
+        """POST {position: id} - pareigos į atskirą grupę."""
+        try:
+            g = payroll_services.split_position(self.get_company(), int(request.data["position"]))
+        except (KeyError, ValueError, Position.DoesNotExist) as e:
+            raise ValidationError(str(e) or "Pareigos nerastos")
+        return Response(PositionGroupSerializer(g, context={"request": request}).data)
 
 
 class DasView(PayrollCompanyMixin, APIView):
@@ -583,7 +763,8 @@ class EmployeeRequestViewSet(PayrollCompanyMixin, viewsets.ReadOnlyModelViewSet)
             warnings = payroll_services.approve_request(self.get_object(), request.user, request.data.get("answer"))
         except ValueError as e:
             raise ValidationError(str(e))
-        return Response({"ok": True, "warnings": warnings})
+        from .roster.repair import affected_rosters
+        return Response({"ok": True, "warnings": warnings, "rosters": affected_rosters(self.get_company())})
 
     @action(detail=True, methods=["post"])
     def reject(self, request, pk=None):
@@ -598,9 +779,33 @@ class EmployeeRequestViewSet(PayrollCompanyMixin, viewsets.ReadOnlyModelViewSet)
         return HttpResponse(self.get_object().html, content_type="text/html; charset=utf-8")
 
     @action(detail=True, methods=["get"])
+    def attachment(self, request, pk=None):
+        from django.http import FileResponse
+        r = self.get_object()
+        if not r.attachment:
+            raise ValidationError("Priedo nėra")
+        return FileResponse(r.attachment.open("rb"), as_attachment=False, filename=r.attachment.name.rsplit("/", 1)[-1])
+
+    @action(detail=True, methods=["get"])
+    def review(self, request, pk=None):
+        """Peržiūros langui: prašymo tekstas + faktai (likutis ir pan.) + patikrinimai (grafikas, nebuvimai)."""
+        from .overview import request_review
+        return Response(request_review(self.get_object()))
+
+    @action(detail=True, methods=["get"])
     def answer_preview(self, request, pk=None):
         """Atsakymo projektas prašymui dėl informacijos apie DU."""
         return Response({"answer": payroll_services.pay_info_answer(self.get_object().employee)})
+
+
+# ---------- Apžvalga ----------
+
+class PayrollOverviewView(PayrollCompanyMixin, APIView):
+    """GET -> {todo, deadlines, preferences} - DU apžvalgai (ką reikia padaryti, terminai, grafiko pageidavimai)."""
+
+    def get(self, request):
+        from .overview import overview
+        return Response(overview(self.get_company()))
 
 
 # ---------- Deklaracijos ----------
@@ -626,10 +831,16 @@ class DeclarationsView(PayrollCompanyMixin, APIView):
             contract = EmploymentContract.objects.filter(id=d["contract"], employee__company=company).first()
             if contract is None:
                 raise ValidationError("Sutartis nerasta")
+        ev = None
+        if d.get("absence_event"):
+            ev = AbsenceEvent.objects.filter(id=d["absence_event"], employee__company=company).select_related("employee").first()
+            if ev is None:
+                raise ValidationError("Nebuvimas nerastas")
         try:
             obj = payroll_services.generate_declaration(
                 company, d.get("form"), int(d["year"]) if d.get("year") else None,
-                int(d["month"]) if d.get("month") else None, contract, d.get("manual"))
+                int(d["month"]) if d.get("month") else None, contract, d.get("manual"),
+                absence_event=ev, variant=d.get("variant") or "")
         except ValueError as e:
             raise ValidationError(str(e))
         return Response({"id": obj.id, "status": obj.status, "status_label": obj.get_status_display(),
@@ -641,9 +852,13 @@ class DeclarationFileView(PayrollCompanyMixin, APIView):
         d = PayrollDeclaration.objects.filter(id=pk, company=self.get_company()).first()
         if d is None or not d.content:
             raise ValidationError("Deklaracija nerasta")
-        name = f"{d.form}_{d.year}-{(d.month or 0):02d}" + (f"_{d.contract.employee.last_name}" if d.contract_id else "")
-        resp = HttpResponse(d.content.encode("utf-8"), content_type="application/xml; charset=utf-8")
-        resp["Content-Disposition"] = f'attachment; filename="{name}.ffdata"'
+        who = d.contract.employee.last_name if d.contract_id else (d.absence_event.employee.last_name if d.absence_event_id else "")
+        name = (f"{d.form}_{d.year}" + (f"-{d.month:02d}" if d.month else "") + (f"_{who}" if who else "")
+                + (f"_{d.variant}" if d.variant else ""))
+        is_json = d.form == "SDUP"
+        resp = HttpResponse(d.content.encode("utf-8"),
+                            content_type="application/json; charset=utf-8" if is_json else "application/xml; charset=utf-8")
+        resp["Content-Disposition"] = f'attachment; filename="{name}.{"json" if is_json else "ffdata"}"'
         return resp
 
 
@@ -872,6 +1087,18 @@ class ShiftTypeViewSet(_CompanyCrud):
     from docscanner_app.models import ShiftType as model  # noqa
     from .serializers import ShiftTypeSerializer as serializer_class  # noqa
 
+    def perform_destroy(self, instance):
+        """Naudojamos grafikuose pamainos neištrinamos (istorija, valandos) - siūloma išjungti."""
+        from docscanner_app.models import RosterShift, RosterSlot, ShiftPreference
+        used = (RosterShift.objects.filter(shift_type=instance).exists()
+                or RosterSlot.objects.filter(shift_type=instance).exclude(min_staff=0, max_staff__isnull=True).exists()
+                or ShiftPreference.objects.filter(shift_type=instance).exists())
+        if used:
+            raise ValidationError({"detail": f"Pamaina „{instance.name}“ naudojama grafikuose – jos ištrinti negalima. "
+                                             "Išjunkite ją (Neaktyvi): naujuose grafikuose ji nebus naudojama, "
+                                             "o esami grafikai liks nepakitę."})
+        instance.delete()
+
 
 class ScheduleRuleViewSet(_CompanyCrud):
     from docscanner_app.models import ScheduleRule as model  # noqa
@@ -931,12 +1158,56 @@ class RosterActionView(PayrollCompanyMixin, APIView):
         try:
             if action_ == "generate":
                 rs.precheck(roster.company, roster.year, roster.month)
+                if not roster.slots.exclude(min_staff=0, max_staff__isnull=True).exists():
+                    rs.plan_from_rules(roster)     # planas iš numatyto poreikio ir taisyklių, jei dar nesudarytas
                 summary = dict(roster.summary or {}, state="queued", error="", queued_at=timezone.now().isoformat())
+                summary.pop("period_chain", None)               # vieno mėnesio sudarymas - ne laikotarpio grandinė
+                summary.pop("auto_applied", None)
                 roster.summary = summary
                 roster.save(update_fields=["summary", "updated_at"])
                 generate_roster_task.delay(roster.id)
                 return Response({"state": "queued"})
-            if action_ == "apply":
+            if action_ == "generate_period":               # visam apskaitiniam laikotarpiui (neskelbti mėnesiai iš eilės)
+                from .roster.tasks import generate_period_task
+                todo = [x["ym"] for x in rs.period_plan(roster.company, roster.year, roster.month) if x["state"] == "todo"]
+                if not todo:
+                    raise ValueError("Visi šio apskaitinio laikotarpio mėnesiai jau paskelbti – sudaryti nėra ką")
+                rs.precheck(roster.company, roster.year, roster.month)
+                now = timezone.now().isoformat()
+                for ym in todo:
+                    r = rs.get_roster(roster.company, int(ym[:4]), int(ym[5:]))
+                    r.summary = dict(r.summary or {}, state="queued", error="", queued_at=now, period_chain=todo)
+                    r.summary.pop("auto_applied", None)
+                    r.save(update_fields=["summary", "updated_at"])
+                generate_period_task.delay(roster.company_id, roster.year, roster.month)
+                return Response({"state": "queued", "months": todo})
+            if action_ == "repair_start":                  # pataisymų peržiūra po nebuvimų (fone)
+                from .roster.tasks import repair_roster_task
+                mode = request.data.get("mode") or "fill"
+                if mode not in ("fill", "balance"):
+                    raise ValueError("Neteisingas taisymo būdas")
+                if ((roster.summary or {}).get("repair") or {}).get("state") in ("queued", "running"):
+                    raise ValueError("Taisymas jau vykdomas")
+                roster.summary = dict(roster.summary or {}, repair={"state": "queued", "mode": mode,
+                                                                    "queued_at": timezone.now().isoformat()})
+                roster.save(update_fields=["summary", "updated_at"])
+                repair_roster_task.delay(roster.id, mode)
+                return Response({"state": "queued"})
+            if action_ == "repair_apply":
+                from .roster.repair import repair_apply
+                res = repair_apply(roster, request.data.get("months") or [], request.user)
+                roster.refresh_from_db()
+                return Response(dict(res, roster=rs.roster_view(roster)))
+            if action_ == "publish_preview":
+                from .roster.repair import publish_preview
+                return Response(publish_preview(roster))
+            if action_ == "repair_discard":
+                from .roster.repair import repair_discard
+                repair_discard(roster)
+            elif action_ == "stale_ignore":                # „Jau sutvarkyta“ - dabartiniai duomenys tampa atskaitos tašku
+                from .roster.repair import record_inputs
+                record_inputs(roster)
+            elif action_ == "apply":
                 rs.apply_variant(roster, int(request.data.get("index", 0)))
             elif action_ == "cell":
                 rs.set_cell(roster, int(request.data["employee_id"]), _date.fromisoformat(request.data["date"]),
@@ -944,10 +1215,18 @@ class RosterActionView(PayrollCompanyMixin, APIView):
             elif action_ == "slot":
                 rs.slot_set(roster, _date.fromisoformat(request.data["date"]), int(request.data["shift_type_id"]),
                             request.data.get("min"), request.data.get("max"))
+            elif action_ == "clear_shifts":
+                rs.clear_shifts(roster)
+            elif action_ == "remove_absence_shifts":
+                rs.remove_absence_shifts(roster)
+            elif action_ == "clear_plan":
+                rs.clear_plan(roster)
             elif action_ == "plan_from_rules":
                 rs.plan_from_rules(roster)
             elif action_ == "copy_prev_plan":
-                rs.copy_prev_plan(roster)
+                src = str(request.data.get("from") or "")          # "YYYY-MM"; tuščia - praėjęs mėnuo
+                fy, fm = (src.split("-") + [None])[:2] if src else (None, None)
+                rs.copy_prev_plan(roster, fy, fm)
             elif action_ == "template_save":
                 rs.template_save(roster, request.data.get("name") or "", _date.fromisoformat(request.data["week_start"]))
             elif action_ == "template_apply":
@@ -956,12 +1235,17 @@ class RosterActionView(PayrollCompanyMixin, APIView):
                                   {_date.fromisoformat(x) for x in dates} if dates else None)
             elif action_ == "publish":
                 try:
-                    res = rs.publish(roster, request.user, confirm_late=bool(request.data.get("confirm_late")))
+                    res = rs.publish(roster, request.user, confirm_late=bool(request.data.get("confirm_late")),
+                                     confirm_violations=bool(request.data.get("confirm_violations")))
+                except rs.LawViolationsError as e:
+                    return Response({"law_violations": e.items, "roster": rs.roster_view(roster)}, status=409)
                 except rs.LateChangeError as e:
                     return Response({"late_changes": e.items, "roster": rs.roster_view(roster)}, status=409)
                 return Response(dict(res, roster=rs.roster_view(roster)))
             elif action_ == "unlock":
                 rs.unlock(roster, request.data.get("reason"), request.data.get("comment") or "")
+            elif action_ == "discard_changes":          # grąžinti paskelbtą versiją ir vėl užrakinti
+                rs.discard_changes(roster)
             elif action_ == "suggest":
                 return Response({"candidates": rs.suggest(roster, _date.fromisoformat(request.data["date"]),
                                                           int(request.data["shift_type_id"]),
@@ -974,3 +1258,359 @@ class RosterActionView(PayrollCompanyMixin, APIView):
         except (ValueError, KeyError) as e:
             raise ValidationError(str(e))
         return Response(rs.roster_view(roster))
+
+
+# ============================================================
+# Komandiruotės
+# ============================================================
+
+class BusinessTripViewSet(PayrollCompanyMixin, viewsets.ModelViewSet):
+    from .serializers import BusinessTripSerializer as serializer_class  # noqa
+
+    def get_queryset(self):
+        from docscanner_app.models import BusinessTrip
+        qs = BusinessTrip.objects.filter(company=self.get_company()).select_related("employee", "advance_payment")
+        p = self.request.query_params
+        if p.get("year") and p.get("month"):
+            from calendar import monthrange
+            y, m = int(p["year"]), int(p["month"])
+            qs = qs.filter(start_at__date__lte=_date(y, m, monthrange(y, m)[1]), end_at__date__gte=_date(y, m, 1))
+        if p.get("employee"):
+            qs = qs.filter(employee_id=p["employee"])
+        return qs
+
+    def _save(self, serializer, **extra):
+        from .trips_services import refresh_calc
+        trip = serializer.save(**extra)
+        refresh_calc(trip)
+
+    def perform_create(self, serializer):
+        self._save(serializer, company=self.get_company())
+
+    def perform_update(self, serializer):
+        self._save(serializer)
+
+    def perform_destroy(self, instance):
+        if instance.status == "approved":
+            raise ValidationError("Patvirtintą komandiruotę pirmiausia atšaukite")
+        instance.delete()
+
+    @action(detail=True, methods=["post"])
+    def approve(self, request, pk=None):
+        from .trips_services import approve
+        try:
+            trip = approve(self.get_object(), request.user, resolve_absences=bool(request.data.get("resolve_absences")))
+        except ValueError as e:
+            raise ValidationError(str(e))
+        from .roster.repair import affected_rosters
+        return Response(dict(self.get_serializer(trip).data, rosters=affected_rosters(trip.company)))
+
+    @action(detail=True, methods=["post"])
+    def cancel(self, request, pk=None):
+        from .trips_services import cancel
+        try:
+            trip = cancel(self.get_object())
+        except ValueError as e:
+            raise ValidationError(str(e))
+        from .roster.repair import affected_rosters
+        return Response(dict(self.get_serializer(trip).data, warnings=getattr(trip, "restore_warnings", []),
+                             rosters=affected_rosters(trip.company)))
+
+    @action(detail=True, methods=["get"])
+    def order(self, request, pk=None):
+        from .trips_services import order_html
+        return HttpResponse(order_html(self.get_object()), content_type="text/html; charset=utf-8")
+
+
+class TripPreviewView(PayrollCompanyMixin, APIView):
+    """POST {legs, start_at, end_at, per_diem_pct} -> dienpinigių skaičiavimas be išsaugojimo; GET - valstybių normos."""
+
+    def get(self, request):
+        from .trips import NORMS
+        return Response([{"name": k, "amount": str(v)} for k, v in NORMS.items()])
+
+    def post(self, request):
+        from datetime import datetime
+        from .trips import Leg, calc_trip
+        d = request.data
+        try:
+            legs = [Leg(l["country"], _date.fromisoformat(l["date_from"]), _date.fromisoformat(l["date_to"]))
+                    for l in d.get("legs") or []]
+            c = calc_trip(legs, datetime.fromisoformat(d["start_at"]), datetime.fromisoformat(d["end_at"]),
+                          Decimal(str(d.get("per_diem_pct") or 100)))
+        except (KeyError, ValueError) as e:
+            raise ValidationError(f"Neteisingi duomenys: {e}")
+        plan = totals = conflicts = None
+        roster_exists = True
+        emp = Employee.objects.filter(id=d.get("employee"), company=self.get_company()).first() if d.get("employee") else None
+        if emp is not None:
+            from .trips_services import absence_conflicts, compute_plan
+            conflicts = absence_conflicts(emp, datetime.fromisoformat(d["start_at"]).date(), datetime.fromisoformat(d["end_at"]).date())
+            plan, totals, roster_exists = compute_plan(emp, datetime.fromisoformat(d["start_at"]), datetime.fromisoformat(d["end_at"]),
+                                                       d.get("travel_out_hours") or 0, d.get("travel_back_hours") or 0,
+                                                       d.get("day_edits") or {})
+        return Response({"errors": c.errors, "total": str(c.total),
+                         "days": [{"date": x.day.isoformat(), "country": x.country, "norm": str(x.norm),
+                                   "pct": str(x.pct), "amount": str(x.amount), "note": x.note} for x in c.days],
+                         "plan": plan, "plan_totals": totals, "roster_exists": roster_exists, "conflicts": conflicts})
+
+
+# ============================================================
+# Perėjimas iš kitos programos (DU)
+# ============================================================
+
+def _summed_default(m):
+    from .roster.period import period_bounds
+    st = payroll_services._settings(m.company)
+    (py, pm), _ = period_bounds(m.du_start.year, m.du_start.month, st.summed_period_months or 3, st.summed_period_anchor or 1)
+    return {"months": st.summed_period_months or 3, "start": f"{py}-{pm:02d}-01"}
+
+
+def _migration_payload(m):
+    from .lpk import all_clusters, all_professions
+    people = []
+    for p in m.people.all():
+        people.append({
+            "id": p.id, "person_code": p.person_code, "first_name": p.first_name, "last_name": p.last_name,
+            "start_date": p.start_date, "end_date": p.end_date, "lpk4": p.lpk4, "lpk_code": p.lpk_code,
+            "position_name": p.position_name, "contract_type": p.contract_type, "pension": p.pension,
+            "npd_mode": p.npd_mode, "base_amount": p.base_amount, "vacation_balance": p.vacation_balance,
+            "unpaid_amount": p.unpaid_amount, "include": p.include, "employee": p.employee_id,
+            "employed": p.employed, "pay_form": p.pay_form, "weekly_hours": p.weekly_hours,
+            "work_time_mode": getattr(p, "work_time_mode", "01"),
+            "has_disability": getattr(p, "has_disability", False), "vdu_override": getattr(p, "vdu_override", None),
+            "children": getattr(p, "children", []) or [],
+            "summed_period_months": getattr(p, "summed_period_months", None),
+            "summed_period_start": getattr(p, "summed_period_start", None),
+            "summed_worked_hours": getattr(p, "summed_worked_hours", None),
+            "summed_absence_hours": getattr(p, "summed_absence_hours", None),
+            "summed_paid_overtime": getattr(p, "summed_paid_overtime", 0),
+            "transition_state": getattr(p, "transition_state", "work") or "work",
+            "transition_until": getattr(p, "transition_until", None),
+            "vacation_prepaid_amount": getattr(p, "vacation_prepaid_amount", None),
+            "pay_once_a_month": getattr(p, "pay_once_a_month", False),
+            "advance_amount": getattr(p, "advance_amount", None),
+            "summed_mid_period": bool(getattr(p, "work_time_mode", "01") == "02" and
+                                      str(getattr(p, "summed_period_start", None) or _summed_default(m)["start"]) < m.du_start.isoformat()),
+            "lpk_name": next((x["name"] for x in all_professions() if p.lpk_code and x["code"] == p.lpk_code), ""),
+            "is_new": bool(m.status == "sdup_ready" and not p.employee_id and p.include and p.employed),
+            "s29_missing": p.id in ((m.summary or {}).get("s29_missing") or []),
+            "annual_leave_days": p.annual_leave_days, "work_regime": p.work_regime, "single_parent": p.single_parent,
+            "iban": p.iban, "email": p.email, "phone": p.phone, "source": p.source,
+            "dismissed_before": not p.employed,
+            "lpk_options": [{"code": x["code"], "name": x["name"]} for x in all_professions()
+                            if p.lpk4 and x["code"].startswith(p.lpk4)][:40],
+            "lpk_group": next((x["group_name"] for x in all_professions() if p.lpk4 and x["group_code"] == p.lpk4), ""),
+            "lpk_needs_choice": bool(p.lpk4 and not p.lpk_code
+                                     and not all_clusters().get(p.lpk4, {}).get("homogeneous", True)),
+        })
+    from docscanner_app.models import PayrollDeclaration
+    from .migration.services import sodra_entries
+    sdup_months = [{"id": d.id, "year": d.year, "month": d.month, "status": d.status,
+                    "status_label": d.get_status_display(), "deadline": d.deadline, "errors": d.errors,
+                    "rows": (d.meta or {}).get("rows", []), "has_file": bool(d.content)}
+                   for d in PayrollDeclaration.objects.filter(company=m.company, form="SDUP")
+                   .order_by("-year", "-month")[:6]] if m.mode == "sdup" else []
+    from docscanner_app.models import DasDocument, PositionGroup
+    das = None
+    if m.status in ("sdup_ready", "confirmed"):
+        last = DasDocument.objects.filter(company=m.company).order_by("-version").first()
+        das = {"approved": bool(last), "approved_date": last.approved_date if last else None,
+               "outdated": payroll_services.das_outdated(m.company) if last else False,
+               "groups": PositionGroup.objects.filter(company=m.company).count()}
+    summed_default = _summed_default(m)
+    return {"id": m.id, "du_start": m.du_start, "status": m.status, "gap_mode": m.gap_mode, "mode": m.mode,
+            "summed_default": summed_default,
+            "sdup_months": sdup_months, "das": das,
+            "sodra_entries": sodra_entries(m) if m.status == "sdup_ready" else [],
+            "sodra_entries_all": sodra_entries(m, only_new=False) if m.status == "sdup_ready" else [],
+            "summary": m.summary or {}, "people": people,
+            "other_payments": list(m.other_payments.values("id", "person_code", "name", "year", "income_code",
+                                                          "amount", "rate", "gpm"))}
+
+
+class PayrollMigrationExcelView(PayrollCompanyMixin, APIView):
+    """GET - Excel šablonas su rastais darbuotojais."""
+    def get(self, request):
+        from .migration import services as ms
+        m = ms.get_or_create(self.get_company(), request.user)
+        resp = HttpResponse(ms.export_excel(m),
+                            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        resp["Content-Disposition"] = 'attachment; filename="du_perejimas_darbuotojai.xlsx"'
+        return resp
+
+
+class PayrollMigrationView(PayrollCompanyMixin, APIView):
+    """
+    GET  - būsena;  POST multipart files[] - įkelti .ffdata;
+    POST {action: start|analyze|person|remove_file|confirm|reopen|other_add|other_delete}
+    """
+    def get(self, request):
+        from .migration import services as ms
+        m = ms.get_or_create(self.get_company(), request.user)
+        if not m.summary and m.files.exists():
+            ms.analyze(m)
+        return Response(_migration_payload(m))
+
+    def post(self, request):
+        from docscanner_app.models import PayrollMigrationOtherPayment
+        from .migration import services as ms
+        m = ms.get_or_create(self.get_company(), request.user)
+        try:
+            if request.FILES.get("excel"):
+                upd, new, errors = ms.import_excel(m, request.FILES["excel"])
+                return Response(dict(_migration_payload(m), excel={"updated": upd, "added": new, "errors": errors}))
+            if request.FILES:
+                import zipfile
+                items = []
+                for f in request.FILES.getlist("files"):
+                    if f.size > 20 * 1024 * 1024:
+                        continue
+                    if f.name.lower().endswith(".zip"):
+                        with zipfile.ZipFile(f) as z:          # pvz. kelios ataskaitos viename ZIP
+                            items += [(n.rsplit("/", 1)[-1], z.read(n)) for n in z.namelist()
+                                      if n.lower().endswith((".xml", ".ffdata")) and z.getinfo(n).file_size < 5 * 1024 * 1024]
+                    else:
+                        items.append((f.name, f.read()))
+                ok, skipped = ms.add_files(m, items)
+                ms.analyze(m)
+                return Response(dict(_migration_payload(m), uploaded=ok,
+                                     skipped=[{"name": n, "reason": r} for n, r in skipped]))
+            a = request.data.get("action")
+            if a == "start":
+                ms.set_start(m, _date.fromisoformat(request.data["du_start"]), request.data.get("gap_mode"))
+            elif a == "analyze":
+                ms.analyze(m)
+            elif a == "add_person":
+                ms.add_person(m, request.data.get("data") or {})
+            elif a == "reset":
+                ms.reset(m)
+            elif a == "remove_person":
+                ms.remove_person(m, int(request.data["id"]))
+            elif a == "person":
+                ms.update_person(m, int(request.data["id"]), request.data.get("data") or {})
+            elif a == "remove_file":
+                ms.remove_file(m, int(request.data["id"]))
+                ms.analyze(m)
+            elif a == "other_add":
+                d = request.data.get("data") or {}
+                PayrollMigrationOtherPayment.objects.create(
+                    migration=m, person_code=d["person_code"], name=d.get("name", "")[:68], year=int(d["year"]),
+                    income_code=d["income_code"], amount=Decimal(str(d["amount"])), rate=Decimal(str(d.get("rate") or 0)),
+                    gpm=Decimal(str(d.get("gpm") or 0)))
+            elif a == "other_delete":
+                m.other_payments.filter(id=int(request.data["id"])).delete()
+            elif a == "mode":
+                ms.set_mode(m, request.data.get("mode"))
+            elif a == "confirm_sdup":
+                ms.confirm_sdup(m, request.user)
+            elif a == "sdup_month_build":
+                ms.sdup_month_build(m, int(request.data["year"]), int(request.data["month"]))
+            elif a == "sdup_month_save":
+                ms.sdup_month_save(m, int(request.data["year"]), int(request.data["month"]), request.data.get("rows"))
+            elif a == "sdup_month_generate":
+                ms.sdup_month_generate(m, int(request.data["year"]), int(request.data["month"]))
+            elif a == "confirm":
+                ms.confirm(m, request.user)
+            elif a == "reopen":
+                ms.reopen(m)
+            else:
+                raise ValidationError("Neteisingas veiksmas")
+        except (ValueError, KeyError) as e:
+            raise ValidationError(str(e))
+        m.refresh_from_db()
+        return Response(_migration_payload(m))
+
+
+# ============================================================
+# Sodros ataskaitos: S15 (ligos pažymėjimai) ir S47 (tarifų sutikrinimas) - nebūtinos
+# ============================================================
+
+class SodraReportsView(PayrollCompanyMixin, APIView):
+    """
+    POST multipart files[] (S15 ir / arba S47 XML), apply=0|1 -> S15 peržiūra / įrašymas + S47 sutikrinimas.
+    POST JSON {action: "fix", employee_id, field, value} -> pritaikyti S47 pataisymą kortelėje.
+    """
+    def post(self, request):
+        import xml.etree.ElementTree as ET
+        from . import sick_import, sodra_tariffs
+        company = self.get_company()
+        if request.data.get("action") == "fix":
+            try:
+                sodra_tariffs.apply_fix(company, int(request.data["employee_id"]), request.data.get("field"),
+                                        request.data.get("value"))
+            except (ValueError, KeyError) as e:
+                raise ValidationError(str(e))
+            return Response({"ok": True})
+        files = request.FILES.getlist("files") or ([request.FILES["file"]] if request.FILES.get("file") else [])
+        if not files:
+            raise ValidationError("Pasirinkite Sodros ataskaitas (.xml)")
+        out = {"s15": None, "s47": None, "unknown": []}
+        apply = str(request.data.get("apply")) == "1"
+        for f in files:
+            content = f.read()
+            rows = sodra_tariffs.parse(content)
+            if rows is not None:
+                out["s47"] = sodra_tariffs.run_check(company, rows)
+                continue
+            try:
+                out["s15"] = sick_import.run_import(company, content, apply=apply)
+            except (ValueError, ET.ParseError):
+                out["unknown"].append(f.name)
+        if apply and out["s15"]:
+            from .roster.repair import affected_rosters
+            out["rosters"] = affected_rosters(company)
+        return Response(out)
+
+
+
+# ---------- Išskaitos ir nuolatiniai priedai ----------
+
+class GarnishmentOrderViewSet(PayrollCompanyMixin, viewsets.ModelViewSet):
+    """?employee= ; išskaitų dokumentai (antstoliai, alimentai)."""
+
+    def get_serializer_class(self):
+        from .serializers import GarnishmentOrderSerializer
+        return GarnishmentOrderSerializer
+
+    def get_queryset(self):
+        from docscanner_app.models import GarnishmentOrder
+        qs = GarnishmentOrder.objects.filter(employee__company=self.get_company())
+        e = self.request.query_params.get("employee")
+        return qs.filter(employee_id=e) if e else qs
+
+    def perform_create(self, serializer):
+        self.check_employee(serializer.validated_data["employee"])
+        serializer.save()
+
+    @action(detail=False, methods=["get"])
+    def journal(self, request):
+        """Vykdomų antstolių patvarkymų apskaitos knyga (CPK 741) - visi dokumentai su išskaitomis."""
+        from docscanner_app.models import GarnishmentOrder, PayrollLine
+        out = []
+        for g in GarnishmentOrder.objects.filter(employee__company=self.get_company()).select_related("employee"):
+            lines = PayrollLine.objects.filter(garnishment=g, run__status__in=("approved", "paid", "closed")) \
+                .select_related("run").order_by("run__year", "run__month")
+            out.append({"id": g.id, "employee": g.employee.full_name, "kind": g.get_kind_display(), "document_no": g.document_no,
+                        "received_date": g.received_date, "bailiff": g.bailiff, "case_no": g.case_no,
+                        "total_debt": g.total_debt, "paid_before": g.paid_before,
+                        "entries": [{"month": f"{l.run.year}-{l.run.month:02d}", "amount": str(l.amount)} for l in lines]})
+        return Response(out)
+
+
+class RecurringPayItemViewSet(PayrollCompanyMixin, viewsets.ModelViewSet):
+    """?employee= ; nuolatiniai priedai."""
+
+    def get_serializer_class(self):
+        from .serializers import RecurringPayItemSerializer
+        return RecurringPayItemSerializer
+
+    def get_queryset(self):
+        from docscanner_app.models import RecurringPayItem
+        qs = RecurringPayItem.objects.filter(employee__company=self.get_company()).select_related("pay_code")
+        e = self.request.query_params.get("employee")
+        return qs.filter(employee_id=e) if e else qs
+
+    def perform_create(self, serializer):
+        self.check_employee(serializer.validated_data["employee"])
+        serializer.save()

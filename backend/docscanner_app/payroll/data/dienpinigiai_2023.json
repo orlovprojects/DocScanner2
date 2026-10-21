@@ -1,0 +1,606 @@
+{
+ "source": "LRV 2004-04-29 nutarimas Nr. 526, Maksimalių dienpinigių dydžių sąrašas (2023-06-28 nutarimo Nr. 504 redakcija)",
+ "valid_from": "2023-08-01",
+ "norms": [
+  {
+   "name": "Afganistano Islamo Respublika",
+   "amount": 33
+  },
+  {
+   "name": "Airija",
+   "amount": 69
+  },
+  {
+   "name": "Albanijos Respublika",
+   "amount": 33
+  },
+  {
+   "name": "Alžyro Liaudies Demokratinė Respublika",
+   "amount": 57
+  },
+  {
+   "name": "Andoros Kunigaikštystė",
+   "amount": 46
+  },
+  {
+   "name": "Angolos Respublika",
+   "amount": 70
+  },
+  {
+   "name": "Argentinos Respublika",
+   "amount": 50
+  },
+  {
+   "name": "Armėnijos Respublika",
+   "amount": 47
+  },
+  {
+   "name": "Australija",
+   "amount": 50
+  },
+  {
+   "name": "Austrijos Respublika",
+   "amount": 69
+  },
+  {
+   "name": "Azerbaidžano Respublika",
+   "amount": 47
+  },
+  {
+   "name": "Bahamų Sandrauga",
+   "amount": 50
+  },
+  {
+   "name": "Bahreino Karalystė",
+   "amount": 60
+  },
+  {
+   "name": "Baltarusijos Respublika",
+   "amount": 60
+  },
+  {
+   "name": "Bangladešo Liaudies Respublika",
+   "amount": 33
+  },
+  {
+   "name": "Belgijos Karalystė",
+   "amount": 61
+  },
+  {
+   "name": "Bosnija ir Hercegovina",
+   "amount": 43
+  },
+  {
+   "name": "Botsvanos Respublika",
+   "amount": 33
+  },
+  {
+   "name": "Brazilijos Federacinė Respublika",
+   "amount": 43
+  },
+  {
+   "name": "Brunėjaus Darusalamas",
+   "amount": 40
+  },
+  {
+   "name": "Bulgarijos Respublika",
+   "amount": 39
+  },
+  {
+   "name": "Burkina Fasas",
+   "amount": 37
+  },
+  {
+   "name": "Butano Karalystė",
+   "amount": 33
+  },
+  {
+   "name": "Čekijos Respublika",
+   "amount": 50
+  },
+  {
+   "name": "Čilės Respublika",
+   "amount": 47
+  },
+  {
+   "name": "Danijos Karalystė",
+   "amount": 80
+  },
+  {
+   "name": "Dramblio Kaulo Kranto Respublika",
+   "amount": 40
+  },
+  {
+   "name": "Egipto Arabų Respublika",
+   "amount": 50
+  },
+  {
+   "name": "Ekvadoro Respublika",
+   "amount": 33
+  },
+  {
+   "name": "Estijos Respublika",
+   "amount": 47
+  },
+  {
+   "name": "Etiopijos Federacinė Demokratinė Respublika",
+   "amount": 33
+  },
+  {
+   "name": "Filipinų Respublika",
+   "amount": 45
+  },
+  {
+   "name": "Ganos Respublika",
+   "amount": 47
+  },
+  {
+   "name": "Graikijos Respublika",
+   "amount": 55
+  },
+  {
+   "name": "Gvatemalos Respublika",
+   "amount": 33
+  },
+  {
+   "name": "Indijos Respublika",
+   "amount": 33
+  },
+  {
+   "name": "Indonezijos Respublika",
+   "amount": 33
+  },
+  {
+   "name": "Irako Respublika",
+   "amount": 40
+  },
+  {
+   "name": "Irano Islamo Respublika",
+   "amount": 37
+  },
+  {
+   "name": "Islandijos Respublika",
+   "amount": 70
+  },
+  {
+   "name": "Ispanijos Karalystė",
+   "amount": 58
+  },
+  {
+   "name": "Italijos Respublika",
+   "amount": 63
+  },
+  {
+   "name": "Izraelio Valstybė",
+   "amount": 70
+  },
+  {
+   "name": "Ypatingasis Administracinis Kinijos Regionas Honkongas",
+   "amount": 40
+  },
+  {
+   "name": "Ypatingasis Administracinis Kinijos Regionas Makao",
+   "amount": 37
+  },
+  {
+   "name": "Japonija",
+   "amount": 87
+  },
+  {
+   "name": "Jemeno Respublika",
+   "amount": 40
+  },
+  {
+   "name": "Jordanijos Hašimitų Karalystė",
+   "amount": 40
+  },
+  {
+   "name": "Jungtinė Didžiosios Britanijos ir Šiaurės Airijos Karalystė",
+   "amount": 67
+  },
+  {
+   "name": "Jungtinės Amerikos Valstijos (išskyrus Niujorką)",
+   "amount": 61
+  },
+  {
+   "name": "Niujorkas",
+   "amount": 82
+  },
+  {
+   "name": "Jungtiniai Arabų Emyratai",
+   "amount": 60
+  },
+  {
+   "name": "Juodkalnija",
+   "amount": 53
+  },
+  {
+   "name": "Kambodžos Karalystė",
+   "amount": 33
+  },
+  {
+   "name": "Kanada",
+   "amount": 55
+  },
+  {
+   "name": "Kataro Valstybė",
+   "amount": 52
+  },
+  {
+   "name": "Kazachstano Respublika",
+   "amount": 60
+  },
+  {
+   "name": "Kenijos Respublika",
+   "amount": 40
+  },
+  {
+   "name": "Kinijos Liaudies Respublika",
+   "amount": 37
+  },
+  {
+   "name": "Kipro Respublika",
+   "amount": 62
+  },
+  {
+   "name": "Kirgizijos Respublika",
+   "amount": 60
+  },
+  {
+   "name": "Kolumbijos Respublika",
+   "amount": 33
+  },
+  {
+   "name": "Kongo Demokratinė Respublika",
+   "amount": 70
+  },
+  {
+   "name": "Korėjos Respublika",
+   "amount": 67
+  },
+  {
+   "name": "Korėjos Liaudies Demokratinė Respublika",
+   "amount": 33
+  },
+  {
+   "name": "Kosovo Respublika",
+   "amount": 40
+  },
+  {
+   "name": "Kosta Rikos Respublika",
+   "amount": 33
+  },
+  {
+   "name": "Kroatijos Respublika",
+   "amount": 45
+  },
+  {
+   "name": "Kubos Respublika",
+   "amount": 50
+  },
+  {
+   "name": "Kuveito Valstybė",
+   "amount": 60
+  },
+  {
+   "name": "Laoso Liaudies Demokratinė Respublika",
+   "amount": 33
+  },
+  {
+   "name": "Latvijos Respublika",
+   "amount": 44
+  },
+  {
+   "name": "Lenkijos Respublika",
+   "amount": 48
+  },
+  {
+   "name": "Lesoto Karalystė",
+   "amount": 33
+  },
+  {
+   "name": "Libano Respublika",
+   "amount": 47
+  },
+  {
+   "name": "Liberijos Respublika",
+   "amount": 57
+  },
+  {
+   "name": "Libijos Valstybė",
+   "amount": 33
+  },
+  {
+   "name": "Lichtenšteino Kunigaikštystė",
+   "amount": 80
+  },
+  {
+   "name": "Lietuvos Respublika",
+   "amount": 28
+  },
+  {
+   "name": "Liuksemburgo Didžioji Hercogystė",
+   "amount": 61
+  },
+  {
+   "name": "Madagaskaro Respublika",
+   "amount": 33
+  },
+  {
+   "name": "Malaizija",
+   "amount": 33
+  },
+  {
+   "name": "Malavio Respublika",
+   "amount": 33
+  },
+  {
+   "name": "Maldyvų Respublika",
+   "amount": 60
+  },
+  {
+   "name": "Malio Respublika",
+   "amount": 40
+  },
+  {
+   "name": "Maltos Respublika",
+   "amount": 63
+  },
+  {
+   "name": "Maroko Karalystė",
+   "amount": 50
+  },
+  {
+   "name": "Mauricijaus Respublika",
+   "amount": 40
+  },
+  {
+   "name": "Mauritanijos Islamo Respublika",
+   "amount": 33
+  },
+  {
+   "name": "Meksikos Jungtinės Valstijos",
+   "amount": 47
+  },
+  {
+   "name": "Mianmaro Sąjungos Respublika",
+   "amount": 33
+  },
+  {
+   "name": "Moldovos Respublika",
+   "amount": 53
+  },
+  {
+   "name": "Monako Kunigaikštystė",
+   "amount": 49
+  },
+  {
+   "name": "Mongolija",
+   "amount": 50
+  },
+  {
+   "name": "Mozambiko Respublika",
+   "amount": 40
+  },
+  {
+   "name": "Namibijos Respublika",
+   "amount": 33
+  },
+  {
+   "name": "Naujoji Zelandija",
+   "amount": 40
+  },
+  {
+   "name": "Nepalo Federacinė Demokratinė Respublika",
+   "amount": 33
+  },
+  {
+   "name": "Nigerijos Federacinė Respublika",
+   "amount": 33
+  },
+  {
+   "name": "Nyderlandų Karalystė",
+   "amount": 64
+  },
+  {
+   "name": "Norvegijos Karalystė",
+   "amount": 70
+  },
+  {
+   "name": "Omano Sultonatas",
+   "amount": 47
+  },
+  {
+   "name": "Pakistano Islamo Respublika",
+   "amount": 33
+  },
+  {
+   "name": "Panamos Respublika",
+   "amount": 33
+  },
+  {
+   "name": "Papua Naujosios Gvinėjos Nepriklausomoji Valstybė",
+   "amount": 37
+  },
+  {
+   "name": "Peru Respublika",
+   "amount": 50
+  },
+  {
+   "name": "Pietų Afrikos Respublika",
+   "amount": 33
+  },
+  {
+   "name": "Pietų Sudano Respublika",
+   "amount": 37
+  },
+  {
+   "name": "Portugalijos Respublika",
+   "amount": 56
+  },
+  {
+   "name": "Prancūzijos Respublika",
+   "amount": 69
+  },
+  {
+   "name": "Puerto Rikas",
+   "amount": 43
+  },
+  {
+   "name": "Ruandos Respublika",
+   "amount": 43
+  },
+  {
+   "name": "Rumunija",
+   "amount": 35
+  },
+  {
+   "name": "Rusijos Federacija",
+   "amount": 60
+  },
+  {
+   "name": "Sakartvelas",
+   "amount": 53
+  },
+  {
+   "name": "San Marino Respublika",
+   "amount": 63
+  },
+  {
+   "name": "Saudo Arabijos Karalystė",
+   "amount": 60
+  },
+  {
+   "name": "Seišelių Respublika",
+   "amount": 57
+  },
+  {
+   "name": "Senegalo Respublika",
+   "amount": 43
+  },
+  {
+   "name": "Sent Kitsas ir Nevis",
+   "amount": 57
+  },
+  {
+   "name": "Serbijos Respublika",
+   "amount": 53
+  },
+  {
+   "name": "Singapūro Respublika",
+   "amount": 60
+  },
+  {
+   "name": "Sirijos Arabų Respublika",
+   "amount": 53
+  },
+  {
+   "name": "Slovakijos Respublika",
+   "amount": 53
+  },
+  {
+   "name": "Slovėnijos Respublika",
+   "amount": 52
+  },
+  {
+   "name": "Sudano Respublika",
+   "amount": 37
+  },
+  {
+   "name": "Suomijos Respublika",
+   "amount": 69
+  },
+  {
+   "name": "Šiaurės Makedonijos Respublika",
+   "amount": 40
+  },
+  {
+   "name": "Šri Lankos Demokratinė Socialistinė Respublika",
+   "amount": 33
+  },
+  {
+   "name": "Švedijos Karalystė",
+   "amount": 70
+  },
+  {
+   "name": "Šveicarijos Konfederacija",
+   "amount": 80
+  },
+  {
+   "name": "Tadžikistano Respublika",
+   "amount": 60
+  },
+  {
+   "name": "Tailando Karalystė",
+   "amount": 40
+  },
+  {
+   "name": "Taivanas",
+   "amount": 37
+  },
+  {
+   "name": "Tanzanijos Jungtinė Respublika",
+   "amount": 33
+  },
+  {
+   "name": "Tuniso Respublika",
+   "amount": 40
+  },
+  {
+   "name": "Turkijos Respublika",
+   "amount": 37
+  },
+  {
+   "name": "Turkmėnistanas",
+   "amount": 53
+  },
+  {
+   "name": "Ugandos Respublika",
+   "amount": 37
+  },
+  {
+   "name": "Ukraina",
+   "amount": 53
+  },
+  {
+   "name": "Urugvajaus Rytų Respublika",
+   "amount": 37
+  },
+  {
+   "name": "Uzbekistano Respublika",
+   "amount": 60
+  },
+  {
+   "name": "Vatikano Miesto Valstybė",
+   "amount": 63
+  },
+  {
+   "name": "Venesuelos Bolivaro Respublika",
+   "amount": 57
+  },
+  {
+   "name": "Vengrija",
+   "amount": 48
+  },
+  {
+   "name": "Vietnamo Socialistinė Respublika",
+   "amount": 33
+  },
+  {
+   "name": "Vokietijos Federacinė Respublika",
+   "amount": 62
+  },
+  {
+   "name": "Zambijos Respublika",
+   "amount": 33
+  },
+  {
+   "name": "Zimbabvės Respublika",
+   "amount": 33
+  },
+  {
+   "name": "Kitos valstybės",
+   "amount": 33
+  }
+ ]
+}

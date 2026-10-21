@@ -41,8 +41,8 @@ def _check_employee(emp, items):
     for a, b in zip(items, items[1:]):
         if b.start < a.end:
             out.append(Violation(emp, b.day, "OVERLAP", "Pamainos persidengia"))
-        elif (b.start - a.end).total_seconds() / 3600 < MIN_DAILY_REST_H:
-            gap = round((b.start - a.end).total_seconds() / 3600, 1)
+        elif real_hours(a.end, b.start) < MIN_DAILY_REST_H:          # ROS-09: realus laikas (laiko keitimas)
+            gap = round(real_hours(a.end, b.start), 1)
             out.append(Violation(emp, b.day, "REST_11H",
                                  f"Tarp pamainų tik {gap} val. poilsio (reikia bent {MIN_DAILY_REST_H})"))
     if not items:
@@ -58,21 +58,28 @@ def _check_employee(emp, items):
         if hours > MAX_7D_H and "52" not in reported:
             out.append(Violation(emp, w1, "WEEK_52H", f"{w1}–{w2 - timedelta(days=1)}: {hours} val. (daugiau nei 52)"))
             reported.add("52")
-        if win and "35" not in reported:
-            # ilgiausias nepertraukiamas poilsis 7 dienų lange
-            start = _dt(w1)
-            end = _dt(w2)
-            gaps, cur = [], start
-            for s in sorted(win, key=lambda x: x.start):
-                gaps.append((s.start - cur).total_seconds() / 3600)
-                cur = max(cur, s.end)
-            gaps.append((end - cur).total_seconds() / 3600)
-            if max(gaps) < MIN_WEEKLY_REST_H and len(win) >= 5:
+        if "35" not in reported and w1 >= first and w2 - timedelta(days=1) <= last:
+            # bent viena „poilsio diena“ 7 dienų lange: diena be pamainos pradžios, o tarp ankstesnės pamainos
+            # pabaigos ir kitos pradžios >= 35 val. (ta pati taisyklė kaip sprendiklyje)
+            if not any(_rest_day(items, w1 + timedelta(days=k)) for k in range(7)):
                 out.append(Violation(emp, w1, "WEEKLY_REST_35H",
                                      f"{w1}–{w2 - timedelta(days=1)}: nėra {MIN_WEEKLY_REST_H} val. nepertraukiamo poilsio"))
                 reported.add("35")
         d += timedelta(days=1)
     return out
+
+
+from .shifts import real_hours  # noqa: E402
+
+
+def _rest_day(items, d):
+    if any(s.day == d for s in items):
+        return False
+    prev = [s for s in items if s.day < d]
+    nxt = [s for s in items if s.day > d]
+    if not prev or not nxt:
+        return True
+    return real_hours(max(x.end for x in prev), min(x.start for x in nxt)) >= MIN_WEEKLY_REST_H
 
 
 def _dt(d):

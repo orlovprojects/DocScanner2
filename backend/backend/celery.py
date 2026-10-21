@@ -75,6 +75,10 @@ app.conf.beat_schedule = {
         "task": "docscanner_app.payroll.roster.tasks.auto_draft_rosters",
         "schedule": crontab(hour=6, minute=30),
     },
+    "remind-due-declarations": {
+        "task": "docscanner_app.payroll.declarations.tasks.remind_due_declarations",
+        "schedule": crontab(hour=8, minute=0),
+    },
 }
 
 

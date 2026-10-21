@@ -10,7 +10,8 @@ Taisyklės (patikrinta 2026-09):
 - Išeitinė į mėnesio NPD bazę neįeina, bet apmokestinama 20 %.
 - Darbuotojo Sodra: suma = round(bazė x 19,5 %), PSD = round(bazė x 6,98 %), VSD = suma - PSD.
   Pasiekus lubas VSD ir PSD skaičiuojami atskirai (PSD lubų neturi).
-- Lubos 60 VDU taikomos VSD, kaupimui ir darbdavio VSD (nedarbo + NA), bet ne PSD, GAR, ILG.
+- Lubos 60 VDU (2026 m. - 138 729 €) taikomos apdraustojo VSD, kaupimui IR draudėjo VSD (nedarbo + NA) įmokoms
+  (Sodra, „Aktuali informacija draudėjams 2026“). PSD, GAR, ILG lubos netaikomos.
 - SAM: A12 = round(A11 x P3). Darbdavio VSD koreguojamas centu, kad komponentų suma = SAM.
 - Grindys (MMA): priemoka iš darbdavio lėšų: 19,5 % + darbdavio VSD + ILG. GAR ir kaupimas - ne.
 """
@@ -143,17 +144,17 @@ def split_npd(npd_applied, income_standard, income_sick):
 
 def calc_gpm_standard(taxable, P, progressive=False, taxable_ytd=ZERO):
     """
-    GPM nuo 20 % pajamų.
-    Pagal nutylėjimą 20 % (darbdavys vertina konkrečią išmoką).
-    progressive=True - pagal darbuotojo prašymą, kaupiant nuo metų pradžios.
-    ⚠ Progresinio slenksčio bazė (pajamos po NPD) - patikrinti su VMI.
+    GPM nuo 20 % pajamų (GPMĮ 23 str. 7 d., nuo 2026).
+    Be prašymo: tarifas pagal KONKREČIOS išmokos dydį - jei pati išmoka viršija 36 / 60 VDU,
+    viršijanti dalis apmokestinama 25 / 32 % (CAL-05). Metų pajamų darbdavys nesumuoja.
+    progressive=True - darbuotojo prašymu: pagal visas per metus išmokėtas pajamas (kaupiant nuo metų pradžios).
     """
     if taxable <= ZERO:
         return ZERO
-    if not progressive:
-        return pct(taxable, P.gpm_rate_1)
 
     t1, t2 = P.gpm_threshold_1_amount, P.gpm_threshold_2_amount
+    if not progressive:
+        taxable_ytd = ZERO
     start, end = taxable_ytd, taxable_ytd + taxable
     parts = (
         (max(min(end, t1) - start, ZERO), P.gpm_rate_1),
@@ -205,7 +206,7 @@ def calc_sodra(P, inp, r):
     if inp.pension_accumulation:
         r.kaupimas = pct(vsd_base, P.kaupimas)
 
-    r.employer_vsd = pct(vsd_base, unemp_na)
+    r.employer_vsd = pct(vsd_base, unemp_na)      # CAL-06: nuo 2026 lubos taikomos ir draudėjo VSD įmokoms
     if inp.pays_gar_ilg:
         r.gar = pct(base, P.gar)
         r.ilg = pct(base, P.ilg)
@@ -218,6 +219,11 @@ def calc_sodra(P, inp, r):
         if diff != ZERO:
             r.employer_vsd += diff
             r.notes.append(f"SAM apvalinimo korekcija darbdavio VSD: {diff}")
+    else:
+        # CAL-04: pasiekus lubas SAM įmokų suma = faktiškai apskaičiuotos įmokos (sutampa su mokėjimu Sodrai).
+        # Sodra lubas vertina pagal visų draudėjų duomenis ir permoką (jei buvo) grąžina pati.
+        r.sam_payment = r.vsd + r.psd + r.kaupimas + r.employer_vsd + r.gar + r.ilg
+        r.notes.append("SAM: pasiektos VSD lubos - įmokų suma pagal faktiškai apskaičiuotas įmokas")
 
 
 def calc_grindys(P, inp, r):

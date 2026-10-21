@@ -671,7 +671,7 @@ function ReviewStep({ summary, batch, onConfirm, onReopen, confirming, onGoTo })
 // Puslapis
 // ════════════════════════════════════════════════════════
 
-export default function PradiniaiLikuciaiPage() {
+export default function PradiniaiLikuciaiPage({ embedded = false }) {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down("md"));
   const navigate = useNavigate();
@@ -800,18 +800,21 @@ export default function PradiniaiLikuciaiPage() {
 
   return (
     <LocalizationProvider dateAdapter={AdapterDayjs} adapterLocale="lt">
-      <Box sx={{ p: isMobile ? 2 : 4, maxWidth: 1100, mx: "auto" }}>
-        <Helmet><title>Pradiniai likučiai - DokSkenas</title></Helmet>
-
-        <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 0.5 }}>
-          <IconButton size="small" onClick={() => navigate("/apskaitos-centras")}>
-            <ArrowBackIcon fontSize="small" />
-          </IconButton>
-          <Typography variant={isMobile ? "h6" : "h5"} sx={{ fontWeight: 800 }}>Pradiniai likučiai</Typography>
-        </Box>
-        <Typography sx={{ fontSize: 13, color: "text.secondary", mb: 3, ml: 5 }}>
-          Perkelkite likučius iš ankstesnės apskaitos programos
-        </Typography>
+      <Box sx={embedded ? {} : { p: isMobile ? 2 : 4, maxWidth: 1100, mx: "auto" }}>
+        {!embedded && (
+          <>
+            <Helmet><title>Pradiniai likučiai - DokSkenas</title></Helmet>
+            <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 0.5 }}>
+              <IconButton size="small" onClick={() => navigate("/apskaitos-centras")}>
+                <ArrowBackIcon fontSize="small" />
+              </IconButton>
+              <Typography variant={isMobile ? "h6" : "h5"} sx={{ fontWeight: 800 }}>Pradiniai likučiai</Typography>
+            </Box>
+            <Typography sx={{ fontSize: 13, color: "text.secondary", mb: 3, ml: 5 }}>
+              Perkelkite likučius iš ankstesnės apskaitos programos
+            </Typography>
+          </>
+        )}
 
         <Stepper
           activeStep={activeStep}

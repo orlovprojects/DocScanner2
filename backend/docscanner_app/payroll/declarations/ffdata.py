@@ -33,10 +33,11 @@ def num(value, places=2):
 def page_field_names(spec, page_name):
     """Visi lapo laukai tokia tvarka, kokia aprašyti specifikacijoje (eilutės išskleistos 1..rows_per_page)."""
     p = spec["pages"][page_name]
-    names = [f["name"] for f in p.get("header_fields", [])]
+    header = [f["name"] for f in p.get("header_fields", [])]
+    rows = []
     for n in range(1, (p.get("rows_per_page") or 0) + 1):
-        names += [f["name"].replace("{N}", str(n)) for f in p.get("row_fields", [])]
-    return names
+        rows += [f["name"].replace("{N}", str(n)) for f in p.get("row_fields", [])]
+    return rows + header if p.get("rows_first") else header + rows    # VMI GPM312L: eilutės pirma
 
 
 def _group_name_for(groups, page_name):

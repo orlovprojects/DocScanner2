@@ -133,7 +133,7 @@ def plan_hints(slots, shift_hours, emps, rules, shift_ids, absences=None):
     """
     absences = absences or {}
     hints = []
-    need = sum((shift_hours[s] * (mn or 0) for (d, s), (mn, mx) in slots.items()), 0)
+    need = sum((shift_hours.get(s, 0) * (mn or 0) for (d, s), (mn, mx) in slots.items()), 0)
     norm = sum((t for _, _, t in emps), 0)
     if slots and norm:
         diff = need - norm

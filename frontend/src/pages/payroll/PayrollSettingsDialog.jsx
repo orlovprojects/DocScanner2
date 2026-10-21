@@ -6,10 +6,11 @@ import {
 import CloseIcon from "@mui/icons-material/Close";
 
 import { apiError, payrollApi } from "../../api/payroll";
+import SuminePeriodSection from "./SuminePeriodSection";
 
 const FIELDS = ["sodra_insurer_code", "edas_username", "vmi_ws_username", "manager_name", "manager_position",
   "representation_basis", "contract_city", "workplace_address", "advance_enabled", "advance_day", "salary_day",
-  "advance_percent", "payout_account"];
+  "advance_percent", "payout_account", "summed_period_months", "summed_period_anchor"];
 
 function Section({ title, hint, children }) {
   return (
@@ -38,6 +39,7 @@ export default function PayrollSettingsDialog({ open, onClose, onSaved }) {
   const [isSet, setIsSet] = useState({ edas: false, vmi: false });
   const [vmiTest, setVmiTest] = useState(null);
   const [accounts, setAccounts] = useState([]);
+  const [savedPeriod, setSavedPeriod] = useState({});
   const set = (v) => setF((s) => ({ ...s, ...v }));
 
   useEffect(() => {
@@ -45,7 +47,9 @@ export default function PayrollSettingsDialog({ open, onClose, onSaved }) {
     setError(""); setPw({ edas: "", vmi: "" }); setVmiTest(null);
     payrollApi.bankAccounts().then(setAccounts).catch(() => setAccounts([]));
     payrollApi.settings().then((s) => {
-      setF(Object.fromEntries(FIELDS.map((k) => [k, s[k] ?? ""])));
+      setF({ ...Object.fromEntries(FIELDS.map((k) => [k, s[k] ?? ""])),
+        summed_period_months: s.summed_period_months || 3, summed_period_anchor: s.summed_period_anchor || 1 });
+      setSavedPeriod({ m: s.summed_period_months || 3, a: s.summed_period_anchor || 1 });
       setIsSet({ edas: !!s.edas_password_set, vmi: !!s.vmi_ws_password_set });
     }).catch((e) => setError(apiError(e)));
   }, [open]);
@@ -142,6 +146,14 @@ export default function PayrollSettingsDialog({ open, onClose, onSaved }) {
                 <TextField label="Darbovietės adresas" value={f.workplace_address} onChange={(e) => set({ workplace_address: e.target.value })}
                   fullWidth helperText="Jei tuščia – įmonės buveinės adresas" />
               </Stack>
+            </Section>
+
+            <Divider />
+
+            {/* ---------- Suminė apskaita ---------- */}
+            <Section title="Suminė darbo laiko apskaita" hint="Apskaitinis laikotarpis – per jį skaičiuojama valandų norma ir viršvalandžiai.">
+              <SuminePeriodSection months={f.summed_period_months} anchor={f.summed_period_anchor}
+                savedMonths={savedPeriod.m} savedAnchor={savedPeriod.a} onChange={set} />
             </Section>
 
             <Divider />

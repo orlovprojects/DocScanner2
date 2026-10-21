@@ -5,14 +5,14 @@ Grynas modulis (be DB). DB adapteris (services) surenka EmployeeMonthInput iš m
 ir išsaugo EmployeeMonthResult į PayrollRun / PayrollLine / PayrollEmployeeResult.
 """
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 
 from .averages import VduMonth, calc_daily_vdu, downtime_pay, pay_by_days
 from .gross import TermsSegment, calc_base_pay, monthly_hourly_rate, multiplier_pay
 from .seed_data import SYSTEM_PAY_CODES
 from .taxes import HUNDRED, ZERO, TaxInput, calculate, q2
-from .timesheet import Event, employer_sick_days, generate
+from .timesheet import FD, Event, employer_sick_days, generate
 from .work_calendar import month_norm
 
 CODES = {c["code"]: c for c in SYSTEM_PAY_CODES}
@@ -48,6 +48,7 @@ class EmployeeMonthInput:
     bonuses: list = field(default_factory=list)      # BonusRecord
     extra_lines: list = field(default_factory=list)  # Line (premijos, dovanos, DPN...)
     deductions: list = field(default_factory=list)   # Line (ANT, PRF, ISK...) - teigiamos sumos
+    garnishments: list = field(default_factory=list) # išskaitos pagal dokumentus: dict(id, kind, method, percent, amount, remaining, doc)
     advance_paid: Decimal = ZERO
 
     # darbuotojas / sutartis / įmonė
@@ -97,7 +98,23 @@ def _vdu(inp, P, primary):
     return r
 
 
-def _build_lines(inp, P, ts, primary, daily_vdu, warnings):
+def _vdu_days_pay(ts, kind, daily_vdu, hourly_vdu, bonus_part, pct=HUNDRED, use="norm"):
+    """
+    Išmoka pagal VDU už įvykio dienas -> (suma, kiekis, tarifas).
+    Suminė apskaita (CAL-03): valandinis VDU x valandos (atostogoms - normos, kitiems - pamainos), kai yra istorija.
+    """
+    days = ts.event_workdays(kind)
+    if not days:
+        return None
+    if ts.summed and hourly_vdu and hourly_vdu > 0:
+        hours = sum(((d.norm_hours if use == "norm" else (d.scheduled_hours or d.norm_hours)) for d in days), ZERO)
+        amount = q2((hourly_vdu * hours + bonus_part * len(days)) * pct / HUNDRED)
+        return amount, hours, q2(hourly_vdu)
+    n = len(days)
+    return pay_by_days(daily_vdu, n, pct), Decimal(n), q2(daily_vdu)
+
+
+def _build_lines(inp, P, ts, primary, daily_vdu, warnings, hourly_vdu=ZERO, bonus_part=ZERO):
     lines = []
 
     # 1. Alga / valandinis
@@ -110,10 +127,14 @@ def _build_lines(inp, P, ts, primary, daily_vdu, warnings):
         lines.append(line)
 
     # 2. Pagal VDU
-    for kind, code, pct in (("vacation", "ATO", HUNDRED), ("parent_day", "MAM", HUNDRED)):
-        n = len(ts.event_workdays(kind))
-        if n:
-            lines.append(Line(code, pay_by_days(daily_vdu, n, pct), Decimal(n), q2(daily_vdu)))
+    for kind, code, pct, use in (("vacation", "ATO", HUNDRED, "norm"), ("parent_day", "MAM", HUNDRED, "shift")):
+        r = _vdu_days_pay(ts, kind, daily_vdu, hourly_vdu, bonus_part, pct, use)
+        if r:
+            lines.append(Line(code, r[0], r[1], r[2]))
+
+    if any(e.kind == "vacation_prepaid" for e in inp.events):
+        warnings.append("Dalis kasmetinių atostogų apmokėta ankstesnėje programoje – atostoginiai neišmokami dar kartą, "
+                        "o šio mėnesio dalis įtraukiama į SAM (Sodros taisyklių 51.4 p.).")
 
     if inp.study_paid:
         n = len(ts.event_workdays("study"))
@@ -127,7 +148,14 @@ def _build_lines(inp, P, ts, primary, daily_vdu, warnings):
     for ev in {id(e): e for e in inp.events if e.kind == "sick"}.values():
         if ev.start.year == inp.year and ev.start.month == inp.month:
             n = employer_sick_days(ev, primary.week, primary.workload, primary.daily_hours)
-            if n:
+            if n and ts.summed and hourly_vdu and hourly_vdu > 0 and primary.daily_hours is not None:
+                # VDI: suminėje apskaitoje mokama už grafiko valandas pirmosiomis 2 kalendorinėmis dienomis
+                # (pvz. 2 x 11 val. = 22 val., ne 16 val.)
+                hours = sum((primary.daily_hours.get(ev.start + timedelta(days=i), ZERO) for i in range(2)
+                             if ev.start + timedelta(days=i) <= ev.end), ZERO)
+                amount = q2(hourly_vdu * hours * inp.sick_pay_pct / HUNDRED)
+                lines.append(Line("LIG", amount, hours, q2(hourly_vdu * inp.sick_pay_pct / HUNDRED)))
+            elif n:
                 lines.append(Line("LIG", pay_by_days(daily_vdu, n, inp.sick_pay_pct), Decimal(n), q2(daily_vdu)))
 
     # 2b. Kompensacija už nepanaudotas atostogas (atleidimo mėnesį)
@@ -139,8 +167,19 @@ def _build_lines(inp, P, ts, primary, daily_vdu, warnings):
     # 3. Viršvalandžiai / naktis / šventės
     rate = (primary.base_amount if primary.pay_form == "hourly"
             else monthly_hourly_rate(primary.base_amount, inp.year, inp.month, primary.week, primary.workload))
+    # suminė (CAL-01): šventės valandos pagal grafiką jau įeina į bazinį DU -> mokama tik +100 % priemoka
+    roster_holiday = ZERO
+    if ts.summed:
+        for d in ts.days:
+            h = (inp.roster_extra.get(d.date) or {}).get("holiday")
+            if d.code == FD and h:
+                roster_holiday += Decimal(str(h))
     for hour_type, code in HOUR_TYPE_CODES.items():
         hours = ts.extra_hours(hour_type)
+        if hour_type == "holiday" and roster_holiday:
+            prem = min(roster_holiday, hours)
+            lines.append(Line("SVP", multiplier_pay(rate, prem, CODES["SVP"]["multiplier"]), prem, q2(rate)))
+            hours -= prem
         if hours:
             mult = CODES[code]["multiplier"]
             lines.append(Line(code, multiplier_pay(rate, hours, mult), hours, q2(rate)))
@@ -227,7 +266,7 @@ def _tax_input(inp, P, lines, warnings):
     return ti, used
 
 
-SDUP_PAID_ABSENCES = {"vacation", "parent_day", "downtime"}
+SDUP_PAID_ABSENCES = {"vacation", "vacation_prepaid", "parent_day", "downtime"}
 SDUP_EXTRA_HOUR_TYPES = ("overtime", "rest_day", "holiday", "ot_night", "ot_rest", "ot_holiday")
 
 
@@ -255,7 +294,7 @@ def calculate_employee_month(P, inp):
     vdu = _vdu(inp, P, primary)
     warnings.extend(vdu.notes)
 
-    lines = _build_lines(inp, P, ts, primary, vdu.daily, warnings)
+    lines = _build_lines(inp, P, ts, primary, vdu.daily, warnings, vdu.hourly, vdu.bonus_part)
     ti, used = _tax_input(inp, P, lines, warnings)
     taxes = calculate(P, ti)
     warnings.extend(taxes.notes)
@@ -267,6 +306,10 @@ def calculate_employee_month(P, inp):
         auto_deductions.append(atg)
         lines.append(atg)
         warnings.append(f"Pereikvota {days} d. atostogų - išskaičiuojama {atg.amount} (patikrinkite DK 150 str. ribas)")
+
+    garn = garnishment_lines(inp, P, lines, taxes, warnings)
+    auto_deductions += garn
+    lines.extend(garn)
 
     deductions = sum((d.amount for d in list(inp.deductions) + auto_deductions), ZERO)
     payable = taxes.net - deductions - inp.advance_paid
@@ -288,3 +331,86 @@ def max_deduction(net, P, kind="ordinary"):
     m = P.mma
     parts = (min(net, m), max(min(net, 2 * m) - m, ZERO), max(net - 2 * m, ZERO))
     return q2(sum(p * Decimal(t) / HUNDRED for p, t in zip(parts, tiers)))
+
+
+# Pajamos, iš kurių neišskaitoma (CPK 738-739). ⚠ LEGAL-CHECK: ligos išmoka darbdavio lėšomis ir kompensacija
+# už nepanaudotas atostogas - kol kas neišskaitoma (atsargiai).
+NOT_GARNISHABLE = {"ordinary": {"ISE", "LIG", "KMP"}, "maintenance": {"LIG", "KMP"}}
+GARN_CODE = {"ordinary": "ANT", "harm": "ANT", "maintenance": "ALI", "voluntary": "ALI"}
+
+
+def _garnish_base(lines, taxes, kind):
+    """Išskaitų bazė: DU po mokesčių, proporcingai tik toms piniginėms pajamoms, iš kurių galima išskaityti."""
+    excl = NOT_GARNISHABLE["ordinary" if kind == "ordinary" else "maintenance"]
+    earn = [l for l in lines if CODES.get(l.code, {}).get("category") == "earning"]
+    total = sum((l.amount for l in earn), ZERO)
+    ok = sum((l.amount for l in earn if l.code not in excl), ZERO)
+    if total <= 0 or taxes.net <= 0:
+        return ZERO
+    return q2(taxes.net * ok / total)
+
+
+def _request(o, base, cap):
+    if o["method"] == "fixed":
+        amt = Decimal(str(o.get("amount") or 0))
+    elif o["method"] == "percent":
+        amt = q2(base * Decimal(str(o.get("percent") or 0)) / HUNDRED)
+    else:                                          # "max" - kiek leidžia CPK 736
+        amt = cap
+    if o.get("remaining") is not None:
+        amt = min(amt, max(Decimal(str(o["remaining"])), ZERO))
+    return max(amt, ZERO)
+
+
+def _allocate(orders, reqs, cap, warnings, label):
+    total = sum(reqs, ZERO)
+    if total <= cap or total <= 0:
+        return reqs
+    warnings.append(f"{label}: išskaitos sumažintos iki CPK 736 str. ribos ({cap} €) – paskirstyta proporcingai")
+    out = [q2(cap * r / total) for r in reqs]
+    out[-1] += cap - sum(out, ZERO)
+    return out
+
+
+def garnishment_lines(inp, P, lines, taxes, warnings):
+    """
+    Išskaitos pagal antstolio patvarkymus / alimentus (CPK 735-736, 742, 754):
+      bazė - DU po mokesčių; ribos pakopomis pagal MMA; ribos nesumuojamos;
+      eilė: I - išlaikymas ir žala sveikatai, III - kiti; vienos eilės viduje - proporcingai.
+    """
+    orders = list(inp.garnishments or [])
+    if not orders:
+        return []
+    first = [o for o in orders if o["kind"] in ("maintenance", "harm")]
+    third = [o for o in orders if o["kind"] == "ordinary"]
+    vol = [o for o in orders if o["kind"] == "voluntary"]
+    if vol and (first or third):
+        warnings.append("Savanoriškos alimentų išskaitos netaikomos, kai vykdomi kiti vykdomieji dokumentai (CPK 742 str. 3 d.)")
+        vol = []
+    out = []
+    base_m = _garnish_base(lines, taxes, "maintenance")
+    base_o = _garnish_base(lines, taxes, "ordinary")
+    cap_m = max_deduction(base_m, P, "maintenance") if first else ZERO
+    cap_o = max_deduction(base_o, P, "ordinary") if third else ZERO
+    total_cap = max(cap_m, cap_o)
+    taken = ZERO
+    if first:
+        reqs = _allocate(first, [_request(o, base_m, cap_m) for o in first], cap_m, warnings, "I eilė (išlaikymas)")
+        for o, a in zip(first, reqs):
+            if a > 0:
+                out.append((o, a))
+                taken += a
+    if third:
+        avail = max(min(cap_o, total_cap - taken), ZERO)
+        reqs = _allocate(third, [_request(o, base_o, cap_o) for o in third], avail, warnings, "III eilė")
+        out += [(o, a) for o, a in zip(third, reqs) if a > 0]
+    for o in vol:
+        a = min(_request(o, base_m, base_m), base_m)
+        if a > 0:
+            out.append((o, a))
+    res = []
+    for o, a in out:
+        line = Line(GARN_CODE[o["kind"]], q2(a), ZERO, ZERO, (o.get("doc") or "")[:255])
+        line.garnishment_id = o["id"]
+        res.append(line)
+    return res

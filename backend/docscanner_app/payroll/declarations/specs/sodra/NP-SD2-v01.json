@@ -1,0 +1,130 @@
+{
+ "FormDefId": "{7647E6BD-342A-42CD-A1CD-AE1E4DBC8295}",
+ "form": "NP-SD2",
+ "version": "01",
+ "source": "Tikras EDAS eksportas (NP-SD2 v01, vienas lapas)",
+ "pages": {
+  "NP-SD2": {
+   "header_fields": [
+    {
+     "name": "PageNumber"
+    },
+    {
+     "name": "PageTotal"
+    },
+    {
+     "name": "Currency"
+    },
+    {
+     "name": "FormCode"
+    },
+    {
+     "name": "FormVersion"
+    },
+    {
+     "name": "InsurerName"
+    },
+    {
+     "name": "InsurerCode"
+    },
+    {
+     "name": "JuridicalPersonCode"
+    },
+    {
+     "name": "InsurerPhone"
+    },
+    {
+     "name": "InsurerAddress"
+    },
+    {
+     "name": "DocDate"
+    },
+    {
+     "name": "DocNumber"
+    },
+    {
+     "name": "PersonCode"
+    },
+    {
+     "name": "InsuranceSeries"
+    },
+    {
+     "name": "InsuranceNumber"
+    },
+    {
+     "name": "A5_Start"
+    },
+    {
+     "name": "A6_End"
+    },
+    {
+     "name": "A7"
+    },
+    {
+     "name": "PersonFirstName"
+    },
+    {
+     "name": "PersonLastName"
+    },
+    {
+     "name": "B1_Start_1"
+    },
+    {
+     "name": "B2_End_1"
+    },
+    {
+     "name": "B1_Start_2"
+    },
+    {
+     "name": "B2_End_2"
+    },
+    {
+     "name": "B1_Start_3"
+    },
+    {
+     "name": "B2_End_3"
+    },
+    {
+     "name": "B3_Start"
+    },
+    {
+     "name": "B4_End"
+    },
+    {
+     "name": "B5_Start"
+    },
+    {
+     "name": "B6_End"
+    },
+    {
+     "name": "B7_PaymentSum"
+    },
+    {
+     "name": "ReasonCode_1"
+    },
+    {
+     "name": "ReasonText_1"
+    },
+    {
+     "name": "ManagerJobPosition"
+    },
+    {
+     "name": "ManagerFullName"
+    },
+    {
+     "name": "PreparatorDetails"
+    },
+    {
+     "name": "J_group"
+    }
+   ],
+   "rows_per_page": 0
+  }
+ },
+ "groups": {
+  "name": "Forma",
+  "pages": [
+   "NP-SD2"
+  ]
+ }
+}

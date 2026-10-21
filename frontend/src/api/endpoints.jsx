@@ -125,7 +125,9 @@ export const login = async (email, password) => {
     return data.success === true;
   } catch (error) {
     console.error('Login error:', error.response?.data || error.message);
-    return false;
+    // neteisingi duomenys -> false; nėra ryšio / serverio klaida -> klaida perduodama toliau
+    if (error.response?.status === 400 || error.response?.status === 401) return false;
+    throw error;
   }
 };
 

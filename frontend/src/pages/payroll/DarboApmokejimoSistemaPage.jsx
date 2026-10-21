@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  Alert, Autocomplete, Box, Button, Chip, Dialog, DialogActions, DialogContent, DialogTitle, IconButton,
-  InputAdornment, Paper, Slider, Stack, Table, TableBody, TableCell, TableHead, TableRow, TextField, Typography,
+  Alert, Autocomplete, Box, Button, Chip, Dialog, DialogActions, DialogContent, DialogTitle, FormControlLabel, IconButton,
+  InputAdornment, MenuItem, Paper, Slider, Stack, Switch, Table, TableBody, TableCell, TableHead, TableRow, TextField,
+  Tooltip, Typography,
 } from "@mui/material";
+import CallMergeIcon from "@mui/icons-material/CallMerge";
 import AddIcon from "@mui/icons-material/Add";
 import AutoFixHighIcon from "@mui/icons-material/AutoFixHigh";
 import CloseIcon from "@mui/icons-material/Close";
@@ -23,7 +25,7 @@ const CRITERIA = [
   { key: "conditions", label: "Darbo sąlygos", help: "Aplinka, rizika, darbo laiko ypatumai" },
 ];
 
-export default function DarboApmokejimoSistemaPage() {
+export default function DarboApmokejimoSistemaPage({ embedded = false } = {}) {
   const [groups, setGroups] = useState([]);
   const [positions, setPositions] = useState([]);
   const [issues, setIssues] = useState([]);
@@ -32,6 +34,8 @@ export default function DarboApmokejimoSistemaPage() {
   const [preview, setPreview] = useState(false);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [merge, setMerge] = useState(null);      // grupė, kurią jungiam
+  const [info, setInfo] = useState("");
 
   const load = useCallback(async () => {
     try {
@@ -53,13 +57,15 @@ export default function DarboApmokejimoSistemaPage() {
   const nums = groups.map((g) => /^G(\d+)$/.exec(g.code)).filter(Boolean).map((m) => Number(m[1]));
   const nextCode = `G${String((nums.length ? Math.max(...nums) : 0) + 1).padStart(3, "0")}`;
   const outOfRange = issues.filter((i) => i.type === "out_of_range");
+  const mixed = issues.filter((i) => i.type === "mixed_group");
+  const belowMma = issues.filter((i) => i.type === "below_mma");
   const mmaUpdated = issues.filter((i) => i.type === "mma_updated");
   const outdated = issues.some((i) => i.type === "das_outdated");
 
   return (
-    <Box sx={{ p: { xs: 2, md: 3 }, maxWidth: 1100 }}>
+    <Box sx={{ p: embedded ? 0 : { xs: 2, md: 3 }, maxWidth: 1100 }}>
       <Stack direction={{ xs: "column", sm: "row" }} justifyContent="space-between" gap={2} mb={1}>
-        <Typography variant="h5" fontWeight={700}>Darbo apmokėjimo sistema</Typography>
+        {!embedded && <Typography variant="h5" fontWeight={700}>Darbo apmokėjimo sistema</Typography>}
         <Chip color={docs.length && !outdated ? "success" : "warning"}
           label={!docs.length ? "Privaloma iki 2026-12-31" : outdated ? `Reikia atnaujinti (v${docs[0].version})` : `Patvirtinta (v${docs[0].version})`} />
       </Stack>
@@ -100,9 +106,23 @@ export default function DarboApmokejimoSistemaPage() {
         {noGroup.length > 0 && (
           <Alert severity="info" sx={{ mb: 2 }}>
             Pareigos be grupės: {noGroup.map((i) => i.position).join(", ")}.
-            Mažai įmonei paprasčiausia – „Sukurti automatiškai“: kiekvienos pareigos taps atskira grupe, o algų ribos bus užpildytos pagal dabartines algas.
+            Paprasčiausia – „Sukurti automatiškai“: lygiavertės pareigos bus sugrupuotos pagal profesijų klasifikatorių,
+            o algų ribos nustatomos automatiškai pagal dabartines algas (visam etatui).
           </Alert>
         )}
+        {info && <Alert severity="warning" sx={{ mb: 2 }} onClose={() => setInfo("")}>{info}</Alert>}
+        {belowMma.length > 0 && (
+          <Alert severity="warning" sx={{ mb: 1 }}>
+            Alga visam etatui mažesnė už MMA ({belowMma[0].mma} €): {belowMma.map((i) => `${i.employee} (${i.salary} €)`).join(", ")}.
+            Patikrinkite algą ir etatą darbuotojo kortelėje – dažniausiai tai ne visas etatas arba seni duomenys.
+          </Alert>
+        )}
+        {mixed.map((i) => (
+          <Alert key={i.group} severity="warning" sx={{ mb: 1 }}>
+            Grupėje {i.group}: {i.positions.join(", ")} – paprastai vertinama kitaip nei grupė. Patikrinkite, ar darbas lygiavertis
+            (jei ne – atidarykite grupę ir išskirkite).
+          </Alert>
+        ))}
         {outOfRange.length > 0 && (
           <Alert severity="warning" sx={{ mb: 2 }}>
             {outOfRange.map((i, n) => (
@@ -130,12 +150,18 @@ export default function DarboApmokejimoSistemaPage() {
                   <TableCell align="center">{g.total_score} / 25</TableCell>
                   <TableCell align="right">
                     {!g.salary_min && !g.salary_max ? "–"
-                      : g.salary_min === g.salary_max ? `${money(g.salary_min)} (fiksuota)`
+                      : g.salary_min === g.salary_max ? money(g.salary_min)
                       : `${money(g.salary_min)} – ${money(g.salary_max)}`}
+                    {g.auto_range && <Chip size="small" label="auto" variant="outlined" sx={{ ml: 0.75, height: 18, fontSize: 10 }} />}
                   </TableCell>
                   <TableCell align="right" sx={{ whiteSpace: "nowrap" }}>
                     <IconButton size="small" onClick={() => setEdit(g)}><EditOutlinedIcon fontSize="small" /></IconButton>
-                    <IconButton size="small" onClick={() => payrollApi.deleteGroup(g.id).then(load)}><DeleteOutlineIcon fontSize="small" /></IconButton>
+                    {groups.length > 1 && (
+                      <Tooltip title="Sujungti su kita grupe">
+                        <IconButton size="small" onClick={() => setMerge(g)}><CallMergeIcon fontSize="small" /></IconButton>
+                      </Tooltip>
+                    )}
+                    <IconButton size="small" onClick={() => window.confirm(`Ištrinti grupę ${g.code}? Pareigos liks be grupės.`) && payrollApi.deleteGroup(g.id).then(load)}><DeleteOutlineIcon fontSize="small" /></IconButton>
                   </TableCell>
                 </TableRow>
               ))}
@@ -167,6 +193,8 @@ export default function DarboApmokejimoSistemaPage() {
       )}
 
       <GroupDialog group={edit} nextCode={nextCode} onClose={() => setEdit(null)} onSaved={() => { setEdit(null); load(); }} />
+      <MergeDialog group={merge} groups={groups} onClose={() => setMerge(null)}
+        onDone={(warning) => { setMerge(null); if (warning) setInfo(warning); load(); }} />
       <PreviewDialog open={preview} onClose={() => setPreview(false)} onApproved={() => { setPreview(false); load(); }} />
     </Box>
   );
@@ -179,7 +207,38 @@ function printHtml(html) {
   w.focus(); setTimeout(() => w.print(), 300);
 }
 
-function GroupDialog({ group, nextCode, onClose, onSaved }) {
+export function MergeDialog({ group, groups, onClose, onDone }) {
+  const [target, setTarget] = useState("");
+  const [error, setError] = useState("");
+  useEffect(() => { setTarget(""); setError(""); }, [group]);
+  if (!group) return null;
+  const go = async () => {
+    try { const r = await payrollApi.mergeGroup(group.id, target); onDone(r.warning); } catch (e) { setError(apiError(e)); }
+  };
+  return (
+    <Dialog open onClose={onClose} fullWidth maxWidth="xs" disableScrollLock>
+      <DialogTitle>Sujungti grupę {group.code}</DialogTitle>
+      <DialogContent>
+        <Typography variant="body2" color="text.secondary" mb={2}>
+          Visos grupės {group.code} pareigos bus perkeltos į pasirinktą grupę. Junkite tik lygiavertį darbą.
+        </Typography>
+        <TextField select fullWidth label="Į grupę" value={target} onChange={(e) => setTarget(e.target.value)}
+          SelectProps={{ MenuProps: { disableScrollLock: true } }}>
+          {groups.filter((g) => g.id !== group.id).map((g) => (
+            <MenuItem key={g.id} value={g.id}>{g.code} – {g.name} ({g.total_score} / 25)</MenuItem>
+          ))}
+        </TextField>
+        {error && <Alert severity="error" sx={{ mt: 2 }}>{error}</Alert>}
+      </DialogContent>
+      <DialogActions sx={{ px: 3, pb: 2 }}>
+        <Button onClick={onClose}>Atšaukti</Button>
+        <Button variant="contained" disabled={!target} onClick={go}>Sujungti</Button>
+      </DialogActions>
+    </Dialog>
+  );
+}
+
+export function GroupDialog({ group, nextCode, onClose, onSaved }) {
   const [f, setF] = useState(null);
   const [error, setError] = useState("");
   const [input, setInput] = useState("");
@@ -192,6 +251,7 @@ function GroupDialog({ group, nextCode, onClose, onSaved }) {
     setF({
       code: group.code || "", name: group.name || "", description: group.description || "",
       salary_min: group.salary_min || "", salary_max: group.salary_max || "",
+      auto_range: group.id ? !!group.auto_range : true,
       positions: (group.positions || []).map((p) => ({ kind: "pos", key: `p${p.id}`, id: p.id, name: p.name, sub: "" })),
       ...Object.fromEntries(CRITERIA.map((c) => [c.key, group[c.key] || 3])),
     });
@@ -229,6 +289,7 @@ function GroupDialog({ group, nextCode, onClose, onSaved }) {
       }
       const { positions: _p, code: _c, ...rest } = f;
       const data = { ...rest, salary_min: f.salary_min || null, salary_max: f.salary_max || null, position_ids: ids };
+      if (f.auto_range) { delete data.salary_min; delete data.salary_max; }
       if (group.id) await payrollApi.updateGroup(group.id, data); else await payrollApi.createGroup(data);
       onSaved();
     } catch (e) { setError(apiError(e)); }
@@ -296,19 +357,44 @@ function GroupDialog({ group, nextCode, onClose, onSaved }) {
               </Box>
             ))}
           </Box>
+          {group.id && (group.positions || []).length > 1 && (
+            <Box>
+              <Typography variant="caption" color="text.secondary">Jei kurios nors pareigos nėra lygiavertės – išskirkite jas į atskirą grupę:</Typography>
+              <Stack direction="row" gap={0.75} flexWrap="wrap" mt={0.5}>
+                {group.positions.map((p) => (
+                  <Chip key={p.id} size="small" variant="outlined" label={`${p.name} · išskirti`}
+                    onClick={async () => {
+                      if (!window.confirm(`Išskirti „${p.name}“ į atskirą grupę?`)) return;
+                      try { await payrollApi.splitPosition(p.id); onSaved(); } catch (e) { setError(apiError(e)); }
+                    }} />
+                ))}
+              </Stack>
+            </Box>
+          )}
+          <FormControlLabel
+            control={<Switch checked={f.auto_range} onChange={(e) => set({ auto_range: e.target.checked })} />}
+            label={<Box><Typography variant="body2">Automatinės algų ribos</Typography>
+              <Typography variant="caption" color="text.secondary">
+                Pagal faktines šios grupės darbuotojų algas (visam etatui). Ribos tik plečiasi – priėmus ar padidinus algą.
+              </Typography></Box>} />
           <Stack direction="row" gap={2}>
             <TextField label="Alga nuo" type="number" value={f.salary_min} onChange={(e) => set({ salary_min: e.target.value })} fullWidth
+              disabled={f.auto_range} required={!f.auto_range}
               InputProps={{ endAdornment: <InputAdornment position="end">€</InputAdornment> }} />
             <TextField label="Alga iki" type="number" value={f.salary_max} onChange={(e) => set({ salary_max: e.target.value })} fullWidth
+              disabled={f.auto_range} required={!f.auto_range}
               InputProps={{ endAdornment: <InputAdornment position="end">€</InputAdornment> }} />
           </Stack>
-          <Typography variant="caption" color="text.secondary">Algos ribos nurodomos visam etatui. Konkreti alga ribose priklauso nuo patirties ir rezultatų.</Typography>
+          <Typography variant="caption" color="text.secondary">
+            Algos ribos visam etatui – privalomos darbo apmokėjimo sistemoje, jas darbuotojas gali pasitikrinti savitarnoje.
+            Į SDUP nepateikiamos.
+          </Typography>
           {error && <Alert severity="error">{error}</Alert>}
         </Stack>
       </DialogContent>
       <DialogActions sx={{ px: 3, pb: 2 }}>
         <Button onClick={onClose}>Atšaukti</Button>
-        <Button variant="contained" onClick={save} disabled={!f.name}>Išsaugoti</Button>
+        <Button variant="contained" onClick={save} disabled={!f.name || (!f.auto_range && (!f.salary_min || !f.salary_max))}>Išsaugoti</Button>
       </DialogActions>
     </Dialog>
   );

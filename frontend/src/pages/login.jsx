@@ -29,6 +29,8 @@ const Login = () => {
         setError("Nepavyko prisijungti. Patikrinkite interneto ryšį.");
       } else if (err.response.status === 401 || err.response.status === 400) {
         setError("Neteisingas el. paštas arba slaptažodis.");
+      } else if (err.response.status >= 500) {
+        setError("Serveris laikinai nepasiekiamas. Bandykite po kelių minučių.");
       } else if (err.response.data?.detail) {
         setError(err.response.data.detail);
       } else {

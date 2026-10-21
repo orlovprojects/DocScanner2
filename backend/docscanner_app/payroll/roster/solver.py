@@ -17,8 +17,8 @@ from decimal import Decimal
 from ortools.sat.python import cp_model
 
 from ..work_calendar import is_holiday
-from .law import MAX_7D_H, MIN_DAILY_REST_H
-from .shifts import holiday_hours, make_shift, night_hours
+from .law import MAX_7D_H, MIN_DAILY_REST_H, MIN_WEEKLY_REST_H
+from .shifts import holiday_hours, make_shift, night_hours, real_hours
 
 H = 100                      # valandos -> šimtosios (CP-SAT dirba su sveikaisiais)
 BIG = 1_000_000              # „būtina“ taisyklė
@@ -35,9 +35,11 @@ class ShiftDef:
     start: time
     end: time
     break_minutes: int = 0
+    break_start: time = None
+    break_paid: bool = False
 
     def instance(self, emp, d):
-        return make_shift(emp, d, self.start, self.end, self.break_minutes, self.id)
+        return make_shift(emp, d, self.start, self.end, self.break_minutes, self.id, self.break_start, self.break_paid)
 
 
 @dataclass
@@ -84,9 +86,16 @@ class Result:
 
 
 class Problem:
-    def __init__(self, days, shifts, emps, rules=(), prefs=(), locked=(), history=(), slots=None):
-        """slots: {(data, shift_id): (min, max)} - pamainų planas; jei nurodytas, pamainos statomos tik į jį."""
+    def __init__(self, days, shifts, emps, rules=(), prefs=(), locked=(), history=(), slots=None,
+                 keep=None, w_change=0, w_touch=0):
+        """
+        slots: {(data, shift_id): (min, max)} - pamainų planas; jei nurodytas, pamainos statomos tik į jį.
+        keep: esamo grafiko pamainos {(emp, data, shift_id)} - taisant grafiką kiekvienas pakeitimas baudžiamas
+              (w_change), o kiekvienas paliestas darbuotojas - dar w_touch (kad keistųsi kuo mažiau žmonių).
+        """
         self.slots = slots
+        self.keep = set(keep) if keep is not None else None
+        self.w_change, self.w_touch = w_change, w_touch
         self.days, self.shifts, self.emps = list(days), list(shifts), list(emps)
         self.rules, self.prefs, self.locked = list(rules), list(prefs), list(locked)
         self.history = list(history)               # ankstesnio mėn. pabaigos Shift (poilsiui tikrinti)
@@ -103,8 +112,9 @@ class Problem:
     def inst(self, e, d, s):
         return s.instance(e.id, d)
 
-    def hours(self, s):
-        return int(round(float(s.instance(0, self.days[0]).hours) * H))
+    def hours(self, s, d=None):
+        """ROS-07: trukmė konkrečią dieną (laiko keitimo naktį pamaina realiai ilgesnė / trumpesnė)."""
+        return int(round(float(s.instance(0, d or self.days[0]).hours) * H))
 
     def work(self, e, d):
         return sum(self.x[e.id, d, s.id] for s in self.shifts if (e.id, d, s.id) in self.x)
@@ -149,6 +159,32 @@ class Problem:
         self._norm()
         self._prefs()
         self._cost()
+        if self.keep is not None and (self.w_change or self.w_touch):
+            self._stability()
+
+    def _stability(self):
+        """Taisymas: kuo mažiau pakeitimų ir kuo mažiau paliestų darbuotojų (nebuvimo dienos - ne pakeitimas)."""
+        m = self.m
+        cur = {(e, d): s for e, d, s in self.keep}
+        for e in self.emps:
+            changes = []
+            for d in self.days:
+                if d in e.unavailable:
+                    continue
+                v = m.NewBoolVar(f"ch_{e.id}_{d}")
+                s = cur.get((e.id, d))
+                if s is not None and (e.id, d, s) in self.x:
+                    m.Add(v + self.x[e.id, d, s] == 1)          # buvo pamaina s - pakeitimas, jei jos neliko
+                else:
+                    m.Add(v == self.work(e, d))                 # buvo laisva - pakeitimas, jei atsirado pamaina
+                changes.append(v)
+                if self.w_change:
+                    self.penalties.append((self.w_change, v))
+            if changes and self.w_touch:
+                t = m.NewBoolVar(f"touch_{e.id}")
+                for v in changes:
+                    m.Add(t >= v)
+                self.penalties.append((self.w_touch, t))
 
     def _plan(self):
         plan_rule = Rule(0, "plan", label="Pamainų planas")
@@ -168,13 +204,13 @@ class Problem:
     def _law(self):
         m = self.m
         # 11 val. poilsis tarp pamainų (ir su praėjusio mėn. paskutinėmis pamainomis)
-        for s1 in self.shifts:
-            for s2 in self.shifts:
-                a = s1.instance(0, self.days[0])
-                b = s2.instance(0, self.days[0] + timedelta(days=1))
-                if (b.start - a.end).total_seconds() / 3600 < MIN_DAILY_REST_H:
-                    for e in self.emps:
-                        for d1, d2 in zip(self.days, self.days[1:]):
+        for d1, d2 in zip(self.days, self.days[1:]):            # ROS-09: tikslios datos (laiko keitimas)
+            for s1 in self.shifts:
+                a = s1.instance(0, d1)
+                for s2 in self.shifts:
+                    b = s2.instance(0, d2)
+                    if real_hours(a.end, b.start) < MIN_DAILY_REST_H:
+                        for e in self.emps:
                             m.Add(self.x[e.id, d1, s1.id] + self.x[e.id, d2, s2.id] <= 1)
         for h in self.history:
             for s in self.shifts:
@@ -192,16 +228,48 @@ class Problem:
                 if len(inside) < 1:
                     continue
                 prev = sum(hist[e.id, d] for d in win if d not in self.days)
-                m.Add(sum(self.x[e.id, d, s.id] * self.hours(s) for d in inside for s in self.shifts) + prev
+                m.Add(sum(self.x[e.id, d, s.id] * self.hours(s, d) for d in inside for s in self.shifts) + prev
                       <= int(MAX_7D_H * H))
                 if len(inside) == 7:
                     m.Add(sum(self.work(e, d) for d in inside) <= 6)
+        self._weekly_rest()
+
+    def _weekly_rest(self):
+        """
+        ROS-01: per kiekvienas 7 dienas - bent 35 val. nepertraukiamo poilsio.
+        r[e, d] = 1 - diena d laisva ir tarp pamainos d-1 pabaigos ir pamainos d+1 pradžios >= 35 val.
+        """
+        m = self.m
+        law = Rule(-1, "law_weekly_rest", label="DK: 35 val. nepertraukiamas savaitės poilsis")
+        short_pairs = []
+        for s1 in self.shifts:
+            for s2 in self.shifts:
+                a = s1.instance(0, self.days[0])
+                b = s2.instance(0, self.days[0] + timedelta(days=2))
+                if real_hours(a.end, b.start) < MIN_WEEKLY_REST_H:
+                    short_pairs.append((s1.id, s2.id))
+        dayset = set(self.days)
+        for e in self.emps:
+            r = {}
+            for d in self.days:
+                v = m.NewBoolVar(f"rest_{e.id}_{d}")
+                m.Add(self.work(e, d) == 0).OnlyEnforceIf(v)
+                prev_d, next_d = d - timedelta(days=1), d + timedelta(days=1)
+                if prev_d in dayset and next_d in dayset:
+                    for a, b in short_pairs:
+                        m.Add(v + self.x[e.id, prev_d, a] + self.x[e.id, next_d, b] <= 2)
+                r[d] = v
+            for i in range(len(self.days) - 6):
+                win = self.days[i:i + 7]
+                if any(d in e.unavailable for d in win):
+                    continue           # atostogos / liga savaitėje - poilsio pakanka
+                m.Add(sum(r[d] for d in win) + self._slack(law, win[0], 1) >= 1)
 
     def _norm(self):
         m = self.m
         self.total = {}
         for e in self.emps:
-            tot = sum(self.x[e.id, d, s.id] * self.hours(s) for d in self.days for s in self.shifts)
+            tot = sum(self.x[e.id, d, s.id] * self.hours(s, d) for d in self.days for s in self.shifts)
             self.total[e.id] = tot
             target = int(round(float(e.target_hours) * H))
             over = m.NewIntVar(0, 400 * H, f"over_{e.id}")

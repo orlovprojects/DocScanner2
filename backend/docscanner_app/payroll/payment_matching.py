@@ -118,11 +118,11 @@ def _fifo(amount, obligations):
 
 
 def _by_reference(txn, obligations):
+    """Mūsų nuoroda (DU202610-E12) paskirtyje. Po nuorodos negali eiti skaitmuo - kitaip E1 sutaptų su E10 (PAY-01)."""
     hay = re.sub(r"\s+", "", f"{txn.purpose} {txn.reference}").upper()
-    for o in obligations:
-        if o.reference and o.reference.upper() in hay:
-            return o
-    return None
+    hits = [o for o in obligations if o.reference and
+            re.search(rf"(?<![0-9]){re.escape(o.reference.upper())}(?![0-9])", hay)]
+    return max(hits, key=lambda o: len(o.reference)) if hits else None
 
 
 def _match_authority(txn, obligations, kind, good_code, codes):

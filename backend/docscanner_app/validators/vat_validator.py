@@ -166,7 +166,7 @@ EU_VIES_COUNTRIES = {
     "EL",  # Greece (ISO GR)
     "ES", "FI", "FR", "HR", "HU", "IE", "IT", "LT",
     "LU", "LV", "MT", "NL", "PL", "PT", "RO", "SE",
-    "SI", "SK",
+    "SI", "SK", "XI",
 }
 
 # Маппинг ISO2 → код страны в VIES
@@ -199,6 +199,7 @@ ISO_TO_VIES = {
     "SE": "SE",
     "SI": "SI",
     "SK": "SK",
+    "XI": "XI",
 }
 
 
@@ -218,6 +219,134 @@ def _normalize_country_code(country_iso: str | None) -> str | None:
     return vies_code
 
 
+# VAT formats: without two-letter country prefix
+VAT_FORMAT_PATTERNS = {
+    "AT": r"U\d{8}",
+    "BE": r"\d{10}",
+    "BG": r"\d{9,10}",
+    "CY": r"\d{8}[A-Z]",
+    "CZ": r"\d{8,10}",
+    "DE": r"\d{9}",
+    "DK": r"\d{8}",
+    "EE": r"\d{9}",
+    "EL": r"\d{9}",
+    "ES": r"(?:[A-Z]\d{7}[A-Z0-9]|\d{8}[A-Z])",
+    "FI": r"\d{8}",
+    "FR": r"[A-Z0-9]{2}\d{9}",
+    "HR": r"\d{11}",
+    "HU": r"\d{8}",
+    "IE": r"(?:\d[A-Z0-9+*]\d{5}[A-Z]|\d{7}[A-Z]{1,2})",
+    "IT": r"\d{11}",
+    "LT": r"(?:\d{9}|\d{12})",
+    "LU": r"\d{8}",
+    "LV": r"\d{11}",
+    "MT": r"\d{8}",
+    "NL": r"\d{9}B\d{2}",
+    "PL": r"\d{10}",
+    "PT": r"\d{9}",
+    "RO": r"\d{2,10}",
+    "SE": r"\d{10}01",
+    "SI": r"\d{8}",
+    "SK": r"\d{10}",
+    "XI": r"(?:\d{9}|\d{12}|GD\d{3}|HA\d{3})",
+}
+
+# Visually similar characters in VAT country prefixes
+_VAT_PREFIX_OCR_ALTERNATIVES = {
+    "1": "IL",
+    "I": "L",
+    "L": "I",
+    "0": "OD",
+    "O": "D",
+    "D": "O",
+    "8": "B",
+    "6": "G",
+    "9": "G",
+    "2": "Z",
+    "5": "S",
+    "7": "T",
+    "U": "V",
+    "V": "U",
+}
+
+
+def is_valid_vat_format(country_code: str, vat_number: str) -> bool:
+    """Check national VAT format, not VIES validity."""
+    cc = _normalize_country_code(country_code)
+    pattern = VAT_FORMAT_PATTERNS.get(cc or "")
+    return bool(
+        pattern and re.fullmatch(
+            pattern, (vat_number or "").upper()
+        )
+    )
+
+
+def normalize_vat_ocr(
+    raw_code: str | None,
+    country_iso: str | None = None,
+):
+    """
+    Correct OCR mistakes in the two-letter VAT prefix.
+    Works without country_iso when one unique format matches.
+    Never changes the national VAT number.
+    Returns (code, correction_log).
+    """
+    if raw_code is None:
+        return None, None
+
+    code = re.sub(r"\s+", "", str(raw_code)).upper()
+
+    if not code or len(code) < 3:
+        return code, None
+
+    prefix, remainder = code[:2], code[2:]
+
+    # Greece
+    if prefix == "GR" and is_valid_vat_format("EL", remainder):
+        return (
+            "EL" + remainder,
+            "VAT prefix GR -> EL (Greece/VIES)",
+        )
+
+    # Already recognized prefix
+    if prefix in VAT_FORMAT_PATTERNS:
+        return code, None
+
+    possible = []
+
+    for i, ch in enumerate(prefix):
+        for alternative in _VAT_PREFIX_OCR_ALTERNATIVES.get(ch, ""):
+            candidate = (
+                prefix[:i] + alternative + prefix[i + 1:]
+            )
+
+            if (
+                candidate in VAT_FORMAT_PATTERNS
+                and is_valid_vat_format(candidate, remainder)
+            ):
+                possible.append(candidate)
+
+    possible = sorted(set(possible))
+
+    # Resolve ambiguity using country_iso
+    if len(possible) > 1:
+        preferred = _normalize_country_code(country_iso)
+        if preferred in possible:
+            possible = [preferred]
+
+    # Do not guess ambiguous prefixes
+    if len(possible) != 1:
+        return code, None
+
+    corrected = possible[0] + remainder
+
+    return (
+        corrected,
+        f"OCR prefix {prefix} -> {possible[0]} "
+        "(national VAT format match)",
+    )
+
+
 def _parse_vat(raw_code: str | None, country_iso: str | None):
     """
     Пытаемся понять, что у нас за VAT-код и какую страну использовать.
@@ -235,7 +364,7 @@ def _parse_vat(raw_code: str | None, country_iso: str | None):
     if not raw_code:
         return None
 
-    original = raw_code.strip()
+    original, _ocr_info = normalize_vat_ocr(raw_code, country_iso)
     if not original:
         return None
 
@@ -273,7 +402,7 @@ def _parse_vat(raw_code: str | None, country_iso: str | None):
     vat_number = re.sub(r"\s+", "", rest)
 
     # Базовая проверка: только латинские буквы и цифры
-    if not re.match(r"^[A-Z0-9]+$", vat_number, re.IGNORECASE):
+    if not is_valid_vat_format(country_code, vat_number):
         logger.info(
             "VAT invalid format, skip VIES: raw_code=%r, normalized=%r, country=%s",
             raw_code,

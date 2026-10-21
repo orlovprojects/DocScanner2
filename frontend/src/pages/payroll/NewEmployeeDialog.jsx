@@ -1,37 +1,132 @@
 import { useEffect, useState } from "react";
 import {
-  Alert, Autocomplete, Box, Button, Checkbox, Chip, Collapse, Dialog, DialogActions, DialogContent, DialogTitle,
-  Divider, FormControl, FormControlLabel, IconButton, InputAdornment, InputLabel, Link, MenuItem, Radio,
-  RadioGroup, Select, Stack, Switch, TextField, ToggleButton, ToggleButtonGroup, Typography,
+  Alert, Autocomplete, Box, Button, Checkbox, Chip, Collapse, Dialog, Divider, FormControl, FormControlLabel, IconButton,
+  InputAdornment, InputLabel, Link, MenuItem, Select, Stack, Switch, TextField, ToggleButton, ToggleButtonGroup, Typography,
 } from "@mui/material";
 import CloseIcon from "@mui/icons-material/Close";
+import CheckIcon from "@mui/icons-material/Check";
+import MarkEmailReadOutlinedIcon from "@mui/icons-material/MarkEmailReadOutlined";
+import EditNoteOutlinedIcon from "@mui/icons-material/EditNoteOutlined";
+import DescriptionOutlinedIcon from "@mui/icons-material/DescriptionOutlined";
+import AccountBalanceOutlinedIcon from "@mui/icons-material/AccountBalanceOutlined";
+import PersonAddAltOutlinedIcon from "@mui/icons-material/PersonAddAltOutlined";
+import BeachAccessOutlinedIcon from "@mui/icons-material/BeachAccessOutlined";
 import { MuiTelInput } from "mui-tel-input";
 
 import LtDatePicker from "../../components/LtDatePicker"; // ⚠ pataisyk kelią, jei komponentas kitur
 import { CONTRACT_TYPES, NPD_MODES, apiError, money, payrollApi } from "../../api/payroll";
 import { estimateNet } from "./payrollEstimate";
 import { parsePersonalCode } from "./personalCode";
+import { anchorLabel, cap, iso, norm, periodsFrom } from "./SuminePeriodSection";
 
 const MENU_PROPS = { disableScrollLock: true };
 const today = () => new Date().toISOString().slice(0, 10);
 const QUICK_HOURS = [40, 30, 20, 10];
+const DAYS = ["Pr", "An", "Tr", "Kt", "Pn", "Š", "S"];
+const STD_DAYS = [true, true, true, true, true, false, false];
+const DAY_TEMPLATES = [["Pr–Pn", STD_DAYS], ["An–Š", [false, true, true, true, true, true, false]], ["Pr–Š", [true, true, true, true, true, true, false]]];
+const r2 = (x) => Math.round(x * 100) / 100;
+const fmtH = (x) => String(r2(Number(x) || 0)).replace(".", ",");
+
+// Savaitės valandos tolygiai pasirinktoms dienoms (likutis - paskutinei)
+function spread(total, days) {
+  const idx = days.map((on, i) => (on ? i : -1)).filter((i) => i >= 0);
+  const out = days.map(() => 0);
+  if (!idx.length) return out;
+  const each = r2(total / idx.length);
+  idx.forEach((i) => { out[i] = each; });
+  out[idx[idx.length - 1]] = r2(total - each * (idx.length - 1));
+  return out;
+}
+
+// „Pr–Pn po 8 val.“, „An–Š po 8 val.“, „Pr, Tr, Pn · 20 val.“
+function weekLabel(days, week) {
+  const runs = [];
+  days.forEach((on, i) => {
+    if (!on) return;
+    const last = runs[runs.length - 1];
+    if (last && last[1] === i - 1) last[1] = i; else runs.push([i, i]);
+  });
+  if (!runs.length) return "–";
+  const names = runs.map(([a, b]) => (a === b ? DAYS[a] : b - a === 1 ? `${DAYS[a]}, ${DAYS[b]}` : `${DAYS[a]}–${DAYS[b]}`)).join(", ");
+  const hrs = week.filter((_, i) => days[i]).map(Number);
+  return hrs.every((h) => Math.abs(h - hrs[0]) < 0.01) ? `${names} po ${fmtH(hrs[0])} val.` : `${names} · skirtingai`;
+}
+
+const isStdWeek = (days, week) => days.every((on, i) => on === STD_DAYS[i])
+  && week.slice(0, 5).every((h) => Math.abs(Number(h) - Number(week[0])) < 0.01);
+
+function WeekEditor({ days, week, total, onToggle, onHour, onTemplate }) {
+  const sum = week.reduce((a, h, i) => a + (days[i] ? Number(h) || 0 : 0), 0);
+  const off = Math.abs(sum - total) > 0.01;
+  const tooLong = week.some((h, i) => days[i] && Number(h) > 12);
+  return (
+    <Box>
+      <Stack direction="row" alignItems="center" justifyContent="space-between" mb={1}>
+        <Typography sx={{ fontSize: 13.5, fontWeight: 500 }}>Darbo dienos ir valandos</Typography>
+        <Stack direction="row" gap={.75}>
+          {DAY_TEMPLATES.map(([l, d]) => (
+            <Chip key={l} size="small" label={l} clickable onClick={() => onTemplate(d)}
+              variant={d.every((x, i) => x === days[i]) ? "filled" : "outlined"}
+              color={d.every((x, i) => x === days[i]) ? "primary" : "default"} />
+          ))}
+        </Stack>
+      </Stack>
+      <Box sx={{ display: "grid", gridTemplateColumns: "repeat(7, minmax(0, 1fr))", gap: 1, maxWidth: 520 }}>
+        {DAYS.map((d, i) => (
+          <Box key={d}>
+            <Box onClick={() => onToggle(i)} sx={{
+              height: 34, borderRadius: 2, display: "grid", placeItems: "center", cursor: "pointer", userSelect: "none",
+              fontSize: 13.5, fontWeight: 600, border: "1.5px solid", borderColor: days[i] ? "#1570EF" : "#EAECF0",
+              bgcolor: days[i] ? "#1570EF" : "#FFFFFF", color: days[i] ? "#FFFFFF" : i > 4 ? "#98A2B3" : "#475467",
+            }}>{d}</Box>
+            <TextField size="small" fullWidth disabled={!days[i]} placeholder="–"
+              value={days[i] ? String(week[i]).replace(".", ",") : ""}
+              onChange={(e) => onHour(i, e.target.value.replace(",", ".").replace(/[^\d.]/g, ""))}
+              inputProps={{ inputMode: "decimal", style: { textAlign: "center", padding: "6px 2px", fontSize: 13 } }}
+              sx={{ mt: .75 }} />
+          </Box>
+        ))}
+      </Box>
+      <Typography sx={{ fontSize: 12, color: off || tooLong ? "#B42318" : "#667085", mt: .75 }}>
+        {off ? `Dienų suma ${fmtH(sum)} val., o turi būti ${fmtH(total)} val. per savaitę`
+          : tooLong ? "Ne daugiau kaip 12 val. per dieną (DK 114 str.)"
+            : "Valandos per dieną. Paspauskite dieną, kad ją įjungtumėte ar išjungtumėte."}
+      </Typography>
+    </Box>
+  );
+}
+const LONG_PROBATION_FROM = "2026-11-01";   // DK 36 str. 2 d. (įst. XV-1058): iki 6 mėn., kai alga >= 2 VDU
+const CARD_SX = { border: "1px solid #EAECF0", borderRadius: 2.5, p: 2.25, bgcolor: "#FFFFFF" };
+const BTN_SX = { textTransform: "none", fontWeight: 600, borderRadius: 2, boxShadow: "none", "&:hover": { boxShadow: "none" } };
 
 const EMPTY = {
   first_name: "", last_name: "", personal_code: "", is_foreigner: false, birth_date: "", gender: "",
   email: "", phone: "+370",
   position_id: null, position_name: "", lpk_code: "", lpk_title: "", custom_title: "",
-  start_date: today(), sodra_contract_type: "01", sodra_contract_subtype: "", end_date: "",
+  start_date: today(), sodra_contract_type: "01", sodra_contract_subtype: "", end_date: "", probation_months: "0",
+  work_regime: "standard", days: STD_DAYS, week: [8, 8, 8, 8, 8, 0, 0],
+  period_custom: false, period_months: 3, period_anchor: 1,
   pay_form: "monthly", base_amount: "", weekly_hours: 40, full_time_hours: 40, shortened: false,
   extended_leave_days: "", extra_leave_days: "",
   fill_mode: "invite",
   iban: "", address: "", npd_mode: "standard", pension_accumulation: false, single_parent: false,
 };
 
-function Section({ title, children, sx }) {
+// 1-SD - ne vėliau kaip prieš 1 darbo dieną iki darbo pradžios (savaitgaliai praleidžiami; šventes tikrina Sodros forma)
+function prevWorkday(iso) {
+  if (!iso) return "";
+  const d = new Date(`${iso}T12:00:00`);
+  do { d.setDate(d.getDate() - 1); } while (d.getDay() === 0 || d.getDay() === 6);
+  return d.toISOString().slice(0, 10);
+}
+
+function Section({ title, desc, children, sx }) {
   return (
-    <Box sx={{ mb: 3, ...sx }}>
-      <Typography fontWeight={700} mb={1.5}>{title}</Typography>
-      <Stack gap={2}>{children}</Stack>
+    <Box sx={{ ...CARD_SX, ...sx }}>
+      <Typography sx={{ fontSize: 14.5, fontWeight: 600, color: "#101828" }}>{title}</Typography>
+      {desc && <Typography sx={{ fontSize: 12.5, color: "#667085", mt: .2 }}>{desc}</Typography>}
+      <Stack gap={2} mt={1.75}>{children}</Stack>
     </Box>
   );
 }
@@ -93,27 +188,36 @@ export function PositionPicker({ c, set }) {
             onChange={(e) => set({ custom_title: e.target.value })}
             helperText={`Profesija pagal klasifikatorių: ${c.lpk_title} (${c.lpk_code})`} autoFocus />
         ) : (
-          <Button size="small" sx={{ mt: 0.5, px: 0 }} onClick={() => setCustom(true)}>+ Kitas pavadinimas sutartyje</Button>
+          <Button size="small" sx={{ mt: 0.5, px: 0, textTransform: "none" }} onClick={() => setCustom(true)}>+ Kitas pavadinimas sutartyje</Button>
         )
       )}
     </Box>
   );
 }
 
+const STEPS = ["Asmuo", "Darbas", "Kiti duomenys"];
+
 // ---------- Dialogas ----------
 export default function NewEmployeeDialog({ open, onClose, onCreated }) {
   const [f, setF] = useState(EMPTY);
+  const [step, setStep] = useState(0);
   const [positions, setPositions] = useState([]);
   const [leave, setLeave] = useState(null);
   const [leaveEdit, setLeaveEdit] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [co, setCo] = useState({ m: 3, a: 1 });   // įmonės apskaitinis laikotarpis (DU nustatymai)
   const set = (v) => setF((s) => ({ ...s, ...v }));
+  const setHours = (h) => setF((s) => ({ ...s, weekly_hours: h, week: spread(Number(h) || 0, s.days) }));
+  const setDays = (days) => setF((s) => ({ ...s, days, week: spread(Number(s.weekly_hours) || 0, days) }));
+  const toggleDay = (i) => setDays(f.days.map((x, j) => (j === i ? !x : x)));
+  const setDayHours = (i, v) => setF((s) => ({ ...s, week: s.week.map((h, j) => (j === i ? v : h)) }));
 
   useEffect(() => {
     if (!open) return;
-    setF({ ...EMPTY, start_date: today() }); setError(""); setLeaveEdit(false);
+    setF({ ...EMPTY, start_date: today() }); setError(""); setLeaveEdit(false); setStep(0);
     payrollApi.positions().then(setPositions).catch(() => {});
+    payrollApi.settings().then((st) => setCo({ m: st.summed_period_months || 3, a: st.summed_period_anchor || 1 })).catch(() => {});
   }, [open]);
 
   const pc = f.is_foreigner ? null : f.personal_code ? parsePersonalCode(f.personal_code) : null;
@@ -121,34 +225,46 @@ export default function NewEmployeeDialog({ open, onClose, onCreated }) {
   const fixedTerm = ["02", "04", "05"].includes(f.sodra_contract_type) || f.sodra_contract_subtype?.endsWith("1");
   const needsEnd = f.sodra_contract_type === "02" || f.sodra_contract_subtype?.endsWith("1");
   const workload = Number(f.weekly_hours || 0) / Number(f.full_time_hours || 40);
+  const workDays = f.days.filter(Boolean).length;
+  const weekSum = f.week.reduce((a, h, i) => a + (f.days[i] ? Number(h) || 0 : 0), 0);
+  const pm = f.period_custom ? Number(f.period_months) : co.m;
+  const pa = f.period_custom ? norm(pm, f.period_anchor) : norm(co.m, co.a);
+  const firstPeriod = f.start_date ? periodsFrom(new Date(`${f.start_date}T12:00:00`), pm, pa, 0)[0] : null;
   const monthlyGross = f.pay_form === "monthly" ? Number(f.base_amount) : Number(f.base_amount) * Number(f.weekly_hours || 0) * 52 / 12;
-  const hasContact = !!f.email || (f.phone && f.phone.replace(/\D/g, "").length > 6);
 
   // atostogų trukmė iš backend (viena taisyklių vieta)
   useEffect(() => {
-    if (!open) return;
+    if (!open) return undefined;
     const t = setTimeout(() => {
       payrollApi.leavePreview({
         personal_code: f.is_foreigner ? "" : f.personal_code, birth_date: f.is_foreigner ? f.birth_date : "",
-        start_date: f.start_date, weekly_days: 5,
+        start_date: f.start_date, weekly_days: f.work_regime === "standard" && workDays >= 6 ? 6 : 5,
         has_disability: ["d30_55", "d0_25"].includes(f.npd_mode), single_parent: f.single_parent,
         extended_leave_days: f.extended_leave_days, extra_leave_days: f.extra_leave_days,
       }).then(setLeave).catch(() => setLeave(null));
     }, 250);
     return () => clearTimeout(t);
-  }, [open, f.personal_code, f.is_foreigner, f.birth_date, f.start_date, f.npd_mode, f.single_parent, f.extended_leave_days, f.extra_leave_days]);
+  }, [open, f.personal_code, f.is_foreigner, f.birth_date, f.start_date, f.npd_mode, f.single_parent, f.extended_leave_days, f.extra_leave_days, f.work_regime, workDays]);
 
-  const errors = [];
-  if (!f.first_name || !f.last_name) errors.push("vardas ir pavardė");
-  if (!f.is_foreigner && !pc?.valid) errors.push("teisingas asmens kodas");
-  if (f.is_foreigner && (!f.birth_date || !f.gender)) errors.push("gimimo data ir lytis");
-  if (!f.position_id && !f.lpk_code) errors.push("pareigos");
-  if (!f.start_date) errors.push("darbo pradžia");
-  if (!(Number(f.base_amount) > 0)) errors.push("atlyginimas");
-  if (!(Number(f.weekly_hours) > 0)) errors.push("darbo valandos");
-  if (type?.subtypes && !f.sodra_contract_subtype) errors.push("ar sutartis terminuota");
-  if (needsEnd && !f.end_date) errors.push("darbo pabaiga");
-  if (f.fill_mode === "invite" && !hasContact) errors.push("el. paštas arba telefonas anketai išsiųsti");
+  // trūkstami laukai pagal žingsnį
+  const missing = [[], [], []];
+  if (!f.first_name || !f.last_name) missing[0].push("vardas ir pavardė");
+  if (!f.is_foreigner && !pc?.valid) missing[0].push("teisingas asmens kodas");
+  if (f.is_foreigner && (!f.birth_date || !f.gender)) missing[0].push("gimimo data ir lytis");
+  if (!f.position_id && !f.lpk_code) missing[1].push("pareigos");
+  if (!f.start_date) missing[1].push("darbo pradžia");
+  if (!(Number(f.base_amount) > 0)) missing[1].push("atlyginimas");
+  if (!(Number(f.weekly_hours) > 0)) missing[1].push("darbo valandos");
+  if (Number(f.weekly_hours) > Number(f.full_time_hours || 40)) missing[1].push(`ne daugiau kaip ${f.full_time_hours || 40} val. per savaitę`);
+  if (f.work_regime === "standard" && Number(f.weekly_hours) > 0) {
+    if (!workDays || Math.abs(weekSum - Number(f.weekly_hours)) > 0.01) missing[1].push("darbo dienų valandos (suma nesutampa)");
+    if (f.week.some((h, i) => f.days[i] && Number(h) > 12)) missing[1].push("ne daugiau 12 val. per dieną");
+  }
+  if (type?.subtypes && !f.sodra_contract_subtype) missing[1].push("ar sutartis terminuota");
+  if (needsEnd && !f.end_date) missing[1].push("darbo pabaiga");
+  if (Number(f.probation_months) > 3 && f.start_date < LONG_PROBATION_FROM) missing[1].push("išbandymas iki 3 mėn. (ilgesnis – nuo 2026-11-01)");
+  if (f.fill_mode === "invite" && !f.email) missing[2].push("el. paštas kvietimui");
+  const allMissing = missing.flat();
 
   const save = async () => {
     setSaving(true); setError("");
@@ -174,12 +290,16 @@ export default function NewEmployeeDialog({ open, onClose, onCreated }) {
       const c = await payrollApi.createContract({
         employee: emp.id, start_date: f.start_date, end_date: f.end_date || null,
         sodra_contract_type: f.sodra_contract_type, sodra_contract_subtype: f.sodra_contract_subtype, status: "active",
+        probation_months: Number(f.probation_months) || 0, work_time_mode: f.work_regime === "summed" ? "02" : "01",
         extra_leave_days: Number(f.extra_leave_days) || 0,
         extended_leave_days: f.extended_leave_days ? Number(f.extended_leave_days) : null,
+        ...(f.work_regime === "summed" && f.period_custom
+          ? { summed_period_months: Number(f.period_months), summed_period_anchor: norm(Number(f.period_months), f.period_anchor) } : {}),
       });
       await payrollApi.createTerms({
         contract: c.id, valid_from: f.start_date, position: pos.id, pay_form: f.pay_form, base_amount: f.base_amount,
-        workload: workload.toFixed(3), full_time_hours: f.full_time_hours,
+        workload: workload.toFixed(3), full_time_hours: f.full_time_hours, work_regime: f.work_regime,
+        week_hours: f.work_regime === "standard" && !isStdWeek(f.days, f.week) ? f.week.map((h, i) => (f.days[i] ? Number(h) || 0 : 0)) : null,
       });
       onCreated(emp.id);
     } catch (e) { setError(apiError(e)); } finally { setSaving(false); }
@@ -189,200 +309,395 @@ export default function NewEmployeeDialog({ open, onClose, onCreated }) {
     gross: monthlyGross, npdMode: f.npd_mode, pension: f.pension_accumulation, fixedTerm, date: f.start_date,
   }) : estimateNet({ gross: monthlyGross, fixedTerm, date: f.start_date });
   const minWage = f.pay_form === "monthly" && Number(f.base_amount) > 0 && Number(f.base_amount) < (est?.mma || 1153) * workload;
+  const positionLabel = f.position_name || f.custom_title || f.lpk_title;
+  const sd1 = prevWorkday(f.start_date);
 
   return (
-    <Dialog open={open} onClose={onClose} fullWidth maxWidth="md" disableScrollLock>
-      <DialogTitle sx={{ pr: 6 }}>
-        Naujas darbuotojas
-        <IconButton onClick={onClose} sx={{ position: "absolute", right: 12, top: 12 }}><CloseIcon /></IconButton>
-      </DialogTitle>
-      <DialogContent dividers>
-        {/* ---------- Asmuo ---------- */}
-        <Section title="Asmuo">
-          <Stack direction={{ xs: "column", sm: "row" }} gap={2}>
-            <TextField label="Vardas" value={f.first_name} onChange={(e) => set({ first_name: e.target.value })} fullWidth required autoFocus />
-            <TextField label="Pavardė" value={f.last_name} onChange={(e) => set({ last_name: e.target.value })} fullWidth required />
-          </Stack>
-          <Stack direction={{ xs: "column", sm: "row" }} gap={2} alignItems={{ sm: "flex-start" }}>
-            {!f.is_foreigner && (
-              <TextField label="Asmens kodas" value={f.personal_code} required sx={{ width: { sm: 260 } }}
-                inputProps={{ inputMode: "numeric", maxLength: 11 }}
-                onChange={(e) => set({ personal_code: e.target.value.replace(/\D/g, "") })}
-                error={!!f.personal_code && f.personal_code.length === 11 && !pc?.valid}
-                helperText={!f.personal_code ? " " : pc?.valid
-                  ? `Gimė ${pc.birth_date} · ${pc.gender === "M" ? "vyras" : "moteris"}`
-                  : f.personal_code.length === 11 ? pc?.error : " "} />
-            )}
-            {f.is_foreigner && (
+    <Dialog open={open} onClose={onClose} fullWidth maxWidth="lg" disableScrollLock
+      PaperProps={{ sx: { borderRadius: 3, overflow: "hidden", bgcolor: "#F8FAFC", height: { md: "88vh" } } }}>
+      {/* antraštė su žingsniais */}
+      <Stack direction="row" alignItems="center" gap={2} sx={{ px: 3, py: 1.75, bgcolor: "#FFFFFF", borderBottom: "1px solid #EAECF0" }}>
+        <Box sx={{ width: 38, height: 38, borderRadius: 2, bgcolor: "#EFF8FF", display: "grid", placeItems: "center" }}>
+          <PersonAddAltOutlinedIcon sx={{ color: "#1570EF" }} />
+        </Box>
+        <Typography sx={{ fontSize: 17, fontWeight: 600, mr: 2 }}>Naujas darbuotojas</Typography>
+        <Stack direction="row" alignItems="center" gap={1} sx={{ flex: 1, display: { xs: "none", md: "flex" } }}>
+          {STEPS.map((s, i) => {
+            const done = i < step && !missing[i].length;
+            const cur = i === step;
+            return (
+              <Stack key={s} direction="row" alignItems="center" gap={1}>
+                {i > 0 && <Box sx={{ width: 28, height: 2, bgcolor: i <= step ? "#1570EF" : "#EAECF0", borderRadius: 1 }} />}
+                <Stack direction="row" alignItems="center" gap={.8} onClick={() => setStep(i)} sx={{ cursor: "pointer" }}>
+                  <Box sx={{ width: 24, height: 24, borderRadius: "50%", display: "grid", placeItems: "center", fontSize: 12.5, fontWeight: 600,
+                    bgcolor: done ? "#1570EF" : cur ? "#EFF8FF" : "#F2F4F7", color: done ? "#FFFFFF" : cur ? "#1570EF" : "#667085",
+                    border: cur ? "1.5px solid #1570EF" : "none" }}>
+                    {done ? <CheckIcon sx={{ fontSize: 15 }} /> : i + 1}
+                  </Box>
+                  <Typography sx={{ fontSize: 13.5, fontWeight: cur ? 600 : 500, color: cur ? "#101828" : "#667085" }}>{s}</Typography>
+                </Stack>
+              </Stack>
+            );
+          })}
+        </Stack>
+        <IconButton onClick={onClose} aria-label="Uždaryti"><CloseIcon /></IconButton>
+      </Stack>
+
+      <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "minmax(0,1fr) 300px" }, flex: 1, minHeight: 0 }}>
+        <Box sx={{ overflowY: "auto", p: 2.5 }}>
+          <Stack gap={2}>
+            {/* ---------- 1. Asmuo ---------- */}
+            {step === 0 && (
               <>
-                <Box sx={{ width: { sm: 200 } }}>
-                  <LtDatePicker label="Gimimo data *" value={f.birth_date} onChange={(v) => set({ birth_date: v })} size="medium" />
-                </Box>
-                <FormControl sx={{ minWidth: 160 }}>
-                  <InputLabel>Lytis *</InputLabel>
-                  <Select label="Lytis *" value={f.gender} MenuProps={MENU_PROPS} onChange={(e) => set({ gender: e.target.value })}>
-                    <MenuItem value="M">Vyras</MenuItem><MenuItem value="F">Moteris</MenuItem>
-                  </Select>
-                </FormControl>
+                <Section title="Asmuo" desc="Kaip nurodyta asmens dokumente">
+                  <Stack direction={{ xs: "column", sm: "row" }} gap={2}>
+                    <TextField label="Vardas" value={f.first_name} onChange={(e) => set({ first_name: e.target.value })} fullWidth required autoFocus />
+                    <TextField label="Pavardė" value={f.last_name} onChange={(e) => set({ last_name: e.target.value })} fullWidth required />
+                  </Stack>
+                  <Stack direction={{ xs: "column", sm: "row" }} gap={2} alignItems={{ sm: "flex-start" }}>
+                    {!f.is_foreigner ? (
+                      <TextField label="Asmens kodas" value={f.personal_code} required sx={{ width: { sm: 420 } }}
+                        inputProps={{ inputMode: "numeric", maxLength: 11 }}
+                        onChange={(e) => set({ personal_code: e.target.value.replace(/\D/g, "") })}
+                        error={!!f.personal_code && f.personal_code.length === 11 && !pc?.valid}
+                        FormHelperTextProps={{ sx: { color: pc?.valid && pc.warning ? "#B54708" : undefined } }}
+                        helperText={!f.personal_code ? "11 skaitmenų" : pc?.valid
+                          ? `${pc.birth_date ? `Gimė ${pc.birth_date} · ` : ""}${pc.gender === "M" ? "vyras" : "moteris"}${pc.warning ? `. ⚠ ${pc.warning}` : ""}`
+                          : f.personal_code.length === 11 ? pc?.error : `Įvesta ${f.personal_code.length} iš 11 skaitmenų`} />
+                    ) : (
+                      <>
+                        <Box sx={{ width: { sm: 200 } }}>
+                          <LtDatePicker label="Gimimo data *" value={f.birth_date} onChange={(v) => set({ birth_date: v })} size="medium" />
+                        </Box>
+                        <FormControl sx={{ minWidth: 160 }}>
+                          <InputLabel>Lytis *</InputLabel>
+                          <Select label="Lytis *" value={f.gender} MenuProps={MENU_PROPS} onChange={(e) => set({ gender: e.target.value })}>
+                            <MenuItem value="M">Vyras</MenuItem><MenuItem value="F">Moteris</MenuItem>
+                          </Select>
+                        </FormControl>
+                      </>
+                    )}
+                    <FormControlLabel sx={{ mt: 1 }} control={<Checkbox checked={f.is_foreigner} onChange={(e) => set({ is_foreigner: e.target.checked })} />}
+                      label={<Typography sx={{ fontSize: 14 }}>Užsienietis (neturi LT asmens kodo)</Typography>} />
+                  </Stack>
+                </Section>
+                <Section title="Kontaktai" desc="El. paštu siunčiamas kvietimas į eSavitarną ir algalapiai">
+                  <Stack direction={{ xs: "column", sm: "row" }} gap={2}>
+                    <TextField label="El. paštas" type="email" value={f.email} onChange={(e) => set({ email: e.target.value.trim() })} fullWidth />
+                    <MuiTelInput label="Telefonas" value={f.phone} onChange={(v) => set({ phone: v })} defaultCountry="LT"
+                      preferredCountries={["LT", "LV", "PL", "UA"]} fullWidth MenuProps={MENU_PROPS} />
+                  </Stack>
+                </Section>
               </>
             )}
-            <FormControlLabel sx={{ mt: 1 }} control={<Checkbox checked={f.is_foreigner} onChange={(e) => set({ is_foreigner: e.target.checked })} />}
-              label="Užsienietis (neturi LT asmens kodo)" />
-          </Stack>
-          <Stack direction={{ xs: "column", sm: "row" }} gap={2}>
-            <TextField label="El. paštas" type="email" value={f.email} onChange={(e) => set({ email: e.target.value.trim() })} fullWidth />
-            <MuiTelInput label="Telefonas" value={f.phone} onChange={(v) => set({ phone: v })} defaultCountry="LT"
-              preferredCountries={["LT", "LV", "PL", "UA"]} fullWidth MenuProps={MENU_PROPS} />
-          </Stack>
-        </Section>
 
-        <Divider sx={{ mb: 3 }} />
+            {/* ---------- 2. Darbas ---------- */}
+            {step === 1 && (
+              <>
+                <Section title="Pareigos ir sutartis">
+                  <PositionPicker c={f} set={set} />
+                  <Stack direction={{ xs: "column", sm: "row" }} gap={2}>
+                    <Box sx={{ width: { sm: 200 }, flexShrink: 0 }}>
+                      <LtDatePicker label="Darbo pradžia *" value={f.start_date} onChange={(v) => set({ start_date: v })} size="medium" />
+                    </Box>
+                    <FormControl fullWidth>
+                      <InputLabel>Sutarties rūšis</InputLabel>
+                      <Select label="Sutarties rūšis" value={f.sodra_contract_type} MenuProps={MENU_PROPS}
+                        onChange={(e) => set({ sodra_contract_type: e.target.value, sodra_contract_subtype: "" })}>
+                        {CONTRACT_TYPES.map((t) => <MenuItem key={t.value} value={t.value}>{t.label}</MenuItem>)}
+                      </Select>
+                    </FormControl>
+                    <FormControl sx={{ minWidth: 200 }}>
+                      <InputLabel>Bandomasis laikotarpis</InputLabel>
+                      <Select label="Bandomasis laikotarpis" value={f.probation_months} MenuProps={MENU_PROPS} onChange={(e) => set({ probation_months: e.target.value })}>
+                        {["0", "1", "2", "3", "4", "5", "6"].map((m) => (
+                          <MenuItem key={m} value={m} disabled={Number(m) > 3 && f.start_date < LONG_PROBATION_FROM}>
+                            {m === "0" ? "Nėra" : `${m} mėn.`}{Number(m) > 3 ? " (tik didelė alga)" : ""}
+                          </MenuItem>
+                        ))}
+                      </Select>
+                    </FormControl>
+                  </Stack>
+                  {Number(f.probation_months) > 3 && (
+                    <Alert severity="info" sx={{ py: 0 }}>
+                      Ilgesnis nei 3 mėn. išbandymas (iki 6 mėn.) leidžiamas nuo 2026-11-01, kai sutartyje nustatyta mėnesinė alga ne mažesnė
+                      kaip 2 šalies vidutiniai darbo užmokesčiai (paskutinis VDA paskelbtas). DK 36 str., įst. Nr. XV-1058.
+                    </Alert>
+                  )}
+                  {fixedTerm && Number(f.probation_months) > 0 && (
+                    <Typography sx={{ fontSize: 12.5, color: "#667085" }}>
+                      Terminuotoje sutartyje išbandymas turi būti proporcingas sutarties trukmei.
+                    </Typography>
+                  )}
+                  {(type?.subtypes || needsEnd) && (
+                    <Stack direction={{ xs: "column", sm: "row" }} gap={2}>
+                      {type?.subtypes && (
+                        <FormControl fullWidth>
+                          <InputLabel>Ar terminuota?</InputLabel>
+                          <Select label="Ar terminuota?" value={f.sodra_contract_subtype} MenuProps={MENU_PROPS}
+                            onChange={(e) => set({ sodra_contract_subtype: e.target.value })}>
+                            <MenuItem value={`${f.sodra_contract_type}1`}>Terminuota</MenuItem>
+                            <MenuItem value={`${f.sodra_contract_type}2`}>Neterminuota</MenuItem>
+                          </Select>
+                        </FormControl>
+                      )}
+                      {needsEnd && (
+                        <Box sx={{ width: { sm: 200 }, flexShrink: 0 }}>
+                          <LtDatePicker label="Darbo pabaiga *" value={f.end_date} onChange={(v) => set({ end_date: v })} size="medium" />
+                        </Box>
+                      )}
+                    </Stack>
+                  )}
+                </Section>
 
-        {/* ---------- Darbas ---------- */}
-        <Section title="Darbas">
-          <PositionPicker c={f} set={set} />
-          <Stack direction={{ xs: "column", sm: "row" }} gap={2}>
-            <Box sx={{ width: { sm: 200 }, flexShrink: 0 }}>
-              <LtDatePicker label="Darbo pradžia *" value={f.start_date} onChange={(v) => set({ start_date: v })} size="medium" />
-            </Box>
-            <FormControl fullWidth>
-              <InputLabel>Sutarties rūšis</InputLabel>
-              <Select label="Sutarties rūšis" value={f.sodra_contract_type} MenuProps={MENU_PROPS}
-                onChange={(e) => set({ sodra_contract_type: e.target.value, sodra_contract_subtype: "" })}>
-                {CONTRACT_TYPES.map((t) => <MenuItem key={t.value} value={t.value}>{t.label}</MenuItem>)}
-              </Select>
-            </FormControl>
-          </Stack>
-          {(type?.subtypes || needsEnd) && (
-            <Stack direction={{ xs: "column", sm: "row" }} gap={2}>
-              {type?.subtypes && (
-                <FormControl fullWidth>
-                  <InputLabel>Ar terminuota?</InputLabel>
-                  <Select label="Ar terminuota?" value={f.sodra_contract_subtype} MenuProps={MENU_PROPS}
-                    onChange={(e) => set({ sodra_contract_subtype: e.target.value })}>
-                    <MenuItem value={`${f.sodra_contract_type}1`}>Terminuota</MenuItem>
-                    <MenuItem value={`${f.sodra_contract_type}2`}>Neterminuota</MenuItem>
-                  </Select>
-                </FormControl>
-              )}
-              {needsEnd && (
-                <Box sx={{ width: { sm: 200 }, flexShrink: 0 }}>
-                  <LtDatePicker label="Darbo pabaiga *" value={f.end_date} onChange={(v) => set({ end_date: v })} size="medium" />
-                </Box>
-              )}
-            </Stack>
-          )}
+                <Section title="Atlyginimas ir darbo laikas">
+                  <Stack direction={{ xs: "column", sm: "row" }} gap={2} alignItems={{ sm: "center" }}>
+                    <ToggleButtonGroup exclusive size="small" value={f.pay_form} onChange={(_, v) => v && set({ pay_form: v })}
+                      sx={{ "& .MuiToggleButton-root": { textTransform: "none", px: 1.75 } }}>
+                      <ToggleButton value="monthly">Mėnesinė alga</ToggleButton>
+                      <ToggleButton value="hourly">Valandinis</ToggleButton>
+                    </ToggleButtonGroup>
+                    <TextField label={f.pay_form === "monthly" ? "Alga „ant popieriaus“" : "Už valandą „ant popieriaus“"} required
+                      type="number" value={f.base_amount} onChange={(e) => set({ base_amount: e.target.value })} sx={{ flex: 1 }}
+                      InputProps={{ endAdornment: <InputAdornment position="end">{f.pay_form === "monthly" ? "€ / mėn." : "€ / val."}</InputAdornment> }} />
+                  </Stack>
+                  <Box>
+                    <Stack direction="row" gap={2} alignItems="center" flexWrap="wrap">
+                      <TextField label="Valandų per savaitę" type="number" value={f.weekly_hours} sx={{ width: 170 }} required
+                        onChange={(e) => setHours(e.target.value)} inputProps={{ min: 1, max: f.full_time_hours || 40 }} />
+                      <Stack direction="row" gap={1}>
+                        {QUICK_HOURS.map((h) => (
+                          <Chip key={h} label={h} clickable color={Number(f.weekly_hours) === h ? "primary" : "default"}
+                            variant={Number(f.weekly_hours) === h ? "filled" : "outlined"} onClick={() => setHours(h)} />
+                        ))}
+                      </Stack>
+                      <Typography variant="body2" color="text.secondary">
+                        = {workload === 1 ? "visas etatas" : `${String(Math.round(workload * 1000) / 1000).replace(".", ",")} etato`}
+                      </Typography>
+                    </Stack>
+                    {!f.shortened ? (
+                      <Link component="button" type="button" variant="caption" onClick={() => set({ shortened: true })} sx={{ mt: 0.75 }}>
+                        Sutrumpinta darbo laiko norma
+                      </Link>
+                    ) : (
+                      <Stack direction="row" gap={2} alignItems="center" mt={1}>
+                        <TextField size="small" label="Visas etatas šiai pareigybei, val./sav." type="number" value={f.full_time_hours} sx={{ width: 260 }}
+                          onChange={(e) => set({ full_time_hours: e.target.value })} />
+                        <Button size="small" onClick={() => set({ shortened: false, full_time_hours: 40 })} sx={{ textTransform: "none" }}>Atšaukti</Button>
+                      </Stack>
+                    )}
+                  </Box>
+                  {minWage && <Alert severity="warning">Alga mažesnė už minimalią (MMA) šiam darbo laikui.</Alert>}
+                  <Box>
+                    <Typography sx={{ fontSize: 13.5, fontWeight: 500, mb: 1 }}>Darbo laiko apskaita</Typography>
+                    <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "1fr 1fr" }, gap: 1.5 }}>
+                      {[["standard", "Standartinė", "Darbo dienomis pagal kalendorių (pvz. Pr–Pn po 8 val.). Darbo laikas – pagal sutartį."],
+                        ["summed", "Suminė", "Pamainomis pagal grafiką. Valandų norma skaičiuojama per apskaitinį laikotarpį (pvz. 3 mėn.)."]].map(([v, t, d]) => {
+                        const on = f.work_regime === v;
+                        return (
+                          <Box key={v} onClick={() => set({ work_regime: v })}
+                            sx={{ p: 1.5, borderRadius: 2, cursor: "pointer", border: "1.5px solid", borderColor: on ? "#1570EF" : "#EAECF0", bgcolor: on ? "#F5F8FF" : "#FFFFFF" }}>
+                            <Stack direction="row" alignItems="center" gap={1}>
+                              <Box sx={{ width: 16, height: 16, borderRadius: "50%", border: "2px solid", borderColor: on ? "#1570EF" : "#D0D5DD", display: "grid", placeItems: "center" }}>
+                                {on && <Box sx={{ width: 8, height: 8, borderRadius: "50%", bgcolor: "#1570EF" }} />}
+                              </Box>
+                              <Typography sx={{ fontSize: 14, fontWeight: 600 }}>{t}</Typography>
+                            </Stack>
+                            <Typography sx={{ fontSize: 12.5, color: "#667085", mt: .4, ml: 3 }}>{d}</Typography>
+                          </Box>
+                        );
+                      })}
+                    </Box>
+                    {f.work_regime === "standard" && (
+                      <Box mt={2}>
+                        <WeekEditor days={f.days} week={f.week} total={Number(f.weekly_hours) || 0}
+                          onToggle={toggleDay} onHour={setDayHours} onTemplate={setDays} />
+                      </Box>
+                    )}
+                    {f.work_regime === "summed" && (
+                      <Box sx={{ mt: 1.5, p: 1.5, borderRadius: 2, bgcolor: "#F8FAFC", border: "1px solid #EAECF0" }}>
+                        {!f.period_custom ? (
+                          <Stack direction={{ xs: "column", sm: "row" }} alignItems={{ sm: "center" }} gap={1.5}>
+                            <Box sx={{ flex: 1 }}>
+                              <Typography sx={{ fontSize: 13.5, fontWeight: 500 }}>
+                                Apskaitinis laikotarpis – {pm} mėn., {anchorLabel(pm, pa)}
+                              </Typography>
+                              <Typography sx={{ fontSize: 12.5, color: "#667085" }}>
+                                Pagal įmonės DU nustatymus{firstPeriod ? ` · pirmasis: ${f.start_date} – ${iso(firstPeriod.end)}` : ""}
+                              </Typography>
+                            </Box>
+                            <Button size="small" onClick={() => set({ period_custom: true, period_months: co.m, period_anchor: norm(co.m, co.a) })}
+                              sx={{ textTransform: "none", flexShrink: 0 }}>Kitoks šiam darbuotojui</Button>
+                          </Stack>
+                        ) : (
+                          <Stack gap={1.5}>
+                            <Stack direction={{ xs: "column", sm: "row" }} gap={1.5}>
+                              <TextField select size="small" label="Laikotarpio trukmė" value={pm} sx={{ minWidth: 170 }}
+                                onChange={(e) => set({ period_months: Number(e.target.value), period_anchor: 1 })} SelectProps={{ MenuProps: MENU_PROPS }}>
+                                <MenuItem value={1}>1 mėnuo</MenuItem>
+                                <MenuItem value={2}>2 mėnesiai</MenuItem>
+                                <MenuItem value={3}>3 mėnesiai</MenuItem>
+                              </TextField>
+                              {pm > 1 && (
+                                <TextField select size="small" label="Laikotarpiai prasideda" value={pa} fullWidth
+                                  onChange={(e) => set({ period_anchor: Number(e.target.value) })} SelectProps={{ MenuProps: MENU_PROPS }}>
+                                  {Array.from({ length: pm }, (_, i) => i + 1).map((a) => (
+                                    <MenuItem key={a} value={a}>{cap(anchorLabel(pm, a))}</MenuItem>
+                                  ))}
+                                </TextField>
+                              )}
+                            </Stack>
+                            <Stack direction="row" alignItems="center" gap={1}>
+                              <Typography sx={{ fontSize: 12.5, color: "#667085", flex: 1 }}>
+                                {firstPeriod ? `Pirmasis laikotarpis: ${f.start_date} – ${iso(firstPeriod.end)}. ` : ""}Ne ilgiau kaip 3 mėn. (DK 113 str.)
+                              </Typography>
+                              <Button size="small" onClick={() => set({ period_custom: false })} sx={{ textTransform: "none" }}>Kaip įmonėje</Button>
+                            </Stack>
+                          </Stack>
+                        )}
+                      </Box>
+                    )}
+                  </Box>
+                </Section>
 
-          <Stack direction={{ xs: "column", sm: "row" }} gap={2} alignItems={{ sm: "center" }}>
-            <ToggleButtonGroup exclusive size="small" value={f.pay_form} onChange={(_, v) => v && set({ pay_form: v })}>
-              <ToggleButton value="monthly">Mėnesinė alga</ToggleButton>
-              <ToggleButton value="hourly">Valandinis</ToggleButton>
-            </ToggleButtonGroup>
-            <TextField label={f.pay_form === "monthly" ? "Alga „ant popieriaus“" : "Už valandą „ant popieriaus“"} required
-              type="number" value={f.base_amount} onChange={(e) => set({ base_amount: e.target.value })} sx={{ flex: 1 }}
-              InputProps={{ endAdornment: <InputAdornment position="end">{f.pay_form === "monthly" ? "€ / mėn." : "€ / val."}</InputAdornment> }} />
-          </Stack>
-
-          <Box>
-            <Stack direction="row" gap={2} alignItems="center" flexWrap="wrap">
-              <TextField label="Valandų per savaitę" type="number" value={f.weekly_hours} sx={{ width: 170 }} required
-                onChange={(e) => set({ weekly_hours: e.target.value })} />
-              <Stack direction="row" gap={1}>
-                {QUICK_HOURS.map((h) => (
-                  <Chip key={h} label={h} clickable color={Number(f.weekly_hours) === h ? "primary" : "default"}
-                    variant={Number(f.weekly_hours) === h ? "filled" : "outlined"} onClick={() => set({ weekly_hours: h })} />
-                ))}
-              </Stack>
-              <Typography variant="body2" color="text.secondary">
-                = {workload === 1 ? "visas etatas" : `${String(Math.round(workload * 1000) / 1000).replace(".", ",")} etato`}
-              </Typography>
-            </Stack>
-            {!f.shortened ? (
-              <Link component="button" type="button" variant="caption" onClick={() => set({ shortened: true })} sx={{ mt: 0.5 }}>
-                Sutrumpinta darbo laiko norma
-              </Link>
-            ) : (
-              <Stack direction="row" gap={2} alignItems="center" mt={1}>
-                <TextField size="small" label="Visas etatas šiai pareigybei, val./sav." type="number" value={f.full_time_hours} sx={{ width: 260 }}
-                  onChange={(e) => set({ full_time_hours: e.target.value })} />
-                <Button size="small" onClick={() => set({ shortened: false, full_time_hours: 40 })}>Atšaukti</Button>
-              </Stack>
+                <Section title="Kasmetinės atostogos" desc={leave ? `${leave.total} d. d. per metus` : "Skaičiuojama…"}>
+                  {leave?.parts?.map((p, i) => (
+                    <Stack key={i} direction="row" gap={1} alignItems="center">
+                      <BeachAccessOutlinedIcon sx={{ fontSize: 17, color: "#0E7490" }} />
+                      <Typography sx={{ fontSize: 13.5 }}><b style={{ fontWeight: 500 }}>{p.days} d. d.</b> – {p.reason}</Typography>
+                    </Stack>
+                  ))}
+                  <Box>
+                    <Link component="button" type="button" variant="caption" onClick={() => setLeaveEdit(!leaveEdit)}>
+                      {leaveEdit ? "Paslėpti" : "Pailgintos ar papildomos atostogos"}
+                    </Link>
+                    <Collapse in={leaveEdit}>
+                      <Stack direction={{ xs: "column", sm: "row" }} gap={2} mt={1.5}>
+                        <TextField size="small" label="Pailgintos pagal profesiją, d.d." type="number" value={f.extended_leave_days}
+                          onChange={(e) => set({ extended_leave_days: e.target.value })} helperText="Pvz. mokytojams, medikams (iki 41 d.d.)" fullWidth />
+                        <TextField size="small" label="Papildomai pagal sutartį, d.d." type="number" value={f.extra_leave_days}
+                          onChange={(e) => set({ extra_leave_days: e.target.value })} helperText="Jei įmonė suteikia daugiau" fullWidth />
+                      </Stack>
+                    </Collapse>
+                  </Box>
+                </Section>
+              </>
             )}
-          </Box>
-          {minWage && <Alert severity="warning">Alga mažesnė už minimalią (MMA) šiam darbo laikui.</Alert>}
 
-          {/* atostogos */}
-          <Box sx={{ p: 1.5, borderRadius: 1, bgcolor: "action.hover" }}>
-            <Stack direction="row" justifyContent="space-between" alignItems="center">
-              <Typography fontWeight={600}>Kasmetinės atostogos: {leave ? `${leave.total} d.d. per metus` : "…"}</Typography>
-              <Button size="small" onClick={() => setLeaveEdit(!leaveEdit)}>{leaveEdit ? "Uždaryti" : "Keisti"}</Button>
-            </Stack>
-            {leave?.parts?.map((p, i) => (
-              <Typography key={i} variant="body2" color="text.secondary">{i ? "+ " : ""}{p.days} d.d. – {p.reason}</Typography>
-            ))}
-            <Collapse in={leaveEdit}>
-              <Stack direction={{ xs: "column", sm: "row" }} gap={2} mt={1.5}>
-                <TextField size="small" label="Pailgintos pagal profesiją, d.d." type="number" value={f.extended_leave_days}
-                  onChange={(e) => set({ extended_leave_days: e.target.value })} helperText="Pvz. mokytojams, medikams (iki 41 d.d.)" fullWidth />
-                <TextField size="small" label="Papildomai pagal sutartį, d.d." type="number" value={f.extra_leave_days}
-                  onChange={(e) => set({ extra_leave_days: e.target.value })} helperText="Jei įmonė suteikia daugiau" fullWidth />
+            {/* ---------- 3. Kiti duomenys ---------- */}
+            {step === 2 && (
+              <>
+                <Section title="Kas suves adresą, banko sąskaitą, NPD ir vaikus?">
+                  <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "1fr 1fr" }, gap: 1.5 }}>
+                    {[["invite", MarkEmailReadOutlinedIcon, "Darbuotojas pats", "Gaus kvietimą į eSavitarną el. paštu ir užpildys duomenis", "Rekomenduojama"],
+                      ["manual", EditNoteOutlinedIcon, "Suvesiu pats", "Jei darbuotojas neturi el. pašto ar duomenis jau turite"]].map(([v, I, t, d, tag]) => {
+                      const on = f.fill_mode === v;
+                      return (
+                        <Box key={v} onClick={() => set({ fill_mode: v })}
+                          sx={{ p: 1.75, borderRadius: 2, cursor: "pointer", border: "1.5px solid", borderColor: on ? "#1570EF" : "#EAECF0", bgcolor: on ? "#F5F8FF" : "#FFFFFF" }}>
+                          <Stack direction="row" gap={1.25} alignItems="flex-start">
+                            <Box sx={{ width: 34, height: 34, borderRadius: 2, bgcolor: on ? "#1570EF" : "#F2F4F7", display: "grid", placeItems: "center", flexShrink: 0 }}>
+                              <I sx={{ fontSize: 19, color: on ? "#FFFFFF" : "#475467" }} />
+                            </Box>
+                            <Box>
+                              <Stack direction="row" gap={1} alignItems="center">
+                                <Typography sx={{ fontSize: 14, fontWeight: 600 }}>{t}</Typography>
+                                {tag && <Chip size="small" label={tag} sx={{ height: 20, fontSize: 11, bgcolor: "#ECFDF3", color: "#027A48" }} />}
+                              </Stack>
+                              <Typography sx={{ fontSize: 12.5, color: "#667085", mt: .3 }}>{d}</Typography>
+                            </Box>
+                          </Stack>
+                        </Box>
+                      );
+                    })}
+                  </Box>
+                  {f.fill_mode === "invite" && !f.email && (
+                    <Alert severity="warning" action={<Button color="inherit" size="small" onClick={() => setStep(0)}>Įvesti</Button>}>
+                      Kvietimui išsiųsti reikia darbuotojo el. pašto.
+                    </Alert>
+                  )}
+                </Section>
+                <Collapse in={f.fill_mode === "manual"}>
+                  <Section title="Duomenys">
+                    <TextField label="Banko sąskaita (IBAN)" value={f.iban} onChange={(e) => set({ iban: e.target.value.toUpperCase().replace(/\s/g, "") })} />
+                    <TextField label="Gyvenamoji vieta" value={f.address} onChange={(e) => set({ address: e.target.value })} />
+                    <FormControl fullWidth>
+                      <InputLabel>Neapmokestinamasis pajamų dydis (NPD)</InputLabel>
+                      <Select label="Neapmokestinamasis pajamų dydis (NPD)" value={f.npd_mode} MenuProps={MENU_PROPS} onChange={(e) => set({ npd_mode: e.target.value })}>
+                        {NPD_MODES.map((m) => <MenuItem key={m.value} value={m.value}>{m.label}</MenuItem>)}
+                      </Select>
+                    </FormControl>
+                    <Divider />
+                    <FormControlLabel control={<Switch checked={f.pension_accumulation} onChange={(e) => set({ pension_accumulation: e.target.checked })} />}
+                      label={<Typography sx={{ fontSize: 14 }}>Kaupia pensiją II pakopoje (+3 %)</Typography>} />
+                    <FormControlLabel control={<Switch checked={f.single_parent} onChange={(e) => set({ single_parent: e.target.checked })} />}
+                      label={<Typography sx={{ fontSize: 14 }}>Vienas (-a) augina vaiką iki 14 m. arba vaiką su negalia iki 18 m.</Typography>} />
+                    <Typography sx={{ fontSize: 12.5, color: "#667085" }}>Vaikus pridėsite darbuotojo kortelėje („Šeima“).</Typography>
+                  </Section>
+                </Collapse>
+              </>
+            )}
+            {error && <Alert severity="error">{error}</Alert>}
+          </Stack>
+        </Box>
+
+        {/* ---------- santrauka ---------- */}
+        <Box sx={{ bgcolor: "#FFFFFF", borderLeft: { md: "1px solid #EAECF0" }, p: 2.5, overflowY: "auto" }}>
+          <Typography sx={{ fontSize: 12, fontWeight: 600, color: "#667085", letterSpacing: .4 }}>SANTRAUKA</Typography>
+          <Typography sx={{ fontSize: 16, fontWeight: 600, mt: 1, color: f.first_name ? "#101828" : "#98A2B3" }}>
+            {`${f.first_name} ${f.last_name}`.trim() || "Vardas Pavardė"}
+          </Typography>
+          <Typography sx={{ fontSize: 13, color: "#667085" }}>{positionLabel || "Pareigos"}</Typography>
+          <Stack gap={1} mt={2}>
+            {[["Darbo pradžia", f.start_date || "–"],
+              ["Sutartis", `${type?.label || ""}${needsEnd && f.end_date ? ` iki ${f.end_date}` : ""}`],
+              ["Darbo laikas", `${f.weekly_hours || 0} val./sav. · ${workload === 1 ? "visas etatas" : `${String(Math.round(workload * 1000) / 1000).replace(".", ",")} etato`}`],
+              ["Apskaita", f.work_regime === "summed" ? `Suminė · ${pm} mėn.` : "Standartinė"],
+              ...(f.work_regime === "standard" ? [["Darbo dienos", weekLabel(f.days, f.week)]] : []),
+              ...(Number(f.probation_months) ? [["Išbandymas", `${f.probation_months} mėn.`]] : []),
+              ["Atlyginimas", Number(f.base_amount) > 0 ? `${money(f.base_amount)} ${f.pay_form === "monthly" ? "/ mėn." : "/ val."}` : "–"],
+              ["Atostogos", leave ? `${leave.total} d. d. per metus` : "–"],
+            ].map(([l, v]) => (
+              <Stack key={l} direction="row" justifyContent="space-between" gap={1}>
+                <Typography sx={{ fontSize: 13, color: "#667085" }}>{l}</Typography>
+                <Typography sx={{ fontSize: 13, fontWeight: 500, textAlign: "right" }}>{v}</Typography>
               </Stack>
-            </Collapse>
-          </Box>
-
-          {est && (
-            <Typography variant="body2" color="text.secondary">
-              Į rankas apytiksliai <b>{money(est.net)}</b>, įmonei kainuos {money(est.cost)} per mėnesį.
-            </Typography>
+            ))}
+          </Stack>
+          {est && Number(f.base_amount) > 0 && (
+            <Box sx={{ mt: 2, p: 1.5, borderRadius: 2, bgcolor: "#F5F8FF" }}>
+              <Typography sx={{ fontSize: 12, color: "#475467" }}>Į rankas apytiksliai</Typography>
+              <Typography sx={{ fontSize: 22, fontWeight: 600, color: "#1D4ED8" }}>{money(est.net)}</Typography>
+              <Typography sx={{ fontSize: 12, color: "#475467" }}>Įmonei kainuos {money(est.cost)} per mėnesį</Typography>
+            </Box>
           )}
-        </Section>
+          <Divider sx={{ my: 2 }} />
+          <Typography sx={{ fontSize: 12, fontWeight: 600, color: "#667085", letterSpacing: .4, mb: 1 }}>KAS BUS PADARYTA</Typography>
+          <Stack gap={1.25}>
+            <Stack direction="row" gap={1}><DescriptionOutlinedIcon sx={{ fontSize: 18, color: "#475467" }} />
+              <Typography sx={{ fontSize: 12.5, color: "#344054" }}>Sukurta darbo sutartis – dokumentą paruošite kortelėje</Typography></Stack>
+            <Stack direction="row" gap={1}><AccountBalanceOutlinedIcon sx={{ fontSize: 18, color: "#475467" }} />
+              <Typography sx={{ fontSize: 12.5, color: "#344054" }}>Paruoštas <b style={{ fontWeight: 500 }}>1-SD</b> – pateikti Sodrai iki <b style={{ fontWeight: 500 }}>{sd1 || "–"}</b></Typography></Stack>
+            {f.fill_mode === "invite" && (
+              <Stack direction="row" gap={1}><MarkEmailReadOutlinedIcon sx={{ fontSize: 18, color: "#475467" }} />
+                <Typography sx={{ fontSize: 12.5, color: "#344054" }}>Kvietimas į eSavitarną – {f.email || "nurodykite el. paštą"}</Typography></Stack>
+            )}
+          </Stack>
+        </Box>
+      </Box>
 
-        <Divider sx={{ mb: 3 }} />
-
-        {/* ---------- Kiti duomenys ---------- */}
-        <Section title="Kiti duomenys (adresas, banko sąskaita, vaikai, NPD)" sx={{ mb: 0 }}>
-          <RadioGroup value={f.fill_mode} onChange={(e) => set({ fill_mode: e.target.value })}>
-            <FormControlLabel value="invite" control={<Radio />} label={
-              <Box><Typography>Užpildys pats darbuotojas</Typography>
-                <Typography variant="caption" color="text.secondary">Jam bus išsiųsta anketa el. paštu ar SMS</Typography></Box>} />
-            <FormControlLabel value="manual" control={<Radio />} label={
-              <Box><Typography>Suvesiu pats</Typography>
-                <Typography variant="caption" color="text.secondary">Jei darbuotojas neturi el. pašto ar telefono</Typography></Box>} sx={{ mt: 1 }} />
-          </RadioGroup>
-          {f.fill_mode === "invite" && !hasContact && (
-            <Alert severity="info">Anketai išsiųsti nurodykite el. paštą arba telefoną.</Alert>
-          )}
-          <Collapse in={f.fill_mode === "manual"}>
-            <Stack gap={2} mt={1}>
-              <TextField label="Banko sąskaita (IBAN)" value={f.iban} onChange={(e) => set({ iban: e.target.value.toUpperCase().replace(/\s/g, "") })} />
-              <TextField label="Adresas" value={f.address} onChange={(e) => set({ address: e.target.value })} />
-              <FormControl fullWidth>
-                <InputLabel>Neapmokestinamasis pajamų dydis (NPD)</InputLabel>
-                <Select label="Neapmokestinamasis pajamų dydis (NPD)" value={f.npd_mode} MenuProps={MENU_PROPS} onChange={(e) => set({ npd_mode: e.target.value })}>
-                  {NPD_MODES.map((m) => <MenuItem key={m.value} value={m.value}>{m.label}</MenuItem>)}
-                </Select>
-              </FormControl>
-              <Typography variant="caption" color="text.secondary" mt={-1.5}>
-                Padidintas NPD taikomas, kai nustatytas dalyvumo lygis (iki 2024 m. – darbingumo lygis).
-              </Typography>
-              <FormControlLabel control={<Switch checked={f.pension_accumulation} onChange={(e) => set({ pension_accumulation: e.target.checked })} />}
-                label="Kaupia pensiją II pakopoje (+3 %)" />
-              <FormControlLabel control={<Switch checked={f.single_parent} onChange={(e) => set({ single_parent: e.target.checked })} />}
-                label="Vienas (-a) augina vaiką iki 14 m. arba vaiką su negalia iki 18 m." />
-              <Typography variant="caption" color="text.secondary" mt={-1.5}>Vaikus galėsite pridėti darbuotojo kortelėje.</Typography>
-            </Stack>
-          </Collapse>
-        </Section>
-
-        {error && <Alert severity="error" sx={{ mt: 2 }}>{error}</Alert>}
-      </DialogContent>
-      <DialogActions sx={{ px: 3, py: 2 }}>
-        {errors.length > 0 && (
-          <Typography variant="caption" color="text.secondary" sx={{ mr: "auto" }}>Dar trūksta: {errors.join(", ")}</Typography>
+      {/* apačia */}
+      <Stack direction="row" alignItems="center" gap={1} sx={{ px: 3, py: 1.75, bgcolor: "#FFFFFF", borderTop: "1px solid #EAECF0" }}>
+        <Typography sx={{ fontSize: 12.5, color: "#667085", mr: "auto" }}>
+          {missing[step].length ? `Šiame žingsnyje trūksta: ${missing[step].join(", ")}` : allMissing.length ? `Dar trūksta: ${allMissing.join(", ")}` : "Viskas užpildyta"}
+        </Typography>
+        {step > 0 && <Button onClick={() => setStep(step - 1)} sx={{ ...BTN_SX, fontWeight: 500, color: "#344054" }}>Atgal</Button>}
+        {step < STEPS.length - 1 ? (
+          <Button variant="contained" disabled={missing[step].length > 0} onClick={() => setStep(step + 1)} sx={BTN_SX}>Toliau</Button>
+        ) : (
+          <Button variant="contained" disabled={saving || allMissing.length > 0} onClick={save} sx={BTN_SX}>Sukurti darbuotoją</Button>
         )}
-        <Button onClick={onClose}>Atšaukti</Button>
-        <Button variant="contained" disabled={saving || errors.length > 0} onClick={save}>Išsaugoti</Button>
-      </DialogActions>
+      </Stack>
     </Dialog>
   );
 }

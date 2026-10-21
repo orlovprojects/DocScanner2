@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
 import {
-  Alert, Box, Button, Chip, Dialog, DialogActions, DialogContent, DialogTitle, Paper, Stack, TextField,
-  ToggleButton, ToggleButtonGroup, Typography,
+  Alert, Box, Button, Chip, Dialog, DialogActions, DialogContent, DialogTitle, IconButton, Paper, Stack, TextField,
+  ToggleButton, ToggleButtonGroup, Tooltip, Typography,
 } from "@mui/material";
+import RefreshIcon from "@mui/icons-material/Refresh";
 
 import { apiError, payrollApi } from "../../api/payroll";
+import { AffectedRosters } from "./RosterRepair";
 
 const STATUS_COLOR = { pending: "warning", approved: "success", rejected: "error", cancelled: "default" };
 
@@ -14,36 +16,60 @@ function openHtml(html) {
   w.document.open(); w.document.write(html); w.document.close();
 }
 
-export default function PrasymaiPage() {
+export default function PrasymaiPage({ embedded = false } = {}) {
   const [status, setStatus] = useState("pending");
   const [rows, setRows] = useState([]);
   const [error, setError] = useState("");
   const [info, setInfo] = useState([]);
+  const [rosters, setRosters] = useState([]);   // paveikti grafikai
   const [reject, setReject] = useState(null); // {id, reason}
+  const [answer, setAnswer] = useState(null); // {id, text}
+  const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(null);
 
   const load = useCallback(() => {
+    setLoading(true);
     payrollApi.requests({ status: status === "all" ? undefined : status })
-      .then((r) => { setRows(r); setError(""); }).catch((e) => setError(apiError(e)));
+      .then((r) => { setRows(r); setError(""); }).catch((e) => setError(apiError(e)))
+      .finally(() => setLoading(false));
   }, [status]);
   useEffect(() => { load(); }, [load]);
 
   const approve = async (id) => {
     setBusy(id);
-    try { const r = await payrollApi.approveRequest(id); setInfo(r.warnings || []); load(); }
+    try { const r = await payrollApi.approveRequest(id); setInfo(r.warnings || []); setRosters(r.rosters || []); load(); }
     catch (e) { setError(apiError(e)); } finally { setBusy(null); }
   };
+  const openAnswer = async (id) => {
+    try { const r = await payrollApi.requestAnswerPreview(id); setAnswer({ id, text: r.answer }); }
+    catch (e) { setError(apiError(e)); }
+  };
+  const sendAnswer = async () => {
+    try { await payrollApi.approveRequest(answer.id, answer.text); setAnswer(null); load(); }
+    catch (e) { setError(apiError(e)); }
+  };
+  const due = (created) => { const d = new Date(created); d.setMonth(d.getMonth() + 2); return d.toLocaleDateString("lt-LT"); };
+
   const doReject = async () => {
     try { await payrollApi.rejectRequest(reject.id, reject.reason); setReject(null); load(); }
     catch (e) { setError(apiError(e)); }
   };
 
   return (
-    <Box sx={{ p: { xs: 2, md: 3 }, maxWidth: 900 }}>
-      <Typography variant="h5" fontWeight={700}>Darbuotojų prašymai</Typography>
+    <Box sx={{ p: embedded ? 0 : { xs: 2, md: 3 }, maxWidth: 900 }}>
+      <Stack direction="row" alignItems="center" gap={1}>
+        {!embedded && <Typography variant="h5" fontWeight={700}>Darbuotojų prašymai</Typography>}
+        <Tooltip title="Atnaujinti">
+          <IconButton onClick={load} disabled={loading} sx={{ border: 1, borderColor: "divider", borderRadius: "50%" }}>
+            <RefreshIcon sx={{ animation: loading ? "spin 1s linear infinite" : "none", "@keyframes spin": { to: { transform: "rotate(360deg)" } } }} />
+          </IconButton>
+        </Tooltip>
+      </Stack>
+{!embedded && (
       <Typography variant="body2" color="text.secondary" mb={2}>
         Prašymai iš esavitarna.lt. Patvirtinus atostogos automatiškai atsiranda tabelyje ir atlyginimo skaičiavime.
       </Typography>
+      )}
 
       <ToggleButtonGroup size="small" exclusive value={status} onChange={(_, v) => v && setStatus(v)} sx={{ mb: 2 }}>
         <ToggleButton value="pending">Laukia</ToggleButton>
@@ -54,6 +80,7 @@ export default function PrasymaiPage() {
 
       {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
       {info.map((w, i) => <Alert key={i} severity="warning" sx={{ mb: 1 }} onClose={() => setInfo([])}>{w}</Alert>)}
+      <AffectedRosters items={rosters} onClose={() => setRosters([])} sx={{ mb: 2 }} />
 
       {rows.length === 0 ? (
         <Paper variant="outlined" sx={{ p: 4, textAlign: "center" }}>
@@ -71,19 +98,29 @@ export default function PrasymaiPage() {
                   </Stack>
                   <Typography>{r.kind_label}</Typography>
                   <Typography variant="body2" color="text.secondary">
-                    {r.kind === "dismissal" ? `Paskutinė darbo diena: ${r.end_date}`
+                    {r.kind === "pay_info" ? (r.status === "pending" ? `Atsakyti iki ${due(r.created_at)}` : "")
+                      : r.kind === "dismissal" ? `Paskutinė darbo diena: ${r.end_date}`
                       : `${r.start_date === r.end_date ? r.start_date : `${r.start_date} – ${r.end_date}`} · ${Number(r.work_days)} d.d.`}
                   </Typography>
+                  {r.answer && <Typography variant="body2" sx={{ mt: 0.5, whiteSpace: "pre-line", color: "text.secondary" }}>{r.answer}</Typography>}
+                  {r.child_label && <Typography variant="body2" color="text.secondary">Vaikas: {r.child_label}</Typography>}
                   {r.comment && <Typography variant="body2" sx={{ mt: 0.5 }}>„{r.comment}“</Typography>}
                   {r.reject_reason && <Typography variant="body2" color="error">Atmesta: {r.reject_reason}</Typography>}
                   <Typography variant="caption" color="text.secondary">Pateikta {new Date(r.created_at).toLocaleString("lt-LT")}</Typography>
                 </Box>
                 <Stack direction="row" gap={1} alignItems="flex-start" flexWrap="wrap">
                   <Button size="small" onClick={() => payrollApi.requestHtml(r.id).then(openHtml)}>Prašymas</Button>
+                  {r.has_attachment && (
+                    <Button size="small" onClick={() => payrollApi.requestAttachment(r.id).then((b) => window.open(URL.createObjectURL(b), "_blank"))}>
+                      Pažyma
+                    </Button>
+                  )}
                   {r.status === "pending" && (
                     <>
                       <Button size="small" color="error" onClick={() => setReject({ id: r.id, reason: "" })}>Atmesti</Button>
-                      <Button size="small" variant="contained" disabled={busy === r.id} onClick={() => approve(r.id)}>Patvirtinti</Button>
+                      {r.kind === "pay_info"
+                        ? <Button size="small" variant="contained" onClick={() => openAnswer(r.id)}>Paruošti atsakymą</Button>
+                        : <Button size="small" variant="contained" disabled={busy === r.id} onClick={() => approve(r.id)}>Patvirtinti</Button>}
                     </>
                   )}
                 </Stack>
@@ -92,6 +129,20 @@ export default function PrasymaiPage() {
           ))}
         </Stack>
       )}
+
+      <Dialog open={!!answer} onClose={() => setAnswer(null)} fullWidth maxWidth="sm" disableScrollLock>
+        <DialogTitle>Atsakymas darbuotojui</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" color="text.secondary" mb={1}>
+            Atsakymas paruoštas automatiškai iš atlyginimų duomenų. Galite jį pataisyti. Darbuotojas matys jį savitarnoje.
+          </Typography>
+          <TextField fullWidth multiline minRows={6} value={answer?.text || ""} onChange={(e) => setAnswer({ ...answer, text: e.target.value })} />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setAnswer(null)}>Atšaukti</Button>
+          <Button variant="contained" onClick={sendAnswer} disabled={!answer?.text?.trim()}>Siųsti atsakymą</Button>
+        </DialogActions>
+      </Dialog>
 
       <Dialog open={!!reject} onClose={() => setReject(null)} fullWidth maxWidth="xs" disableScrollLock>
         <DialogTitle>Atmesti prašymą</DialogTitle>

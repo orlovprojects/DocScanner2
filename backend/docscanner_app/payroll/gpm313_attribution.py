@@ -29,6 +29,7 @@ class EmployeeMonth:
     final_date: date                    # paskutinės dalies (atlyginimo) išmokėjimo data
     advances: list = field(default_factory=list)   # [(date, suma)]
     planned: bool = False               # bent viena data - planinė (mokėjimas dar nepažymėtas)
+    employee_id: int = None
 
 
 def month_end(y, m):

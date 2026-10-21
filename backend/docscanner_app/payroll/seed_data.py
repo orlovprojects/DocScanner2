@@ -81,6 +81,9 @@ PARAMETERS = [
 SDUP = {
     "ALG": (True, False, "worked"), "VAL": (True, False, "worked"),
     "VRS": (True, True, "actual"), "POI": (True, True, "actual"), "SVN": (True, True, "actual"),
+    "SVP": (True, True, "none"),   # suminė: šventės valandos jau įeina į dirbtas - tik priemoka
+    "SAV": (True, True, "none"),   # suminė: viršyta laikotarpio norma (viršvalandžiai) - valandos jau dirbtose
+    "SAN": (True, False, "none"),  # suminė: neįvykdyta norma dėl grafiko - apmokamas neišdirbtas laikas (kaip prastova)
     "VRP": (True, True, "actual"), "VRN": (True, True, "actual"), "VRF": (True, True, "actual"),
     "NAK": (True, True, "none"),  # naktinės valandos jau įeina į dirbtas
     "ATO": (True, False, "scheduled"), "MAM": (True, False, "scheduled"),
@@ -117,6 +120,9 @@ SYSTEM_PAY_CODES = [
     _code("NAK", "Priemoka už darbą naktį (+50 %)", "earning", calc="multiplier", mult=D("0.5"), order=21),
     _code("POI", "Darbas poilsio dieną", "earning", calc="multiplier", mult=D("2"), order=22),
     _code("SVN", "Darbas švenčių dieną", "earning", calc="multiplier", mult=D("2"), order=23),
+    # suminė apskaita: šventės valandos pagal grafiką jau apmokėtos alga -> tik priemoka +100 % (iš viso 2x)
+    _code("SVP", "Darbas švenčių dieną pagal grafiką – priemoka (+100 %)", "earning", calc="multiplier",
+          mult=D("1"), order=23),
     _code("VRP", "Viršvalandžiai poilsio dieną", "earning", calc="multiplier", mult=D("2"), order=24),
     _code("VRN", "Viršvalandžiai naktį", "earning", calc="multiplier", mult=D("2"), order=25),
     _code("VRF", "Viršvalandžiai švenčių dieną", "earning", calc="multiplier", mult=D("2.5"), order=26),
@@ -157,8 +163,11 @@ SYSTEM_PAY_CODES = [
     _code("NAT", "Kitos pajamos natūra", "in_kind", vdu="excluded", debit=None, credit=None, order=54),
 
     # --- E. Kompensacijos ---
-    _code("DPN", "Dienpinigiai", "compensation", gpm="dpn_rule", sodra="no", vdu="excluded",
-          debit="6312", credit="4484", order=60),
+    # komandiruotės: neapmokestinama dalis (GPM312 kodas 05) ir dalis virš ribų (01, GPM + Sodra)
+    _code("DPN", "Dienpinigiai (neapmokestinami)", "compensation", gpm="exempt", vmi="05", npd=False, sodra="no",
+          vdu="excluded", debit="6312", credit="4484", order=60),
+    _code("DPA", "Dienpinigiai, viršijantys neapmokestinamą dalį", "earning", vmi="01", vdu="excluded",
+          debit="6312", credit="4484", order=63),
     _code("AUK", "Kompensacija už asmeninio automobilio naudojimą", "compensation", gpm="exempt",
           vmi=None, npd=False, sodra="no", vdu="excluded", gpm313=False, debit="6312", credit="4484", order=61),
     _code("NUO", "Nuotolinio darbo priemonių kompensacija", "compensation", gpm="exempt",
@@ -179,6 +188,7 @@ SYSTEM_PAY_CODES = [
     _code("KAU", "Pensijų kaupimas 3 %", "deduction", vmi=None, debit="4480", credit="4482", order=104),
     _code("AVN", "Avansas", "deduction", vmi=None, debit=None, credit=None, order=110),  # DK per mokėjimą
     _code("ANT", "Išskaita pagal antstolio patvarkymą", "deduction", vmi=None, debit="4480", credit="4494", order=111),
+    _code("ALI", "Išskaita: išlaikymas (alimentai)", "deduction", vmi=None, debit="4480", credit="4494", order=111),
     _code("PRF", "Profsąjungos nario mokestis", "deduction", vmi=None, debit="4480", credit="4494", order=112),
     _code("III", "III pakopos pensijų įmoka iš DU", "deduction", vmi=None, debit="4480", credit="4494", order=113),
     _code("ZAL", "Žalos atlyginimas darbdaviui", "deduction", vmi=None, debit="4480", credit="24460", order=114),

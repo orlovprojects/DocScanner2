@@ -76,6 +76,7 @@ KIND_LT = {
     "vacation": "kasmetinių atostogų", "parent_day": "papildomo poilsio laiko (mamadienio / tėvadienio)",
     "unpaid": "nemokamų atostogų", "dismissal": "darbo sutarties nutraukimo",
     "pay_info": "informacijos apie darbo užmokestį",
+    "paternity": "tėvystės atostogų", "childcare": "atostogų vaikui prižiūrėti", "study": "mokymosi atostogų",
 }
 
 

@@ -47,6 +47,9 @@ export const payrollApi = {
   requestAnswerPreview: (id) => api.get(`${P}/requests/${id}/answer_preview/`).then((r) => r.data),
   rejectRequest: (id, reason) => api.post(`${P}/requests/${id}/reject/`, { reason }).then((r) => r.data),
   requestHtml: (id) => api.get(`${P}/requests/${id}/html/`, { responseType: "text" }).then((r) => r.data),
+  requestReview: (id) => api.get(`${P}/requests/${id}/review/`).then((r) => r.data),
+  payrollOverview: () => api.get(`${P}/overview/`).then((r) => r.data), 
+  requestAttachment: (id) => api.get(`${P}/requests/${id}/attachment/`, { responseType: "blob" }).then((r) => r.data),
 
   // įvykiai
   absences: (params) => api.get(`${P}/absences/`, { params }).then((r) => r.data),
@@ -55,6 +58,7 @@ export const payrollApi = {
 
   // tabelis
   timesheet: (year, month) => api.get(`${P}/timesheet/`, { params: { year, month } }).then((r) => r.data),
+  timesheetFull: (year, month) => api.get(`${P}/timesheet/`, { params: { year, month, meta: 1 } }).then((r) => r.data),
   setTimesheetHours: (data) => api.post(`${P}/timesheet/`, data).then((r) => r.data),
   clearTimesheetHours: (data) => api.delete(`${P}/timesheet/`, { data }),
 
@@ -63,7 +67,17 @@ export const payrollApi = {
   createGroup: (data) => api.post(`${P}/position-groups/`, data).then((r) => r.data),
   updateGroup: (id, data) => api.patch(`${P}/position-groups/${id}/`, data).then((r) => r.data),
   deleteGroup: (id) => api.delete(`${P}/position-groups/${id}/`),
+  garnishments: (params) => api.get(`${P}/garnishments/`, { params }).then((r) => r.data),
+  createGarnishment: (data) => api.post(`${P}/garnishments/`, data).then((r) => r.data),
+  updateGarnishment: (id, data) => api.patch(`${P}/garnishments/${id}/`, data).then((r) => r.data),
+  deleteGarnishment: (id) => api.delete(`${P}/garnishments/${id}/`),
+  recurring: (params) => api.get(`${P}/recurring-items/`, { params }).then((r) => r.data),
+  createRecurring: (data) => api.post(`${P}/recurring-items/`, data).then((r) => r.data),
+  updateRecurring: (id, data) => api.patch(`${P}/recurring-items/${id}/`, data).then((r) => r.data),
+  deleteRecurring: (id) => api.delete(`${P}/recurring-items/${id}/`),
   autoCreateGroups: () => api.post(`${P}/position-groups/auto_create/`).then((r) => r.data),
+  mergeGroup: (id, target) => api.post(`${P}/position-groups/${id}/merge/`, { target }).then((r) => r.data),
+  splitPosition: (position) => api.post(`${P}/position-groups/split/`, { position }).then((r) => r.data),
   groupsCheck: () => api.get(`${P}/position-groups/check/`).then((r) => r.data),
   dasList: () => api.get(`${P}/das/`).then((r) => r.data),
   dasPreview: (date, manager) =>
@@ -86,6 +100,38 @@ export const payrollApi = {
   createAdvances: (year, month) => api.post(`${P}/payments/advances/`, { year, month }).then((r) => r.data),
   linkTransaction: (id, data) => api.post(`${P}/payments/${id}/link-transaction/`, data).then((r) => r.data),
   bankAccounts: () => api.get("invoicing/bank-accounts/").then((r) => r.data),
+  // Sodros ataskaitos S15 / S47 (nebūtina)
+  sodraReports: (files, apply) => {
+    const fd = new FormData();
+    Array.from(files).forEach((f) => fd.append("files", f));
+    fd.append("apply", apply ? "1" : "0");
+    return api.post(`${P}/sodra-reports/`, fd).then((r) => r.data);
+  },
+  sodraFix: (employee_id, field, value) =>
+    api.post(`${P}/sodra-reports/`, { action: "fix", employee_id, field, value }).then((r) => r.data),
+  // perėjimas iš kitos programos
+  migration: () => api.get(`${P}/migration/`).then((r) => r.data),
+  migrationAction: (data) => api.post(`${P}/migration/`, data).then((r) => r.data),
+  migrationExcel: () => api.get(`${P}/migration/excel/`, { responseType: "blob" }).then((r) => r.data),
+  migrationExcelUpload: (file) => {
+    const fd = new FormData();
+    fd.append("excel", file);
+    return api.post(`${P}/migration/`, fd).then((r) => r.data);
+  },
+  migrationUpload: (files) => {
+    const fd = new FormData();
+    Array.from(files).forEach((f) => fd.append("files", f));
+    return api.post(`${P}/migration/`, fd).then((r) => r.data);
+  },
+  // komandiruotės
+  trips: (params) => api.get(`${P}/trips/`, { params }).then((r) => r.data),
+  saveTrip: (d) => (d.id ? api.patch(`${P}/trips/${d.id}/`, d) : api.post(`${P}/trips/`, d)).then((r) => r.data),
+  deleteTrip: (id) => api.delete(`${P}/trips/${id}/`),
+  approveTrip: (id, data = {}) => api.post(`${P}/trips/${id}/approve/`, data).then((r) => r.data),
+  cancelTrip: (id) => api.post(`${P}/trips/${id}/cancel/`).then((r) => r.data),
+  tripOrderHtml: (id) => api.get(`${P}/trips/${id}/order/`, { responseType: "text" }).then((r) => r.data),
+  tripNorms: () => api.get(`${P}/trip-preview/`).then((r) => r.data),
+  tripPreview: (d) => api.post(`${P}/trip-preview/`, d).then((r) => r.data),
   // grafikai
   roster: (year, month) => api.get(`${P}/roster/`, { params: { year, month } }).then((r) => r.data),
   rosterAction: (data) => api.post(`${P}/roster/action/`, data).then((r) => r.data),
@@ -109,7 +155,7 @@ export const payrollApi = {
   // mėnesio DU
   prepareRun: (year, month) => api.post(`${P}/runs/prepare/`, { year, month }).then((r) => r.data),
   recalcRun: (id) => api.post(`${P}/runs/${id}/recalculate/`).then((r) => r.data),
-  approveRun: (id) => api.post(`${P}/runs/${id}/approve/`).then((r) => r.data),
+  approveRun: (id, advance_decisions) => api.post(`${P}/runs/${id}/approve/`, advance_decisions ? { advance_decisions } : {}).then((r) => r.data),
   reopenRun: (id) => api.post(`${P}/runs/${id}/reopen/`).then((r) => r.data),
   runResults: (id) => api.get(`${P}/runs/${id}/results/`).then((r) => r.data),
   runLines: (id, employee) => api.get(`${P}/runs/${id}/lines/`, { params: { employee } }).then((r) => r.data),
@@ -124,9 +170,15 @@ export const money = (v) =>
     : `${Number(v).toLocaleString("lt-LT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`;
 
 export const apiError = (e) => {
+  const status = e?.response?.status;
   const d = e?.response?.data;
-  if (!d) return "Nepavyko susisiekti su serveriu";
-  if (typeof d === "string") return d;
+  if (!e?.response) return "Serveris nepasiekiamas – patikrinkite interneto ryšį ir bandykite dar kartą";
+  // UX-02: serverio klaidos puslapis (HTML) nerodomas bukalteriui
+  if (status >= 500 || (typeof d === "string" && /<(!doctype|html|body)/i.test(d))) {
+    return `Serverio klaida${status ? ` (${status})` : ""}. Bandykite dar kartą; jei kartojasi – parašykite mums.`;
+  }
+  if (!d) return "Nepavyko atlikti veiksmo";
+  if (typeof d === "string") return d.length > 300 ? `${d.slice(0, 300)}…` : d;
   if (Array.isArray(d)) return d.join(" ");
   if (d.detail) return d.detail;
   return Object.entries(d)
@@ -141,6 +193,7 @@ export const MONTHS = [
 
 export const ABSENCE_KINDS = {
   vacation: { label: "Kasmetinės atostogos", short: "A", color: "#4C8BF5" },
+  vacation_prepaid: { label: "Kasmetinės atostogos (apmokėtos anksčiau)", short: "A", color: "#4C8BF5" },
   sick: { label: "Liga", short: "L", color: "#E5484D" },
   parent_day: { label: "Mamadienis / tėvadienis", short: "MD", color: "#A15CE0" },
   unpaid: { label: "Nemokamos atostogos", short: "NA", color: "#8B8D98" },

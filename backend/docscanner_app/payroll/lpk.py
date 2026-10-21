@@ -97,3 +97,55 @@ def search(query, items, limit=15):
             scored.append((r, len(i["name"]), i))
     scored.sort(key=lambda x: (x[0], x[1]))
     return [i for _, _, i in scored[:limit]]
+
+
+# ============================================================
+# Lygiavertės profesijos (klasteriai 4 skaitmenų grupės viduje) - pareigybių grupėms / SDUP
+# ============================================================
+
+GROUPS_FILE = Path(__file__).parent / "data" / "lpk_groups.json"
+SCORE_KEYS = ("skills", "qualification", "effort", "responsibility", "conditions")
+
+
+@lru_cache(maxsize=1)
+def all_clusters():
+    """{group_code: {"homogeneous": bool, "clusters": [{key, codes, 5 balai, note}]}}"""
+    try:
+        with open(GROUPS_FILE, encoding="utf-8") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return {}
+
+
+@lru_cache(maxsize=1)
+def _cluster_by_code():
+    out = {}
+    for gc, g in all_clusters().items():
+        for c in g["clusters"]:
+            for code in c["codes"]:
+                out[code] = dict(c, group_code=gc, homogeneous=g["homogeneous"])
+    return out
+
+
+def cluster_for(code):
+    """
+    6 skaitmenų kodas -> jo klasteris; 4 skaitmenys -> grupės pagrindinis (didžiausias) klasteris
+    su požymiu exact=False. -> dict su key, balais, note, homogeneous, exact arba None.
+    """
+    code = (code or "").strip()
+    if len(code) >= 6 and code[:6] in _cluster_by_code():
+        return dict(_cluster_by_code()[code[:6]], exact=True)
+    g = all_clusters().get(code[:4])
+    if not g:
+        return None
+    main = max(g["clusters"], key=lambda c: len(c["codes"]))
+    return dict(main, group_code=code[:4], homogeneous=g["homogeneous"], exact=g["homogeneous"])
+
+
+def scores_of(cluster):
+    return {k: cluster[k] for k in SCORE_KEYS}
+
+
+def scores_differ(a, b, tolerance=1):
+    """Ar dviejų vertinimų bent vienas kriterijus skiriasi daugiau nei tolerancija."""
+    return any(abs(int(a[k]) - int(b[k])) > tolerance for k in SCORE_KEYS)

@@ -17,23 +17,30 @@ def diff(old, new):
     out = {}
     for k in sorted(set(a) | set(b), key=lambda k: (k[0], k[1])):
         o, n = a.get(k), b.get(k)
-        if o and n and (o.get("shift_type_id"), o.get("start"), o.get("end")) == (n.get("shift_type_id"), n.get("start"), n.get("end")):
+        key = lambda x: (x.get("shift_type_id"), x.get("start"), x.get("end"), int(x.get("break_minutes") or 0))  # noqa: E731
+        if o and n and key(o) == key(n):        # ROS-03: pertraukos pakeitimas - irgi pakeitimas
             continue
         out.setdefault(k[0], []).append({"date": k[1], "old": o, "new": n})
     return out
 
 
-def late_changes(changes, today, old_items):
+def late_changes(changes, today, old_items, before=None, calendar_days=()):
     """
     Pakeitimai, apie kuriuos įspėjama mažiau nei prieš 2 darbuotojo darbo dienas (pagal iki šiol galiojusį grafiką).
+    ROS-10: dienos prieš grafiko mėnesį (`before` - mėnesio 1 d.) imamos iš ankstesnio grafiko (old_items), o jei
+    darbuotojas jame nebuvo - iš darbo kalendoriaus (`calendar_days` - darbo dienų sąrašas ISO).
     -> [{"employee_id", "date"}]
     """
     work = {}
     for x in old_items:
         work.setdefault(int(x["employee_id"]), set()).add(x["date"])
+    prev_month_known = {emp for emp, ds in work.items() if before and any(d < before for d in ds)}
     out = []
     for emp, items in changes.items():
-        days = sorted(work.get(emp, ()))
+        days = set(work.get(emp, ()))
+        if before and emp not in prev_month_known:
+            days |= {d for d in calendar_days if d < before}
+        days = sorted(days)
         for ch in items:
             d = ch["date"]
             if d <= today.isoformat():

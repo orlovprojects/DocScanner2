@@ -71,7 +71,7 @@ class SdupJsonTests(TestCase):
 
     def test_build_ok(self):
         data, errors = build_sdup("166337", 2027, 1, [SdupRow(
-            "Ona", "Onaitė-Jonaitienė", person_code="48501010000", group_code="FIN-02",
+            "Ona", "Onaitė-Jonaitienė", person_code="48501010003", group_code="FIN-02",
             brutto=D("1500"), extra=D("200"), paid_hours=D("168"))])
         self.assertEqual(errors, [])
         e = data["entries"][0]
@@ -106,8 +106,25 @@ class SdupSplitTests(TestCase):
     def test_json_two_rows(self):
         from docscanner_app.payroll.sdup import SdupSalary
         data, errors = build_sdup("166337", 2027, 1, [SdupRow(
-            "Ona", "Onaitė", person_code="48501010000",
+            "Ona", "Onaitė", person_code="48501010003",
             salaries=[SdupSalary("G001", brutto=D("750"), paid_hours=D("88")),
                       SdupSalary("G002", brutto=D("1100"), extra=D("200"), paid_hours=D("88"))])])
         self.assertEqual(errors, [])
         self.assertEqual([s["profGroupNum"] for s in data["entries"][0]["salaryInfo"]], ["G001", "G002"])
+
+
+class SdupSchemaTests(TestCase):
+
+    def test_ssn_padding_merge_and_gender(self):
+        from decimal import Decimal as D
+        from docscanner_app.payroll.sdup import SdupRow, build_sdup, ssn
+        self.assertEqual(ssn("sd", "81498"), "SD0081498")
+        rows = [SdupRow("Jonas", "Jonaitis", person_code="39001010000", gender="F", group_code="G001",
+                        brutto=D("1000"), extra=D("100"), paid_hours=D("80")),
+                SdupRow("Jonas", "Jonaitis", person_code="39001010000", group_code="G002",
+                        brutto=D("500"), paid_hours=D("40"))]
+        data, errors = build_sdup("1234567", 2027, 1, rows)
+        self.assertEqual(len(data["entries"]), 1)                                  # vienas asmuo - vienas įrašas
+        self.assertEqual([s["profGroupNum"] for s in data["entries"][0]["salaryInfo"]], ["G001", "G002"])
+        self.assertEqual(data["entries"][0]["employeeInfo"]["gender"], "M")       # pagal asmens kodą
+        self.assertTrue(all(e.startswith("⚠") for e in errors))

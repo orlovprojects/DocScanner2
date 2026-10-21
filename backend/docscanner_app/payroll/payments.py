@@ -24,9 +24,10 @@ logger = logging.getLogger("docscanner_app")
 ZERO = Decimal("0")
 VMI_NAME, VMI_CODE = "Valstybinė mokesčių inspekcija", "188659752"
 SODRA_NAME = "Valstybinio socialinio draudimo fondo valdyba"
-DEDUCTION_CODES = ("ANT", "PRF", "III", "ISK")          # išskaitos, mokamos kitam gavėjui (4494)
-DEFAULT_ACCOUNT = {"employee": "4480", "advance": "4480", "gpm": "4481", "sodra": "4482", "deduction": "4494"}
-REF_LETTER = {"employee": "E", "advance": "A", "gpm": "G", "sodra": "S", "deduction": "I"}
+DEDUCTION_CODES = ("ANT", "ALI", "PRF", "III", "ISK")          # išskaitos, mokamos kitam gavėjui (4494)
+DEFAULT_ACCOUNT = {"employee": "4480", "advance": "4480", "gpm": "4481", "sodra": "4482", "deduction": "4494",
+                   "trip_advance": "4484"}
+REF_LETTER = {"employee": "E", "advance": "A", "gpm": "G", "sodra": "S", "deduction": "I", "trip_advance": "K"}
 ACTIVE = ("auto", "confirmed", "manual")
 
 
@@ -70,6 +71,7 @@ def create_obligations_for_run(run):
     pay_date = _clip(ny, nm, st.salary_day or 10)
     journals = dict(employee_journals(run))
     gpm = s4482 = s4486 = ZERO
+    gpm_by_due = {}                                   # PAY-04: GPM pagal mokėjimo terminą
     out = []
 
     first, last = date(y, m, 1), _clip(y, m, 31)
@@ -84,6 +86,8 @@ def create_obligations_for_run(run):
         emp_pay_date = terminated.get(e.id) or pay_date      # atleidžiamam - atsiskaitymo diena
         pay_dates.append(emp_pay_date)
         gpm += res.gpm + res.gpm15
+        due = gpm_due_date(emp_pay_date)
+        gpm_by_due[due] = gpm_by_due.get(due, ZERO) + res.gpm + res.gpm15
         s4486 += res.psd + res.grindys_psd
         s4482 += res.vsd + res.kaupimas + res.employer_vsd + res.gar + res.ilg + res.grindys_vsd
         if res.payable > 0:
@@ -95,19 +99,26 @@ def create_obligations_for_run(run):
                 purpose=f"Darbo užmokestis už {y}-{m:02d}",
                 breakdown={k: v for k, v in br.items() if Decimal(v)}, due_date=emp_pay_date,
             ))
-        for l in run.lines.filter(employee=e, pay_code__code__in=DEDUCTION_CODES).select_related("pay_code"):
+        for l in run.lines.filter(employee=e, pay_code__code__in=DEDUCTION_CODES).select_related("pay_code", "garnishment"):
+            g = l.garnishment
             out.append(_create(
                 run.company, run, "deduction", y, m, l.amount, employee=e,
-                recipient_name=(l.comment or l.pay_code.name)[:255],
-                purpose=f"{l.pay_code.name}: {e.full_name}"[:140],
+                recipient_name=((g.recipient_name if g else "") or l.comment or l.pay_code.name)[:255],
+                recipient_iban=((g.recipient_iban if g else "") or "").replace(" ", ""),
+                purpose=((g.payment_purpose if g else "") or f"{l.pay_code.name}: {e.full_name}")[:140],
                 breakdown={"4494": str(l.amount)}, due_date=emp_pay_date,
             ))
 
-    if gpm > 0:
+    # PAY-04: atskiras GPM įsipareigojimas kiekvienam terminui (pvz. atleistam išmokėta 10-15 -> GPM iki 10-15,
+    # kitiems 11-10 -> GPM iki 11-15)
+    for due, amount in sorted(gpm_by_due.items()):
+        if amount <= 0:
+            continue
+        note = "" if len(gpm_by_due) == 1 else f" (išmokos iki {due:%m-%d})"
         out.append(_create(
-            run.company, run, "gpm", y, m, gpm, recipient_name=VMI_NAME, recipient_code=VMI_CODE,
-            imokos_kodas="1311", purpose=f"GPM už {y}-{m:02d}", breakdown={"4481": str(gpm)},
-            due_date=min(gpm_due_date(d) for d in pay_dates) if pay_dates else gpm_due_date(pay_date),
+            run.company, run, "gpm", y, m, amount, recipient_name=VMI_NAME, recipient_code=VMI_CODE,
+            imokos_kodas="1311", purpose=f"GPM už {y}-{m:02d}{note}", breakdown={"4481": str(amount)},
+            due_date=due,
         ))
     if s4482 + s4486 > 0:
         out.append(_create(
@@ -277,6 +288,8 @@ def mark_paid(p, user, payment_date, payment_account="", amount=None, note=""):
     amount = _q2(amount if amount not in (None, "") else p.open_amount)
     if amount <= 0:
         raise ValueError("Šis mokėjimas jau sumokėtas")
+    if amount > p.open_amount + Decimal("0.01"):      # PAY-02
+        raise ValueError(f"Suma {amount} € didesnė nei likusi mokėti {p.open_amount} €")
     acc = (payment_account or "").strip()
     alloc = PaymentAllocation.objects.create(
         kind="payroll", payroll_payment=p, source="manual", status="manual",
@@ -336,12 +349,83 @@ def remove(alloc):
 
 
 @transaction.atomic
+# ============================================================
+# PAY-05: banko operacija pakeičia rankines žymas (ne prideda prie jų)
+# ============================================================
+
+def _manual_allocs(p):
+    return list(p.allocations.filter(source="manual", outgoing_transaction__isnull=True, status="manual")
+                .order_by("payment_date", "id"))
+
+
+def _to_bank(a, txn, reasons, status=None):
+    """Rankinę žymą pririšti prie banko operacijos (atšaukiant - detach_statement grąžina atgal)."""
+    _drop_je(a)
+    a.match_reasons = dict(a.match_reasons or {}, converted_from_manual=True,
+                           manual_payment_account=a.payment_account, **(reasons or {}))
+    a.outgoing_transaction, a.source = txn, "bank_import"
+    a.payment_date, a.payment_account, a.needs_account = txn.transaction_date, "", False
+    if status:
+        a.status = status
+    a.save()
+    create_je(a)
+
+
+def _absorb_manual(p, txn, amount, reasons, status=None):
+    """
+    Banko suma `amount` vietoj rankinių žymų:
+      >= rankinių sumai - visos žymos pririšamos prie banko, likutis (jei yra) - nauja banko dalis;
+      <  rankinių sumai - pririšama tik tiek, kiek bankas; likusi žyma lieka kaip kitas mokėjimas (pvz. grynaisiais).
+    -> padengta banku suma iš rankinių žymų.
+    """
+    from docscanner_app.models import PaymentAllocation
+    left, covered = _q2(amount), ZERO
+    for a in _manual_allocs(p):
+        if left <= Decimal("0.01"):
+            break
+        if a.amount <= left + Decimal("0.01"):
+            _to_bank(a, txn, reasons, status)
+            left -= a.amount
+            covered += a.amount
+        else:                                      # dalis banku, likutis lieka rankinė žyma
+            _drop_je(a)
+            a.amount = a.amount_txn = a.amount_eur = _q2(a.amount - left)
+            a.save(update_fields=["amount", "amount_txn", "amount_eur"])
+            create_je(a)
+            b = PaymentAllocation.objects.create(
+                kind="payroll", payroll_payment=p, outgoing_transaction=txn, source="bank_import",
+                status=status or "manual", amount=left, amount_txn=left, amount_eur=left,
+                payment_date=txn.transaction_date, confidence=Decimal("1.00"),
+                match_reasons=dict(reasons or {}, split_from_manual=a.id), counterparty_name=p.recipient_name[:255])
+            create_je(b)
+            covered += left
+            left = ZERO
+    return covered
+
+
 def link_transaction(p, txn, user, amount=None):
     """Rankinis banko išlaidos susiejimas su DU mokėjimu."""
     from docscanner_app.models import PaymentAllocation
-    amount = _q2(amount if amount not in (None, "") else min(txn.unallocated_amount, p.open_amount))
+    manual_sum = sum((a.amount for a in _manual_allocs(p)), ZERO)
+    limit = p.open_amount + manual_sum                # PAY-05: banku galima „perimti“ rankines žymas
+    amount = _q2(amount if amount not in (None, "") else min(txn.unallocated_amount, limit))
     if amount <= 0:
         raise ValueError("Nėra ką susieti - operacija arba mokėjimas jau padengti")
+    if amount > limit + Decimal("0.01"):              # PAY-02
+        raise ValueError(f"Suma {amount} € didesnė nei likusi mokėti {limit} €")
+    if amount > txn.unallocated_amount + Decimal("0.01"):
+        raise ValueError(f"Banko operacijoje nepaskirstyta liko tik {txn.unallocated_amount} €")
+    covered = _absorb_manual(p, txn, amount, {"manual_match": True}) if manual_sum else ZERO
+    rest = _q2(amount - covered)
+    txn.match_status = "manually_matched"
+    txn.transaction_category = {"gpm": "tax_vmi", "sodra": "tax_sodra"}.get(p.kind, "salary")
+    txn.matched_document_number = p.reference
+    txn.save(update_fields=["match_status", "transaction_category", "matched_document_number", "updated_at"])
+    if rest <= Decimal("0.01"):
+        _recalc(p)
+        _refresh_txn(txn)
+        return p.allocations.filter(outgoing_transaction=txn).last()
+    amount = rest
     alloc = PaymentAllocation.objects.create(
         kind="payroll", payroll_payment=p, outgoing_transaction=txn, source="bank_import", status="manual",
         amount=amount, amount_txn=amount, amount_eur=amount, payment_date=txn.transaction_date,
@@ -390,7 +474,9 @@ def match_transactions(user, company, txns):
         if r.status == "none":
             _apply_hint(txn, r)
             continue
-        _apply(txn, r, payments)
+        if _apply(txn, r, payments) is False:
+            stats["conflict"] = stats.get("conflict", 0) + 1
+            continue
         stats[r.status] += 1
     return stats
 
@@ -420,23 +506,37 @@ def _apply_hint(txn, r):
 def _apply(txn, r, payments):
     from docscanner_app.models import PaymentAllocation
     status = "auto" if r.status == "auto" else "proposed"
+    # PAY-05: bankas mažiau nei rankiniu būdu pažymėta -> automatiškai nesiejame, bukalteris sprendžia
+    for m in r.matches:
+        p = payments[m.obligation_id]
+        manual_sum = sum((a.amount for a in _manual_allocs(p)), ZERO)
+        if manual_sum and m.amount + Decimal("0.01") < manual_sum:
+            details = dict(txn.match_details or {})
+            details["payroll_conflict"] = {
+                "reference": p.reference, "bank": str(m.amount), "manual": str(manual_sum),
+                "note": (f"Banke {m.amount} €, rankiniu būdu pažymėta {manual_sum} € ({p.reference}). "
+                         "Susiekite rankiniu būdu: banko suma pakeis atitinkamą žymų dalį, likusi dalis liks "
+                         "kaip kitas mokėjimas (pvz. grynaisiais)."),
+            }
+            txn.match_details = details
+            txn.save(update_fields=["match_details", "updated_at"])
+            return False
     labels = []
     for m in r.matches:
         p = payments[m.obligation_id]
         labels.append(p.reference)
         reasons = dict(m.reasons, warnings=r.warnings)
-        manual = (p.allocations.filter(source="manual", outgoing_transaction__isnull=True, status="manual",
-                                       amount__gte=m.amount - Decimal("0.01"), amount__lte=m.amount + Decimal("0.01"))
-                  .first())
-        if manual:
-            # Jau pažymėta rankiniu būdu -> tik pririšam banko operaciją (antro DK nebus)
-            _drop_je(manual)
-            manual.match_reasons = dict(manual.match_reasons or {}, converted_from_manual=True,
-                                        manual_payment_account=manual.payment_account, **reasons)
-            manual.outgoing_transaction, manual.source = txn, "bank_import"
-            manual.payment_date, manual.payment_account, manual.needs_account = txn.transaction_date, "", False
-            manual.save()
-            create_je(manual)
+        manual_sum = sum((a.amount for a in _manual_allocs(p)), ZERO)
+        if manual_sum:
+            # PAY-05: jau pažymėta rankiniu būdu -> banko operacija pakeičia žymas (antro mokėjimo / DK nebus)
+            covered = _absorb_manual(p, txn, m.amount, reasons)
+            rest = _q2(m.amount - covered)
+            if rest > Decimal("0.01"):
+                alloc = PaymentAllocation.objects.create(
+                    kind="payroll", payroll_payment=p, outgoing_transaction=txn, source="bank_import", status=status,
+                    amount=rest, amount_txn=rest, amount_eur=rest, payment_date=txn.transaction_date,
+                    confidence=m.confidence, match_reasons=reasons, counterparty_name=p.recipient_name[:255])
+                create_je(alloc)
         else:
             alloc = PaymentAllocation.objects.create(
                 kind="payroll", payroll_payment=p, outgoing_transaction=txn, source="bank_import", status=status,

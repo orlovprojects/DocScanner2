@@ -85,3 +85,28 @@ class SummedTimesheetTests(TestCase):
         self.assertEqual(ts.extra_hours("holiday"), D("7.00"))
         sick = Event("sick", date(2026, 10, 9), date(2026, 10, 12))
         self.assertEqual(employer_sick_days(sick, daily_schedule=daily_hours(shifts)), 2)   # 9 ir 10 - pamainos
+
+
+class NightBreakTests(TestCase):
+
+    def test_break_not_paid_as_night(self):
+        s = make_shift(1, date(2026, 11, 1), time(22), time(6), 60)
+        self.assertEqual((s.hours, night_hours(s)), (D("7.00"), D("7.00")))
+
+
+class DstTests(TestCase):
+
+    def test_autumn_night_shift_is_13_hours(self):
+        s = make_shift(1, date(2026, 10, 24), time(19), time(7))      # naktį iš 10-24 į 10-25 laikrodis -1 val.
+        self.assertEqual(s.hours, D("13.00"))
+        self.assertEqual(night_hours(s), D("9.00"))
+        self.assertEqual(make_shift(1, date(2026, 10, 17), time(19), time(7)).hours, D("12.00"))
+
+
+class DstRestTests(TestCase):
+
+    def test_spring_dst_rest_10h_is_violation(self):
+        from docscanner_app.payroll.roster.law import check
+        a = make_shift(1, date(2026, 3, 28), time(16), time(0))
+        b = make_shift(1, date(2026, 3, 29), time(11), time(19))
+        self.assertIn("REST_11H", [v.code for v in check([a, b])])

@@ -122,8 +122,21 @@ def reconcile(batch):
             if key:
                 cp_control[key] = cp_control.get(key, ZERO) + line_eur_balance(line, entry_date)
 
+    # Atlyginimų sąskaitas įrašė DU perėjimas (tą pačią dieną) - balanse jos tik sutikrinamos
+    from ..payroll.migration.services import PAYROLL_CONTROL_ACCOUNTS, payroll_control_amounts
+    du_amounts = payroll_control_amounts(batch.company_profile)
+
     control_rows = []
     total_diff = ZERO
+    for account in sorted(du_amounts or {}):
+        in_balance = -sum((line_eur_balance(l, entry_date) for l in by_section.get(OpeningBalanceSection.BALANCE, [])
+                           if str(l.mapped_account) == account), ZERO)
+        diff = in_balance - du_amounts[account]
+        control_rows.append({
+            "account_code": account, "account_name": (get_account_name(account) or "") + " (pagal DU)",
+            "in_balance": str(in_balance), "in_counterparties": str(du_amounts[account]),
+            "difference": str(diff), "matches": abs(diff) <= TOLERANCE,
+        })
     for account in sorted(set(balance_control) | set(cp_control)):
         in_balance = balance_control.get(account, ZERO)
         in_cp = cp_control.get(account, ZERO)
@@ -146,6 +159,8 @@ def reconcile(batch):
             continue  # IT sumos jau yra balanse, kortelės kuriamos atskirai
         if line.section == OpeningBalanceSection.BALANCE and _control_key(line.mapped_account):
             continue  # kontrolinės sąskaitos imamos iš kontrahentų failų
+        if du_amounts and line.section == OpeningBalanceSection.BALANCE and str(line.mapped_account) in PAYROLL_CONTROL_ACCOUNTS:
+            continue  # atlyginimų sąskaitas įrašė DU perėjimas
         eur = line_eur_balance(line, entry_date)
         if eur > ZERO:
             total_debit += eur
@@ -272,9 +287,13 @@ def confirm(batch, user):
     asset_errors = create_assets(batch, user)[1]
 
     # 1. Balansas — be kontrolinių sąskaitų (jos ateina iš kontrahentų failų)
+    from ..payroll.migration.services import PAYROLL_CONTROL_ACCOUNTS, payroll_control_amounts
+    du_amounts = payroll_control_amounts(batch.company_profile)
     for line in batch.lines.filter(section=OpeningBalanceSection.BALANCE):
         if _control_key(line.mapped_account):
             continue
+        if du_amounts and str(line.mapped_account) in PAYROLL_CONTROL_ACCOUNTS:
+            continue  # atlyginimų sąskaitas jau įrašė DU perėjimas (PRAD-DU)
         amount = line_eur_balance(line, entry_date)
         if amount == ZERO:
             continue

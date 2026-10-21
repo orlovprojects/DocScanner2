@@ -14,6 +14,9 @@ import FavoriteBorderIcon from "@mui/icons-material/FavoriteBorder";
 import EventBusyOutlinedIcon from "@mui/icons-material/EventBusyOutlined";
 import LogoutOutlinedIcon from "@mui/icons-material/LogoutOutlined";
 import EuroOutlinedIcon from "@mui/icons-material/EuroOutlined";
+import ChildCareOutlinedIcon from "@mui/icons-material/ChildCareOutlined";
+import StrollerOutlinedIcon from "@mui/icons-material/StrollerOutlined";
+import SchoolOutlinedIcon from "@mui/icons-material/SchoolOutlined";
 import ChevronLeftRoundedIcon from "@mui/icons-material/ChevronLeftRounded";
 import ChevronRightRoundedIcon from "@mui/icons-material/ChevronRightRounded";
 import { useNavigate } from "react-router-dom";
@@ -179,6 +182,18 @@ export default function OtherRequests() {
       icon: <FavoriteBorderIcon />, title: parentTitle(employee), subtitle: parentSubtitle(pd),
       to: "/prasymas/parent_day", bg: "#FFF3F5", iconBg: "#FDDDE3", iconColor: "#EF476F",
     },
+    String(employee?.gender || "").toUpperCase() !== "F" && {
+      icon: <StrollerOutlinedIcon />, title: "Tėvystės atostogos", subtitle: "30 d., kol vaikui sueis 1 metai",
+      to: "/prasymas/paternity", bg: "#EEF4FF", iconBg: "#DCE7FF", iconColor: "#3E63DD",
+    },
+    {
+      icon: <ChildCareOutlinedIcon />, title: "Atostogos vaikui prižiūrėti", subtitle: "Kol vaikui sueis 3 metai",
+      to: "/prasymas/childcare", bg: "#F3F0FF", iconBg: "#E4DEFF", iconColor: "#6E56CF",
+    },
+    {
+      icon: <SchoolOutlinedIcon />, title: "Mokymosi atostogos", subtitle: "Egzaminams, baigiamajam darbui",
+      to: "/prasymas/study", bg: "#EEFAF8", iconBg: "#D3F2EE", iconColor: "#12A594",
+    },
     {
       icon: <EventBusyOutlinedIcon />, title: "Nemokamos atostogos", subtitle: "Pateikti prašymą dėl nemokamų atostogų",
       to: "/prasymas/unpaid", bg: "#FFF7E8", iconBg: "#FDE9BA", iconColor: "#9A6700",
@@ -210,7 +225,7 @@ export default function OtherRequests() {
       {!readOnly && (
         <Stack gap={1.1}>
           {pd === undefined
-            ? Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} variant="rounded" sx={{ height: 68, borderRadius: "10px" }} />)
+            ? Array.from({ length: 8 }).map((_, i) => <Skeleton key={i} variant="rounded" sx={{ height: 68, borderRadius: "10px" }} />)
             : items.map((item) => <RequestItem key={item.to} item={item} onClick={() => nav(item.to)} />)}
         </Stack>
       )}

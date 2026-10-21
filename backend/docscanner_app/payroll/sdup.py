@@ -11,6 +11,13 @@ from .taxes import ZERO, q2
 NAME_RE = re.compile(r"^[^\W\d_]+([ '-][^\W\d_]+)*$")
 GROUP_RE = re.compile(r"^[a-zA-Z0-9.-]{1,15}$")
 WORK_TIME_MODES = {"01", "02", "03", "04", "05"}
+SSN_RE = re.compile(r"^[A-Z]{2}\d{7}$")
+
+
+def ssn(series, number):
+    """SD numeris pagal schemą: 2 raidės + 7 skaitmenys (SD81498 -> SD0081498)."""
+    series, number = (series or "").strip().upper(), re.sub(r"\D", "", number or "")
+    return f"{series}{number.zfill(7)}" if series and number else ""
 
 
 def fmt(value):
@@ -64,8 +71,35 @@ def build_sdup(insurer_code, year, month, rows):
     if not re.fullmatch(r"\d{1,7}", insurer_code or ""):
         errors.append("Nenurodytas arba neteisingas draudėjo kodas (DU nustatymuose)")
 
-    entries = []
+    # schema: vienas asmuo - vienas įrašas (x-unique-employees); kelios sutartys -> kelios salaryInfo eilutės
+    merged = {}
     for r in rows:
+        key = r.person_code or r.ssn or r.iltu or f"{r.first_name} {r.last_name}"
+        if key in merged:
+            prev = merged[key]
+            prev.salaries = (prev.salaries or [SdupSalary(prev.group_code, prev.weekly_hours, prev.work_time_mode,
+                                                         prev.brutto, prev.extra, prev.paid_hours)])
+            prev.salaries += r.salaries or [SdupSalary(r.group_code, r.weekly_hours, r.work_time_mode,
+                                                       r.brutto, r.extra, r.paid_hours)]
+        else:
+            merged[key] = r
+    for r in merged.values():
+        if r.salaries:                     # ta pati grupė dviejose eilutėse -> sumuojama (x-unique-prof-groups)
+            by_group = {}
+            for sal in r.salaries:
+                g = by_group.get(sal.group_code)
+                if g is None:
+                    by_group[sal.group_code] = SdupSalary(sal.group_code, sal.weekly_hours, sal.work_time_mode,
+                                                          sal.brutto, sal.extra, sal.paid_hours)
+                else:
+                    g.weekly_hours = max(g.weekly_hours, sal.weekly_hours)
+                    g.brutto += sal.brutto
+                    g.extra += sal.extra
+                    g.paid_hours += sal.paid_hours
+            r.salaries = list(by_group.values())
+
+    entries = []
+    for r in merged.values():
         who = f"{r.first_name} {r.last_name}".strip()
         name, surname = _clean_name(r.first_name), _clean_name(r.last_name)
         for label, v in (("Vardas", name), ("Pavardė", surname)):
@@ -74,10 +108,13 @@ def build_sdup(insurer_code, year, month, rows):
 
         emp = {"name": name, "surname": surname}
         if r.person_code:
-            if not re.fullmatch(r"\d{11}", r.person_code):
+            from .personal_code import parse as parse_code
+            if not re.fullmatch(r"\d{11}", r.person_code) or not parse_code(r.person_code).valid:
                 errors.append(f"{who}: neteisingas asmens kodas")
             emp["personCode"] = r.person_code
         if r.ssn:
+            if not SSN_RE.match(r.ssn):
+                errors.append(f"{who}: SD numeris turi būti 2 raidės ir 7 skaitmenys")
             emp["personSSN"] = r.ssn
         if r.iltu:
             emp["personILTU"] = r.iltu
@@ -89,7 +126,10 @@ def build_sdup(insurer_code, year, month, rows):
             else:
                 emp["birthDate"] = r.birth_date
 
-        gender = r.gender or gender_from_code(r.person_code)
+        coded = gender_from_code(r.person_code)
+        gender = coded or r.gender           # schema: lytis turi atitikti asmens kodą (x-match-code-and-gender)
+        if coded and r.gender and r.gender != coded:
+            errors.append(f"⚠ {who}: kortelėje nurodyta lytis nesutampa su asmens kodu - naudojama pagal kodą")
         if gender not in ("M", "F"):
             errors.append(f"{who}: nenurodyta lytis")
         emp["gender"] = gender or ""
@@ -106,11 +146,13 @@ def build_sdup(insurer_code, year, month, rows):
             if sal.work_time_mode not in WORK_TIME_MODES:
                 errors.append(f"{who}: neteisingas darbo laiko režimas")
             if not (ZERO <= sal.weekly_hours < Decimal("100")):
-                errors.append(f"{who}: neteisinga savaitinė darbo laiko norma")
+                errors.append(f"{who}: neteisinga savaitinė darbo laiko norma (iki 99,99 val.)")
+            if sal.brutto < ZERO or sal.extra < ZERO:
+                errors.append(f"{who}: neigiama DU suma - SDUP teikiamos tik teigiamos sumos (patikrinkite korekcijas)")
             if sal.extra > sal.brutto:
                 errors.append(f"{who}: papildomas DU negali viršyti bruto DU")
-            if sal.paid_hours >= Decimal("1000"):
-                errors.append(f"{who}: per daug apmokėtų valandų")
+            if sal.paid_hours >= Decimal("1000") or sal.paid_hours < ZERO:
+                errors.append(f"{who}: apmokėtos valandos turi būti nuo 0 iki 999,99")
             infos.append({
                 "profGroupNum": sal.group_code or "",
                 "workTimeRate": fmt(sal.weekly_hours),

@@ -20,6 +20,7 @@ NE = "-"    # nedirbo (ne darbo santykių laikotarpis)
 
 EVENT_CODES = {
     "vacation": "A",
+    "vacation_prepaid": "A",       # perėjimas: atostogos, apmokėtos ankstesnėje programoje
     "sick": "L",
     "parent_day": "MD",
     "unpaid": "NA",
@@ -139,7 +140,7 @@ def generate(year, month, *, week=STANDARD_WEEK, workload=Decimal("1"),
             for ev in events:
                 if ev.start <= d <= ev.end:
                     day.event = ev
-                    if day.code == FD or (summed and ev.kind == "vacation" and norm_h > 0):
+                    if day.code == FD or (summed and ev.kind in ("vacation", "vacation_prepaid") and norm_h > 0):
                         code = EVENT_CODES.get(ev.kind, "?")
                         day.code = code
                         if ev.kind not in WORKED_EVENTS:

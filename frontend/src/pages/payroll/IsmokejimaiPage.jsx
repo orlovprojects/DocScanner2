@@ -48,7 +48,7 @@ function AccountSelect({ accounts, value, onChange }) {
   );
 }
 
-export default function IsmokejimaiPage() {
+export default function IsmokejimaiPage({ embedded = false } = {}) {
   const [{ year, month }, setYm] = useState(prevMonth);
   const [data, setData] = useState(null);
   const [settings, setSettings] = useState(null);
@@ -169,7 +169,7 @@ export default function IsmokejimaiPage() {
               </TextField>
             )}
             <Tooltip title={proposed ? "Atmesti" : "Pašalinti mokėjimą"}>
-              <IconButton size="small" onClick={() => allocAction(() => payrollApi.removeAllocation(a.id))}><DeleteOutlineIcon fontSize="small" /></IconButton>
+              <IconButton size="small" onClick={() => window.confirm("Pašalinti šį mokėjimą? Bus ištrintas ir jo DK įrašas.") && allocAction(() => payrollApi.removeAllocation(a.id))}><DeleteOutlineIcon fontSize="small" /></IconButton>
             </Tooltip>
           </Stack>
         </Stack>
@@ -218,10 +218,10 @@ export default function IsmokejimaiPage() {
   };
 
   return (
-    <Box sx={{ p: { xs: 2, md: 3 }, maxWidth: 1100 }}>
+    <Box sx={{ p: embedded ? 0 : { xs: 2, md: 3 }, maxWidth: 1100 }}>
       <Stack direction={{ xs: "column", sm: "row" }} justifyContent="space-between" alignItems={{ sm: "center" }} gap={2} mb={2}>
         <Stack direction="row" alignItems="center" gap={1}>
-          <Typography variant="h5" fontWeight={700}>Išmokėjimai</Typography>
+          {!embedded && <Typography variant="h5" fontWeight={700}>Išmokėjimai</Typography>}
           <Tooltip title="Atnaujinti">
             <IconButton onClick={load} sx={{ border: 1, borderColor: "divider", borderRadius: "50%" }}><RefreshIcon /></IconButton>
           </Tooltip>

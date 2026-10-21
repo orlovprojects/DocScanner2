@@ -1,6 +1,9 @@
 """
-Lietuvos asmens kodas: kontrolinio skaičiaus tikrinimas, gimimo data, lytis.
+Lietuvos asmens kodas: gimimo data, lytis, kontrolinis skaičius.
 Formatas: G YYMMDD NNN K  (G: 1/2 - XIX a., 3/4 - XX a., 5/6 - XXI a.; nelyginis - vyras)
+
+Kontrolinio skaičiaus neatitikimas - ĮSPĖJIMAS (warning), ne klaida: registre pasitaiko išduotų kodų su
+nestandartiniu kontroliniu skaičiumi, todėl tokio kodo išsaugojimas neblokuojamas.
 """
 from dataclasses import dataclass
 from datetime import date
@@ -25,19 +28,28 @@ class PersonalCodeInfo:
     error: str = ""
     birth_date: date = None
     gender: str = ""   # M / F
+    warning: str = ""
 
 
 def parse(code):
     code = (code or "").strip()
-    if len(code) != 11 or not code.isdigit():
-        return PersonalCodeInfo(False, "Asmens kodą sudaro 11 skaitmenų")
+    if not code.isdigit():
+        return PersonalCodeInfo(False, "Asmens kodą sudaro tik skaitmenys")
+    if len(code) != 11:
+        return PersonalCodeInfo(False, f"Įvesta {len(code)} iš 11 skaitmenų")
     if code[0] not in CENTURY:
-        return PersonalCodeInfo(False, "Neteisingas pirmas skaitmuo")
-    if control_digit(code[:10]) != int(code[10]):
-        return PersonalCodeInfo(False, "Neteisingas asmens kodas (nesutampa kontrolinis skaičius)")
+        return PersonalCodeInfo(False, f"Pirmas skaitmuo turi būti 1–6 (lytis ir gimimo šimtmetis), o įvesta {code[0]}")
     gender = "M" if int(code[0]) % 2 else "F"
-    try:
-        bd = date(CENTURY[code[0]] + int(code[1:3]), int(code[3:5]), int(code[5:7]))
-    except ValueError:
-        bd = None  # retais atvejais data užkoduota nepilnai (pvz. 00 mėnuo)
-    return PersonalCodeInfo(True, "", bd, gender)
+    year, mm, dd = CENTURY[code[0]] + int(code[1:3]), int(code[3:5]), int(code[5:7])
+    bd = None
+    if mm and dd:                                   # 00 - data užkoduota nepilnai (retais atvejais)
+        try:
+            bd = date(year, mm, dd)
+        except ValueError:
+            return PersonalCodeInfo(False, f"2–7 skaitmenys turi būti gimimo data, bet {year}-{code[3:5]}-{code[5:7]} tokios datos nėra")
+        if bd > date.today():
+            return PersonalCodeInfo(False, f"Gimimo data {bd} – ateityje")
+    k = control_digit(code[:10])
+    warning = "" if k == int(code[10]) else (
+        f"Kontrolinis skaitmuo pagal algoritmą turėtų būti {k}, o įvesta {code[10]} – patikrinkite pagal asmens dokumentą")
+    return PersonalCodeInfo(True, "", bd, gender, warning)

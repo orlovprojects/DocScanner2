@@ -284,8 +284,10 @@ from .payroll.views import (
     PayrollPaymentsView, PayrollPaymentMarkPaidView, PayrollAllocationView, 
     PayrollAdvancesView, PayrollPaymentLinkView,
     EmployeeTagViewSet, ShiftTypeViewSet, ScheduleRuleViewSet, ShiftPreferenceViewSet,
-    RosterView, RosterActionView, RosterCatalogView,
-    
+    RosterView, RosterActionView, RosterCatalogView, PayrollPaymentFileView,
+    BusinessTripViewSet, TripPreviewView, PayrollMigrationView,
+    PayrollMigrationExcelView, SodraReportsView,
+    GarnishmentOrderViewSet, RecurringPayItemViewSet, PayrollOverviewView,
 )
 
 
@@ -314,7 +316,9 @@ router.register(r"payroll/employee-tags", EmployeeTagViewSet, basename="payroll-
 router.register(r"payroll/shift-types", ShiftTypeViewSet, basename="payroll-shift-types")
 router.register(r"payroll/schedule-rules", ScheduleRuleViewSet, basename="payroll-schedule-rules")
 router.register(r"payroll/shift-preferences", ShiftPreferenceViewSet, basename="payroll-shift-preferences")
-
+router.register(r"payroll/trips", BusinessTripViewSet, basename="payroll-trips")
+router.register(r"payroll/garnishments", GarnishmentOrderViewSet, basename="payroll-garnishments")
+router.register(r"payroll/recurring-items", RecurringPayItemViewSet, basename="payroll-recurring")
 
 urlpatterns = [
 
@@ -781,6 +785,7 @@ urlpatterns = [
     path("payroll/leave-preview/", LeavePreviewView.as_view(), name="payroll-leave-preview"),
     path("payroll/personal-code/", PersonalCodeCheckView.as_view(), name="payroll-personal-code"),
     path("payroll/declarations/", DeclarationsView.as_view(), name="payroll-declarations"),
+    path("payroll/overview/", PayrollOverviewView.as_view()),
     path("payroll/declarations/<int:pk>/file/", DeclarationFileView.as_view(), name="payroll-declaration-file"),
     path("payroll/declarations/<int:pk>/status/", DeclarationStatusView.as_view(), name="payroll-declaration-status"),
     path("payroll/declarations/<int:pk>/submit/", DeclarationSubmitView.as_view(), name="payroll-declaration-submit"),
@@ -794,6 +799,11 @@ urlpatterns = [
     path("payroll/roster/", RosterView.as_view(), name="payroll-roster"),
     path("payroll/roster/action/", RosterActionView.as_view(), name="payroll-roster-action"),
     path("payroll/roster/catalog/", RosterCatalogView.as_view(), name="payroll-roster-catalog"),
+    path("payroll/payments/file/", PayrollPaymentFileView.as_view(), name="payroll-payments-file"),
+    path("payroll/trip-preview/", TripPreviewView.as_view(), name="payroll-trip-preview"),
+    path("payroll/migration/", PayrollMigrationView.as_view(), name="payroll-migration"),
+    path("payroll/migration/excel/", PayrollMigrationExcelView.as_view(), name="payroll-migration-excel"),
+    path("payroll/sodra-reports/", SodraReportsView.as_view(), name="payroll-sodra-reports"),
 
     #Darbuotoju savitarna
     path("savitarna/", include("docscanner_app.payroll.savitarna_urls")),

@@ -32,6 +32,10 @@ import AddIcon from "@mui/icons-material/Add";
 import DeleteOutlineIcon from "@mui/icons-material/DeleteOutline";
 import UnfoldMoreIcon from "@mui/icons-material/UnfoldMore";
 import AccountBalanceIcon from "@mui/icons-material/AccountBalance";
+import GroupsIcon from "@mui/icons-material/Groups";
+import AssignmentTurnedInIcon from "@mui/icons-material/AssignmentTurnedIn";
+import PaymentsOutlinedIcon from "@mui/icons-material/PaymentsOutlined";
+import CalendarMonthOutlinedIcon from "@mui/icons-material/CalendarMonthOutlined";
 import { ACCOUNTING_PROGRAMS } from "../page_elements/AccountingPrograms";
 
 const RAIL_WIDTH = 58;
@@ -138,6 +142,29 @@ const SECTIONS = [
       { icon: ListAltIcon, text: "PVM grąžinimas (EPRIS)", path: "/epris" },
     ],
   },
+  {
+    id: "personalas",
+    erpOnly: true,
+    label: "Person.",
+    fullLabel: "Personalas",
+    icon: GroupsIcon,
+    pathPrefix: ["/darbo-uzmokestis", "/grafikai-ir-tabeliai"],
+    items: () => [
+      { icon: PaymentsOutlinedIcon, text: "Darbo užmokestis", path: "/darbo-uzmokestis" },
+      { icon: CalendarMonthOutlinedIcon, text: "Grafikai ir tabeliai", path: "/grafikai-ir-tabeliai" },
+    ],
+  },
+  {
+    id: "deklaravimas",
+    erpOnly: true,
+    label: "Deklar.",
+    fullLabel: "Deklaravimas",
+    icon: AssignmentTurnedInIcon,
+    pathPrefix: ["/deklaravimas"],
+    items: () => [
+      { icon: ListAltIcon, text: "Deklaracijos", path: "/deklaravimas" },
+    ],
+  },
 ];
 
 const BOTTOM_ITEMS = [
@@ -182,6 +209,8 @@ export default function SidebarRail({
     (p) => p.id === activeCompanyProfileId
   );
   const switcherOpen = Boolean(switcherAnchor);
+  const isErp = activeProfile?.accounting_program === "dokskenas_erp";
+  const visibleSections = SECTIONS.filter((section) => !section.erpOnly || isErp);
 
   useLayoutEffect(() => {
     const updateLayout = () => {
@@ -392,7 +421,7 @@ export default function SidebarRail({
           </>
         )}
 
-        {SECTIONS.map((section) => {
+        {visibleSections.map((section) => {
             const Icon = section.icon;
             const isActive = activeSection?.id === section.id;
             const isOpen = openSection === section.id;

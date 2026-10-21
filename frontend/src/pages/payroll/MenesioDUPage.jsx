@@ -1,7 +1,8 @@
 import { Fragment, useCallback, useEffect, useState } from "react";
 import {
   Alert, Box, Button, Chip, CircularProgress, Collapse, Dialog, DialogActions, DialogContent, DialogTitle,
-  FormControl, IconButton, InputAdornment, InputLabel, ListSubheader, MenuItem, Paper, Popover, Select, Stack,
+  FormControl, FormControlLabel, IconButton, InputAdornment, InputLabel, ListSubheader, MenuItem, Paper, Popover, Radio,
+  RadioGroup, Select, Stack,
   Step, StepButton, Stepper, Table, TableBody, TableCell, TableHead, TableRow, TextField, Tooltip, Typography,
 } from "@mui/material";
 import ChevronLeftIcon from "@mui/icons-material/ChevronLeft";
@@ -13,6 +14,10 @@ import AddIcon from "@mui/icons-material/Add";
 
 import { ABSENCE_KINDS, EXTRA_HOURS, MONTHS, apiError, money, payrollApi } from "../../api/payroll";
 import { AbsenceForm } from "./DarbuotojaiPage";
+import SodraReportsDialog from "./SodraReportsDialog";
+import { TripPeriodBlock } from "./TripPeriodChoice";
+import { useNavigate } from "react-router-dom";
+import IsmokejimaiPage from "./IsmokejimaiPage";
 
 const MENU_PROPS = { disableScrollLock: true };
 const WEEKDAYS = ["S", "Pr", "A", "T", "K", "Pn", "Š"];
@@ -61,17 +66,23 @@ const sum = (rows, f) => rows.reduce((a, r) => a + Number(typeof f === "function
 // ============================================================
 // Puslapis
 // ============================================================
-export default function MenesioDUPage() {
+// mode: "full" - visi žingsniai (senas puslapis); "timesheet" - tik tabelis (Grafikai ir tabeliai);
+//       "payroll" - atlyginimai -> patvirtinimas -> išmokėjimai (Darbo užmokestis)
+export default function MenesioDUPage({ mode = "full", embedded = false } = {}) {
+  const navigate = useNavigate();
   const [{ year, month }, setYm] = useState(defaultMonth);
   const [run, setRun] = useState(null);
   const [results, setResults] = useState([]);
   const [timesheet, setTimesheet] = useState([]);
+  const STEPS = mode === "payroll" ? ["Atlyginimai", "Patvirtinimas", "Išmokėjimai"]
+    : mode === "timesheet" ? ["Darbo laikas"] : ["Darbo laikas", "Atlyginimai", "Patvirtinimas"];
   const [step, setStep] = useState(0);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
   const locked = run && run.status !== "draft";
+  const [sickOpen, setSickOpen] = useState(false);
 
   const loadAll = useCallback(async () => {
     setLoading(true); setError("");
@@ -105,13 +116,26 @@ export default function MenesioDUPage() {
   };
 
   return (
-    <Box sx={{ p: { xs: 2, md: 3 }, maxWidth: 1400 }}>
+    <Box sx={{ p: embedded ? 0 : { xs: 2, md: 3 }, maxWidth: 1400 }}>
       <Stack direction={{ xs: "column", sm: "row" }} justifyContent="space-between" alignItems={{ sm: "center" }} gap={2} mb={2}>
-        <Box>
-          <Typography variant="h5" fontWeight={700}>Atlyginimai</Typography>
-          <Typography variant="body2" color="text.secondary">Trys žingsniai: patikrinti darbo laiką, peržiūrėti atlyginimus ir patvirtinti.</Typography>
-        </Box>
+        {!embedded ? (
+          <Box>
+            <Typography variant="h5" fontWeight={700}>Atlyginimai</Typography>
+            <Typography variant="body2" color="text.secondary">Trys žingsniai: patikrinti darbo laiką, peržiūrėti atlyginimus ir patvirtinti.</Typography>
+          </Box>
+        ) : (
+          <Typography variant="body2" color="text.secondary" sx={{ maxWidth: 560 }}>
+            {mode === "timesheet"
+              ? "Darbo laikas užpildomas pagal grafiką ir šventes. Pažymėkite tik tai, kas buvo kitaip."
+              : <>Darbo laikas tikrinamas skiltyje <Box component="span" onClick={() => navigate("/grafikai-ir-tabeliai/tabelis")}
+                  sx={{ color: "primary.main", cursor: "pointer", fontWeight: 600, "&:hover": { textDecoration: "underline" } }}>Grafikai ir tabeliai → Tabelis</Box>.</>}
+          </Typography>
+        )}
         <Stack direction="row" alignItems="center" gap={1}>
+          {mode !== "timesheet" && !embedded && (
+            <Button size="small" onClick={() => setSickOpen(true)} sx={{ mr: 1, textTransform: "none" }}>Sodros ataskaitos (S15, S47)</Button>
+          )}
+          <SodraReportsDialog open={sickOpen} onClose={() => setSickOpen(false)} onDone={loadAll} />
           <IconButton onClick={() => shiftMonth(-1)} aria-label="Ankstesnis mėnuo"><ChevronLeftIcon /></IconButton>
           <Typography fontWeight={700} sx={{ minWidth: 150, textAlign: "center" }}>{year} m. {MONTHS[month - 1].toLowerCase()}</Typography>
           <IconButton onClick={() => shiftMonth(1)} aria-label="Kitas mėnuo"><ChevronRightIcon /></IconButton>
@@ -120,14 +144,23 @@ export default function MenesioDUPage() {
         </Stack>
       </Stack>
 
-      <Stepper nonLinear activeStep={step} sx={{ mb: 3 }}>
-        {["Darbo laikas", "Atlyginimai", "Patvirtinimas"].map((l, i) => (
-          <Step key={l} completed={locked && i < 2}><StepButton onClick={() => setStep(i)}>{l}</StepButton></Step>
-        ))}
-      </Stepper>
+      {STEPS.length > 1 && (
+        <Stepper nonLinear activeStep={step} sx={{ mb: 3 }}>
+          {STEPS.map((l, i) => (
+            <Step key={l} completed={locked && i < (mode === "payroll" ? 2 : 2)}><StepButton onClick={() => setStep(i)}>{l}</StepButton></Step>
+          ))}
+        </Stepper>
+      )}
 
       {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
-      {run?.warnings?.length > 0 && step < 2 && <Warnings items={run.warnings} />}
+      {mode !== "timesheet" && run && run.status === "draft" && !["approved", "locked"].includes(run.timesheet_status) && (
+        <Alert severity="warning" sx={{ mb: 2 }}
+          action={<Button size="small" color="inherit" onClick={() => navigate(`/grafikai-ir-tabeliai/tabelis?m=${year}-${String(month).padStart(2, "0")}`)}>Į tabelį</Button>}>
+          Tabelis nepatvirtintas – skaičiavimas preliminarus. Atlyginimus patvirtinti bus galima patvirtinus tabelį.
+        </Alert>
+      )}
+      {run?.warnings?.length > 0 && (mode === "payroll" ? step < 1 : step < 2) && <Warnings items={run.warnings} />}
+      {mode !== "timesheet" && run && <TripPeriodBlock year={year} month={month} locked={locked} onChanged={recalc} />}
 
       {loading ? (
         <Box sx={{ py: 8, textAlign: "center" }}><CircularProgress /></Box>
@@ -138,9 +171,18 @@ export default function MenesioDUPage() {
         </Paper>
       ) : (
         <>
-          {step === 0 && <TimesheetStep rows={timesheet} year={year} month={month} locked={locked} onChanged={recalc} onNext={() => setStep(1)} />}
-          {step === 1 && <ResultsStep run={run} rows={results} locked={locked} onChanged={recalc} onNext={() => setStep(2)} />}
-          {step === 2 && <ApproveStep run={run} rows={results} onDone={loadAll} setError={setError} />}
+          {mode === "timesheet" && <TimesheetStep rows={timesheet} year={year} month={month} locked={locked} onChanged={recalc}
+            onNext={() => navigate("/darbo-uzmokestis/atlyginimai")} />}
+          {mode === "payroll" && <>
+            {step === 0 && <ResultsStep run={run} rows={results} locked={locked} onChanged={recalc} onNext={() => setStep(1)} />}
+            {step === 1 && <ApproveStep run={run} rows={results} onDone={loadAll} setError={setError} />}
+            {step === 2 && <IsmokejimaiPage embedded />}
+          </>}
+          {mode === "full" && <>
+            {step === 0 && <TimesheetStep rows={timesheet} year={year} month={month} locked={locked} onChanged={recalc} onNext={() => setStep(1)} />}
+            {step === 1 && <ResultsStep run={run} rows={results} locked={locked} onChanged={recalc} onNext={() => setStep(2)} />}
+            {step === 2 && <ApproveStep run={run} rows={results} onDone={loadAll} setError={setError} />}
+          </>}
         </>
       )}
     </Box>
@@ -213,7 +255,7 @@ function TimesheetStep({ rows, year, month, locked, onChanged, onNext }) {
         </Table>
       </Paper>
 
-      <Box><Button variant="contained" onClick={onNext}>Darbo laikas teisingas – toliau</Button></Box>
+      <Box><Button variant="contained" onClick={onNext}>Darbo laikas teisingas – skaičiuoti atlyginimus</Button></Box>
 
       {pop && (
         <DayPopover pop={pop} year={year} month={month} onClose={() => setPop(null)}
@@ -291,6 +333,15 @@ function DayPopover({ pop, onClose, onChanged }) {
           <Stack gap={1}>
             <Button variant="outlined" onClick={() => setMode("absence")}>Nedirbo (atostogos, liga…)</Button>
             <Button variant="outlined" onClick={() => setMode("hours")}>Dirbo papildomai (viršvalandžiai, naktis…)</Button>
+            {row.pay_form === "monthly" && !row.summed && (
+              <Typography variant="caption" color="text.secondary">
+                Mėnesinė alga nuo valandų skaičiaus nepriklauso. Jei darbuotojas dirbo mažiau – pažymėkite priežastį
+                („Nedirbo“: pravaikšta, prastova, nemokamos atostogos…).
+              </Typography>
+            )}
+            {row.summed && (
+              <Typography variant="caption" color="text.secondary">Suminė apskaita: valandos imamos iš paskelbto darbo grafiko.</Typography>
+            )}
             {Object.entries(day.extra || {}).map(([k, v]) => (
               <Stack key={k} direction="row" alignItems="center" justifyContent="space-between" sx={{ mt: 1 }}>
                 <Typography variant="body2">{EXTRA_HOURS[k]}: {Number(v)} val.</Typography>
@@ -429,7 +480,7 @@ function EmployeeLines({ run, result, locked, onChanged, onAdd }) {
                   <Tooltip title={l.comment || ""}>
                     <Typography variant="body2">
                       {l.code_name}
-                      {Number(l.quantity) > 0 && <span style={{ opacity: 0.6 }}> · {Number(l.quantity)} {["ALG", "VAL", "VRS", "NAK", "POI", "SVN", "VRP", "VRN", "VRF"].includes(l.code) ? "val." : "d."}</span>}
+                      {Number(l.quantity) > 0 && <span style={{ opacity: 0.6 }}> · {Number(l.quantity)} {["ALG", "VAL", "VRS", "NAK", "POI", "SVN", "SVP", "VRP", "VRN", "VRF", "SAV", "SAN"].includes(l.code) ? "val." : "d."}</span>}
                     </Typography>
                   </Tooltip>
                   <Stack direction="row" alignItems="center" gap={0.5}>
@@ -539,6 +590,7 @@ function SdupBlock({ run }) {
 }
 
 function ApproveStep({ run, rows, onDone, setError }) {
+  const tsOk = ["approved", "locked"].includes(run.timesheet_status) || run.status !== "draft";
   const [busy, setBusy] = useState(false);
   const locked = run.status !== "draft";
 
@@ -550,6 +602,23 @@ function ApproveStep({ run, rows, onDone, setError }) {
   const act = async (fn) => {
     setBusy(true);
     try { await fn(run.id); await onDone(); } catch (e) { setError(apiError(e)); } finally { setBusy(false); }
+  };
+
+  // PAY-03: nepažymėti kaip sumokėti avansai -> sprendimas prieš tvirtinant
+  const [adv, setAdv] = useState(null);          // [{id, employee, open, due_date, action, date}]
+  const [notes, setNotes] = useState([]);
+  const approve = async (decisions) => {
+    setBusy(true); setError("");
+    try {
+      const r = await payrollApi.approveRun(run.id, decisions);
+      setAdv(null);
+      setNotes(r.warnings || []);
+      await onDone();
+    } catch (e) {
+      if (e?.response?.status === 409 && e.response.data?.advances) {
+        setAdv(e.response.data.advances.map((a) => ({ ...a, action: "paid", date: a.due_date || "" })));
+      } else setError(apiError(e));
+    } finally { setBusy(false); }
   };
 
   const Tile = ({ title, value, note }) => (
@@ -564,10 +633,46 @@ function ApproveStep({ run, rows, onDone, setError }) {
     <Stack gap={3}>
       <Stack direction={{ xs: "column", md: "row" }} gap={2}>
         <Tile title="Išmokėti darbuotojams" value={toEmployees} note="Pervesti į darbuotojų banko sąskaitas" />
-        <Tile title="Sumokėti VMI (pajamų mokestis)" value={toVmi} note="Iki kito mėnesio 15 d." />
-        <Tile title="Sumokėti Sodrai" value={toSodra} note="Iki kito mėnesio 15 d." />
+        <Tile title="Sumokėti VMI (pajamų mokestis)" value={toVmi}
+          note="Iki 15 d. to mėnesio, kai išmokamas atlyginimas (išmokėjus po 15 d. – iki mėnesio pabaigos). Tikslūs terminai – „Išmokėjimai“." />
+        <Tile title="Sumokėti Sodrai" value={toSodra} note="Iki kito mėnesio 15 d. (jei poilsio diena – kitą darbo dieną)" />
       </Stack>
       <Typography variant="body2" color="text.secondary">Įmonei šis mėnuo iš viso kainavo {money(cost)} (atlyginimai su visais mokesčiais).</Typography>
+
+      {notes.map((n, i) => <Alert key={i} severity="warning" onClose={() => setNotes(notes.filter((_, j) => j !== i))}>{n}</Alert>)}
+
+      <Dialog open={!!adv} onClose={() => setAdv(null)} fullWidth maxWidth="sm" disableScrollLock>
+        <DialogTitle>Avansai nepažymėti kaip sumokėti</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" color="text.secondary" mb={2}>
+            Iš atlyginimo išskaičiuojamas tik faktiškai sumokėtas avansas. Jei avansas sumokėtas, bet banko išrašas dar neįkeltas –
+            pažymėkite jį sumokėtu.
+          </Typography>
+          <Stack gap={2}>
+            {(adv || []).map((a, i) => (
+              <Paper key={a.id} variant="outlined" sx={{ p: 1.5 }}>
+                <Typography fontWeight={600}>{a.employee} · {money(a.open)}{Number(a.paid) > 0 ? ` (jau sumokėta ${money(a.paid)})` : ""}</Typography>
+                <RadioGroup value={a.action} onChange={(e) => setAdv(adv.map((x, j) => (j === i ? { ...x, action: e.target.value } : x)))}>
+                  <FormControlLabel value="paid" control={<Radio size="small" />} label="Sumokėtas – išskaičiuoti iš atlyginimo" />
+                  <FormControlLabel value="unpaid" control={<Radio size="small" />} label="Nesumokėtas – visa suma bus išmokėta su atlyginimu" />
+                </RadioGroup>
+                {a.action === "paid" && (
+                  <TextField size="small" type="date" label="Sumokėjimo data" value={a.date} InputLabelProps={{ shrink: true }}
+                    onChange={(e) => setAdv(adv.map((x, j) => (j === i ? { ...x, date: e.target.value } : x)))} />
+                )}
+              </Paper>
+            ))}
+          </Stack>
+        </DialogContent>
+        <DialogActions sx={{ px: 3, py: 2 }}>
+          <Button onClick={() => setAdv(null)}>Atšaukti</Button>
+          <Button variant="contained" disabled={busy}
+            disabled={!tsOk}
+            onClick={() => approve(Object.fromEntries(adv.map((a) => [a.id, { action: a.action, date: a.date }])))}>
+            Patvirtinti atlyginimus
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       {locked ? (
         <Alert severity="success" action={<Button color="inherit" size="small" disabled={busy} onClick={() => act(payrollApi.reopenRun)}>Atidaryti taisymui</Button>}>
@@ -582,7 +687,7 @@ function ApproveStep({ run, rows, onDone, setError }) {
           <Typography variant="body2" color="text.secondary" mb={2}>
             Patvirtinus bus sukurtas įrašas didžiojoje knygoje. Jei vėliau rasite klaidą – atidarykite taisymui, pataisykite ir patvirtinkite iš naujo.
           </Typography>
-          <Button variant="contained" size="large" disabled={busy || rows.length === 0} onClick={() => act(payrollApi.approveRun)}>
+          <Button variant="contained" size="large" disabled={busy || rows.length === 0 || !tsOk} onClick={() => approve()}>
             Patvirtinti atlyginimus
           </Button>
         </Paper>

@@ -103,8 +103,17 @@ class LoginView(PublicView):
     def post(self, request):
         login = normalize_login(request.data.get("login"))
         pw = request.data.get("password", "")
+        if "@" not in (login or ""):
+            raise ValidationError({"detail": "Prisijunkite el. paštu"})
         acc = EmployeeAccount.objects.filter(login=login, is_active=True).first()
-        generic = ValidationError({"detail": "Neteisingas prisijungimas arba slaptažodis"})
+        if acc is None:
+            # anksčiau pakviestas telefonu, bet anketoje nurodytas el. paštas -> paskyra pereina prie el. pašto
+            acc = (EmployeeAccount.objects.filter(is_active=True, employees__email__iexact=login)
+                   .exclude(login__contains="@").distinct().first())
+            if acc is not None:
+                acc.login = login
+                acc.save(update_fields=["login"])
+        generic = ValidationError({"detail": "Neteisingas el. paštas arba slaptažodis"})
         if acc is None or not acc.password:
             raise generic
         if acc.locked_until and acc.locked_until > timezone.now():
@@ -275,8 +284,8 @@ class AnketaView(SavitarnaView):
             "address": e.address, "iban": e.iban, "phone": e.phone, "email": e.email,
             "works_elsewhere_with_npd": e.npd_mode == "none", "participation_level": level,
             "pension_accumulation": e.pension_accumulation, "single_parent": e.single_parent,
-            "children": [{"first_name": c.first_name, "birth_date": c.birth_date, "has_disability": c.has_disability}
-                         for c in e.children.all()],
+            "children": [{"id": c.id, "first_name": c.first_name, "birth_date": c.birth_date,
+                          "has_disability": c.has_disability} for c in e.children.all()],
             "data_status": e.data_status,
         })
 
@@ -301,8 +310,21 @@ class AnketaView(SavitarnaView):
         first_time = e.data_status != "complete"
         e.data_status = "complete"
         e.save()
-        e.children.all().delete()
-        EmployeeChild.objects.bulk_create([EmployeeChild(employee=e, **c) for c in d["children"]])
+        # vaikai atnaujinami vietoje (ne trinami iš naujo) - į juos rodo nebuvimai, prašymai ir 9-SD
+        existing = list(e.children.all())
+        keep = set()
+        for c in d["children"]:
+            match = next((x for x in existing if x.id not in keep and x.birth_date == c["birth_date"]
+                          and (x.first_name or "").strip().lower() == (c.get("first_name") or "").strip().lower()), None) \
+                or next((x for x in existing if x.id not in keep and x.birth_date == c["birth_date"]), None)
+            if match:
+                for k, v in c.items():
+                    setattr(match, k, v)
+                match.save()
+                keep.add(match.id)
+            else:
+                keep.add(EmployeeChild.objects.create(employee=e, **c).id)
+        e.children.exclude(id__in=keep).delete()
         notify_accountant(
             e, f"{e.full_name}: " + ("užpildyta anketa" if first_time else "pakeisti duomenys"),
             f"{e.full_name} {'užpildė savo anketą' if first_time else 'pakeitė savo duomenis'} esavitarna.lt.\n"
@@ -319,7 +341,9 @@ def _req_json(r):
     return {"id": r.id, "kind": r.kind, "kind_label": r.get_kind_display(), "start_date": r.start_date,
             "end_date": r.end_date, "work_days": str(r.work_days), "status": r.status,
             "status_label": r.get_status_display(), "reject_reason": r.reject_reason,
-            "comment": r.comment, "answer": r.answer, "created_at": r.created_at}
+            "comment": r.comment, "answer": r.answer, "created_at": r.created_at,
+            "child": (f"{r.child.first_name or 'Vaikas'} ({r.child.birth_date:%Y-%m-%d})" if getattr(r, "child_id", None) else ""),
+            "has_attachment": bool(getattr(r, "attachment", None))}
 
 
 def _parse_dates(data):
@@ -336,7 +360,8 @@ class RequestPreviewView(SavitarnaView):
 
     def post(self, request):
         start, end = _parse_dates(request.data)
-        return Response(payroll_services.request_preview(request.user.employee, request.data.get("kind"), start, end))
+        return Response(payroll_services.request_preview(request.user.employee, request.data.get("kind"), start, end,
+                                                         request.data.get("child") or None))
 
 
 class RequestListView(SavitarnaView):
@@ -362,9 +387,13 @@ class RequestListView(SavitarnaView):
         start, end = _parse_dates(request.data)
         from .savitarna_auth import _ip
         try:
+            f = request.FILES.get("attachment")
+            if f is not None and f.size > 10 * 1024 * 1024:
+                raise ValidationError("Failas per didelis (daugiausia 10 MB)")
             r = payroll_services.create_request(emp, request.data.get("kind"), start, end,
                                                 request.data.get("comment", ""), _ip(request),
-                                                request.META.get("HTTP_USER_AGENT", ""))
+                                                request.META.get("HTTP_USER_AGENT", ""),
+                                                child_id=request.data.get("child") or None, attachment=f)
         except ValueError as e:
             raise ValidationError(str(e))
         return Response(_req_json(r), status=status.HTTP_201_CREATED)
@@ -374,6 +403,8 @@ class RequestCancelView(SavitarnaView):
     permission_classes = [HasActiveEmployee]
 
     def post(self, request, pk):
+        if request.user.employee.status == "dismissed":
+            raise ValidationError("Tik peržiūra")
         r = EmployeeRequest.objects.filter(id=pk, employee=request.user.employee).first()
         if r is None or r.status != "pending":
             raise ValidationError("Atšaukti galima tik dar nepatvirtintą prašymą")
@@ -447,7 +478,7 @@ class MyRosterView(SavitarnaView):
     def post(self, request):
         from .roster import services as rs
         emp = request.user.employee
-        if getattr(emp, "read_only", False):
+        if emp.status == "dismissed":               # SEC-02: buvę darbuotojai - tik peržiūra
             raise ValidationError("Tik peržiūra")
         a = request.data.get("action")
         try:

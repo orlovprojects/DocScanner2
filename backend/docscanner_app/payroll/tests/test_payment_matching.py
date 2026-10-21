@@ -95,3 +95,15 @@ class AuthorityByIbanTests(TestCase):
     def test_sodra_by_iban_without_name(self):
         r = match_txn(Txn(1, D("421.15"), date(2026, 10, 9), "", "LT777300010129002656", "", "252", ""), obl())
         self.assertEqual((r.status, r.category), ("auto", "tax_sodra"))
+
+
+
+class ReferencePrefixTests(TestCase):
+
+    def test_e1_does_not_match_e10(self):
+        o1 = Obligation(1, "employee", D("100"), date(2026, 11, 10), "A", "", "DU202610-E1")
+        o10 = Obligation(10, "employee", D("200"), date(2026, 11, 10), "B", "", "DU202610-E10")
+        r = match_txn(Txn(1, D("200"), date(2026, 11, 10), "B", "", "", "Atlyginimas DU202610-E10", ""), [o1, o10])
+        self.assertEqual(r.matches[0].obligation_id, 10)
+        r = match_txn(Txn(2, D("100"), date(2026, 11, 10), "A", "", "", "DU202610-E1 atlyginimas", ""), [o10, o1])
+        self.assertEqual(r.matches[0].obligation_id, 1)

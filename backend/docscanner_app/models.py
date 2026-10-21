@@ -20,6 +20,7 @@ from .ilgalaikis_turtas.constants import (
     DepreciationBook,
     ILT_MONTHS,
 )
+from docscanner_app.payroll.roster.planning import default_weekday_need, default_weekday_max
 
 #wagtail importy
 from wagtail.models import Page
@@ -7221,6 +7222,7 @@ class PayCode(models.Model):
 
 
 
+
 class PayrollSettings(models.Model):
     """Įmonės DU nustatymai (vienas CompanyProfile - vieni nustatymai)."""
     NA_GROUP_CHOICES = [("I", "I"), ("II", "II"), ("III", "III"), ("IV", "IV")]
@@ -7240,6 +7242,7 @@ class PayrollSettings(models.Model):
     roster_publish_days = models.PositiveSmallIntegerField(default=10)   # juodraštis sudaromas likus N d.
     advance_percent = models.PositiveSmallIntegerField(default=50)
     payout_account = models.CharField(max_length=20, blank=True, default="")
+    overtime_year_limit = models.PositiveSmallIntegerField(default=180)  # DK 119 str. 3 d. (kolektyvine sutartimi iki 260)
  
     default_expense_account = models.CharField(max_length=10, default="6304")
     collective_agreement = models.BooleanField(default=False)
@@ -7294,8 +7297,8 @@ class Position(models.Model):
  
     def __str__(self):
         return self.name
- 
- 
+
+
 class Employee(models.Model):
     NPD_CHOICES = [
         ("standard", "Taikyti (formulė)"),
@@ -7346,6 +7349,10 @@ class Employee(models.Model):
     status = models.CharField(max_length=10, choices=STATUS_CHOICES, default="active")
     tags = models.ManyToManyField("EmployeeTag", blank=True, related_name="employees")
     summed_overtime_to_vacation = models.BooleanField(default=False)   # suminė: viršytas laikas x1,5 prie atostogų
+    vsd_cap_year = models.PositiveSmallIntegerField(null=True, blank=True)   # Sodra (S47): VSD lubos pasiektos šiais metais
+    opening_vdu = models.DecimalField(max_digits=12, decimal_places=4, null=True, blank=True)   # VDU iš senos programos
+    opening_vdu_unit = models.CharField(max_length=4, blank=True, default="")                   # day / hour
+    opening_vdu_until = models.DateField(null=True, blank=True)                                  # naudojamas iki šios datos
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
  
@@ -7359,7 +7366,7 @@ class Employee(models.Model):
  
     def __str__(self):
         return self.full_name
- 
+    
  
 class EmployeeChild(models.Model):
     employee = models.ForeignKey(Employee, on_delete=models.CASCADE, related_name="children")
@@ -7370,7 +7377,6 @@ class EmployeeChild(models.Model):
  
     class Meta:
         ordering = ["birth_date"]
- 
  
 class EmploymentContract(models.Model):
     # Sodra 1-SD klasifikatorius (ReasonDetCode, kai ReasonCode = 01)
@@ -7386,11 +7392,7 @@ class EmploymentContract(models.Model):
     ]
     STATUS_CHOICES = [("draft", "Juodraštis"), ("active", "Galioja"), ("terminated", "Nutraukta")]
     # Nedarbo draudimas 2,03 %: terminuotos rūšys ir terminuoti potipiai (A40)
-    # Nedarbo draudimas 2,03 %: terminuotos rūšys ir terminuoti potipiai (A40)
     FIXED_TERM_TYPES = {"02", "04", "05"}
-    FIXED_TERM_SUBTYPES = {"031", "061", "071", "081"}
-    OPEN_ENDED_SUBTYPES = {"032", "062", "072", "082"}
-    SUBTYPE_REQUIRED = {"03", "06", "07", "08"}
     FIXED_TERM_SUBTYPES = {"031", "061", "071", "081"}
     OPEN_ENDED_SUBTYPES = {"032", "062", "072", "082"}
     SUBTYPE_REQUIRED = {"03", "06", "07", "08"}
@@ -7405,10 +7407,16 @@ class EmploymentContract(models.Model):
     probation_months = models.PositiveSmallIntegerField(default=0)
     annual_leave_days = models.PositiveSmallIntegerField(default=20)  # 20 (5 d./sav.), 24 (6 d./sav.), 25, 30...
     work_time_mode = models.CharField(max_length=2, default="01")  # SDUP: 01 nekintanti, 02 suminė, 03 lankstus, 04 suskaidyta, 05 individualus
+    summed_period_months = models.PositiveSmallIntegerField(null=True, blank=True)  # None - pagal įmonės DU nustatymus
+    summed_period_anchor = models.PositiveSmallIntegerField(null=True, blank=True)
     extra_leave_days = models.PositiveSmallIntegerField(default=0)            # papildomai pagal sutartį
     extended_leave_days = models.PositiveSmallIntegerField(null=True, blank=True)  # pailgintos pagal profesiją
     seniority_since = models.DateField(null=True, blank=True)                 # nepertraukiamas stažas nuo
     extra_terms = models.TextField(blank=True, default="")  # papildomos sutarties sąlygos (5 p.)
+    is_company_head = models.BooleanField(default=False)    # juridinio asmens vienasmenis valdymo organas (1-SD - prieš 1 darbo val.)
+    summed_period_months = models.PositiveSmallIntegerField(null=True, blank=True)   # suminė: jei kitoks nei įmonės
+    summed_period_anchor = models.PositiveSmallIntegerField(null=True, blank=True)   # mėnuo (1-12), nuo kurio skaičiuojama
+    summed_opening = models.JSONField(null=True, blank=True)    # perėjimas: {"start", "until", "worked", "absence", "paid_ot"}
 
     termination_date = models.DateField(null=True, blank=True)
     termination_basis = models.JSONField(null=True, blank=True)  # {"article": "57", "part": "1", "point": "1"}
@@ -7435,20 +7443,6 @@ class EmploymentContract(models.Model):
         from django.core.exceptions import ValidationError
         if self.sodra_contract_type in self.SUBTYPE_REQUIRED and not self.sodra_contract_subtype:
             raise ValidationError({"sodra_contract_subtype": "Šiai sutarties rūšiai būtina nurodyti potipį (terminuota / neterminuota)"})
-            return True
-        if self.sodra_contract_subtype in self.FIXED_TERM_SUBTYPES:
-            return True
-        if self.sodra_contract_subtype in self.OPEN_ENDED_SUBTYPES:
-            return False
-        if self.sodra_contract_type in self.SUBTYPE_REQUIRED:
-            # potipis nenurodytas - sprendžiam pagal pabaigos datą
-            return self.end_date is not None
-        return False
- 
-    def clean(self):
-        from django.core.exceptions import ValidationError
-        if self.sodra_contract_type in self.SUBTYPE_REQUIRED and not self.sodra_contract_subtype:
-            raise ValidationError({"sodra_contract_subtype": "Šiai sutarties rūšiai būtina nurodyti potipį (terminuota / neterminuota)"})
  
     @property
     def effective_end(self):
@@ -7456,7 +7450,9 @@ class EmploymentContract(models.Model):
  
     def __str__(self):
         return f"{self.employee} nuo {self.start_date}"
- 
+
+
+    
  
 class ContractTerms(models.Model):
     """Sutarties sąlygų versija (keičiasi nuo datos)."""
@@ -7472,16 +7468,17 @@ class ContractTerms(models.Model):
     schedule = models.ForeignKey(WorkSchedule, null=True, blank=True, on_delete=models.SET_NULL)
     WORK_REGIME_CHOICES = [("standard", "Standartinė"), ("summed", "Suminė darbo laiko apskaita")]
     work_regime = models.CharField(max_length=10, choices=WORK_REGIME_CHOICES, default="standard")
+    week_hours = models.JSONField(null=True, blank=True)  # [Pr..S] faktinės val. per dieną; None - tolygiai Pr–Pn
  
     class Meta:
         ordering = ["valid_from"]
         unique_together = ("contract", "valid_from")
 
 
-
 class AbsenceEvent(models.Model):
     KIND_CHOICES = [
         ("vacation", "Kasmetinės atostogos"),
+        ("vacation_prepaid", "Kasmetinės atostogos (apmokėtos ankstesnėje programoje)"),
         ("sick", "Liga"),
         ("parent_day", "Mamadienis / tėvadienis"),
         ("unpaid", "Nemokamos atostogos"),
@@ -7496,6 +7493,7 @@ class AbsenceEvent(models.Model):
         ("maternity", "Nėštumo ir gimdymo atostogos"),
         ("suspension", "Nušalinimas"),
         ("business_trip", "Komandiruotė"),
+        ("comp_rest", "Kompensacinis poilsis"),
     ]
     SOURCE_CHOICES = [("manual", "Rankinis"), ("request", "Prašymas"), ("sodra_xml", "Sodros XML")]
     STATUS_CHOICES = [("requested", "Pateiktas"), ("approved", "Patvirtintas"), ("cancelled", "Atšauktas")]
@@ -7505,6 +7503,7 @@ class AbsenceEvent(models.Model):
     start_date = models.DateField()
     end_date = models.DateField()
     work_days = models.DecimalField(max_digits=6, decimal_places=2, default=Decimal("0"))
+    hours = models.DecimalField(max_digits=6, decimal_places=2, null=True, blank=True)   # pvz. kompensacinis poilsis valandomis
     pay_code = models.ForeignKey("PayCode", null=True, blank=True, on_delete=models.SET_NULL)
  
     source = models.CharField(max_length=12, choices=SOURCE_CHOICES, default="manual")
@@ -7514,10 +7513,12 @@ class AbsenceEvent(models.Model):
     employer_pays_first_days = models.BooleanField(default=True)
     parent_event = models.ForeignKey("self", null=True, blank=True, on_delete=models.SET_NULL,
                                      related_name="continuations")
-    sodra_reason_code = models.CharField(max_length=3, blank=True, default="")  # 12-SD / 9-SD
+    sodra_reason = models.CharField(max_length=2, blank=True, default="")   # 12-SD / 9-SD priežasties kodas
     child = models.ForeignKey("EmployeeChild", null=True, blank=True, on_delete=models.SET_NULL)
     comment = models.CharField(max_length=255, blank=True, default="")
- 
+    prepaid_amount = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)  # perėjimas: jau išmokėta
+    removed_shifts = models.JSONField(default=list, blank=True)   # neskelbto grafiko pamainos, pašalintos dėl šio nebuvimo 
+
     created_at = models.DateTimeField(auto_now_add=True)
  
     class Meta:
@@ -7526,7 +7527,7 @@ class AbsenceEvent(models.Model):
  
     def __str__(self):
         return f"{self.employee} {self.kind} {self.start_date}-{self.end_date}"
- 
+    
  
 class VacationAdjustment(models.Model):
     """Rankinė atostogų likučio korekcija (pradinis likutis, pataisymai)."""
@@ -7539,6 +7540,7 @@ class VacationAdjustment(models.Model):
         ordering = ["date"]
  
  
+
 class TimesheetMonth(models.Model):
     STATUS_CHOICES = [("draft", "Juodraštis"), ("approved", "Patvirtintas"), ("locked", "Užrakintas")]
  
@@ -7547,11 +7549,16 @@ class TimesheetMonth(models.Model):
     month = models.PositiveSmallIntegerField()
     status = models.CharField(max_length=10, choices=STATUS_CHOICES, default="draft")
     approved_at = models.DateTimeField(null=True, blank=True)
+    approval_note = models.CharField(max_length=500, blank=True, default="")   # kodėl patvirtinta su pažeidimais
+    approval_issues = models.JSONField(default=list, blank=True)              # pažeidimai tvirtinimo metu (auditui)
+    # suminės apskaitos laikotarpio pabaiga (paskutinio mėnesio įraše): kelionių komandiruotėse valandos -
+    # {darbuotojo id: {"choice": "rest" | "overtime", "hours": "8"}}; numatyta - kompensuota poilsiu
+    period_trip_choices = models.JSONField(default=dict, blank=True)
  
     class Meta:
         unique_together = ("company", "year", "month")
         ordering = ["-year", "-month"]
- 
+
  
 class TimesheetEntry(models.Model):
     HOUR_TYPE_CHOICES = [
@@ -7572,6 +7579,7 @@ class TimesheetEntry(models.Model):
     hours = models.DecimalField(max_digits=5, decimal_places=2, default=Decimal("0"))
     hour_type = models.CharField(max_length=12, choices=HOUR_TYPE_CHOICES, default="normal")
     is_manual = models.BooleanField(default=False)
+    detail = models.JSONField(null=True, blank=True)      # faktinis laikas {"start", "end", "break"}
     event = models.ForeignKey(AbsenceEvent, null=True, blank=True, on_delete=models.SET_NULL)
  
     class Meta:
@@ -7657,6 +7665,7 @@ class PayrollLine(models.Model):
     event = models.ForeignKey("AbsenceEvent", null=True, blank=True, on_delete=models.SET_NULL)
     is_manual = models.BooleanField(default=False)
     comment = models.CharField(max_length=255, blank=True, default="")
+    garnishment = models.ForeignKey("GarnishmentOrder", null=True, blank=True, on_delete=models.SET_NULL, related_name="lines")
 
     class Meta:
         ordering = ["employee", "pay_code__sort_order"]
@@ -7726,6 +7735,8 @@ class PositionGroup(models.Model):
     qualification = models.PositiveSmallIntegerField(default=3)
     effort = models.PositiveSmallIntegerField(default=3)
     responsibility = models.PositiveSmallIntegerField(default=3)
+    cluster_key = models.CharField(max_length=10, blank=True, default="")   # lygiaverčių profesijų klasteris (lpk_groups.json)
+    auto_range = models.BooleanField(default=True)                          # algų ribos pagal faktines algas visam etatui
     conditions = models.PositiveSmallIntegerField(default=3)
     salary_min = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
     salary_max = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
@@ -7857,6 +7868,9 @@ class EmployeeRequest(models.Model):
         ("unpaid", "Nemokamos atostogos"),
         ("dismissal", "Darbo sutarties nutraukimas darbuotojo iniciatyva"),
         ("pay_info", "Informacija apie darbo užmokestį"),
+        ("paternity", "Tėvystės atostogos"),
+        ("childcare", "Atostogos vaikui prižiūrėti"),
+        ("study", "Mokymosi atostogos"),
     ]
     STATUS_CHOICES = [
         ("pending", "Laukia"),
@@ -7872,6 +7886,8 @@ class EmployeeRequest(models.Model):
     work_days = models.DecimalField(max_digits=6, decimal_places=2, default=Decimal("0"))
     comment = models.CharField(max_length=500, blank=True, default="")
     answer = models.TextField(blank=True, default="")   # atsakymas į „pay_info“ prašymą
+    child = models.ForeignKey("EmployeeChild", null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
+    attachment = models.FileField(upload_to="employee_requests/%Y/%m/", null=True, blank=True)
     status = models.CharField(max_length=10, choices=STATUS_CHOICES, default="pending")
     reject_reason = models.CharField(max_length=500, blank=True, default="")
     decided_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL,
@@ -7892,7 +7908,8 @@ class EmployeeRequest(models.Model):
 
 
 class PayrollDeclaration(models.Model):
-    FORM_CHOICES = [("SAM", "SAM"), ("GPM313", "GPM313"), ("1-SD", "1-SD"), ("2-SD", "2-SD")]
+    FORM_CHOICES = [("SAM", "SAM"), ("GPM313", "GPM313"), ("1-SD", "1-SD"), ("2-SD", "2-SD"),
+                    ("9-SD", "9-SD"), ("12-SD", "12-SD"), ("GPM312", "GPM312"), ("NP-SD2", "NP-SD2"), ("SDUP", "SDUP")]
     STATUS_CHOICES = [
         ("ready", "Paruošta"),
         ("error", "Yra klaidų"),
@@ -7905,8 +7922,10 @@ class PayrollDeclaration(models.Model):
     form = models.CharField(max_length=10, choices=FORM_CHOICES)
     year = models.PositiveSmallIntegerField(null=True, blank=True)
     month = models.PositiveSmallIntegerField(null=True, blank=True)
-    contract = models.ForeignKey("EmploymentContract", null=True, blank=True, on_delete=models.CASCADE,
-                                 related_name="declarations")
+    contract = models.ForeignKey("EmploymentContract", null=True, blank=True, on_delete=models.CASCADE, related_name="declarations")
+    absence_event = models.ForeignKey("AbsenceEvent", null=True, blank=True, on_delete=models.SET_NULL, related_name="declarations")
+    variant = models.CharField(max_length=12, blank=True, default="")   # "" - pirminis, "change-1"... - patikslinimai
+    meta = models.JSONField(default=dict, blank=True)                   # kokios datos / kodas deklaruoti
     content = models.TextField(blank=True, default="")          # .ffdata (UTF-8 XML)
     errors = models.JSONField(default=list, blank=True)
     manual_values = models.JSONField(default=dict, blank=True)  # GPM313 8-12 laukeliai
@@ -7952,6 +7971,7 @@ class PayrollPayment(models.Model):
         ("gpm", "GPM (VMI)"),
         ("sodra", "Sodra"),
         ("deduction", "Išskaita"),
+        ("trip_advance", "Komandiruotės avansas"),
     ]
     STATUS_CHOICES = [
         ("open", "Laukia"),
@@ -8060,6 +8080,8 @@ class ShiftType(models.Model):
     break_minutes = models.PositiveSmallIntegerField(default=0)
     color = models.CharField(max_length=9, blank=True, default="")
     is_active = models.BooleanField(default=True)
+    default_staff_need_by_weekday = models.JSONField(default=default_weekday_need, blank=True)   # Pr..Sk, darbuotojų poreikis
+    default_staff_max_by_weekday = models.JSONField(default=default_weekday_max, blank=True)     # Pr..Sk, daugiausia (None - be ribos)
     order = models.PositiveSmallIntegerField(default=0)
  
     class Meta:
@@ -8161,6 +8183,7 @@ class RosterSlot(models.Model):
     shift_type = models.ForeignKey("ShiftType", on_delete=models.CASCADE)
     min_staff = models.PositiveSmallIntegerField(default=1)
     max_staff = models.PositiveSmallIntegerField(null=True, blank=True)
+    source = models.CharField(max_length=10, default="auto")   # auto - iš numatyto poreikio / taisyklių, manual - rankiniu būdu
  
     class Meta:
         ordering = ["date", "shift_type__start_time"]
@@ -8195,4 +8218,213 @@ class RosterChange(models.Model):
  
     class Meta:
         ordering = ["-version", "employee_id", "date"]
+
+
+
+
+
+class BusinessTrip(models.Model):
+    """Komandiruotė: siunčia darbdavys (įsakymas), dienpinigiai pagal LRV nutarimą Nr. 526."""
+    STATUS_CHOICES = [("draft", "Juodraštis"), ("approved", "Patvirtinta"), ("cancelled", "Atšaukta")]
+    COMP_REST_CHOICES = [("accrue", "Kaupti"), ("vacation", "Prijungti prie kasmetinių atostogų")]
  
+    company = models.ForeignKey("CompanyProfile", on_delete=models.CASCADE, related_name="business_trips")
+    employee = models.ForeignKey("Employee", on_delete=models.CASCADE, related_name="business_trips")
+    start_at = models.DateTimeField()                      # išvykimas
+    end_at = models.DateTimeField()                        # grįžimas
+    legs = models.JSONField(default=list)                  # [{"country", "date_from", "date_to"}]
+    destination = models.CharField(max_length=255, blank=True, default="")   # miestas, įmonė
+    purpose = models.CharField(max_length=500, blank=True, default="")
+    per_diem_pct = models.DecimalField(max_digits=5, decimal_places=2, default=Decimal("100"))
+    advance_pct = models.DecimalField(max_digits=5, decimal_places=2, default=Decimal("50"))
+    travel_out_hours = models.DecimalField(max_digits=5, decimal_places=2, default=Decimal("0"))    # kelionė pirmyn, val.
+    travel_back_hours = models.DecimalField(max_digits=5, decimal_places=2, default=Decimal("0"))   # kelionė atgal, val.
+    day_plan = models.JSONField(default=list, blank=True)        # darbo laikas pagal dienas (kelionė, darbas, poilsis)
+    day_edits = models.JSONField(default=dict, blank=True)       # {"YYYY-MM-DD": {"travel": x, "work": y}} - pataisymai
+    comp_rest_hours = models.DecimalField(max_digits=6, decimal_places=2, default=Decimal("0"))     # DK 107 str. 4 d.
+    comp_rest_mode = models.CharField(max_length=10, choices=COMP_REST_CHOICES, default="accrue")
+    absence_cuts = models.JSONField(default=list, blank=True)
+    order_number = models.CharField(max_length=30, blank=True, default="")
+    order_date = models.DateField(null=True, blank=True)
+    total = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal("0"))
+    calc = models.JSONField(default=list, blank=True)      # dienų išklotinė
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default="draft")
+    absence_event = models.ForeignKey("AbsenceEvent", null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
+    advance_payment = models.ForeignKey("PayrollPayment", null=True, blank=True, on_delete=models.SET_NULL,
+                                        related_name="+")
+    approved_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL,
+                                    related_name="+")
+    approved_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+ 
+    class Meta:
+        ordering = ["-start_at"]
+        indexes = [models.Index(fields=["company", "start_at"])]
+
+
+class PayrollMigration(models.Model):
+    """DU perėjimas: Sodros / VMI deklaracijos -> darbuotojai, istorija, likučiai."""
+    STATUS_CHOICES = [("draft", "Juodraštis"), ("sdup_ready", "SDUP paruošta"), ("confirmed", "Patvirtinta")]
+    GAP_CHOICES = [("auto", "Iš deklaracijų"), ("manual", "Rankiniu būdu")]
+ 
+    company = models.OneToOneField("CompanyProfile", on_delete=models.CASCADE, related_name="payroll_migration")
+    du_start = models.DateField()                                    # pirmasis mėnuo DokSkenas DU (1 d.)
+    status = models.CharField(max_length=12, choices=STATUS_CHOICES, default="draft")
+    gap_mode = models.CharField(max_length=8, choices=GAP_CHOICES, default="auto")
+    journal_entry_ids = models.JSONField(default=list, blank=True)
+    mode = models.CharField(max_length=5, default="full")
+    summary = models.JSONField(default=dict, blank=True)
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
+    confirmed_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+ 
+ 
+class PayrollMigrationFile(models.Model):
+    migration = models.ForeignKey(PayrollMigration, on_delete=models.CASCADE, related_name="files")
+    file_name = models.CharField(max_length=255)
+    form = models.CharField(max_length=10)
+    year = models.PositiveSmallIntegerField(null=True, blank=True)
+    month = models.PositiveSmallIntegerField(null=True, blank=True)
+    sha1 = models.CharField(max_length=40)
+    content = models.TextField()
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+ 
+    class Meta:
+        unique_together = ("migration", "sha1")
+        ordering = ["form", "year", "month"]
+ 
+class PayrollMigrationEmployee(models.Model):
+    """Atpažintas darbuotojas; bukalteris patikslina pareigas, algą, atostogų likutį, neišmokėtą sumą."""
+    migration = models.ForeignKey(PayrollMigration, on_delete=models.CASCADE, related_name="people")
+    person_code = models.CharField(max_length=11)
+    first_name = models.CharField(max_length=68, blank=True, default="")
+    last_name = models.CharField(max_length=68, blank=True, default="")
+    sd_series = models.CharField(max_length=2, blank=True, default="")
+    sd_number = models.CharField(max_length=7, blank=True, default="")
+    start_date = models.DateField(null=True, blank=True)
+    end_date = models.DateField(null=True, blank=True)
+    lpk4 = models.CharField(max_length=4, blank=True, default="")
+    lpk_code = models.CharField(max_length=10, blank=True, default="")          # pasirinkta profesija (6 sk.)
+    position_name = models.CharField(max_length=255, blank=True, default="")
+    contract_type = models.CharField(max_length=2, blank=True, default="01")
+    pension = models.BooleanField(default=False)
+    npd_mode = models.CharField(max_length=10, default="standard")
+    base_amount = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    vacation_balance = models.DecimalField(max_digits=7, decimal_places=2, null=True, blank=True)
+    unpaid_amount = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    include = models.BooleanField(default=True)
+    employed = models.BooleanField(default=True)                                # Dirba / Nedirba perėjimo dieną
+    pay_form = models.CharField(max_length=10, default="monthly")               # monthly / hourly
+    weekly_hours = models.DecimalField(max_digits=5, decimal_places=2, default=Decimal("40"))
+    annual_leave_days = models.PositiveSmallIntegerField(default=20)
+    work_regime = models.CharField(max_length=10, default="standard")           # standard / summed
+    work_time_mode = models.CharField(max_length=2, default="01")               # SDUP darbo laiko režimas (Sodros kodas 01-05)
+    single_parent = models.BooleanField(default=False)
+    has_disability = models.BooleanField(default=False)                         # dalyvumo lygis (atskirai nuo NPD)
+    vdu_override = models.DecimalField(max_digits=12, decimal_places=4, null=True, blank=True)   # VDU iš senos programos
+    children = models.JSONField(default=list, blank=True)                       # [{"first_name", "birth_date"}]
+    summed_period_months = models.PositiveSmallIntegerField(null=True, blank=True)
+    summed_period_start = models.DateField(null=True, blank=True)               # dabartinio laikotarpio pradžia (1 d.)
+    summed_worked_hours = models.DecimalField(max_digits=8, decimal_places=2, null=True, blank=True)
+    summed_absence_hours = models.DecimalField(max_digits=8, decimal_places=2, null=True, blank=True)
+    summed_paid_overtime = models.DecimalField(max_digits=8, decimal_places=2, default=Decimal("0"))
+    transition_state = models.CharField(max_length=12, default="work")          # work / vacation / sick / childcare / maternity / paternity / unpaid
+    transition_until = models.DateField(null=True, blank=True)                  # nebuvimas perėjimo dieną - iki
+    vacation_prepaid_amount = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)  # atostoginiai jau išmokėti
+    pay_once_a_month = models.BooleanField(default=False)
+    advance_amount = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    iban = models.CharField(max_length=34, blank=True, default="")
+    email = models.EmailField(blank=True, default="")
+    phone = models.CharField(max_length=30, blank=True, default="")
+    source = models.CharField(max_length=10, default="files")                   # files / excel / manual
+    edited = models.JSONField(default=list, blank=True)                         # rankiniu būdu keisti laukai
+    employee = models.ForeignKey("Employee", null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
+ 
+    class Meta:
+        unique_together = ("migration", "person_code")
+        ordering = ["last_name", "first_name"]
+
+ 
+class PayrollHistoryMonth(models.Model):
+    """Perkelta istorija iš ankstesnės programos: VDU, metų sumos, GPM312."""
+    company = models.ForeignKey("CompanyProfile", on_delete=models.CASCADE, related_name="payroll_history")
+    employee = models.ForeignKey("Employee", on_delete=models.CASCADE, related_name="history_months")
+    year = models.PositiveSmallIntegerField()                # priskaičiavimo mėnuo
+    month = models.PositiveSmallIntegerField()
+    income = models.DecimalField(max_digits=12, decimal_places=2)               # Sodros bazė (SAM / 2-SD)
+    gpm = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0"))
+    contributions = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0"))
+    paid_year = models.PositiveSmallIntegerField()           # išmokėjimo mėnuo (GPM313 / GPM312)
+    paid_month = models.PositiveSmallIntegerField()
+    worked_days = models.PositiveSmallIntegerField(default=0)
+    worked_hours = models.DecimalField(max_digits=6, decimal_places=2, default=Decimal("0"))
+    source = models.CharField(max_length=10, default="sam")
+ 
+    class Meta:
+        unique_together = ("employee", "year", "month")
+        ordering = ["year", "month"]
+ 
+ 
+class PayrollMigrationOtherPayment(models.Model):
+    """Ne DU išmokos gyventojams (nuoma ir pan.) iki perėjimo - į GPM312."""
+    migration = models.ForeignKey(PayrollMigration, on_delete=models.CASCADE, related_name="other_payments")
+    person_code = models.CharField(max_length=11)
+    name = models.CharField(max_length=68)
+    year = models.PositiveSmallIntegerField()
+    income_code = models.CharField(max_length=3)
+    amount = models.DecimalField(max_digits=12, decimal_places=2)
+    rate = models.DecimalField(max_digits=5, decimal_places=2)
+    gpm = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0"))
+
+
+
+class GarnishmentOrder(models.Model):
+    """Išskaitų dokumentas: antstolio patvarkymas, alimentai, savanoriška išskaita (CPK 733-742)."""
+    KIND_CHOICES = [
+        ("ordinary", "Antstolio patvarkymas (skola)"),
+        ("maintenance", "Išlaikymas (alimentai) per antstolį"),
+        ("harm", "Žala sveikatai / maitintojo netekimas"),
+        ("voluntary", "Alimentai darbuotojo prašymu"),
+    ]
+    METHOD_CHOICES = [("max", "Kiek leidžia įstatymas"), ("percent", "Procentas nuo DU po mokesčių"), ("fixed", "Fiksuota suma")]
+    STATUS_CHOICES = [("active", "Vykdoma"), ("finished", "Įvykdyta"), ("cancelled", "Atšaukta")]
+ 
+    employee = models.ForeignKey("Employee", on_delete=models.CASCADE, related_name="garnishments")
+    kind = models.CharField(max_length=12, choices=KIND_CHOICES, default="ordinary")
+    document_no = models.CharField(max_length=60, blank=True, default="")
+    received_date = models.DateField(null=True, blank=True)
+    bailiff = models.CharField(max_length=150, blank=True, default="")          # antstolis
+    case_no = models.CharField(max_length=60, blank=True, default="")           # vykdomosios bylos nr.
+    method = models.CharField(max_length=8, choices=METHOD_CHOICES, default="max")
+    percent = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+    amount = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    total_debt = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)   # tuščia - be ribos (periodinės išmokos)
+    paid_before = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0"))  # išskaityta iki DokSkenas
+    recipient_name = models.CharField(max_length=150, blank=True, default="")
+    recipient_iban = models.CharField(max_length=34, blank=True, default="")
+    payment_purpose = models.CharField(max_length=140, blank=True, default="")
+    valid_from = models.DateField()
+    valid_to = models.DateField(null=True, blank=True)
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default="active")
+    note = models.CharField(max_length=255, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+ 
+    class Meta:
+        ordering = ["employee", "valid_from"]
+ 
+ 
+class RecurringPayItem(models.Model):
+    """Nuolatinis priedas / priemoka: kas mėnesį automatiškai (fiksuota suma arba % nuo pareiginės algos)."""
+    employee = models.ForeignKey("Employee", on_delete=models.CASCADE, related_name="recurring_items")
+    pay_code = models.ForeignKey("PayCode", on_delete=models.PROTECT)
+    amount = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    percent = models.DecimalField(max_digits=6, decimal_places=2, null=True, blank=True)
+    valid_from = models.DateField()
+    valid_to = models.DateField(null=True, blank=True)
+    comment = models.CharField(max_length=255, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+ 
+    class Meta:
+        ordering = ["employee", "valid_from"]

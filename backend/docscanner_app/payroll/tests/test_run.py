@@ -77,11 +77,12 @@ class RunTests(TestCase):
         self.assertEqual(r.taxes.net, D("1500") - r.taxes.gpm_total - r.taxes.employee_sodra)
 
     def test_dienpinigiai_low_salary(self):
-        r = calculate_employee_month(P, inp(extra_lines=[Line("DPN", D("900"))]))
-        # DU 1500 < 1,65 MMA -> neapmokestinama iki 750, 150 apmokestinama
+        # DU 1500 < 1,65 MMA -> neapmokestinama iki 750 (DPN), 150 apmokestinama kaip DU (DPA) - skaido trips.tax_split
+        r = calculate_employee_month(P, inp(extra_lines=[Line("DPN", D("750")), Line("DPA", D("150"))]))
         self.assertEqual(r.taxes.gross, D("2400"))
         base = calculate_employee_month(P, inp())
-        self.assertGreater(r.taxes.gpm, base.taxes.gpm)
+        self.assertGreaterEqual(r.taxes.gpm - base.taxes.gpm, D("30.00"))    # 150 x 20 % (+ mažesnis NPD)
+        self.assertGreater(r.taxes.employee_sodra, base.taxes.employee_sodra)  # apmokestinama dalis - ir Sodra
 
     def test_advance_and_deduction(self):
         r = calculate_employee_month(P, inp(advance_paid=D("500"), deductions=[Line("ANT", D("100"))]))

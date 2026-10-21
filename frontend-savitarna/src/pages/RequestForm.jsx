@@ -4,11 +4,13 @@ import {
   Box,
   Button,
   Divider,
+  MenuItem,
   Paper,
   Stack,
   TextField,
   Typography,
 } from "@mui/material";
+import AttachFileRoundedIcon from "@mui/icons-material/AttachFileRounded";
 import ChevronLeftRoundedIcon from "@mui/icons-material/ChevronLeftRounded";
 import CalendarMonthOutlinedIcon from "@mui/icons-material/CalendarMonthOutlined";
 import NotesOutlinedIcon from "@mui/icons-material/NotesOutlined";
@@ -33,6 +35,18 @@ const TITLES = {
   dismissal: {
     title: "Noriu išeiti iš darbo",
     hint: "Nurodykite paskutinę darbo dieną. Pagal DK apie išėjimą įspėjama prieš 20 kalendorinių dienų.",
+  },
+  paternity: {
+    title: "Tėvystės atostogos",
+    hint: "30 kalendorinių dienų, kol vaikui sueis vieneri metai. Galima padalinti į 2 dalis. Išmoką moka Sodra.",
+  },
+  childcare: {
+    title: "Atostogos vaikui prižiūrėti",
+    hint: "Kol vaikui sueis treji metai – visas iš karto arba dalimis. Apie atostogas reikia įspėti prieš 14 dienų. Išmoką moka Sodra.",
+  },
+  study: {
+    title: "Mokymosi atostogos",
+    hint: "Egzaminams, įskaitoms ar baigiamajam darbui. Pridėkite mokymo įstaigos pažymą.",
   },
   pay_info: {
     title: "Informacija apie mano atlyginimą",
@@ -115,6 +129,25 @@ export default function RequestForm() {
 
   const [comment, setComment] = useState("");
   const [pd, setPd] = useState(null);
+  const family = kind === "paternity" || kind === "childcare";
+  const [kids, setKids] = useState(null);
+  const [child, setChild] = useState("");
+  const [file, setFile] = useState(null);
+
+  useEffect(() => {
+    if (!family) return;
+    api.get("anketa/").then((r) => {
+      const list = r.data.children || [];
+      setKids(list);
+      if (list.length === 1) setChild(String(list[0].id));
+    }).catch(() => setKids([]));
+  }, [family]);
+
+  const addYears = (iso, n) => {
+    const [y, m, d] = iso.split("-").map(Number);
+    return `${y + n}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+  };
+  const kid = kids?.find((k) => String(k.id) === String(child));
   const [pre, setPre] = useState(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -154,25 +187,37 @@ export default function RequestForm() {
           kind,
           start_date: start,
           end_date: end,
+          child: child || null,
         })
         .then((r) => setPre(r.data))
         .catch(() => setPre(null));
     }, 250);
 
     return () => clearTimeout(t);
-  }, [kind, start, end]);
+  }, [kind, start, end, child]);
 
   const submit = async () => {
     setBusy(true);
     setError("");
 
     try {
-      await api.post("requests/", {
-        kind,
-        start_date: start,
-        end_date: end,
-        comment,
-      });
+      if (file) {
+        const fd = new FormData();
+        fd.append("kind", kind);
+        fd.append("start_date", start);
+        fd.append("end_date", end);
+        fd.append("comment", comment);
+        fd.append("attachment", file);
+        await api.post("requests/", fd);
+      } else {
+        await api.post("requests/", {
+          kind,
+          start_date: start,
+          end_date: end,
+          comment,
+          child: child || null,
+        });
+      }
 
       nav("/", {
         replace: true,
@@ -185,7 +230,7 @@ export default function RequestForm() {
     }
   };
 
-  const blocked = !start || !end || pre?.errors?.length > 0;
+  const blocked = !start || !end || pre?.errors?.length > 0 || (family && !child);
 
   return (
     <Stack gap={2.1}>
@@ -241,6 +286,30 @@ export default function RequestForm() {
         }}
       >
         <Stack gap={1.8}>
+          {family && (
+            <Box>
+              <FieldLabel>Vaikas</FieldLabel>
+              {kids && kids.length === 0 ? (
+                <Alert severity="warning" sx={{ borderRadius: "9px", "& .MuiAlert-message": { fontSize: "0.8rem" } }}
+                  action={<Button color="inherit" size="small" onClick={() => nav("/anketa")}>Pridėti</Button>}>
+                  Jūsų duomenyse nėra vaikų – pridėkite vaiką skiltyje „Mano duomenys“.
+                </Alert>
+              ) : (
+                <TextField select fullWidth size="small" value={child}
+                  onChange={(e) => {
+                    setChild(e.target.value);
+                    const k = kids?.find((x) => String(x.id) === e.target.value);
+                    if (k && kind === "childcare" && start && !end) setEnd(addYears(k.birth_date, 3));
+                  }}
+                  SelectProps={{ MenuProps: { disableScrollLock: true } }}>
+                  {(kids || []).map((k) => (
+                    <MenuItem key={k.id} value={String(k.id)}>{k.first_name || "Vaikas"} (gim. {k.birth_date})</MenuItem>
+                  ))}
+                </TextField>
+              )}
+            </Box>
+          )}
+
           {!noDates && (
             <Box>
               <Stack
@@ -289,7 +358,9 @@ export default function RequestForm() {
                       onChange={(value) => {
                         setStart(value);
 
-                        if (
+                        if (kind === "childcare" && kid && (!end || end < value)) {
+                          setEnd(addYears(kid.birth_date, 3));
+                        } else if (
                           !end ||
                           end < value ||
                           kind === "parent_day"
@@ -359,6 +430,15 @@ export default function RequestForm() {
                 },
               }}
             />
+            {kind === "study" && (
+              <Box sx={{ mt: 1.2 }}>
+                <Button component="label" size="small" variant="outlined" startIcon={<AttachFileRoundedIcon />}
+                  sx={{ borderRadius: "10px", textTransform: "none", fontWeight: 650 }}>
+                  {file ? file.name : "Pridėti pažymą (nuotrauka ar PDF)"}
+                  <input hidden type="file" accept="image/*,application/pdf" onChange={(e) => setFile(e.target.files?.[0] || null)} />
+                </Button>
+              </Box>
+            )}
           </Box>
         </Stack>
       </Paper>
@@ -392,13 +472,25 @@ export default function RequestForm() {
               <Typography
                 sx={{ fontSize: "0.78rem", color: "text.secondary" }}
               >
-                Darbo dienų
+                {pre.calendar_days ? "Kalendorinių dienų" : "Darbo dienų"}
               </Typography>
               <Typography sx={{ fontSize: "0.8rem", fontWeight: 700 }}>
                 {days(pre.work_days)}
               </Typography>
             </Stack>
 
+            {kind === "paternity" && pre.info && (
+              <Stack direction="row" justifyContent="space-between" gap={2}>
+                <Typography sx={{ fontSize: "0.78rem", color: "text.secondary" }}>Liko iš 30 d. / galima iki</Typography>
+                <Typography sx={{ fontSize: "0.8rem", fontWeight: 700 }}>{pre.info.remaining} d. · {pre.info.until}</Typography>
+              </Stack>
+            )}
+            {kind === "childcare" && pre.info && (
+              <Stack direction="row" justifyContent="space-between" gap={2}>
+                <Typography sx={{ fontSize: "0.78rem", color: "text.secondary" }}>Galima iki (vaikui 3 m.)</Typography>
+                <Typography sx={{ fontSize: "0.8rem", fontWeight: 700 }}>{pre.info.until}</Typography>
+              </Stack>
+            )}
             {pre.balance != null && (
               <>
                 <Stack

@@ -21,3 +21,10 @@ def poll_submitted_declarations():
             check_declaration_state(d)
         except Exception:  # noqa: BLE001 - viena įmonė neturi stabdyti kitų
             logger.exception("poll_submitted_declarations: decl=%s", d.id)
+
+
+
+@shared_task
+def remind_due_declarations():
+    from ..services import declarations_due_reminders
+    return declarations_due_reminders()

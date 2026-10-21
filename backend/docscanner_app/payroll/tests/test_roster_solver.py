@@ -35,7 +35,7 @@ class SolverTests(TestCase):
             for sid in (1, 2):
                 self.assertEqual(sum(1 for (e, dd, s) in r.assignments if dd == d and s == sid), 2)
         inst = [next(s for s in shifts if s.id == sid).instance(e, d) for e, d, sid in r.assignments]
-        self.assertEqual([v for v in check(inst) if v.code != "WEEKLY_REST_35H"], [])
+        self.assertEqual(check(inst), [])                      # ir 35 val. savaitės poilsis (ROS-01)
         for h in r.hours.values():
             self.assertLessEqual(abs(h - D("168")), D("24"))
 
@@ -95,3 +95,25 @@ class PlanTests(TestCase):
             self.assertIn((d, s), slots)
         for (d, s), (mn, mx) in slots.items():
             self.assertEqual(sum(1 for a in r.assignments if a[1] == d and a[2] == s), mn)
+
+
+
+@skipUnless(HAS_ORTOOLS, "ortools neįdiegtas")
+class WeeklyRestTests(TestCase):
+
+    def test_locked_violation_is_reported(self):
+        days = [date(2026, 11, 1) + timedelta(days=i) for i in range(9)]
+        shifts = [ShiftDef(1, "D", time(7), time(15)), ShiftDef(2, "N", time(19), time(3))]
+        locked = [(1, date(2026, 11, d), 1) for d in (1, 2, 3, 6, 7, 8)] + [(1, date(2026, 11, 4), 2)]
+        r = Problem(days, shifts, [Emp(1, "A", D("56"), D("10"))], locked=locked).solve(seconds=5)
+        self.assertTrue(any(u["rule_id"] == -1 for u in r.unmet))
+
+
+@skipUnless(HAS_ORTOOLS, "ortools neįdiegtas")
+class DstSolverTests(TestCase):
+
+    def test_hours_per_actual_date(self):
+        days = [date(2026, 10, 24), date(2026, 10, 25)]
+        sh = [ShiftDef(1, "N", time(22), time(6))]
+        r = Problem(days, sh, [Emp(1, "A", D("17"), D("10"))], locked=[(1, days[0], 1), (1, days[1], 1)]).solve(seconds=5)
+        self.assertEqual(r.hours[1], D("17"))                     # 9 (laiko keitimo naktis) + 8

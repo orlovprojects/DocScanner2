@@ -151,20 +151,21 @@ export default function Login() {
                 lineHeight: 1.45,
               }}
             >
-              Prisijunkite naudodami savo el. paštą arba telefono numerį.
+              Prisijunkite el. paštu, kuriuo gavote kvietimą.
             </Typography>
           </Box>
 
           <Stack component="form" gap={2} onSubmit={submit}>
             <Box>
-              <FieldLabel>El. paštas arba telefonas</FieldLabel>
+              <FieldLabel>El. paštas</FieldLabel>
               <TextField
                 fullWidth
                 size="small"
+                type="email"
                 value={login}
-                onChange={(e) => setLogin(e.target.value)}
-                placeholder="Įveskite el. paštą arba telefoną"
-                autoComplete="username"
+                onChange={(e) => setLogin(e.target.value.trim())}
+                placeholder="vardas@pastas.lt"
+                autoComplete="email"
                 inputProps={{ autoCapitalize: "none" }}
                 autoFocus
                 sx={fieldSx}

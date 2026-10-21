@@ -71,7 +71,7 @@ from .utils.file_converter import normalize_any, ArchiveLimitError, MAX_SINGLE_F
 from .validators.required_fields_checker import check_required_fields_for_export
 from .validators.company_matcher import update_seller_buyer_info
 from .validators.verify_lt_company_match import update_seller_buyer_info_from_companies
-from .validators.vat_validator import validate_vat
+from .validators.vat_validator import validate_vat, normalize_vat_ocr
 from .services.sync_lt_companies import sync_companies_from_vmi, sync_addresses_from_jar
 from .celery_signals import _send_telegram
 from .models import ExportSession
@@ -370,6 +370,111 @@ def _is_pdf_multi_page(file_path: str) -> int:
         return 0
 
 
+def _original_vat_codes_from_llm(raw_json):
+    """Get original VAT codes from gpt_raw_json."""
+    try:
+        if isinstance(raw_json, str):
+            parsed = parse_llm_json_robust(raw_json)
+        else:
+            parsed = raw_json
+
+        if isinstance(parsed, list):
+            parsed = parsed[0] if parsed else {}
+
+        if isinstance(parsed, dict) and isinstance(
+            parsed.get("documents"), list
+        ):
+            docs = parsed["documents"]
+            parsed = docs[0] if docs else {}
+
+        if not isinstance(parsed, dict):
+            return {}
+
+        return {
+            side: parsed.get(f"{side}_vat_code")
+            for side in ("seller", "buyer")
+        }
+
+    except Exception as exc:
+        logger.warning(
+            "[VAT] Unable to parse original LLM VAT: %s", exc
+        )
+        return {}
+
+
+def _validate_final_vat_party(
+    doc,
+    side: str,
+    raw_llm_vat: str | None,
+    audit: list,
+):
+    """
+    Validate current VAT and fallback to Gemini only on invalid.
+    Log OCR corrections and VAT replacements.
+    """
+    vat_field = f"{side}_vat_code"
+    country = getattr(doc, f"{side}_country_iso", None)
+
+    initial_vat = getattr(doc, vat_field, None)
+
+    normalized_vat, correction = normalize_vat_ocr(
+        initial_vat, country
+    )
+
+    # Log OCR correction
+    if correction and normalized_vat != initial_vat:
+        audit.append(
+            f"{side}: {correction}; "
+            f"{initial_vat!r} -> {normalized_vat!r}"
+        )
+
+    if normalized_vat != initial_vat:
+        setattr(doc, vat_field, normalized_vat)
+
+    # Validate current/enriched VAT
+    primary = validate_vat(
+        raw_code=normalized_vat,
+        country_iso=country,
+    )
+
+    primary_status = primary.get("status")
+    final_status = primary_status
+
+    # Gemini fallback ONLY when current VAT is invalid
+    if (
+        primary_status == "invalid"
+        and raw_llm_vat
+        and str(raw_llm_vat).strip()
+    ):
+        gemini_vat, gemini_fix = normalize_vat_ocr(
+            raw_llm_vat, country
+        )
+
+        if gemini_fix and gemini_vat != str(raw_llm_vat).strip():
+            audit.append(
+                f"{side}: Gemini {gemini_fix}; "
+                f"{raw_llm_vat!r} -> {gemini_vat!r}"
+            )
+
+        if gemini_vat and gemini_vat != normalized_vat:
+            fallback = validate_vat(
+                raw_code=gemini_vat,
+                country_iso=country,
+            )
+
+            final_status = fallback.get("status")
+
+            # Use VAT from original invoice
+            setattr(doc, vat_field, gemini_vat)
+
+            audit.append(
+                f"{side}: Company/final VAT "
+                f"{normalized_vat!r}: {primary_status}; "
+                f"Gemini VAT {gemini_vat!r}: {final_status}; "
+                "selected Gemini VAT from invoice"
+            )
+
+    return final_status
 
 
 def _extract_json_object(s: str) -> dict:
@@ -2258,44 +2363,85 @@ def process_uploaded_file_task(self, user_id, doc_id, scan_type, split_depth=0, 
             logger.exception("Failed to apply company_replace_rules (post-enrich): %s", e)
         _log_t("apply_company_replace_rules (post-enrich)", t0)
 
-        # 15.055) VIES проверка ФИНАЛЬНЫХ PVM кодов (после Company enrichment + replace rules)
+        # 15.055) VAT OCR correction + VIES + Gemini fallback
         t0 = _t()
+
         try:
             doc.refresh_from_db(fields=[
-                "seller_vat_code", "seller_country_iso",
-                "buyer_vat_code", "buyer_country_iso",
+                "seller_vat_code",
+                "seller_country_iso",
+                "buyer_vat_code",
+                "buyer_country_iso",
+                "structured_json",
             ])
 
-            logger.info(
-                "[FINAL VAT] seller=%r country=%r | buyer=%r country=%r",
-                doc.seller_vat_code, doc.seller_country_iso,
-                doc.buyer_vat_code, doc.buyer_country_iso,
+            # Original VAT codes before company enrichment
+            llm_vats = _original_vat_codes_from_llm(
+                doc.gpt_raw_json
             )
 
-            try:
-                seller_vat_res = validate_vat(
-                    raw_code=doc.seller_vat_code,
-                    country_iso=doc.seller_country_iso,
-                )
-                doc.seller_vat_val = seller_vat_res.get("status")
-            except Exception as e:
-                logger.warning("Seller VAT validation failed: %s", e)
-                doc.seller_vat_val = None
+            sj = (
+                doc.structured_json
+                if isinstance(doc.structured_json, dict)
+                else {}
+            )
 
-            try:
-                buyer_vat_res = validate_vat(
-                    raw_code=doc.buyer_vat_code,
-                    country_iso=doc.buyer_country_iso,
-                )
-                doc.buyer_vat_val = buyer_vat_res.get("status")
-            except Exception as e:
-                logger.warning("Buyer VAT validation failed: %s", e)
-                doc.buyer_vat_val = None
+            audit = list(sj.get("_vat_validation_log") or [])
 
-            doc.save(update_fields=["seller_vat_val", "buyer_vat_val"])
+            for side in ("seller", "buyer"):
+                try:
+                    vat_status = _validate_final_vat_party(
+                        doc,
+                        side,
+                        llm_vats.get(side),
+                        audit,
+                    )
+
+                    setattr(
+                        doc,
+                        f"{side}_vat_val",
+                        vat_status,
+                    )
+
+                except Exception as e:
+                    logger.warning(
+                        "[VAT] %s validation failed: %s",
+                        side,
+                        e,
+                    )
+                    setattr(
+                        doc,
+                        f"{side}_vat_val",
+                        "unavailable",
+                    )
+
+            # Synchronize final VAT values
+            sj["seller_vat_code"] = doc.seller_vat_code
+            sj["buyer_vat_code"] = doc.buyer_vat_code
+
+            # Save audit only if changes occurred
+            if audit:
+                sj["_vat_validation_log"] = audit
+
+            doc.structured_json = sj
+
+            doc.save(update_fields=[
+                "seller_vat_code",
+                "buyer_vat_code",
+                "seller_vat_val",
+                "buyer_vat_val",
+                "structured_json",
+            ])
+
         except Exception as e:
-            logger.warning("Final VAT validation failed: %s", e)
-        _log_t("VIES final VAT check (post-enrich)", t0)
+            logger.exception(
+                "Final VAT validation failed: %s", e
+            )
+
+        _log_t(
+            "VIES final VAT check + audit (post-enrich)",
+            t0,
+        )
 
         # 15.06) Пересчёт готовности к экспорту после обогащения контрагентов
         t0 = _t()
@@ -6126,5 +6272,5 @@ def cleanup_vat_check_cache():
 
 # DU modulio užduotys (įdėtuose moduliuose - Celery jų automatiškai neranda)
 from .payroll.roster.tasks import auto_draft_rosters, generate_roster_task  # noqa: E402,F401
-from .payroll.declarations.tasks import poll_submitted_declarations  # noqa: E402,F401
+from .payroll.declarations.tasks import poll_submitted_declarations, remind_due_declarations  # noqa: E402,F401
 from .payroll.form_versions import check_sodra_form_versions  # noqa: E402,F401

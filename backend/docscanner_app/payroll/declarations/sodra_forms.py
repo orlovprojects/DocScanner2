@@ -1,5 +1,5 @@
 """
-Sodros pranešimai SAM (v07), 1-SD (v11), 2-SD (v09) -> FFData.
+Sodros pranešimai SAM (v07), 1-SD (v11), 2-SD (v09), 9-SD (v06), 12-SD (v05) -> FFData.
 Grynas modulis: duomenų klasės -> (bytes, klaidos).
 
 Sutikrinta su tikrais priimtais failais (ABBYY / EDAS): žymimieji laukai "1" / "0",
@@ -36,6 +36,7 @@ class Insurer:
     address: str = ""
     manager: str = ""
     preparator: str = ""
+    manager_position: str = ""
 
 
 @dataclass
@@ -243,3 +244,188 @@ def build_2sd(ins, rows, doc_date=None):
             })
         pages.append((name, pv))
     return build_ffdata(spec, pages, created_on=doc_date), errors
+
+
+# ============================================================
+# 12-SD - nedraudiminiai laikotarpiai (nemokamos atostogos, pravaikšta, nušalinimas...)
+# Sutikrinta su priimtu EDAS failu (2021): keli darbuotojai vienoje formoje, 2 eil. 1 lape, 4 - tęsinio lapuose.
+# ============================================================
+
+REASONS_12SD = {
+    "01": "NEMOKAMOS ATOSTOGOS",
+    "02": "ATOSTOGOS KVALIFIKACIJAI TOBULINTI",
+    "03": "KŪRYBINĖS ATOSTOGOS",
+    "04": "MOKYMOSI ATOSTOGOS",
+    "05": "NEATVYKIMAS ADMINISTRACIJOS LEIDIMU",
+    "06": "ATOSTOGOS VAIKUI PRIŽIŪRĖTI (KITIEMS GIMINAIČIAMS)",
+    "07": "IŠDUOTA MEDICININĖ PAŽYMA (FORMA NR. 094/A)",
+    "08": "NUŠALINIMAS NUO DARBO (PAREIGŲ)",
+    "09": "PRAVAIKŠTA",
+    "10": "KARO TARNYBA",
+}
+
+
+@dataclass
+class SuspendRow:
+    person: Person
+    start: date
+    end: date = None
+    reason: str = "01"
+
+
+def build_12sd(ins, rows, doc_date=None, doc_number=None):
+    spec = load_spec("sodra", "12-SD-v05")
+    errors = _insurer_errors(ins)
+    first, per = spec["pages"]["12-SD"]["rows_per_page"], spec["pages"]["12-SD-T"]["rows_per_page"]
+    chunks = [rows[:first]] + [rows[i:i + per] for i in range(first, len(rows), per)]
+    doc = _doc("ND", doc_date)
+    if doc_number:
+        doc["DocNumber"] = doc_number[:16]
+    pages, row_no = [], 0
+    for i, chunk in enumerate(chunks, start=1):
+        name = "12-SD" if i == 1 else "12-SD-T"
+        pv = {"InsurerCode": ins.code, "PageNumber": str(i), "PageTotal": str(len(chunks)),
+              "FormCode": name, "FormVersion": "05", **doc}
+        if i == 1:
+            pv.update({"InsurerName": ins.name[:68], "JuridicalPersonCode": ins.company_code,
+                       "InsurerPhone": ins.phone[:15], "InsurerAddress": ins.address[:68],
+                       "PersonCountTotal": str(len(rows)), "ManagerFullName": ins.manager[:68],
+                       "PreparatorDetails": ins.preparator[:68]})
+        for n, r in enumerate(chunk, start=1):
+            row_no += 1
+            errors += _person_errors(r.person)
+            if r.reason not in REASONS_12SD:
+                errors.append(f"{r.person.first_name} {r.person.last_name}: nežinomas 12-SD priežasties kodas")
+            pv.update(_person_fields(r.person, n))
+            pv.update({f"RowNumber_{n}": str(row_no), f"InsuranceSuspendStart_{n}": r.start.isoformat(),
+                       f"InsuranceSuspendEnd_{n}": r.end.isoformat() if r.end else "",
+                       f"ReasonCode_{n}": r.reason, f"ReasonText_{n}": REASONS_12SD.get(r.reason, "")})
+        pages.append((name, pv))
+    return build_ffdata(spec, pages, created_on=doc_date), errors
+
+
+# ============================================================
+# 9-SD - tėvystės atostogos / atostogos vaikui prižiūrėti (vienas darbuotojas formoje)
+# Sutikrinta su priimtu EDAS failu (2023).
+# ============================================================
+
+REASONS_9SD = {
+    "01": "TĖVYSTĖS ATOSTOGOS",
+    "02": "ATOSTOGOS VAIKUI PRIŽIŪRĖTI",
+    "06": "TĖVYSTĖS ATOSTOGOS (DK 133 STR. 2D. NUO 2018-01-01)",
+    "07": "ATOSTOGOS SENELEI (SENELIUI) VAIKUI PRIŽIŪRĖTI IKI 3 METŲ",
+}
+
+
+@dataclass
+class ChildLeave:
+    person: Person
+    start: date
+    end: date
+    reason: str = "02"
+    child_birth_date: date = None
+    child_code: str = ""
+    cancel_date: date = None          # atšaukta / grįžo anksčiau - paskutinė atostogų diena
+
+
+def build_9sd(ins, leave, doc_date=None, doc_number=None):
+    spec = load_spec("sodra", "9-SD-v06")
+    errors = _insurer_errors(ins) + _person_errors(leave.person)
+    p = leave.person
+    if leave.reason not in REASONS_9SD:
+        errors.append("Nežinomas 9-SD priežasties kodas")
+    if not leave.child_birth_date and not leave.child_code:
+        errors.append(f"{p.first_name} {p.last_name}: nenurodytas vaikas (gimimo data) - pasirinkite vaiką nebuvime")
+    doc = _doc("VP", doc_date)
+    if doc_number:
+        doc["DocNumber"] = doc_number[:16]
+    pv = {"FormCode": "9-SD", "FormVersion": "06", "InsurerName": ins.name[:68], "InsurerCode": ins.code,
+          "JuridicalPersonCode": ins.company_code, "InsurerPhone": ins.phone[:15], "InsurerAddress": ins.address[:68],
+          **doc, "PersonFirstName": p.first_name.upper(), "PersonLastName": p.last_name.upper(),
+          "HolidayStartDate": leave.start.isoformat(), "HolidayEndDate": leave.end.isoformat() if leave.end else "",
+          "ManagerFullName": ins.manager[:68], "PreparatorDetails": ins.preparator[:68],
+          "ReasonCode_1": leave.reason, "ReasonText_1": REASONS_9SD.get(leave.reason, "")}
+    if p.person_code and not p.is_foreigner:
+        pv["PersonCode"] = p.person_code
+    if p.sd_series and p.sd_number:
+        pv["InsuranceSeries"], pv["InsuranceNumber"] = p.sd_series, p.sd_number
+    if leave.child_birth_date:
+        pv["ChildBirthDate"] = leave.child_birth_date.isoformat()
+    if leave.child_code:
+        pv["ChildPersonCode"] = leave.child_code
+    if leave.cancel_date:
+        pv["HolidayCancelDate"] = leave.cancel_date.isoformat()
+    return build_ffdata(spec, [("9-SD", pv)], created_on=doc_date), errors
+
+
+# ============================================================
+# NP-SD2 - duomenys ligos (nėštumo ir gimdymo) išmokai skirti; vienas darbuotojas, vienas laikotarpis.
+# Laukų pavadinimai - pagal tikrą EDAS eksportą (v01): A5_Start, A6_End, A7.
+# Sodros instrukcija: A5/A6 - nedarbingumo laikotarpis (tik praėjęs), A7 - 1 nėštumo ir gimdymo atostogos / 0,
+# B1/B2 (iki 3) - dirbo ir gavo DU nedarbingumo metu, B3/B4 - mokamos atostogos, sutampančios su slauga,
+# B5/B6 - laikotarpis, už kurį ligos išmoka iš darbdavio lėšų, B7 - jos suma (bruto),
+# ReasonCode_1 (B8) - darbdavio išmokos neskyrimo priežastis.
+# ============================================================
+
+REASONS_NPSD2 = {
+    "02": "DIRBO IR DĖL LAIKINOJO NEDARBINGUMO NEPRARADO PAJAMŲ",
+    "03": "NESUTAPO SU DARBO GRAFIKU",
+    "04": "PATEIKTAS NEDARBINGUMO PAŽYMĖJIMO TĘSINYS",
+    "05": "SUTAPO SU NEDRAUDIMINIU LAIKOTARPIU",
+    "06": "",          # kitos priežastys - tekstas įrašomas
+}
+
+
+@dataclass
+class SickReport:
+    person: Person
+    start: date
+    end: date
+    maternity: bool = False
+    worked: list = field(default_factory=list)       # [(nuo, iki)] - iki 3
+    vacation: tuple = None                            # (nuo, iki) - tik slaugai
+    employer_from: date = None
+    employer_to: date = None
+    employer_sum: Decimal = None
+    reason: str = ""
+    reason_text: str = ""
+    doc_number: str = ""
+
+
+def build_npsd2(ins, r, doc_date=None):
+    spec = load_spec("sodra", "NP-SD2-v01")
+    errors = _insurer_errors(ins) + _person_errors(r.person)
+    if r.end < r.start:
+        errors.append("Netinkamas nedarbingumo laikotarpis")
+    if r.reason and r.reason not in REASONS_NPSD2:
+        errors.append("Nežinomas darbdavio išmokos neskyrimo priežasties kodas")
+    if r.reason == "06" and not r.reason_text:
+        errors.append("Priežasčiai 06 reikia įrašyti tekstą")
+    doc = _doc("LIG", doc_date)
+    if r.doc_number:
+        doc["DocNumber"] = r.doc_number[:16]
+    pv = {"PageNumber": "1", "PageTotal": "1", "Currency": "EUR", "FormCode": "NP-SD2", "FormVersion": "01",
+          "InsurerName": ins.name.upper()[:68], "InsurerCode": ins.code, "JuridicalPersonCode": ins.company_code,
+          "InsurerPhone": ins.phone[:15], "InsurerAddress": (ins.address or "").upper()[:68], **doc,
+          "PersonFirstName": r.person.first_name.upper()[:66], "PersonLastName": r.person.last_name.upper()[:66],
+          "A5_Start": r.start.isoformat(), "A6_End": r.end.isoformat(), "A7": "1" if r.maternity else "0",
+          "ManagerJobPosition": (getattr(ins, "manager_position", "") or "")[:30].upper(),
+          "ManagerFullName": (ins.manager or "").upper()[:68], "PreparatorDetails": (ins.preparator or "").upper()[:68],
+          "J_group": "-1"}
+    if r.person.person_code and not r.person.is_foreigner:
+        pv["PersonCode"] = r.person.person_code
+    if r.person.sd_series and r.person.sd_number:
+        pv["InsuranceSeries"], pv["InsuranceNumber"] = r.person.sd_series, r.person.sd_number
+    for n, (a, b) in enumerate(r.worked[:3], start=1):
+        pv[f"B1_Start_{n}"], pv[f"B2_End_{n}"] = a.isoformat(), b.isoformat()
+    if r.vacation:
+        pv["B3_Start"], pv["B4_End"] = r.vacation[0].isoformat(), r.vacation[1].isoformat()
+    if r.employer_from:
+        pv["B5_Start"] = r.employer_from.isoformat()
+        if r.employer_to and r.employer_to != r.employer_from:
+            pv["B6_End"] = r.employer_to.isoformat()
+        pv["B7_PaymentSum"] = num(r.employer_sum or ZERO)
+    if r.reason:
+        pv["ReasonCode_1"] = r.reason
+        pv["ReasonText_1"] = (r.reason_text or REASONS_NPSD2.get(r.reason, "")).upper()[:41]
+    return build_ffdata(spec, [("NP-SD2", pv)], created_on=doc_date), errors

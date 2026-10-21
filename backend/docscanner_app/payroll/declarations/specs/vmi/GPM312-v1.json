@@ -1,0 +1,143 @@
+{
+ "form": "GPM312",
+ "version": "1",
+ "FormDefId": "{DD0F88DD-A858-4595-AF2F-3643D0069A39}",
+ "authority": "VMI",
+ "groups": {
+  "name": "Visa forma",
+  "pages": [
+   "GPM312"
+  ]
+ },
+ "number_format": "decimal comma",
+ "encoding": "UTF-8",
+ "pages": {
+  "GPM312": {
+   "occur": [
+    "1",
+    "1"
+   ],
+   "rows_per_page": 0,
+   "header_fields": [
+    {
+     "name": "B_MM_ID",
+     "type": "Decimal",
+     "length": 11,
+     "comment": "Mokesčių mokėtojo identifikacinis numeris"
+    },
+    {
+     "name": "B_MM_Pavad",
+     "type": "Text",
+     "length": 58,
+     "comment": "Pavadinimas"
+    },
+    {
+     "name": "B_ML_Metai",
+     "type": "Decimal",
+     "length": 4,
+     "comment": "Mokestinis laikotarpis (metai)"
+    },
+    {
+     "name": "G4",
+     "type": "Decimal",
+     "length": 14,
+     "comment": "Išmokų suma (L8 suma)"
+    },
+    {
+     "name": "G5",
+     "type": "Decimal",
+     "length": 14,
+     "comment": "Išskaičiuoto GPM suma (L10 suma)"
+    },
+    {
+     "name": "G6",
+     "type": "Decimal",
+     "length": 14,
+     "comment": "Išmokėjusio asmens lėšomis sumokėto GPM suma (L11 suma)"
+    },
+    {
+     "name": "G7",
+     "type": "Decimal",
+     "length": 14,
+     "comment": "Užsienyje sumokėto GPM suma (L13 suma)"
+    },
+    {
+     "name": "B_FormNr",
+     "type": "Text",
+     "length": 6
+    },
+    {
+     "name": "B_FormVerNr",
+     "type": "Text",
+     "length": 2
+    }
+   ]
+  },
+  "GPM312L": {
+   "occur": [
+    "0",
+    "*"
+   ],
+   "rows_per_page": 10,
+   "rows_first": true,
+   "row_fields": [
+    {
+     "name": "L1-{N}"
+    },
+    {
+     "name": "L2-{N}"
+    },
+    {
+     "name": "L3-{N}"
+    },
+    {
+     "name": "L4-{N}"
+    },
+    {
+     "name": "L5-{N}"
+    },
+    {
+     "name": "L6-{N}"
+    },
+    {
+     "name": "L7-{N}"
+    },
+    {
+     "name": "L8-{N}"
+    },
+    {
+     "name": "L9-{N}"
+    },
+    {
+     "name": "L10-{N}"
+    },
+    {
+     "name": "L11-{N}"
+    },
+    {
+     "name": "L12-{N}"
+    },
+    {
+     "name": "L13-{N}"
+    }
+   ],
+   "header_fields": [
+    {
+     "name": "B_MM_ID"
+    },
+    {
+     "name": "B_ML_Metai"
+    },
+    {
+     "name": "B_FormNr"
+    },
+    {
+     "name": "B_FormVerNr"
+    },
+    {
+     "name": "LapoNr"
+    }
+   ]
+  }
+ }
+}

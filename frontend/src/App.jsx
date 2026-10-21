@@ -109,7 +109,10 @@ const PrasymaiPage = lazy(() => import("./pages/payroll/PrasymaiPage"));
 const DeklaracijosPage = lazy(() => import("./pages/payroll/DeklaracijosPage"));
 const IsmokejimaiPage = lazy(() => import("./pages/payroll/IsmokejimaiPage"));
 const GrafikaiPage = lazy(() => import("./pages/payroll/GrafikaiPage"));
-
+const KomandiruotesPage = lazy(() => import("./pages/payroll/KomandiruotesPage"));
+const PerejimasPage = lazy(() => import("./pages/PerejimasPage"));
+const DarboUzmokestisPage = lazy(() => import("./pages/payroll/DarboUzmokestisPage"));
+const GrafikaiTabeliaiPage = lazy(() => import("./pages/payroll/GrafikaiTabeliaiPage"));
 
 
 // ─── Sidebar - Toolbar ───
@@ -291,15 +294,19 @@ function App() {
                 <Route path="/pirkimai" element={<PrivateRoute><PurchasesPage /></PrivateRoute>} />
                 <Route path="/apskaitos-centras" element={<PrivateRoute><ApskaitosCentrasPage /></PrivateRoute>} />
                 <Route path="/profiliai" element={<PrivateRoute><OnboardingCompanyProfiles /></PrivateRoute>} />
-                <Route path="/pradiniai-likuciai" element={<PrivateRoute><PradiniaiLikuciaiPage /></PrivateRoute>} />
+                <Route path="/perejimas" element={<PrivateRoute><PerejimasPage /></PrivateRoute>} />
                 <Route path="/ilgalaikis-turtas" element={<PrivateRoute><IlgalaikisTurtasPage /></PrivateRoute>} />
-                <Route path="/darbo-uzmokestis/darbuotojai" element={<PrivateRoute><DarbuotojaiPage /></PrivateRoute>} />
-                <Route path="/darbo-uzmokestis/atlyginimai" element={<PrivateRoute><MenesioDUPage /></PrivateRoute>} />
-                <Route path="/darbo-uzmokestis/apmokejimo-sistema" element={<PrivateRoute><DarboApmokejimoSistemaPage /></PrivateRoute>} />                      
-                <Route path="/darbo-uzmokestis/prasymai" element={<PrivateRoute><PrasymaiPage /></PrivateRoute>} />
-                <Route path="/darbo-uzmokestis/deklaracijos" element={<PrivateRoute><DeklaracijosPage /></PrivateRoute>} />
-                <Route path="/darbo-uzmokestis/ismokejimai" element={<PrivateRoute><IsmokejimaiPage /></PrivateRoute>} />
-                <Route path="/darbo-uzmokestis/grafikai" element={<PrivateRoute><GrafikaiPage /></PrivateRoute>} />
+
+                <Route path="/darbo-uzmokestis/prasymai" element={<Navigate to="/darbo-uzmokestis" replace />} />
+                <Route path="/darbo-uzmokestis/ismokejimai" element={<Navigate to="/darbo-uzmokestis/atlyginimai" replace />} />
+                <Route path="/darbo-uzmokestis/apmokejimo-sistema" element={<Navigate to="/darbo-uzmokestis/sdup" replace />} />
+                <Route path="/darbo-uzmokestis/darbo-apmokejimo-sistema" element={<Navigate to="/darbo-uzmokestis/sdup" replace />} />
+                <Route path="/darbo-uzmokestis/deklaracijos" element={<Navigate to="/deklaravimas" replace />} />
+                <Route path="/darbo-uzmokestis/grafikai" element={<Navigate to="/grafikai-ir-tabeliai" replace />} />
+                <Route path="/darbo-uzmokestis/komandiruotes" element={<Navigate to="/grafikai-ir-tabeliai/komandiruotes" replace />} />
+                <Route path="/darbo-uzmokestis/:tab?" element={<PrivateRoute><DarboUzmokestisPage /></PrivateRoute>} />
+                <Route path="/grafikai-ir-tabeliai/:tab?" element={<PrivateRoute><GrafikaiTabeliaiPage /></PrivateRoute>} />
+                <Route path="/deklaravimas" element={<PrivateRoute><DeklaracijosPage /></PrivateRoute>} />
 
                 <Route path="/priminti-slaptazodi" element={<PasswordReset />} />
                 <Route path="/buhalterine-apskaita" element={<BuhalterinenApskaita />} />
