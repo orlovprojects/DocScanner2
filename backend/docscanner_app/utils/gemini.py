@@ -116,14 +116,18 @@ When identifying buyer/seller:
 - Look for "pardavėjas" / "tiekėjas" label→ this is SELLER
 - "Savarankiškas sąskaitų išrašymas" (self-billing) and "Atvirkštinis PVM" (reverse charge) do NOT swap roles: pirkėjas is still buyer, pardavėjas/tiekėjas is still seller
 - Don't rely on position (left/right/top/bottom) when labels are available
-- When no pirkėjas/pardavėjas/tiekėjas labels are present, identify the invoice issuer as SELLER by cross-checking all available clues: who issued the invoice ("Sąskaitą išrašė"), issuer name/signature, invoice logo/branding/watermark, IBAN/bank/SWIFT details, contact details, and payment or late-payment instructions. If only one party has an IBAN/bank account shown and there are no explicit role labels, that party is very likely the SELLER. The other party is BUYER. Also, check a footer. Seller is often mentioned in a footer. Do not determine roles only from left/right position.
+- When no pirkėjas/pardavėjas/tiekėjas labels are present, FIRST identify separate party blocks. Group each company/person with its own name, company/VAT codes, address, email, IBAN and other details. OCR may mix columns, so do not rely on text order or left/right position.
+- Identify the SELLER as the invoice issuer by cross-checking "Sąskaitą išrašė", issuer name/signature, IBAN/bank/SWIFT, payment instructions, footer, logo, branding and watermark. If only one party has an IBAN/bank account, that party is very likely the SELLER.
+- In plain OCR, logos, branding and watermarks may appear only as ordinary text. Use them as supporting clues to identify the seller, but NEVER treat them as separate buyer/seller parties unless they form a genuine party block. A brand name may differ from the seller's legal company name. Prefer the legal name and identifiers from the actual party block.
+- Always look for the BUYER, even without labels or company codes. A buyer may be an individual identified only by name and email. Do not confuse logos, brand names, watermarks or issuer employees with the buyer.
+- Before returning JSON, verify that each party's company code, VAT code, address and IBAN belong to the correct party block. If seller details contradict issuer or payment information, reassess the roles.
 
 When extracting company codes and VAT codes:
 - "Įm. kodas" or "Įmonės kodas" → this is company registration code → put in seller_id / buyer_id (usually 9-digit code)
 - "PVM kodas" or "PVM mokėtojo kodas" → this is VAT code → put in seller_vat_code / buyer_vat_code (usually starts with country prefix like "LT" + 9-12 digits)
 - Buyer and seller must not be identical by default; if buyer_id == seller_id or buyer_vat_code == seller_vat_code, re-scan for a second party block (Seller: Pardavėjas/Tiekėjas/Išrašė/Seller/Supplier; Buyer: Pirkėjas/Gavėjas/Užsakovas/Buyer/Customer) and only allow identical parties if self-billing/self-invoicing is explicitly stated.
 
-If the buyer/seller block contains indicators of Lithuanian “individuali veikla” (e.g., “individuali veikla”, “pagal individualios veiklos pažymą”, “IV/IDV”, “Individualios veiklos Nr.” / “IV pažymos Nr.”), then set buyer_is_person=true / seller_is_person=true.
+If the buyer/seller block contains indicators of Lithuanian "individuali veikla" (e.g., "individuali veikla", "pagal individualios veiklos pažymą", "IV/IDV", "Individualios veiklos Nr." / "IV pažymos Nr."), set the corresponding buyer_is_person/seller_is_person=true. However, "individuali įmonė" (IĮ) is a legal entity, NOT an individual person, even if its name contains a person's full name. For individuali įmonė, UAB, MB, AB and other legal entities, set is_person=false.
 
 If due_date is not stated in the document, but invoice date and payment terms like number of days for payment are mentioned, calculate the due date by adding the payment period to the invoice date.
 Set "separate_vat": true ONLY when the document has 2 or more different VAT rates, AND each rate's taxable base > 0. A 0% VAT rate counts if its taxable base > 0, even though VAT amount = 0 (e.g., 21% on 100 EUR + 0% on 50 EUR = separate_vat: true).
@@ -388,14 +392,18 @@ When identifying buyer/seller:
 - Look for "pardavėjas" / "tiekėjas" label→ this is SELLER
 - "Savarankiškas sąskaitų išrašymas" (self-billing) and "Atvirkštinis PVM" (reverse charge) do NOT swap roles: pirkėjas is still buyer, pardavėjas/tiekėjas is still seller
 - Don't rely on position (left/right/top/bottom) when labels are available
-- When no pirkėjas/pardavėjas/tiekėjas labels are present, identify the invoice issuer as SELLER by cross-checking all available clues: who issued the invoice ("Sąskaitą išrašė"), issuer name/signature, invoice logo/branding/watermark, IBAN/bank/SWIFT details, contact details, and payment or late-payment instructions. If only one party has an IBAN/bank account shown and there are no explicit role labels, that party is very likely the SELLER. The other party is BUYER. Also, check a footer. Seller is often mentioned in a footer. Do not determine roles only from left/right position.
+- When no pirkėjas/pardavėjas/tiekėjas labels are present, FIRST identify separate party blocks. Group each company/person with its own name, company/VAT codes, address, email, IBAN and other details. OCR may mix columns, so do not rely on text order or left/right position.
+- Identify the SELLER as the invoice issuer by cross-checking "Sąskaitą išrašė", issuer name/signature, IBAN/bank/SWIFT, payment instructions, footer, logo, branding and watermark. If only one party has an IBAN/bank account, that party is very likely the SELLER.
+- In plain OCR, logos, branding and watermarks may appear only as ordinary text. Use them as supporting clues to identify the seller, but NEVER treat them as separate buyer/seller parties unless they form a genuine party block. A brand name may differ from the seller's legal company name. Prefer the legal name and identifiers from the actual party block.
+- Always look for the BUYER, even without labels or company codes. A buyer may be an individual identified only by name and email. Do not confuse logos, brand names, watermarks or issuer employees with the buyer.
+- Before returning JSON, verify that each party's company code, VAT code, address and IBAN belong to the correct party block. If seller details contradict issuer or payment information, reassess the roles.
 
 When extracting company codes and VAT codes:
 - "Įm. kodas" or "Įmonės kodas" → this is company registration code → put in seller_id / buyer_id (usually 9-digit code)
 - "PVM kodas" or "PVM mokėtojo kodas" → this is VAT code → put in seller_vat_code / buyer_vat_code (usually starts with country prefix like "LT" + 9-12 digits)
 - Buyer and seller must not be identical by default; if buyer_id == seller_id or buyer_vat_code == seller_vat_code, re-scan for a second party block (Seller: Pardavėjas/Tiekėjas/Išrašė/Seller/Supplier; Buyer: Pirkėjas/Gavėjas/Užsakovas/Buyer/Customer) and only allow identical parties if self-billing/self-invoicing is explicitly stated.
 
-If the buyer/seller block contains indicators of Lithuanian "individuali veikla" (e.g., "individuali veikla", "pagal individualios veiklos pažymą", "IV/IDV", "Individualios veiklos Nr." / "IV pažymos Nr."), then set buyer_is_person=true / seller_is_person=true.
+If the buyer/seller block contains indicators of Lithuanian "individuali veikla" (e.g., "individuali veikla", "pagal individualios veiklos pažymą", "IV/IDV", "Individualios veiklos Nr." / "IV pažymos Nr."), set the corresponding buyer_is_person/seller_is_person=true. However, "individuali įmonė" (IĮ) is a legal entity, NOT an individual person, even if its name contains a person's full name. For individuali įmonė, UAB, MB, AB and other legal entities, set is_person=false.
 
 If due_date is not stated in the document, but invoice date and payment terms like number of days for payment are mentioned, calculate the due date by adding the payment period to the invoice date.
 Set "separate_vat": true ONLY when the document has 2 or more different VAT rates, AND each rate's taxable base > 0. A 0% VAT rate counts if its taxable base > 0, even though VAT amount = 0 (e.g., 21% on 100 EUR + 0% on 50 EUR = separate_vat: true).
@@ -783,7 +791,11 @@ ADDITIONAL RULES
   Look for "pardavėjas" / "tiekėjas" label→ this is SELLER
   "Savarankiškas sąskaitų išrašymas" (self-billing) and "Atvirkštinis PVM" (reverse charge) do NOT swap roles: pirkėjas is still buyer, pardavėjas/tiekėjas is still seller
   Don't rely on position (left/right/top/bottom) when labels are available
-  When no pirkėjas/pardavėjas/tiekėjas labels are present, identify the invoice issuer as SELLER by cross-checking all available clues: who issued the invoice ("Sąskaitą išrašė"), issuer name/signature, invoice logo/branding/watermark, IBAN/bank/SWIFT details, contact details, and payment or late-payment instructions. If only one party has an IBAN/bank account shown and there are no explicit role labels, that party is very likely the SELLER. The other party is BUYER. Also, check a footer. Seller is often mentioned in a footer. Do not determine roles only from left/right position.
+  When no pirkėjas/pardavėjas/tiekėjas labels are present, FIRST identify separate party blocks. Group each company/person with its own name, company/VAT codes, address, email, IBAN and other details. OCR may mix columns, so do not rely on text order or left/right position.
+  Identify the SELLER as the invoice issuer by cross-checking "Sąskaitą išrašė", issuer name/signature, IBAN/bank/SWIFT, payment instructions, footer, logo, branding and watermark. If only one party has an IBAN/bank account, that party is very likely the SELLER.
+  In plain OCR, logos, branding and watermarks may appear only as ordinary text. Use them as supporting clues to identify the seller, but NEVER treat them as separate buyer/seller parties unless they form a genuine party block. A brand name may differ from the seller's legal company name. Prefer the legal name and identifiers from the actual party block.
+  Always look for the BUYER, even without labels or company codes. A buyer may be an individual identified only by name and email. Do not confuse logos, brand names, watermarks or issuer employees with the buyer.
+  Before returning JSON, verify that each party's company code, VAT code, address and IBAN belong to the correct party block. If seller details contradict issuer or payment information, reassess the roles.
 - If due_date is not stated in the document, but invoice date and payment terms like number of days for payment are mentioned, calculate the due date by adding the payment period to the invoice date.
 - In line items, always always try to take price after discount (without VAT) if such price is provided in the document. Use up to 4 decimal places for prices if needed. Do not round numbers.
 - Delete country names from addresses.
