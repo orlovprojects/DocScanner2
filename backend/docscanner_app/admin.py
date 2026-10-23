@@ -1,6 +1,6 @@
 from django.contrib import admin
 from .models import BankStatement, IncomingTransaction, OutgoingTransaction, PaymentAllocation, AdClick
-from .models import BlockedEmail
+from .models import BlockedEmail, PublicLead
 
 
 @admin.register(BlockedEmail)
@@ -69,3 +69,10 @@ class AdClickAdmin(admin.ModelAdmin):
     list_display = ("ad_name", "page_url", "user", "ip_address", "created_at")
     list_filter = ("ad_name", "created_at")
     search_fields = ("ad_name", "page_url", "ip_address")
+
+
+@admin.register(PublicLead)
+class PublicLeadAdmin(admin.ModelAdmin):
+    list_display = ("value", "kind", "ip_address", "page", "created_at")
+    list_filter = ("kind", "created_at")
+    search_fields = ("value", "ip_address")

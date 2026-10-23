@@ -242,10 +242,15 @@ class PayrollLineSerializer(serializers.ModelSerializer):
 
 class PayrollEmployeeResultSerializer(serializers.ModelSerializer):
     employee_name = serializers.CharField(source="employee.full_name", read_only=True)
+    work = serializers.SerializerMethodField()
 
     class Meta:
         model = PayrollEmployeeResult
         exclude = ["calc_snapshot"]
+
+    def get_work(self, obj):
+        s = obj.calc_snapshot or {}
+        return {k: s.get(k) for k in ("worked_days", "worked_hours", "scheduled_days")}
 
 
 class PayrollRunSerializer(serializers.ModelSerializer):

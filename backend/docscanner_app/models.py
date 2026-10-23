@@ -7554,6 +7554,8 @@ class TimesheetMonth(models.Model):
     # suminės apskaitos laikotarpio pabaiga (paskutinio mėnesio įraše): kelionių komandiruotėse valandos -
     # {darbuotojo id: {"choice": "rest" | "overtime", "hours": "8"}}; numatyta - kompensuota poilsiu
     period_trip_choices = models.JSONField(default=dict, blank=True)
+    approved_snapshot = models.JSONField(default=dict, blank=True)   # patvirtinto tabelio kopija palyginimui
+    approved_version = models.PositiveIntegerField(default=0)        # kiek kartų patvirtintas
  
     class Meta:
         unique_together = ("company", "year", "month")
@@ -8428,3 +8430,25 @@ class RecurringPayItem(models.Model):
  
     class Meta:
         ordering = ["employee", "valid_from"]
+
+
+#Marketing experiment - konkursas
+class PublicLead(models.Model):
+    KIND_CHOICES = [
+        ("email", "El. paštas"),
+        ("url", "Nuoroda"),
+        ("facebook", "Facebook"),
+        ("other", "Kita"),
+    ]
+    value = models.CharField(max_length=500)
+    kind = models.CharField(max_length=20, choices=KIND_CHOICES, default="other")
+    ip_address = models.GenericIPAddressField(null=True, blank=True)
+    user_agent = models.CharField(max_length=500, blank=True, default="")
+    page = models.CharField(max_length=255, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.value} ({self.ip_address})"

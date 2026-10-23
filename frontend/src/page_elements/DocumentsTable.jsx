@@ -778,18 +778,34 @@ export default function DocumentsTable({
       );
     }
 
-    if (d.buyer_vat_val === "invalid") {
+    if (["invalid", "invalid_format"].includes(d.buyer_vat_val)) {
+      const badFormat = d.buyer_vat_val === "invalid_format";
       icons.push(
-        <Tooltip key="buyer-vat" title="Negalioja pirkėjo PVM kodas" {...tooltipProps}>
-          <PersonOffIcon fontSize={iconFontSize} sx={{ ...iconSx, color: "#f44336" }} />
+        <Tooltip
+          key="buyer-vat"
+          title={badFormat ? "Blogas pirkėjo PVM kodo formatas" : "Negalioja pirkėjo PVM kodas"}
+          {...tooltipProps}
+        >
+          <PersonOffIcon
+            fontSize={iconFontSize}
+            sx={{ ...iconSx, color: badFormat ? "#ff9800" : "#f44336" }}
+          />
         </Tooltip>
       );
     }
 
-    if (d.seller_vat_val === "invalid") {
+    if (["invalid", "invalid_format"].includes(d.seller_vat_val)) {
+      const badFormat = d.seller_vat_val === "invalid_format";
       icons.push(
-        <Tooltip key="seller-vat" title="Negalioja pardavėjo PVM kodas" {...tooltipProps}>
-          <PersonOffIcon fontSize={iconFontSize} sx={{ ...iconSx, color: "#f44336" }} />
+        <Tooltip
+          key="seller-vat"
+          title={badFormat ? "Blogas pardavėjo PVM kodo formatas" : "Negalioja pardavėjo PVM kodas"}
+          {...tooltipProps}
+        >
+          <PersonOffIcon
+            fontSize={iconFontSize}
+            sx={{ ...iconSx, color: badFormat ? "#ff9800" : "#f44336" }}
+          />
         </Tooltip>
       );
     }

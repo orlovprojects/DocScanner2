@@ -27,7 +27,7 @@ function printHtml(html) {
   w.focus(); setTimeout(() => w.print(), 300);
 }
 
-export default function ContractDocumentPanel({ contract }) {
+export default function ContractDocumentPanel({ contract, bare = false }) {
   const [docs, setDocs] = useState(null);
   const [missing, setMissing] = useState([]);
   const [error, setError] = useState("");
@@ -85,12 +85,12 @@ export default function ContractDocumentPanel({ contract }) {
   const st = doc ? STATUS[doc.status] : null;
 
   return (
-    <Paper variant="outlined" sx={{ p: 2 }}>
+    <Paper variant="outlined" sx={bare ? { p: 0, border: 0, bgcolor: "transparent", "& .MuiButton-root": { textTransform: "none" } } : { p: 2 }}>
       <input ref={fileInput} type="file" accept=".pdf,.jpg,.jpeg,.png" hidden onChange={onFile} />
       <Stack direction="row" justifyContent="space-between" alignItems="center" mb={1.5}>
         <Stack direction="row" gap={1} alignItems="center">
           <DescriptionOutlinedIcon fontSize="small" color="action" />
-          <Typography fontWeight={700}>Darbo sutarties dokumentas</Typography>
+          <Typography sx={bare ? { fontSize: 13.5, fontWeight: 500 } : { fontWeight: 700 }}>{bare ? "Sutarties dokumentas" : "Darbo sutarties dokumentas"}</Typography>
           {st && <Chip size="small" label={st.label} color={st.color} variant="outlined" />}
           {!doc && <Chip size="small" label="Neįkelta" variant="outlined" />}
         </Stack>
@@ -99,8 +99,8 @@ export default function ContractDocumentPanel({ contract }) {
 
       {!doc && (
         <Stack direction={{ xs: "column", sm: "row" }} gap={1}>
-          <Button variant="contained" disabled={busy} onClick={generate}>Sugeneruoti sutartį</Button>
-          <Button variant="outlined" startIcon={<UploadFileOutlinedIcon />} disabled={busy} onClick={() => pickFile("new")}>
+          <Button variant="contained" size={bare ? "small" : "medium"} disableElevation disabled={busy} onClick={generate}>Sugeneruoti sutartį</Button>
+          <Button variant="outlined" size={bare ? "small" : "medium"} startIcon={<UploadFileOutlinedIcon />} disabled={busy} onClick={() => pickFile("new")}>
             Įkelti jau pasirašytą
           </Button>
           <Typography variant="caption" color="text.secondary" sx={{ alignSelf: "center" }}>

@@ -21363,3 +21363,141 @@ def currency_rate(request):
         )
 
     return Response({"currency": cur, "date": d, "rate": str(rate)})
+
+
+
+#Marketing experiment - konkursas
+import ipaddress
+import re
+from rest_framework.views import APIView
+from rest_framework.permissions import AllowAny
+from rest_framework.throttling import AnonRateThrottle
+from rest_framework.response import Response
+from rest_framework import status
+from .models import PublicLead
+import requests
+from datetime import timedelta
+from django.conf import settings
+from django.core.cache import cache
+from django.utils import timezone as dj_timezone
+
+LEAD_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+LEAD_URL_RE = re.compile(r"^(https?://)?([\w-]+\.)+[a-z]{2,}(/\S*)?$", re.I)
+
+
+def _lead_client_ip(request):
+    ip = request.META.get("HTTP_X_REAL_IP", "").strip()
+    if not ip:
+        xff = request.META.get("HTTP_X_FORWARDED_FOR", "")
+        if xff:
+            ip = xff.split(",")[-1].strip()
+    if not ip:
+        ip = request.META.get("REMOTE_ADDR", "")
+    try:
+        ipaddress.ip_address(ip)
+        return ip
+    except ValueError:
+        return None
+
+
+def _lead_detect_kind(v):
+    low = v.lower()
+    if LEAD_EMAIL_RE.match(v):
+        return "email"
+    if "facebook.com" in low or "fb.com" in low or low.startswith("@"):
+        return "facebook"
+    if LEAD_URL_RE.match(v):
+        return "url"
+    return "other"
+
+
+class PublicLeadThrottle(AnonRateThrottle):
+    rate = "10/hour"
+
+    def get_ident(self, request):
+        # za nginx REMOTE_ADDR vsegda 127.0.0.1 - limit byl by obshchim na vseh
+        return _lead_client_ip(request) or super().get_ident(request)
+
+
+def _verify_turnstile(token, ip):
+    secret = getattr(settings, "TURNSTILE_SECRET", "")
+    if not secret:
+        return True  # ne nastroeno - propuskaem
+    if not token:
+        return False
+    try:
+        r = requests.post(
+            "https://challenges.cloudflare.com/turnstile/v0/siteverify",
+            data={"secret": secret, "response": token, "remoteip": ip or ""},
+            timeout=5,
+        )
+        return bool(r.json().get("success"))
+    except Exception:
+        logger.warning("Turnstile verify failed", exc_info=True)
+        return False
+
+
+class PublicLeadView(APIView):
+    permission_classes = [AllowAny]
+    authentication_classes = []
+    throttle_classes = [PublicLeadThrottle]
+
+    DAILY_CAP = 300
+    MIN_FILL_MS = 3000
+
+    def post(self, request):
+        fake_ok = Response({"ok": True}, status=status.HTTP_201_CREATED)
+
+        # 1. honeypot
+        if (request.data.get("website") or "").strip():
+            return fake_ok
+
+        # 2. slishkom bystro
+        try:
+            elapsed = int(request.data.get("t") or 0)
+        except (TypeError, ValueError):
+            elapsed = 0
+        if elapsed < self.MIN_FILL_MS:
+            return fake_ok
+
+        # 3. validacija
+        value = (request.data.get("value") or "").strip()
+        if len(value) < 3 or len(value) > 500:
+            return Response({"error": "invalid"}, status=status.HTTP_400_BAD_REQUEST)
+        kind = _lead_detect_kind(value)
+        if kind == "other":
+            return Response({"error": "invalid"}, status=status.HTTP_400_BAD_REQUEST)
+
+        ip = _lead_client_ip(request)
+
+        # 4. Turnstile
+        if not _verify_turnstile(request.data.get("cf_token"), ip):
+            return Response({"error": "captcha"}, status=status.HTTP_403_FORBIDDEN)
+
+        # 5. globalnyj limit v sutki
+        day_key = f"public_lead_count:{dj_timezone.localdate()}"
+        cache.add(day_key, 0, 86400)
+        try:
+            count = cache.incr(day_key)
+        except ValueError:
+            cache.set(day_key, 1, 86400)
+            count = 1
+        if count > self.DAILY_CAP:
+            logger.warning("PublicLead daily cap reached")
+            return Response({"error": "limit"}, status=status.HTTP_429_TOO_MANY_REQUESTS)
+
+        # 6. dubl za 24 chasa
+        if PublicLead.objects.filter(
+            value__iexact=value,
+            created_at__gte=dj_timezone.now() - timedelta(days=1),
+        ).exists():
+            return fake_ok
+
+        PublicLead.objects.create(
+            value=value,
+            kind=kind,
+            ip_address=ip,
+            user_agent=(request.META.get("HTTP_USER_AGENT") or "")[:500],
+            page=(request.data.get("page") or "")[:255],
+        )
+        return fake_ok

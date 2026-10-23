@@ -1351,12 +1351,15 @@ export default function TabelisView({ year, month, onShift }) {
   const locked = meta.status === "approved" || meta.status === "locked" || meta.payroll_closed;
   const anySummed = rows.some((r) => r.summed);
   const needRoster = rows.filter((r) => r.needs_roster);
+  const changes = meta.changes || [];                 // pakeista po patvirtinimo (nauja liga, prašymas, grafikas)
   const today = meta.today || "";
 
   const [approveDlg, setApproveDlg] = useState(null);   // {issues, need_note, note}
   const [issuesOpen, setIssuesOpen] = useState(false);
   const setStatus = async (approve, note = "") => {
-    if (approve && !note && !window.confirm("Patvirtinti tabelį? Po patvirtinimo jo keisti nebus galima, kol neatšauksite.")) return;
+    if (approve && !note && !window.confirm(meta.status === "approved"
+      ? "Patvirtinti pakeitimus? Atlyginimai bus perskaičiuoti pagal naują tabelį."
+      : "Patvirtinti tabelį? Po patvirtinimo jo keisti nebus galima, kol neatšauksite. Atlyginimai bus apskaičiuoti pagal jį.")) return;
     setBusy(true);
     try {
       await payrollApi.setTimesheetHours({ action: approve ? "approve" : "reopen", year, month, note });
@@ -1436,6 +1439,16 @@ export default function TabelisView({ year, month, onShift }) {
                 label={[nViol ? `${nViol} pažeidimai` : "", nWarn ? `${nWarn} įspėjimai` : ""].filter(Boolean).join(" · ")}
                 sx={{ fontWeight: 750, height: 32, borderRadius: 1.6, bgcolor: nViol ? "#FEF3F2" : "#FFFAEB", color: nViol ? "#B42318" : "#B54708", cursor: "pointer", "& .MuiChip-icon": { color: "inherit" } }} />
             )}
+            {data && changes.length > 0 && (
+              <Tooltip arrow title={<Box sx={{ fontSize: 12.5 }}>
+                Po patvirtinimo pasikeitė (pvz. įkelta liga, patvirtintas prašymas, pakeistas grafikas). Atlyginimai skaičiuojami pagal
+                anksčiau patvirtintą tabelį, kol nepatvirtinsite pakeitimų:
+                {changes.slice(0, 6).map((c) => <div key={c.employee}>• {c.name}{c.dates?.length ? ` (${c.dates.length} d.)` : ""}</div>)}
+              </Box>}>
+                <Chip size="small" icon={<WarningAmberRoundedIcon />} label={`Pakeista po patvirtinimo: ${changes.length}`}
+                  sx={{ fontWeight: 700, height: 32, borderRadius: 1.6, bgcolor: "#FFFAEB", color: "#B54708", border: "1px solid #FEC84B", "& .MuiChip-icon": { color: "#F79009" } }} />
+              </Tooltip>
+            )}
             {data && meta.status === "approved" && meta.approval_note && (
               <Tooltip title={`Patvirtinta su pažeidimais: ${meta.approval_note}`}><Chip size="small" variant="outlined" color="warning" label="Su paaiškinimu" /></Tooltip>
             )}
@@ -1445,12 +1458,23 @@ export default function TabelisView({ year, month, onShift }) {
                 <MoreHorizIcon fontSize="small" />
               </IconButton>
             )}
+            {data && !meta.payroll_closed && meta.status === "approved" && changes.length > 0 && (
+              <Button size="small" variant="contained" startIcon={<CheckCircleOutlineIcon />} disableElevation disabled={busy}
+                onClick={() => setStatus(true)} sx={{ textTransform: "none", fontWeight: 750, borderRadius: 1.8, minHeight: 36, px: 2.1 }}>Patvirtinti pakeitimus</Button>
+            )}
             {data && !meta.payroll_closed && (
               meta.status === "approved"
                 ? <Button size="small" variant="outlined" disabled={busy} onClick={() => setStatus(false)}
                     sx={{ textTransform: "none", fontWeight: 700, borderRadius: 1.8, minHeight: 36 }}>Atšaukti patvirtinimą</Button>
-                : <Button size="small" variant="contained" startIcon={<CheckCircleOutlineIcon />} disableElevation disabled={busy || !rows.length}
-                    onClick={() => setStatus(true)} sx={{ textTransform: "none", fontWeight: 750, borderRadius: 1.8, minHeight: 36, px: 2.1 }}>Patvirtinti tabelį</Button>
+                : (
+                  <Tooltip arrow title={meta.too_early ? `Mėnuo dar nesibaigė – tabelį patvirtinti bus galima nuo ${meta.approve_from}. Iki tol darbo laikas dar gali keistis.`
+                    : needRoster.length ? `Pirmiausia paskelbkite darbo grafiką (suminė apskaita): ${needRoster.slice(0, 3).map((r) => r.employee_name).join(", ")}${needRoster.length > 3 ? "…" : ""}` : ""}>
+                    <span>
+                      <Button size="small" variant="contained" startIcon={<CheckCircleOutlineIcon />} disableElevation disabled={busy || !rows.length || needRoster.length > 0 || !!meta.too_early}
+                        onClick={() => setStatus(true)} sx={{ textTransform: "none", fontWeight: 750, borderRadius: 1.8, minHeight: 36, px: 2.1 }}>Patvirtinti tabelį</Button>
+                    </span>
+                  </Tooltip>
+                )
             )}
           </Stack>
         </Stack>

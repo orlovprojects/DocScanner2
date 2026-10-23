@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import {
-  Alert, Box, Button, Chip, Dialog, DialogActions, DialogContent, DialogTitle, IconButton, MenuItem, Paper,
-  Table, TableBody, TableCell, TableHead, TableRow, TextField, Tooltip, Typography,
+  Alert, Box, Button, Chip, Dialog, DialogActions, DialogContent, DialogTitle, IconButton, MenuItem,
+  Table, TableBody, TableCell, TableHead, TableRow, TextField, ToggleButton, ToggleButtonGroup, Tooltip, Typography,
 } from "@mui/material";
 import AddIcon from "@mui/icons-material/Add";
 import DeleteOutlineIcon from "@mui/icons-material/DeleteOutline";
@@ -25,6 +25,10 @@ const KINDS = [
   ["harm", "Žala sveikatai / maitintojo netekimas"],
   ["voluntary", "Alimentai darbuotojo prašymu"],
 ];
+// Nuolatiniams priedams netinka vienkartiniai ir automatiškai skaičiuojami kodai
+const NOT_RECURRING = ["ALG", "VAL", "PRV", "PRK", "PRT", "ISE", "KMP"];
+const CARD = { border: "1px solid #EAECF0", borderRadius: 2.5, p: 2.25, bgcolor: "#FFFFFF" };
+
 const METHODS = [["max", "Kiek leidžia įstatymas (CPK 736)"], ["percent", "Procentas nuo DU po mokesčių"], ["fixed", "Fiksuota suma per mėnesį"]];
 
 function NumField({ label, value, onChange, error, helperText, suffix }) {
@@ -68,7 +72,7 @@ function GarnishmentDialog({ value, employeeId, onClose, onSaved }) {
   };
   return (
     <Dialog open onClose={onClose} fullWidth maxWidth="sm" disableScrollLock>
-      <DialogTitle>{f.id ? "Išskaitos dokumentas" : "Naujas išskaitos dokumentas"}</DialogTitle>
+      <DialogTitle sx={{ fontSize: 17, fontWeight: 600 }}>{f.id ? "Išskaitos dokumentas" : "Nauja išskaita"}</DialogTitle>
       <DialogContent sx={{ display: "grid", gap: 1.5, pt: "8px !important" }}>
         {err && <Alert severity="error">{err}</Alert>}
         <TextField select size="small" label="Rūšis" value={f.kind} onChange={(e) => set({ kind: e.target.value })} SelectProps={menuProps}>
@@ -96,7 +100,7 @@ function GarnishmentDialog({ value, employeeId, onClose, onSaved }) {
             helperText="Tuščia – periodinės išmokos be ribos" />
           <NumField label="Jau išskaityta iki DokSkenas" value={f.paid_before} onChange={(v) => set({ paid_before: v })} suffix="€" />
         </Box>
-        <Typography sx={{ fontSize: 13, fontWeight: 700, mt: 0.5 }}>Kam pervesti</Typography>
+        <Typography sx={{ fontSize: 13.5, fontWeight: 600, mt: 0.5 }}>Kam pervesti</Typography>
         <TextField size="small" label="Gavėjas" value={f.recipient_name} onChange={(e) => set({ recipient_name: e.target.value })} />
         <TextField size="small" label="IBAN" value={f.recipient_iban} onChange={(e) => set({ recipient_iban: e.target.value })} />
         <TextField size="small" label="Mokėjimo paskirtis" value={f.payment_purpose} onChange={(e) => set({ payment_purpose: e.target.value })}
@@ -109,7 +113,7 @@ function GarnishmentDialog({ value, employeeId, onClose, onSaved }) {
           <MenuItem value="active">Vykdoma</MenuItem><MenuItem value="finished">Įvykdyta</MenuItem><MenuItem value="cancelled">Atšaukta</MenuItem>
         </TextField>}
       </DialogContent>
-      <DialogActions sx={{ px: 3, pb: 2 }}>
+      <DialogActions sx={{ px: 3, pb: 2, "& .MuiButton-root": { textTransform: "none" } }}>
         <Button onClick={onClose}>Atšaukti</Button>
         <Button variant="contained" disableElevation onClick={save} disabled={!f.valid_from}>Išsaugoti</Button>
       </DialogActions>
@@ -137,28 +141,32 @@ function RecurringDialog({ value, employeeId, codes, onClose, onSaved }) {
   };
   return (
     <Dialog open onClose={onClose} fullWidth maxWidth="xs" disableScrollLock>
-      <DialogTitle>{f.id ? "Nuolatinis priedas" : "Naujas nuolatinis priedas"}</DialogTitle>
-      <DialogContent sx={{ display: "grid", gap: 1.5, pt: "8px !important" }}>
+      <DialogTitle sx={{ fontSize: 17, fontWeight: 600 }}>{f.id ? "Nuolatinis priedas" : "Naujas nuolatinis priedas"}</DialogTitle>
+      <DialogContent sx={{ display: "grid", gap: 1.75, pt: "8px !important" }}>
         {err && <Alert severity="error">{err}</Alert>}
-        <TextField select size="small" label="Priedo rūšis" value={f.pay_code} onChange={(e) => set({ pay_code: e.target.value })} SelectProps={menuProps}>
+        <TextField select size="small" label="Priedas" value={f.pay_code} onChange={(e) => set({ pay_code: e.target.value })} SelectProps={menuProps}
+          helperText={!codes.length ? "Nėra tinkamų priedų rūšių – sukurkite jas DU kodų nustatymuose" : " "}>
           {codes.map((c) => <MenuItem key={c.id} value={c.id}>{c.name}</MenuItem>)}
         </TextField>
-        <TextField select size="small" label="Dydis" value={f.mode} onChange={(e) => set({ mode: e.target.value })} SelectProps={menuProps}>
-          <MenuItem value="amount">Fiksuota suma per mėnesį</MenuItem>
-          <MenuItem value="percent">% nuo pareiginės algos</MenuItem>
-        </TextField>
-        {f.mode === "amount" ? <NumField label="Suma" value={f.amount} onChange={(v) => set({ amount: v })} suffix="€" error={!f.amount} />
-          : <NumField label="Procentas" value={f.percent} onChange={(v) => set({ percent: v })} suffix="%" error={!f.percent} />}
+        <Box sx={{ display: "flex", gap: 1.5, alignItems: "flex-start" }}>
+          <ToggleButtonGroup exclusive size="small" value={f.mode} onChange={(_, v) => v && set({ mode: v })}
+            sx={{ "& .MuiToggleButton-root": { textTransform: "none", px: 1.5, height: 40 } }}>
+            <ToggleButton value="amount">Suma</ToggleButton>
+            <ToggleButton value="percent">% nuo algos</ToggleButton>
+          </ToggleButtonGroup>
+          {f.mode === "amount" ? <NumField label="Kiekvieną mėnesį" value={f.amount} onChange={(v) => set({ amount: v })} suffix="€" error={!f.amount} />
+            : <NumField label="Procentas nuo algos" value={f.percent} onChange={(v) => set({ percent: v })} suffix="%" error={!f.percent} />}
+        </Box>
         <Box sx={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 1.5 }}>
           <DateF label="Nuo" value={f.valid_from} onChange={(v) => set({ valid_from: v })} />
           <DateF label="Iki (nebūtina)" value={f.valid_to} onChange={(v) => set({ valid_to: v })} />
         </Box>
         <TextField size="small" label="Pastaba (algalapyje)" value={f.comment} onChange={(e) => set({ comment: e.target.value })} />
         <Typography sx={{ fontSize: 12, color: "text.secondary" }}>
-          Priedas įtraukiamas į kiekvieno mėnesio DU automatiškai. Jei tą mėnesį tą patį priedą įvesite rankiniu būdu – bus naudojamas rankinis.
+          Pridedamas prie algos kiekvieną mėnesį automatiškai. Jei kurį mėnesį tą patį priedą įvesite rankiniu būdu – bus naudojamas rankinis.
         </Typography>
       </DialogContent>
-      <DialogActions sx={{ px: 3, pb: 2 }}>
+      <DialogActions sx={{ px: 3, pb: 2, "& .MuiButton-root": { textTransform: "none" } }}>
         <Button onClick={onClose}>Atšaukti</Button>
         <Button variant="contained" disableElevation onClick={save} disabled={!f.pay_code || !f.valid_from}>Išsaugoti</Button>
       </DialogActions>
@@ -181,26 +189,31 @@ export default function EmployeePayItemsPanel({ employeeId }) {
   }, [employeeId]);
   useEffect(() => { load(); }, [load]);
   useEffect(() => {
-    payrollApi.payCodes().then((all) => setCodes((all || []).filter((c) => c.category === "earning" && (c.calc ?? c.calc_method ?? "manual") === "manual"))).catch(() => {});
+    payrollApi.payCodes().then((all) => setCodes((all || []).filter((c) => c.category === "earning"
+      && ["manual", "fixed"].includes(c.calc ?? c.calc_method ?? "manual") && !NOT_RECURRING.includes(c.code)))).catch(() => {});
   }, []);
   const del = async (fn, id) => { if (!window.confirm("Ištrinti?")) return; try { await fn(id); load(); } catch (e) { setErr(apiError(e)); } };
   const cell = { fontSize: 13 };
-  const head = (h) => <TableCell key={h} sx={{ fontSize: 11.5, fontWeight: 800 }}>{h}</TableCell>;
+  const head = (h) => <TableCell key={h} sx={{ fontSize: 12, fontWeight: 500, color: "#667085" }}>{h}</TableCell>;
 
   return (
     <LocalizationProvider dateAdapter={AdapterDayjs} adapterLocale="lt">
       <Box sx={{ display: "grid", gap: 2.5 }}>
         {err && <Alert severity="error" onClose={() => setErr("")}>{err}</Alert>}
 
-        <Paper variant="outlined" sx={{ borderRadius: 3, p: 2 }}>
-          <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 1 }}>
+        <Box sx={CARD}>
+          <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 2, mb: 1.5 }}>
             <Box>
-              <Typography sx={{ fontSize: 15, fontWeight: 800 }}>Nuolatiniai priedai</Typography>
-              <Typography sx={{ fontSize: 12.5, color: "text.secondary" }}>Kas mėnesį įtraukiami į DU automatiškai</Typography>
+              <Typography sx={{ fontSize: 14.5, fontWeight: 600 }}>Nuolatiniai priedai prie algos</Typography>
+              <Typography sx={{ fontSize: 12.5, color: "#667085", mt: .2 }}>
+                Kartojasi kas mėnesį, pvz. priedas už vadovavimą ar papildomas pareigas.
+                Vienkartinės premijos ir išmokos įvedamos konkretaus mėnesio DU.
+              </Typography>
             </Box>
-            <Button size="small" startIcon={<AddIcon />} onClick={() => setEditR({})} sx={{ textTransform: "none" }}>Pridėti</Button>
+            <Button size="small" variant="outlined" startIcon={<AddIcon />} onClick={() => setEditR({})}
+              sx={{ textTransform: "none", flexShrink: 0, color: "#344054", borderColor: "#D0D5DD" }}>Pridėti</Button>
           </Box>
-          {!rec.length ? <Typography sx={{ fontSize: 13, color: "text.secondary" }}>Nėra</Typography> : (
+          {!rec.length ? <Typography sx={{ fontSize: 13, color: "#98A2B3" }}>Nuolatinių priedų nėra</Typography> : (
             <Table size="small">
               <TableHead><TableRow>{["Priedas", "Dydis", "Laikotarpis", ""].map(head)}</TableRow></TableHead>
               <TableBody>
@@ -218,19 +231,20 @@ export default function EmployeePayItemsPanel({ employeeId }) {
               </TableBody>
             </Table>
           )}
-        </Paper>
+        </Box>
 
-        <Paper variant="outlined" sx={{ borderRadius: 3, p: 2 }}>
-          <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 1 }}>
+        <Box sx={CARD}>
+          <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 2, mb: 1.5 }}>
             <Box>
-              <Typography sx={{ fontSize: 15, fontWeight: 800 }}>Išskaitos (antstoliai, alimentai)</Typography>
-              <Typography sx={{ fontSize: 12.5, color: "text.secondary" }}>
-                Išskaitoma iš DU po mokesčių pagal CPK 736 str. ribas, pervedama gavėjui kartu su atlyginimu
+              <Typography sx={{ fontSize: 14.5, fontWeight: 600 }}>Išskaitos iš atlyginimo</Typography>
+              <Typography sx={{ fontSize: 12.5, color: "#667085", mt: .2 }}>
+                Antstolių patvarkymai ir alimentai – išskaitoma po mokesčių (neviršijant CPK 736 str. ribų) ir pervedama gavėjui kartu su atlyginimu.
               </Typography>
             </Box>
-            <Button size="small" startIcon={<AddIcon />} onClick={() => setEditG({})} sx={{ textTransform: "none" }}>Pridėti</Button>
+            <Button size="small" variant="outlined" startIcon={<AddIcon />} onClick={() => setEditG({})}
+              sx={{ textTransform: "none", flexShrink: 0, color: "#344054", borderColor: "#D0D5DD" }}>Pridėti</Button>
           </Box>
-          {!garn.length ? <Typography sx={{ fontSize: 13, color: "text.secondary" }}>Nėra</Typography> : (
+          {!garn.length ? <Typography sx={{ fontSize: 13, color: "#98A2B3" }}>Išskaitų nėra</Typography> : (
             <Table size="small">
               <TableHead><TableRow>{["Dokumentas", "Dydis", "Skola / likutis", "Gavėjas", "Būsena", ""].map(head)}</TableRow></TableHead>
               <TableBody>
@@ -257,7 +271,7 @@ export default function EmployeePayItemsPanel({ employeeId }) {
               </TableBody>
             </Table>
           )}
-        </Paper>
+        </Box>
 
         <GarnishmentDialog value={editG} employeeId={employeeId} onClose={() => setEditG(null)} onSaved={() => { setEditG(null); load(); }} />
         <RecurringDialog value={editR} employeeId={employeeId} codes={codes} onClose={() => setEditR(null)} onSaved={() => { setEditR(null); load(); }} />

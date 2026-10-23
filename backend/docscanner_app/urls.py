@@ -122,6 +122,7 @@ from .views import (
     purchase_mark_paid,
     PurchasePaymentDetailsView,
     SetPaymentAccountView,
+    PublicLeadView,
 )
 from .views import (
     counterparty_list_create,
@@ -807,4 +808,6 @@ urlpatterns = [
 
     #Darbuotoju savitarna
     path("savitarna/", include("docscanner_app.payroll.savitarna_urls")),
+
+    path("public/lead/", PublicLeadView.as_view(), name="public-lead"),
 ]

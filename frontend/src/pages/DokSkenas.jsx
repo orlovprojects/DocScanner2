@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Helmet } from 'react-helmet';
-import { Box, Typography, Button, Stack, Modal, Accordion, AccordionSummary, AccordionDetails } from '@mui/material';
+import { Box, Typography, Button, Stack, Modal, Accordion, AccordionSummary, AccordionDetails, TextField } from '@mui/material';
+import { api } from '../api/endpoints';
 import { keyframes } from '@mui/system';
 import StarIcon from '@mui/icons-material/Star';
 import PlayCircleIcon from '@mui/icons-material/PlayCircle';
@@ -305,6 +306,153 @@ function FaqSection() {
           );
         })}
       </Box>
+    </Box>
+  );
+}
+
+const TURNSTILE_SITEKEY = import.meta.env.VITE_TURNSTILE_SITEKEY;
+
+function LeadSection() {
+  const [value, setValue] = useState('');
+  const [hp, setHp] = useState('');
+  const [status, setStatus] = useState('idle'); // idle | sending | done | error
+  const [cfToken, setCfToken] = useState('');
+  const mountedAt = useRef(Date.now());
+  const tsRef = useRef(null);
+  const widgetId = useRef(null);
+
+  useEffect(() => {
+    if (window.__PRERENDER || !TURNSTILE_SITEKEY) return;
+    const render = () => {
+      if (!tsRef.current || widgetId.current !== null || !window.turnstile) return;
+      widgetId.current = window.turnstile.render(tsRef.current, {
+        sitekey: TURNSTILE_SITEKEY,
+        appearance: 'interaction-only',
+        callback: (t) => setCfToken(t),
+        'expired-callback': () => setCfToken(''),
+        'error-callback': () => setCfToken(''),
+      });
+    };
+    if (window.turnstile) { render(); return; }
+    let s = document.getElementById('cf-turnstile-script');
+    if (!s) {
+      s = document.createElement('script');
+      s.id = 'cf-turnstile-script';
+      s.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit';
+      s.async = true;
+      document.head.appendChild(s);
+    }
+    s.addEventListener('load', render);
+    return () => s.removeEventListener('load', render);
+  }, []);
+
+  const resetTurnstile = () => {
+    setCfToken('');
+    if (window.turnstile && widgetId.current !== null) window.turnstile.reset(widgetId.current);
+  };
+
+  const submit = async (e) => {
+    e.preventDefault();
+    const v = value.trim();
+    if (v.length < 3) return;
+    setStatus('sending');
+    try {
+      await api.post('/public/lead/', {
+        value: v,
+        website: hp,
+        page: window.location.pathname,
+        t: Date.now() - mountedAt.current,
+        cf_token: cfToken,
+      });
+      setStatus('done');
+      setValue('');
+    } catch {
+      setStatus('error');
+      resetTurnstile();
+    }
+  };
+
+  return (
+    <Box
+      sx={{
+        maxWidth: '720px',
+        margin: '0 auto',
+        paddingX: { xs: 2, md: 2 },
+        paddingBottom: { xs: '60px', md: '120px' },
+      }}
+    >
+      {status === 'done' ? (
+        <Box
+          sx={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 1.2,
+            fontFamily: 'Helvetica',
+            fontSize: '16px',
+            color: '#1b1b1b',
+          }}
+        >
+          <CheckCircleIcon sx={{ color: ACCENT, fontSize: '20px' }} />
+          Ačiū!
+        </Box>
+      ) : (
+        <Box component="form" onSubmit={submit} noValidate>
+          {/* honeypot */}
+          <Box
+            component="input"
+            type="text"
+            name="website"
+            tabIndex={-1}
+            autoComplete="off"
+            value={hp}
+            onChange={(e) => setHp(e.target.value)}
+            sx={{ position: 'absolute', left: '-9999px', width: 1, height: 1, opacity: 0 }}
+          />
+          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5}>
+            <TextField
+              fullWidth
+              value={value}
+              onChange={(e) => { setValue(e.target.value); if (status === 'error') setStatus('idle'); }}
+              placeholder="Įveskite savo el. paštą arba nuorodą į Facebook profilį"
+              inputProps={{ maxLength: 500 }}
+              error={status === 'error'}
+              sx={{
+                '& .MuiOutlinedInput-root': {
+                  background: '#fff',
+                  borderRadius: '999px',
+                  fontFamily: 'Helvetica',
+                  paddingX: 1,
+                },
+              }}
+            />
+            <Button
+              type="submit"
+              variant="contained"
+              size="large"
+              disabled={status === 'sending' || (!!TURNSTILE_SITEKEY && !cfToken)}
+              sx={{
+                backgroundColor: ACCENT,
+                color: '#fff',
+                fontFamily: 'Helvetica',
+                fontWeight: 600,
+                fontSize: '15px',
+                textTransform: 'none',
+                borderRadius: '999px',
+                padding: '12px 28px',
+                boxShadow: 'none',
+                whiteSpace: 'nowrap',
+                flexShrink: 0,
+                '&:hover': { backgroundColor: '#e04a20', boxShadow: 'none' },
+              }}
+            >
+              Siųsti
+            </Button>
+          </Stack>
+          {/* Turnstile - nevidim, pokazyvaetsja tolko esli nuzhna proverka */}
+          <Box ref={tsRef} sx={{ display: 'flex', justifyContent: 'center', marginTop: 1.5 }} />
+        </Box>
+      )}
     </Box>
   );
 }
@@ -1735,6 +1883,8 @@ const Dokskenas = () => {
       </Box>
 
       <FaqSection />
+
+      <LeadSection />
 
     </Box>
   );

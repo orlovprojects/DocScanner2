@@ -11,8 +11,13 @@ export const norm = (months, anchor) => ((Number(anchor || 1) - 1) % months) + 1
 export const startsOf = (months, anchor) => Array.from({ length: 12 / months }, (_, i) => ((norm(months, anchor) - 1 + i * months) % 12) + 1)
   .sort((a, b) => a - b);
 
-export const anchorLabel = (months, anchor) => (Number(months) === 1 ? "kiekvieną mėnesį"
-  : `nuo ${GEN[norm(months, anchor) - 1]} (${startsOf(months, anchor).map((x) => ROMAN[x - 1]).join(", ")} mėn.)`);
+// „sausis–kovas, balandis–birželis, liepa–rugsėjis, spalis–gruodis“ (short - tik 2 pirmi)
+export const anchorLabel = (months, anchor, short = false) => {
+  const mo = Number(months);
+  if (mo === 1) return "kiekvienas kalendorinis mėnuo";
+  const r = startsOf(mo, anchor).map((x) => `${NOM[x - 1]}–${NOM[(x - 2 + mo) % 12]}`);
+  return short && r.length > 2 ? `${r.slice(0, 2).join(", ")}, …` : r.join(", ");
+};
 
 export const cap = (x) => (x ? x[0].toUpperCase() + x.slice(1) : x);
 
@@ -35,7 +40,7 @@ export function periodsFrom(today, months, anchor, count = 5) {
   return out;
 }
 
-const label = ({ start, end }) => {
+export const periodLabel = ({ start, end }) => {
   const sy = start.getFullYear();
   const ey = end.getFullYear();
   const sm = NOM[start.getMonth()];
@@ -69,9 +74,9 @@ export default function SuminePeriodSection({ months, anchor, savedMonths, saved
           <MenuItem value={3}>3 mėnesiai</MenuItem>
         </TextField>
         {mo > 1 && (
-          <TextField select label="Laikotarpiai prasideda" value={an} fullWidth
+          <TextField select label="Laikotarpiai" value={an} fullWidth
             onChange={(e) => onChange({ summed_period_anchor: Number(e.target.value) })}
-            SelectProps={{ MenuProps: { disableScrollLock: true } }}>
+            SelectProps={{ MenuProps: { disableScrollLock: true }, renderValue: (v) => cap(anchorLabel(mo, v, true)) }}>
             {Array.from({ length: mo }, (_, i) => i + 1).map((a) => (
               <MenuItem key={a} value={a}>{cap(anchorLabel(mo, a))}</MenuItem>
             ))}
@@ -81,7 +86,7 @@ export default function SuminePeriodSection({ months, anchor, savedMonths, saved
 
       <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr 1fr", sm: "repeat(3, minmax(0,1fr))" }, gap: 1 }}>
         {periods.map((p) => {
-          const l = label(p);
+          const l = periodLabel(p);
           return (
             <Box key={iso(p.start)} sx={{
               p: 1.25, borderRadius: 2, border: "1px solid", position: "relative",

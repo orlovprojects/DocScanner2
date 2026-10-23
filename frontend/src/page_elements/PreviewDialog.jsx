@@ -317,6 +317,12 @@ const mapVatStatus = (status) => {
         color: "error",
         icon: <ErrorIcon />,
       };
+    case "invalid_format":
+      return {
+        label: "Klaida PVM kode",
+        color: "warning",
+        icon: <ErrorIcon />,
+      };
     default:
       return null;
   }

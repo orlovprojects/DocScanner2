@@ -125,3 +125,41 @@ def employees_table(company, employees):
         row["warnings"] = warn
         out[e.id] = row
     return out
+
+
+# ============================================================
+# Kur darbuotojo duomenys jau pateikti (keičiant asmens kodą reikės tikslinti)
+# ============================================================
+DONE = ("submitted", "accepted")
+FORM_LABELS = {"1-SD": "1-SD (priėmimas)", "2-SD": "2-SD (atleidimas)", "SAM": "SAM", "GPM313": "GPM313"}
+
+
+def reported_forms(employee):
+    """
+    -> [{form, label, period, submitted_at}] - pateiktos (submitted / accepted) Sodros ir VMI ataskaitos,
+    kuriose yra šis darbuotojas: 1-SD / 2-SD pagal sutartį, SAM / GPM313 - mėnesiai, kai jis dirbo.
+    """
+    from docscanner_app.models import PayrollDeclaration
+    contracts = [c for c in employee.contracts.all() if c.status != "draft"]
+    if not contracts:
+        return []
+    out = []
+
+    def add(d, period):
+        out.append({"form": d.form, "label": FORM_LABELS.get(d.form, d.form), "period": period,
+                    "submitted_at": d.submitted_at.date().isoformat() if d.submitted_at else ""})
+
+    for d in PayrollDeclaration.objects.filter(contract__in=contracts, status__in=DONE).order_by("submitted_at"):
+        add(d, d.submitted_at.date().isoformat() if d.submitted_at else "")
+
+    start = min(c.start_date for c in contracts)
+    ends = [c.termination_date or c.end_date for c in contracts]
+    end = None if any(e is None for e in ends) else max(ends)
+    monthly = (PayrollDeclaration.objects
+               .filter(company=employee.company, form__in=("SAM", "GPM313"), status__in=DONE, contract__isnull=True)
+               .exclude(year__isnull=True).exclude(month__isnull=True).order_by("year", "month", "form"))
+    for d in monthly:
+        if (d.year, d.month) < (start.year, start.month) or (end and (d.year, d.month) > (end.year, end.month)):
+            continue
+        add(d, f"{d.year}-{d.month:02d}")
+    return out

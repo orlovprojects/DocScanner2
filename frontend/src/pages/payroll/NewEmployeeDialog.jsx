@@ -56,6 +56,47 @@ function weekLabel(days, week) {
 const isStdWeek = (days, week) => days.every((on, i) => on === STD_DAYS[i])
   && week.slice(0, 5).every((h) => Math.abs(Number(h) - Number(week[0])) < 0.01);
 
+function SummedPeriodBox({ startDate, months, anchor, custom, onCustom, onReset, onMonths, onAnchor }) {
+  const start = startDate ? new Date(`${startDate}T12:00:00`) : new Date();
+  const [p1, p2] = periodsFrom(start, months, anchor, 1);
+  const from = startDate && startDate > iso(p1.start) ? startDate : iso(p1.start);
+  return (
+    <Box sx={{ mt: 1.5, p: 1.5, borderRadius: 2, bgcolor: "#F8FAFC", border: "1px solid #EAECF0" }}>
+      <Stack direction="row" alignItems="center" gap={1.5} flexWrap="wrap">
+        <Typography sx={{ fontSize: 13.5, fontWeight: 500, color: "#101828" }}>Apskaitinis laikotarpis</Typography>
+        {custom ? (
+          <>
+            <TextField select size="small" value={months} sx={{ width: 120, bgcolor: "#FFFFFF" }}
+              onChange={(e) => onMonths(Number(e.target.value))} SelectProps={{ MenuProps: MENU_PROPS }}>
+              {[1, 2, 3].map((m) => <MenuItem key={m} value={m}>{m} mėn.</MenuItem>)}
+            </TextField>
+            {months > 1 && (
+              <TextField select size="small" value={anchor} sx={{ flex: 1, minWidth: 220, bgcolor: "#FFFFFF" }}
+                onChange={(e) => onAnchor(Number(e.target.value))}
+                SelectProps={{ MenuProps: MENU_PROPS, renderValue: (v) => cap(anchorLabel(months, v, true)) }}>
+                {Array.from({ length: months }, (_, i) => i + 1).map((a) => (
+                  <MenuItem key={a} value={a}>{cap(anchorLabel(months, a))}</MenuItem>
+                ))}
+              </TextField>
+            )}
+            <Link component="button" type="button" variant="body2" onClick={onReset} sx={{ ml: "auto" }}>Kaip įmonėje</Link>
+          </>
+        ) : (
+          <>
+            <Typography sx={{ fontSize: 13.5, color: "#475467" }}>
+              <b style={{ fontWeight: 600, color: "#101828" }}>{months} mėn.</b> · pagal įmonės nustatymus
+            </Typography>
+            <Link component="button" type="button" variant="body2" onClick={onCustom} sx={{ ml: "auto" }}>Keisti</Link>
+          </>
+        )}
+      </Stack>
+      <Typography sx={{ fontSize: 12.5, color: "#667085", mt: .75 }}>
+        Pirmasis: {from} – {iso(p1.end)}, kitas nuo {iso(p2.start)}
+      </Typography>
+    </Box>
+  );
+}
+
 function WeekEditor({ days, week, total, onToggle, onHour, onTemplate }) {
   const sum = week.reduce((a, h, i) => a + (days[i] ? Number(h) || 0 : 0), 0);
   const off = Math.abs(sum - total) > 0.01;
@@ -208,7 +249,17 @@ export default function NewEmployeeDialog({ open, onClose, onCreated }) {
   const [error, setError] = useState("");
   const [co, setCo] = useState({ m: 3, a: 1 });   // įmonės apskaitinis laikotarpis (DU nustatymai)
   const set = (v) => setF((s) => ({ ...s, ...v }));
-  const setHours = (h) => setF((s) => ({ ...s, weekly_hours: h, week: spread(Number(h) || 0, s.days) }));
+  const setHours = (h) => setF((s) => {
+    const full = Number(s.full_time_hours) || 40;
+    const v = h !== "" && Number(h) > full ? full : h;             // vienoje sutartyje - daugiausia 1 etatas
+    return { ...s, weekly_hours: v, week: spread(Number(v) || 0, s.days) };
+  });
+  const setFull = (h) => setF((s) => {
+    const wasFull = Number(s.weekly_hours) === Number(s.full_time_hours);
+    const wk = h !== "" && (wasFull || Number(s.weekly_hours) > Number(h)) ? h : s.weekly_hours;
+    return { ...s, full_time_hours: h, weekly_hours: wk, week: spread(Number(wk) || 0, s.days) };
+  });
+  const fullH = Number(f.full_time_hours) || 40;
   const setDays = (days) => setF((s) => ({ ...s, days, week: spread(Number(s.weekly_hours) || 0, days) }));
   const toggleDay = (i) => setDays(f.days.map((x, j) => (j === i ? !x : x)));
   const setDayHours = (i, v) => setF((s) => ({ ...s, week: s.week.map((h, j) => (j === i ? v : h)) }));
@@ -229,7 +280,6 @@ export default function NewEmployeeDialog({ open, onClose, onCreated }) {
   const weekSum = f.week.reduce((a, h, i) => a + (f.days[i] ? Number(h) || 0 : 0), 0);
   const pm = f.period_custom ? Number(f.period_months) : co.m;
   const pa = f.period_custom ? norm(pm, f.period_anchor) : norm(co.m, co.a);
-  const firstPeriod = f.start_date ? periodsFrom(new Date(`${f.start_date}T12:00:00`), pm, pa, 0)[0] : null;
   const monthlyGross = f.pay_form === "monthly" ? Number(f.base_amount) : Number(f.base_amount) * Number(f.weekly_hours || 0) * 52 / 12;
 
   // atostogų trukmė iš backend (viena taisyklių vieta)
@@ -255,7 +305,7 @@ export default function NewEmployeeDialog({ open, onClose, onCreated }) {
   if (!f.start_date) missing[1].push("darbo pradžia");
   if (!(Number(f.base_amount) > 0)) missing[1].push("atlyginimas");
   if (!(Number(f.weekly_hours) > 0)) missing[1].push("darbo valandos");
-  if (Number(f.weekly_hours) > Number(f.full_time_hours || 40)) missing[1].push(`ne daugiau kaip ${f.full_time_hours || 40} val. per savaitę`);
+  if (f.shortened && !(fullH >= 20 && fullH < 40)) missing[1].push("sutrumpinta norma – nuo 20 iki 39 val.");
   if (f.work_regime === "standard" && Number(f.weekly_hours) > 0) {
     if (!workDays || Math.abs(weekSum - Number(f.weekly_hours)) > 0.01) missing[1].push("darbo dienų valandos (suma nesutampa)");
     if (f.week.some((h, i) => f.days[i] && Number(h) > 12)) missing[1].push("ne daugiau 12 val. per dieną");
@@ -464,9 +514,9 @@ export default function NewEmployeeDialog({ open, onClose, onCreated }) {
                   <Box>
                     <Stack direction="row" gap={2} alignItems="center" flexWrap="wrap">
                       <TextField label="Valandų per savaitę" type="number" value={f.weekly_hours} sx={{ width: 170 }} required
-                        onChange={(e) => setHours(e.target.value)} inputProps={{ min: 1, max: f.full_time_hours || 40 }} />
+                        onChange={(e) => setHours(e.target.value)} inputProps={{ min: 1, max: fullH }} />
                       <Stack direction="row" gap={1}>
-                        {QUICK_HOURS.map((h) => (
+                        {[fullH, ...QUICK_HOURS.filter((h) => h < fullH)].map((h) => (
                           <Chip key={h} label={h} clickable color={Number(f.weekly_hours) === h ? "primary" : "default"}
                             variant={Number(f.weekly_hours) === h ? "filled" : "outlined"} onClick={() => setHours(h)} />
                         ))}
@@ -475,16 +525,30 @@ export default function NewEmployeeDialog({ open, onClose, onCreated }) {
                         = {workload === 1 ? "visas etatas" : `${String(Math.round(workload * 1000) / 1000).replace(".", ",")} etato`}
                       </Typography>
                     </Stack>
+                    <Typography sx={{ fontSize: 12, color: "#667085", mt: .75 }}>
+                      Vienoje sutartyje – daugiausia 1 etatas ({fullH} val./sav.). Papildomas darbas toje pačioje įmonėje įforminamas atskiru susitarimu.
+                    </Typography>
                     {!f.shortened ? (
-                      <Link component="button" type="button" variant="caption" onClick={() => set({ shortened: true })} sx={{ mt: 0.75 }}>
-                        Sutrumpinta darbo laiko norma
+                      <Link component="button" type="button" variant="caption" onClick={() => { set({ shortened: true }); setFull(36); }} sx={{ mt: 0.5 }}>
+                        Pareigybei taikoma sutrumpinta darbo laiko norma
                       </Link>
                     ) : (
-                      <Stack direction="row" gap={2} alignItems="center" mt={1}>
-                        <TextField size="small" label="Visas etatas šiai pareigybei, val./sav." type="number" value={f.full_time_hours} sx={{ width: 260 }}
-                          onChange={(e) => set({ full_time_hours: e.target.value })} />
-                        <Button size="small" onClick={() => set({ shortened: false, full_time_hours: 40 })} sx={{ textTransform: "none" }}>Atšaukti</Button>
-                      </Stack>
+                      <Box sx={{ mt: 1.25, p: 1.5, borderRadius: 2, bgcolor: "#F8FAFC", border: "1px solid #EAECF0" }}>
+                        <Stack direction="row" gap={1.5} alignItems="center" flexWrap="wrap">
+                          <TextField size="small" label="Visas etatas, val./sav." type="number" value={f.full_time_hours} sx={{ width: 170, bgcolor: "#FFFFFF" }}
+                            onChange={(e) => setFull(e.target.value)} inputProps={{ min: 20, max: 39 }}
+                            error={!(fullH >= 20 && fullH < 40)} />
+                          {[38, 36, 30, 24].map((h) => (
+                            <Chip key={h} size="small" label={h} clickable onClick={() => setFull(h)}
+                              color={fullH === h ? "primary" : "default"} variant={fullH === h ? "filled" : "outlined"} />
+                          ))}
+                          <Button size="small" onClick={() => { set({ shortened: false }); setFull(40); }} sx={{ textTransform: "none", ml: "auto" }}>Atšaukti</Button>
+                        </Stack>
+                        <Typography sx={{ fontSize: 12, color: "#667085", mt: 1 }}>
+                          Tik jei teisės aktai šiai pareigybei nustato trumpesnį visą darbo laiką (pvz. pedagogams – 36 val.).
+                          Tai ne nepilnas etatas – nepilnam etatui sumažinkite „Valandų per savaitę“.
+                        </Typography>
+                      </Box>
                     )}
                   </Box>
                   {minWage && <Alert severity="warning">Alga mažesnė už minimalią (MMA) šiam darbo laikui.</Alert>}
@@ -515,47 +579,11 @@ export default function NewEmployeeDialog({ open, onClose, onCreated }) {
                       </Box>
                     )}
                     {f.work_regime === "summed" && (
-                      <Box sx={{ mt: 1.5, p: 1.5, borderRadius: 2, bgcolor: "#F8FAFC", border: "1px solid #EAECF0" }}>
-                        {!f.period_custom ? (
-                          <Stack direction={{ xs: "column", sm: "row" }} alignItems={{ sm: "center" }} gap={1.5}>
-                            <Box sx={{ flex: 1 }}>
-                              <Typography sx={{ fontSize: 13.5, fontWeight: 500 }}>
-                                Apskaitinis laikotarpis – {pm} mėn., {anchorLabel(pm, pa)}
-                              </Typography>
-                              <Typography sx={{ fontSize: 12.5, color: "#667085" }}>
-                                Pagal įmonės DU nustatymus{firstPeriod ? ` · pirmasis: ${f.start_date} – ${iso(firstPeriod.end)}` : ""}
-                              </Typography>
-                            </Box>
-                            <Button size="small" onClick={() => set({ period_custom: true, period_months: co.m, period_anchor: norm(co.m, co.a) })}
-                              sx={{ textTransform: "none", flexShrink: 0 }}>Kitoks šiam darbuotojui</Button>
-                          </Stack>
-                        ) : (
-                          <Stack gap={1.5}>
-                            <Stack direction={{ xs: "column", sm: "row" }} gap={1.5}>
-                              <TextField select size="small" label="Laikotarpio trukmė" value={pm} sx={{ minWidth: 170 }}
-                                onChange={(e) => set({ period_months: Number(e.target.value), period_anchor: 1 })} SelectProps={{ MenuProps: MENU_PROPS }}>
-                                <MenuItem value={1}>1 mėnuo</MenuItem>
-                                <MenuItem value={2}>2 mėnesiai</MenuItem>
-                                <MenuItem value={3}>3 mėnesiai</MenuItem>
-                              </TextField>
-                              {pm > 1 && (
-                                <TextField select size="small" label="Laikotarpiai prasideda" value={pa} fullWidth
-                                  onChange={(e) => set({ period_anchor: Number(e.target.value) })} SelectProps={{ MenuProps: MENU_PROPS }}>
-                                  {Array.from({ length: pm }, (_, i) => i + 1).map((a) => (
-                                    <MenuItem key={a} value={a}>{cap(anchorLabel(pm, a))}</MenuItem>
-                                  ))}
-                                </TextField>
-                              )}
-                            </Stack>
-                            <Stack direction="row" alignItems="center" gap={1}>
-                              <Typography sx={{ fontSize: 12.5, color: "#667085", flex: 1 }}>
-                                {firstPeriod ? `Pirmasis laikotarpis: ${f.start_date} – ${iso(firstPeriod.end)}. ` : ""}Ne ilgiau kaip 3 mėn. (DK 113 str.)
-                              </Typography>
-                              <Button size="small" onClick={() => set({ period_custom: false })} sx={{ textTransform: "none" }}>Kaip įmonėje</Button>
-                            </Stack>
-                          </Stack>
-                        )}
-                      </Box>
+                      <SummedPeriodBox startDate={f.start_date} months={pm} anchor={pa} custom={f.period_custom}
+                        onCustom={() => set({ period_custom: true, period_months: co.m, period_anchor: norm(co.m, co.a) })}
+                        onReset={() => set({ period_custom: false })}
+                        onMonths={(m) => set({ period_months: m, period_anchor: 1 })}
+                        onAnchor={(a) => set({ period_anchor: a })} />
                     )}
                   </Box>
                 </Section>

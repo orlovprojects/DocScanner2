@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  Alert, Autocomplete, Avatar, Box, Button, Checkbox, Chip, Dialog, Divider, FormControl, FormControlLabel, IconButton,
-  InputAdornment, InputLabel, MenuItem, Radio, RadioGroup, Select, Skeleton, Stack, Switch, Tab, Tabs, TextField,
+  Alert, Autocomplete, Avatar, Box, Button, Checkbox, Chip, Collapse, Dialog, DialogActions, DialogContent, DialogTitle, Divider,
+  FormControl, FormControlLabel, IconButton, InputAdornment, InputLabel, Menu, MenuItem, Radio, Select, Skeleton, Stack,
+  Switch, Tab, Tabs, TextField,
   ToggleButton, ToggleButtonGroup, Tooltip, Typography,
 } from "@mui/material";
 import AddIcon from "@mui/icons-material/Add";
@@ -30,18 +31,21 @@ import ScheduleOutlinedIcon from "@mui/icons-material/ScheduleOutlined";
 import EuroOutlinedIcon from "@mui/icons-material/EuroOutlined";
 import EditOutlinedIcon from "@mui/icons-material/EditOutlined";
 import HourglassEmptyOutlinedIcon from "@mui/icons-material/HourglassEmptyOutlined";
+import HelpOutlineIcon from "@mui/icons-material/HelpOutline";
+import MoreHorizIcon from "@mui/icons-material/MoreHoriz";
 import { DatePicker, LocalizationProvider } from "@mui/x-date-pickers";
 import { AdapterDayjs } from "@mui/x-date-pickers/AdapterDayjs";
 import dayjs from "dayjs";
 import "dayjs/locale/lt";
 
 import {
-  ABSENCE_KINDS, CONTRACT_TYPES, NPD_MODES, apiError, days, money, payrollApi,
+  ABSENCE_KINDS, CONTRACT_TYPES, apiError, days, money, payrollApi,
 } from "../../api/payroll";
 import NewEmployeeDialog from "./NewEmployeeDialog";
 import { parsePersonalCode } from "./personalCode";
 import ContractDocumentPanel from "./ContractDocumentPanel";
 import PayrollSettingsDialog from "./PayrollSettingsDialog";
+import { anchorLabel, cap, norm, periodsFrom, iso } from "./SuminePeriodSection";
 import SavitarnaInvitePanel from "./SavitarnaInvitePanel";
 import EmployeePayItemsPanel from "./EmployeePayItemsPanel";
 
@@ -62,7 +66,6 @@ const WORK_MODES = [
   ["04", "Suskaidytos darbo dienos laiko režimas"],
   ["05", "Individualus darbo laiko režimas"],
 ];
-const MONTHS_LT = ["sausis", "vasaris", "kovas", "balandis", "gegužė", "birželis", "liepa", "rugpjūtis", "rugsėjis", "spalis", "lapkritis", "gruodis"];
 
 // Skaičiai visada su kableliu: galima įvesti ir taškelį - į serverį siunčiama su tašku
 const toComma = (v) => (v === null || v === undefined || v === "" ? "" : String(v).replace(".", ","));
@@ -354,12 +357,23 @@ function Hint({ children }) {
 const CARD_SX = { border: "1px solid #EAECF0", borderRadius: 2.5, p: 2.25, bgcolor: "#FFFFFF" };
 const BTN_SX = { textTransform: "none", fontWeight: 600, borderRadius: 2, boxShadow: "none", "&:hover": { boxShadow: "none" } };
 
-function Section({ title, desc, action, children, sx }) {
+// „?“ ikonėlė su paaiškinimu
+function Tip({ title }) {
+  if (!title) return null;
+  return (
+    <Tooltip arrow placement="top" enterTouchDelay={0}
+      title={<Box sx={{ fontSize: 12.5, lineHeight: 1.5, p: .25, maxWidth: 300 }}>{title}</Box>}>
+      <HelpOutlineIcon sx={{ fontSize: 16, color: "#98A2B3", ml: .5, verticalAlign: "-3px", cursor: "help", "&:hover": { color: "#475467" } }} />
+    </Tooltip>
+  );
+}
+
+function Section({ title, desc, tip, action, children, sx }) {
   return (
     <Box sx={{ ...CARD_SX, ...sx }}>
       <Stack direction="row" justifyContent="space-between" alignItems="flex-start" gap={1} mb={1.75}>
         <Box>
-          <Typography sx={{ fontSize: 14.5, fontWeight: 600, color: "#101828" }}>{title}</Typography>
+          <Typography component="div" sx={{ fontSize: 14.5, fontWeight: 600, color: "#101828" }}>{title}<Tip title={tip} /></Typography>
           {desc && <Typography sx={{ fontSize: 12.5, color: "#667085", mt: .2 }}>{desc}</Typography>}
         </Box>
         {action}
@@ -369,15 +383,30 @@ function Section({ title, desc, action, children, sx }) {
   );
 }
 
-function ToggleRow({ label, hint, checked, onChange }) {
+// reason - kodėl laukas neaktyvus (rodoma vietoje hint)
+function ToggleRow({ label, hint, tip, checked, onChange, disabled, reason }) {
   return (
     <Stack direction="row" justifyContent="space-between" alignItems="center" gap={2}
       sx={{ py: 1.1, borderTop: "1px solid #F2F4F7", "&:first-of-type": { borderTop: 0, pt: 0 } }}>
       <Box>
-        <Typography sx={{ fontSize: 13.5, color: "#101828" }}>{label}</Typography>
-        {hint && <Typography sx={{ fontSize: 12, color: "#667085", mt: .2 }}>{hint}</Typography>}
+        <Typography component="div" sx={{ fontSize: 13.5, color: disabled ? "#98A2B3" : "#101828" }}>{label}<Tip title={tip} /></Typography>
+        {(reason || hint) && <Typography sx={{ fontSize: 12, color: reason ? "#98A2B3" : "#667085", mt: .2 }}>{reason || hint}</Typography>}
       </Box>
-      <Switch size="small" checked={!!checked} onChange={(e) => onChange(e.target.checked)} />
+      <Switch size="small" checked={!!checked} disabled={disabled} onChange={(e) => onChange(e.target.checked)} />
+    </Stack>
+  );
+}
+
+// Eilutė „pavadinimas ? ............ reikšmė“ (neaktyviems / tik skaitomiems laukams)
+function InfoRow({ label, tip, value, reason }) {
+  return (
+    <Stack direction="row" justifyContent="space-between" alignItems="center" gap={2}
+      sx={{ py: 1.1, borderTop: "1px solid #F2F4F7", "&:first-of-type": { borderTop: 0, pt: 0 } }}>
+      <Box>
+        <Typography component="div" sx={{ fontSize: 13.5, color: "#98A2B3" }}>{label}<Tip title={tip} /></Typography>
+        {reason && <Typography sx={{ fontSize: 12, color: "#98A2B3", mt: .2 }}>{reason}</Typography>}
+      </Box>
+      <Typography sx={{ fontSize: 13, color: "#98A2B3", whiteSpace: "nowrap" }}>{value}</Typography>
     </Stack>
   );
 }
@@ -432,19 +461,43 @@ function useEmployeeForm(emp, onSaved) {
   return { f, set, dirty, busy, error, save, reset: () => setF(base) };
 }
 
+// Vardas, pavardė, AK ir kt. - pateikiami Sodrai / VMI, todėl keičiami tik paspaudus „Keisti“
+function groupReported(list) {
+  const by = {};
+  list.forEach((r) => { (by[r.label] = by[r.label] || []).push(r.period); });
+  return Object.entries(by).map(([label, ps]) => ({ label, periods: [...new Set(ps.filter(Boolean))] }));
+}
+
 function PersonTab({ emp, onSaved, onReload }) {
   const { f, set, dirty, busy, error, save, reset } = useEmployeeForm(emp, onSaved);
+  const [unlocked, setUnlocked] = useState(false);
+  const [ask, setAsk] = useState(null);            // jau pateiktos ataskaitos -> patvirtinimo langas
+  useEffect(() => { setUnlocked(false); }, [emp]);
   const pc = !f.is_foreigner && f.personal_code?.length === 11 ? parsePersonalCode(f.personal_code) : null;   // kontrolinis - tik įspėjimas
+  const locked = !unlocked;
+  const startEdit = async () => {
+    let rep = [];
+    try { rep = await payrollApi.employeeReported(emp.id); } catch { rep = []; }
+    if (rep?.length) setAsk(rep); else setUnlocked(true);
+  };
+  const doReset = () => { reset(); setUnlocked(false); };
   return (
     <>
       <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "1fr 1fr" }, gap: 2, alignItems: "start" }}>
-        <Section title="Asmuo" desc="Kaip nurodyta asmens dokumente">
+        <Section title="Asmuo" desc="Kaip nurodyta asmens dokumente"
+          tip="Vardas, pavardė ir asmens kodas patenka į Sodros ir VMI ataskaitas, todėl apsaugoti nuo atsitiktinio pakeitimo."
+          action={locked ? (
+            <Button size="small" startIcon={<EditOutlinedIcon sx={{ fontSize: "16px !important" }} />} onClick={startEdit}
+              sx={{ ...BTN_SX, fontWeight: 500, color: "#475467" }}>Keisti</Button>
+          ) : (
+            <Chip size="small" label="Redaguojama" sx={{ bgcolor: "#FEF0C7", color: "#B54708", fontWeight: 500 }} />
+          )}>
           <Stack direction="row" gap={1.5}>
-            <TextField size="small" label="Vardas" value={f.first_name || ""} onChange={(e) => set({ first_name: e.target.value })} fullWidth />
-            <TextField size="small" label="Pavardė" value={f.last_name || ""} onChange={(e) => set({ last_name: e.target.value })} fullWidth />
+            <TextField size="small" label="Vardas" value={f.first_name || ""} disabled={locked} onChange={(e) => set({ first_name: e.target.value })} fullWidth />
+            <TextField size="small" label="Pavardė" value={f.last_name || ""} disabled={locked} onChange={(e) => set({ last_name: e.target.value })} fullWidth />
           </Stack>
           {!f.is_foreigner ? (
-            <TextField size="small" label="Asmens kodas" value={f.personal_code || ""} inputProps={{ maxLength: 11, inputMode: "numeric" }}
+            <TextField size="small" label="Asmens kodas" value={f.personal_code || ""} disabled={locked} inputProps={{ maxLength: 11, inputMode: "numeric" }}
               onChange={(e) => set({ personal_code: e.target.value.replace(/\D/g, "") })}
               error={!!pc && !pc.valid}
               FormHelperTextProps={{ sx: { color: pc?.valid && pc.warning ? "#B54708" : undefined } }}
@@ -453,15 +506,17 @@ function PersonTab({ emp, onSaved, onReload }) {
           ) : (
             <>
               <Stack direction="row" gap={1.5}>
-                <Box sx={{ flex: 1 }}><DateF label="Gimimo data" value={f.birth_date || ""} fullWidth onChange={(v) => set({ birth_date: v })} /></Box>
-                <FormControl size="small" sx={{ flex: 1 }}>
+                <Box sx={{ flex: 1, ...(locked ? { pointerEvents: "none", opacity: .6 } : {}) }}>
+                  <DateF label="Gimimo data" value={f.birth_date || ""} fullWidth onChange={(v) => set({ birth_date: v })} />
+                </Box>
+                <FormControl size="small" sx={{ flex: 1 }} disabled={locked}>
                   <InputLabel>Lytis</InputLabel>
                   <Select label="Lytis" value={f.gender || ""} MenuProps={MENU_PROPS} onChange={(e) => set({ gender: e.target.value })}>
                     <MenuItem value="M">Vyras</MenuItem><MenuItem value="F">Moteris</MenuItem>
                   </Select>
                 </FormControl>
               </Stack>
-              <TextField size="small" label="Užsieniečio kodas (Sodroje)" value={f.foreign_code || ""} onChange={(e) => set({ foreign_code: e.target.value })} />
+              <TextField size="small" label="Užsieniečio kodas (Sodroje)" value={f.foreign_code || ""} disabled={locked} onChange={(e) => set({ foreign_code: e.target.value })} />
               <Stack direction="row" gap={1.5}>
                 <TextField size="small" label="SD pažymėjimo serija" value={f.sd_series || ""} inputProps={{ maxLength: 2 }}
                   onChange={(e) => set({ sd_series: e.target.value.toUpperCase() })} sx={{ width: 170 }} />
@@ -470,9 +525,11 @@ function PersonTab({ emp, onSaved, onReload }) {
               </Stack>
             </>
           )}
+          {!locked && (
+            <FormControlLabel sx={{ ml: -.5 }} control={<Switch size="small" checked={!!f.is_foreigner} onChange={(e) => set({ is_foreigner: e.target.checked })} />}
+              label={<Typography sx={{ fontSize: 13.5 }}>Užsienietis (neturi LT asmens kodo)</Typography>} />
+          )}
           <TextField size="small" label="Gyvenamoji vieta" value={f.address || ""} onChange={(e) => set({ address: e.target.value })} />
-          <FormControlLabel sx={{ ml: -.5 }} control={<Switch size="small" checked={!!f.is_foreigner} onChange={(e) => set({ is_foreigner: e.target.checked })} />}
-            label={<Typography sx={{ fontSize: 13.5 }}>Užsienietis (neturi LT asmens kodo)</Typography>} />
         </Section>
 
         <Section title="Kontaktai ir eSavitarna" desc="Per eSavitarną darbuotojas mato algalapius ir teikia prašymus">
@@ -500,50 +557,133 @@ function PersonTab({ emp, onSaved, onReload }) {
           <TagsField value={f.tags || []} onChange={(tags) => set({ tags })} />
         </Section>
       </Box>
-      <SaveBar dirty={dirty} busy={busy} error={error} onSave={save} onReset={reset} />
+      <SaveBar dirty={dirty} busy={busy} error={error} onSave={save} onReset={doReset} />
+
+      <Dialog open={!!ask} onClose={() => setAsk(null)} maxWidth="xs" fullWidth disableScrollLock>
+        <DialogTitle sx={{ fontSize: 17, fontWeight: 600, pb: 1 }}>Duomenys jau pateikti Sodrai / VMI</DialogTitle>
+        <DialogContent>
+          <Typography sx={{ fontSize: 13.5, color: "#475467", mb: 1.5 }}>Šis darbuotojas yra pateiktose ataskaitose:</Typography>
+          <Stack gap={.75} mb={2}>
+            {groupReported(ask || []).map((g) => (
+              <Stack key={g.label} direction="row" gap={1} alignItems="baseline">
+                <Typography sx={{ fontSize: 13.5, fontWeight: 600, minWidth: 120 }}>{g.label}</Typography>
+                <Typography sx={{ fontSize: 13, color: "#667085" }}>
+                  {g.periods.length > 4 ? `${g.periods.slice(0, 2).join(", ")} … ${g.periods[g.periods.length - 1]} (${g.periods.length})` : g.periods.join(", ")}
+                </Typography>
+              </Stack>
+            ))}
+          </Stack>
+          <Typography sx={{ fontSize: 13, color: "#475467" }}>
+            <b style={{ fontWeight: 600 }}>Keičiate pavardę</b> (santuoka ir pan.) – ataskaitų tikslinti nereikia, asmuo atpažįstamas pagal asmens kodą.
+          </Typography>
+          <Typography sx={{ fontSize: 13, color: "#475467", mt: 1 }}>
+            <b style={{ fontWeight: 600 }}>Taisote klaidingą asmens kodą</b> – šias ataskaitas reikės patikslinti Sodroje ir VMI.
+          </Typography>
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2 }}>
+          <Button onClick={() => setAsk(null)} sx={{ ...BTN_SX, fontWeight: 500, color: "#344054" }}>Atšaukti</Button>
+          <Button variant="contained" onClick={() => { setAsk(null); setUnlocked(true); }} sx={BTN_SX}>Suprantu, keisti</Button>
+        </DialogActions>
+      </Dialog>
     </>
   );
 }
 
-function TaxTab({ emp, onSaved }) {
+const NPD_OPTS = [
+  ["standard", "Taikyti", "Dirba tik pas mus arba mūsų įmonė – pagrindinė darbovietė"],
+  ["none", "Netaikyti", "NPD jau taikomas kitoje darbovietėje"],
+  ["d30_55", "Taikyti padidintą", "Nustatytas 30–55 % dalyvumo lygis"],
+  ["d0_25", "Taikyti padidintą", "Nustatytas 0–25 % dalyvumo lygis"],
+];
+const isDisNpd = (m) => m === "d30_55" || m === "d0_25";
+
+function TaxTab({ emp, contract, onSaved }) {
   const { f, set, dirty, busy, error, save, reset } = useEmployeeForm(emp, onSaved);
   const year = new Date().getFullYear();
+  const cur = [...(contract?.terms || [])].sort((a, b) => b.valid_from.localeCompare(a.valid_from))[0];
+  const workload = Number(cur?.workload || 1);
+  const partTime = workload < 1;
+  const disNpd = isDisNpd(f.npd_mode);
+
+  // Padidintas NPD = yra dalyvumo lygis -> automatiškai įjungiam ir atostogų / grindų požymius
+  const setNpd = (v) => set({
+    npd_mode: v,
+    ...(isDisNpd(v) ? { has_disability: true } : {}),
+    ...(isDisNpd(v) && partTime && !f.grindys_exempt_reason ? { grindys_exempt_reason: "participation" } : {}),
+  });
+
   return (
     <>
       <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "1fr 1fr" }, gap: 2, alignItems: "start" }}>
-        <Section title="Neapmokestinamasis pajamų dydis (NPD)" desc="Taikomas tik vienoje darbovietėje – jei nežinote, paklauskite darbuotojo">
-          <RadioGroup value={f.npd_mode || "standard"} onChange={(ev) => set({ npd_mode: ev.target.value })}>
-            {NPD_MODES.map((m) => (
-              <FormControlLabel key={m.value} value={m.value} control={<Radio size="small" />}
-                label={<Typography sx={{ fontSize: 13.5 }}>{m.label}</Typography>} sx={{ mb: .25 }} />
-            ))}
-          </RadioGroup>
+        <Section title="Neapmokestinamasis pajamų dydis (NPD)"
+          tip="NPD – pajamų dalis, nuo kurios neskaičiuojamas GPM. Taikomas tik vienoje darbovietėje: jei darbuotojas dirba keliose, paklauskite, kur jis taikomas. Padidintas NPD – turintiems nustatytą dalyvumo lygį (NDNT pažyma).">
+          <Stack gap={1}>
+            {NPD_OPTS.map(([v, t, d]) => {
+              const on = (f.npd_mode || "standard") === v;
+              return (
+                <Box key={v} onClick={() => setNpd(v)} sx={{
+                  p: 1.25, borderRadius: 2, cursor: "pointer", border: "1.5px solid",
+                  borderColor: on ? "#1570EF" : "#EAECF0", bgcolor: on ? "#F5F8FF" : "#FFFFFF",
+                }}>
+                  <Stack direction="row" alignItems="center" gap={1}>
+                    <Radio size="small" checked={on} sx={{ p: 0 }} />
+                    <Box>
+                      <Typography sx={{ fontSize: 13.5, fontWeight: 500, color: "#101828" }}>{t}</Typography>
+                      <Typography sx={{ fontSize: 12, color: "#667085" }}>{d}</Typography>
+                    </Box>
+                  </Stack>
+                </Box>
+              );
+            })}
+          </Stack>
+          <ToggleRow label="Progresinis GPM per metus" checked={f.progressive_gpm_request}
+            tip="Įjunkite tik gavę rašytinį darbuotojo prašymą. Kitais atvejais GPM tarifai taikomi automatiškai."
+            onChange={(v) => set({ progressive_gpm_request: v })} />
         </Section>
+
         <Section title="Sodra">
-          <ToggleRow label="Kaupia pensiją II pakopoje (+3 %)" hint="Matyti Sodros suvestinėje (S47). Suklydus Sodra perskaičiuos pati."
-            checked={f.pension_accumulation} onChange={(v) => set({ pension_accumulation: v })} />
-          <ToggleRow label={`VSD lubos ${year} m. pasiektos`} hint="Kai dirba keliose darbovietėse – iki metų pabaigos VSD neskaičiuojamos"
-            checked={f.vsd_cap_year === year} onChange={(v) => set({ vsd_cap_year: v ? year : null })} />
-          <FormControl size="small" fullWidth sx={{ mt: .5 }}>
-            <InputLabel>Minimalių įmokų (grindų) išimtis</InputLabel>
-            <Select label="Minimalių įmokų (grindų) išimtis" value={f.grindys_exempt_reason || ""} MenuProps={MENU_PROPS}
-              onChange={(e) => set({ grindys_exempt_reason: e.target.value || null })}>
-              <MenuItem value="">Netaikoma – skaičiuojama nuo MMA</MenuItem>
-              {GRINDYS_REASONS.map(([v, l]) => <MenuItem key={v} value={v}>{l}</MenuItem>)}
-            </Select>
-          </FormControl>
-          <Hint>Dirbant ne visą darbo laiką, Sodros įmokos skaičiuojamos ne mažiau kaip nuo MMA, nebent taikoma išimtis.</Hint>
+          <ToggleRow label="Kaupia pensiją II pakopoje" checked={f.pension_accumulation}
+            tip="Jei darbuotojas kaupia pensiją II pakopos fonde, nuo jo atlyginimo skaičiuojama papildoma įmoka. Tai matyti Sodros suvestinėje S47; suklydus Sodra perskaičiuos pati."
+            onChange={(v) => set({ pension_accumulation: v })} />
+          <ToggleRow label={`VSD lubos ${year} m. pasiektos`} checked={f.vsd_cap_year === year}
+            tip="Kai darbuotojo metinės pajamos (kartu su kitomis darbovietėmis) pasiekia VSD lubas, įmokos iki metų pabaigos nebeskaičiuojamos. Įjunkite, jei lubos pasiektos dirbant ir kitur."
+            onChange={(v) => set({ vsd_cap_year: v ? year : null })} />
+          {partTime ? (
+            <Box sx={{ pt: 1.1, borderTop: "1px solid #F2F4F7" }}>
+              <FormControl size="small" fullWidth>
+                <InputLabel>Minimalių įmokų išimtis</InputLabel>
+                <Select label="Minimalių įmokų išimtis" value={f.grindys_exempt_reason || ""} MenuProps={MENU_PROPS}
+                  onChange={(e) => set({ grindys_exempt_reason: e.target.value || null })}>
+                  <MenuItem value="">Netaikoma – įmokos ne mažiau kaip nuo MMA</MenuItem>
+                  {GRINDYS_REASONS.map(([v, l]) => <MenuItem key={v} value={v}>{l}</MenuItem>)}
+                </Select>
+              </FormControl>
+              <Typography component="div" sx={{ fontSize: 12, color: "#667085", mt: .75 }}>
+                Dirba {num(workload, 3)} etato<Tip title="Dirbant ne visu etatu, Sodros įmokos skaičiuojamos ne mažiau kaip nuo minimalios algos (MMA). Kai kuriems darbuotojams taikoma išimtis – tada įmokos skaičiuojamos tik nuo faktinio atlyginimo." />
+              </Typography>
+              {f.has_disability && !f.grindys_exempt_reason && (
+                <Alert severity="info" sx={{ mt: 1, py: 0 }}
+                  action={<Button size="small" color="inherit" onClick={() => set({ grindys_exempt_reason: "participation" })}>Taikyti</Button>}>
+                  Nustatytas dalyvumo lygis – galima išimtis
+                </Alert>
+              )}
+            </Box>
+          ) : (
+            <InfoRow label="Minimalių įmokų išimtis" value="Netaikoma" reason="Aktualu tik dirbant ne visu etatu"
+              tip="Dirbant ne visu etatu, Sodros įmokos skaičiuojamos ne mažiau kaip nuo minimalios algos (MMA). Dirbant visu etatu tai neaktualu." />
+          )}
         </Section>
-        <Section title="Atostogų trukmė" desc="Nuo to priklauso kasmetinių atostogų dienų skaičius">
-          <ToggleRow label="Nustatytas dalyvumo lygis (0–55 %)" hint="Atostogos – 25 d. d. (tai nėra tas pats, kas NPD)"
-            checked={f.has_disability} onChange={(v) => set({ has_disability: v })} />
-          <ToggleRow label="Vienas augina vaiką iki 14 m. (ar su negalia iki 18 m.)" hint="Pailgintos kasmetinės atostogos"
-            checked={f.single_parent} onChange={(v) => set({ single_parent: v })} />
+
+        <Section title="Ilgesnės atostogos" tip="Šiais atvejais kasmetinės atostogos – 25 d. d. vietoj 20 (DK 126 str.).">
+          <ToggleRow label="Nustatytas 0–55 % dalyvumo lygis" checked={f.has_disability} disabled={disNpd}
+            reason={disNpd ? "Įjungta, nes pasirinktas padidintas NPD" : ""}
+            tip="Dalyvumo lygį nustato NDNT. Tokiam darbuotojui priklauso 25 d. d. atostogų."
+            onChange={(v) => set({ has_disability: v })} />
+          <ToggleRow label="Vienas augina vaiką" checked={f.single_parent}
+            tip="Vienas auginantis vaiką iki 14 m. arba vaiką su negalia iki 18 m. – 25 d. d. atostogų."
+            onChange={(v) => set({ single_parent: v })} />
         </Section>
-        <Section title="GPM">
-          <ToggleRow label="Taikyti progresinį GPM per metus" hint="Retas atvejis – tik gavus rašytinį darbuotojo prašymą"
-            checked={f.progressive_gpm_request} onChange={(v) => set({ progressive_gpm_request: v })} />
-        </Section>
+
         <OpeningVdu f={f} set={set} />
       </Box>
       <SaveBar dirty={dirty} busy={busy} error={error} onSave={save} onReset={reset} />
@@ -575,7 +715,7 @@ function OpeningVdu({ f, set }) {
 // ============================================================
 // Darbuotojo kortelė
 // ============================================================
-const KTABS = [["person", "Asmens duomenys"], ["tax", "Mokesčiai"], ["contract", "Sutartis"], ["items", "Priedai ir išskaitos"],
+const KTABS = [["person", "Asmens duomenys"], ["contract", "Sutartis"], ["tax", "Mokesčiai"], ["items", "Priedai ir išskaitos"],
   ["absences", "Nebuvimai"], ["family", "Šeima"]];
 
 function ProfilePanel({ emp, row, vac, contract, onTab }) {
@@ -592,6 +732,7 @@ function ProfilePanel({ emp, row, vac, contract, onTab }) {
     ? dayjs(contract.start_date).add(contract.probation_months, "month").subtract(1, "day").format("YYYY-MM-DD") : null;
   const inProbation = probEnd && probEnd >= today();
   const bal = vac?.balance != null ? Number(vac.balance) : null;
+  const perYear = (Number(contract?.extended_leave_days) || Number(contract?.annual_leave_days) || 20) + (Number(contract?.extra_leave_days) || 0);
   return (
     <Box sx={{ bgcolor: "#FFFFFF", borderRight: { md: "1px solid #EAECF0" }, p: 2.5, overflowY: "auto" }}>
       <Stack alignItems="center" textAlign="center">
@@ -629,7 +770,10 @@ function ProfilePanel({ emp, row, vac, contract, onTab }) {
         {bal != null && (
           <Box onClick={() => onTab("absences")} sx={{ cursor: "pointer" }}>
             <PFact icon={BeachAccessOutlinedIcon} label="Atostogų likutis" value={`${days(vac.balance)}`}
-              color={bal < 0 ? "#B42318" : undefined} sub={`sukaupta ${days(vac.accrued)}, panaudota ${days(vac.used)}`} />
+              color={bal < 0 ? "#B42318" : undefined}
+              sub={Number(vac.accrued) < 1 && !Number(vac.used)
+                ? `kaupiasi po ~${days(perYear / 12)} per mėn. (${perYear} d. per metus)`
+                : `sukaupta ${days(vac.accrued)}, panaudota ${days(vac.used)} · ${perYear} d. per metus`} />
           </Box>
         )}
       </Stack>
@@ -701,9 +845,9 @@ function EmployeeDialog({ id, row, onClose }) {
                 {msg && <Alert severity="success" sx={{ mb: 2 }} onClose={() => setMsg("")}>{msg}</Alert>}
                 {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
                 {tab === "person" && <PersonTab emp={emp} onSaved={done} onReload={load} />}
-                {tab === "tax" && <TaxTab emp={emp} onSaved={done} />}
+                {tab === "tax" && <TaxTab emp={emp} contract={contract} onSaved={done} />}
                 {tab === "contract" && <ContractTab emp={emp} contract={contract} onChanged={done} />}
-                {tab === "items" && <Box sx={CARD_SX}><EmployeePayItemsPanel employeeId={emp.id} /></Box>}
+                {tab === "items" && <EmployeePayItemsPanel employeeId={emp.id} />}
                 {tab === "absences" && <AbsencesTab emp={emp} vac={vac} onChanged={load} />}
                 {tab === "family" && <ChildrenTab emp={emp} onChanged={load} />}
               </Box>
@@ -727,72 +871,121 @@ function TagsField({ value, onChange }) {
   );
 }
 
-function WorkTimeSettings({ contract, summed, onChanged }) {
-  const [f, setF] = useState({
-    work_time_mode: contract.work_time_mode || (summed ? "02" : "01"),
-    summed_period_months: contract.summed_period_months || "",
-    summed_period_anchor: contract.summed_period_anchor || "",
-    is_company_head: !!contract.is_company_head,
+const DAY_SHORT = ["Pr", "An", "Tr", "Kt", "Pn", "Š", "S"];
+const hoursOf = (t) => Number(t?.workload || 0) * Number(t?.full_time_hours || 40);
+const etatas = (w) => (Number(w) === 1 ? "visas etatas" : `${num(w, 3)} etato`);
+
+// „Pr–Pn po 8 val.“ iš week_hours (jei nėra - tolygiai Pr–Pn)
+function weekText(t) {
+  const wh = t?.week_hours?.length === 7 ? t.week_hours.map(Number) : null;
+  if (!wh) return `Pr–Pn po ${num(hoursOf(t) / 5, 2)} val.`;
+  const runs = [];
+  wh.forEach((h, i) => {
+    if (!(h > 0)) return;
+    const last = runs[runs.length - 1];
+    if (last && last[1] === i - 1) last[1] = i; else runs.push([i, i]);
   });
+  const names = runs.map(([x, y]) => (x === y ? DAY_SHORT[x] : y - x === 1 ? `${DAY_SHORT[x]}, ${DAY_SHORT[y]}` : `${DAY_SHORT[x]}–${DAY_SHORT[y]}`)).join(", ");
+  const hrs = wh.filter((h) => h > 0);
+  return hrs.every((h) => h === hrs[0]) ? `${names} po ${num(hrs[0], 2)} val.` : `${names} · skirtingai`;
+}
+
+function WorkTimeSettings({ contract, summed, co, onChanged }) {
+  const init = useCallback(() => ({
+    work_time_mode: contract.work_time_mode && contract.work_time_mode !== "02" ? contract.work_time_mode : "01",
+    custom: !!contract.summed_period_months,
+    months: Number(contract.summed_period_months) || co.m,
+    anchor: Number(contract.summed_period_anchor) || co.a,
+    is_company_head: !!contract.is_company_head,
+  }), [contract, co]);
+  const [f, setF] = useState(init);
   const [error, setError] = useState("");
-  const dirty = f.work_time_mode !== (contract.work_time_mode || "01")
-    || String(f.summed_period_months || "") !== String(contract.summed_period_months || "")
-    || String(f.summed_period_anchor || "") !== String(contract.summed_period_anchor || "")
-    || f.is_company_head !== !!contract.is_company_head;
-  const save = async () => {
-    try {
-      await payrollApi.updateContract(contract.id, {
-        work_time_mode: f.work_time_mode, is_company_head: f.is_company_head,
-        summed_period_months: f.summed_period_months || null, summed_period_anchor: f.summed_period_anchor || null,
-      });
-      setError(""); onChanged("Darbo laiko nustatymai išsaugoti");
-    } catch (e) { setError(apiError(e)); }
+  useEffect(() => { setF(init()); }, [init]);
+  const payload = {
+    work_time_mode: summed ? "02" : f.work_time_mode,
+    summed_period_months: summed && f.custom ? f.months : null,
+    summed_period_anchor: summed && f.custom ? norm(f.months, f.anchor) : null,
+    is_company_head: f.is_company_head,
   };
-  const showPeriod = summed || f.work_time_mode === "02";
+  const orig = {
+    work_time_mode: contract.work_time_mode || "01", summed_period_months: contract.summed_period_months || null,
+    summed_period_anchor: contract.summed_period_anchor || null, is_company_head: !!contract.is_company_head,
+  };
+  const dirty = JSON.stringify(payload) !== JSON.stringify(orig);
+  const save = async () => {
+    try { await payrollApi.updateContract(contract.id, payload); setError(""); onChanged("Darbo laiko nustatymai išsaugoti"); }
+    catch (e) { setError(apiError(e)); }
+  };
+  const pm = f.custom ? f.months : co.m;
+  const pa = f.custom ? norm(f.months, f.anchor) : norm(co.m, co.a);
+  const now = periodsFrom(new Date(), pm, pa, 0)[0];
+
   return (
-    <Box sx={CARD_SX}>
-      <Typography sx={{ fontSize: 14.5, fontWeight: 600, color: "#101828", mb: 1.75 }}>Darbo laikas</Typography>
-      <Stack gap={2}>
-        <FormControl size="small" fullWidth>
-          <InputLabel>Darbo laiko režimas (SDUP)</InputLabel>
-          <Select label="Darbo laiko režimas (SDUP)" value={f.work_time_mode} MenuProps={MENU_PROPS}
-            onChange={(e) => setF({ ...f, work_time_mode: e.target.value })}>
-            {WORK_MODES.map(([v, l]) => <MenuItem key={v} value={v}>{v} – {l}</MenuItem>)}
-          </Select>
-        </FormControl>
-        {showPeriod && (
-          <Stack direction={{ xs: "column", sm: "row" }} gap={2}>
-            <FormControl size="small" sx={{ minWidth: 220 }}>
-              <InputLabel>Apskaitinis laikotarpis</InputLabel>
-              <Select label="Apskaitinis laikotarpis" value={String(f.summed_period_months || "")} MenuProps={MENU_PROPS}
-                onChange={(e) => setF({ ...f, summed_period_months: e.target.value })}>
-                <MenuItem value="">Pagal įmonės nustatymus</MenuItem>
-                <MenuItem value="1">1 mėnuo</MenuItem><MenuItem value="2">2 mėnesiai</MenuItem><MenuItem value="3">3 mėnesiai</MenuItem>
-              </Select>
-            </FormControl>
-            <FormControl size="small" sx={{ minWidth: 220 }}>
-              <InputLabel>Laikotarpiai prasideda nuo</InputLabel>
-              <Select label="Laikotarpiai prasideda nuo" value={String(f.summed_period_anchor || "")} MenuProps={MENU_PROPS}
-                onChange={(e) => setF({ ...f, summed_period_anchor: e.target.value })}>
-                <MenuItem value="">Pagal įmonės nustatymus</MenuItem>
-                {MONTHS_LT.map((m, i) => <MenuItem key={m} value={String(i + 1)}>{m}</MenuItem>)}
-              </Select>
-            </FormControl>
+    <Section title="Papildomi darbo laiko nustatymai" desc="Dažniausiai keisti nereikia">
+      {summed ? (
+        <Box sx={{ pb: 1.1 }}>
+          <Stack direction="row" alignItems="center" gap={1.5} flexWrap="wrap">
+            <Typography component="div" sx={{ fontSize: 13.5, color: "#101828", mr: "auto" }}>
+              Apskaitinis laikotarpis
+              <Tip title="Per šį laikotarpį sumuojamos valandos – kiek turėjo dirbti ir kiek dirbo. Viršvalandžiai ar neišdirbta norma paaiškėja laikotarpio pabaigoje. Ne ilgiau kaip 3 mėn. (DK 113 str.)." />
+            </Typography>
+            {f.custom ? (
+              <>
+                <TextField select size="small" value={f.months} sx={{ width: 110 }}
+                  onChange={(e) => setF({ ...f, months: Number(e.target.value), anchor: 1 })} SelectProps={{ MenuProps: MENU_PROPS }}>
+                  {[1, 2, 3].map((m) => <MenuItem key={m} value={m}>{m} mėn.</MenuItem>)}
+                </TextField>
+                {f.months > 1 && (
+                  <TextField select size="small" value={norm(f.months, f.anchor)} sx={{ width: 250 }}
+                    onChange={(e) => setF({ ...f, anchor: Number(e.target.value) })}
+                    SelectProps={{ MenuProps: MENU_PROPS, renderValue: (v) => cap(anchorLabel(f.months, v, true)) }}>
+                    {Array.from({ length: f.months }, (_, i) => i + 1).map((x) => <MenuItem key={x} value={x}>{cap(anchorLabel(f.months, x))}</MenuItem>)}
+                  </TextField>
+                )}
+                <Button size="small" onClick={() => setF({ ...f, custom: false })} sx={{ textTransform: "none" }}>Kaip įmonėje</Button>
+              </>
+            ) : (
+              <>
+                <Typography sx={{ fontSize: 13.5, color: "#475467" }}><b style={{ fontWeight: 600, color: "#101828" }}>{co.m} mėn.</b> · pagal įmonės nustatymus</Typography>
+                <Button size="small" onClick={() => setF({ ...f, custom: true, months: co.m, anchor: co.a })} sx={{ textTransform: "none" }}>Keisti</Button>
+              </>
+            )}
           </Stack>
-        )}
-        {showPeriod && <Hint>Pvz. 3 mėnesiai nuo sausio – laikotarpiai sausis–kovas, balandis–birželis… Pabaigoje apskaičiuojami viršvalandžiai arba neišdirbta norma.</Hint>}
-        {contract.summed_opening && (
-          <Hint>
-            Perkeltas laikotarpio likutis iš ankstesnės programos: dirbta {toComma(contract.summed_opening.worked)} val.,
-            nebuvimai {toComma(contract.summed_opening.absence)} val., jau apmokėta viršvalandžių {toComma(contract.summed_opening.paid_ot)} val.
-          </Hint>
-        )}
-        <FormControlLabel control={<Checkbox size="small" checked={f.is_company_head} onChange={(e) => setF({ ...f, is_company_head: e.target.checked })} />}
-          label="Juridinio asmens vienasmenis valdymo organas (vadovas)" />
-        {error && <Alert severity="error">{error}</Alert>}
-        {dirty && <Box><Button size="small" variant="contained" onClick={save}>Išsaugoti</Button></Box>}
-      </Stack>
-    </Box>
+          <Typography sx={{ fontSize: 12, color: "#667085", mt: .5 }}>Dabartinis: {iso(now.start)} – {iso(now.end)}</Typography>
+        </Box>
+      ) : (
+        <InfoRow label="Apskaitinis laikotarpis" value="–" reason="Taikoma tik suminei darbo laiko apskaitai"
+          tip="Laikotarpis, per kurį sumuojamos valandos. Reikalingas tik suminei apskaitai." />
+      )}
+
+      {summed ? (
+        <InfoRow label="Darbo laiko režimas (SDUP)" value="02 – suminė" reason="Nustatoma pagal darbo laiko apskaitą"
+          tip="Režimo kodas teikiamas SDUP ataskaitoje (darbo užmokesčio skaidrumas)." />
+      ) : (
+        <Box sx={{ py: 1.1, borderTop: "1px solid #F2F4F7" }}>
+          <Typography component="div" sx={{ fontSize: 13.5, color: "#101828", mb: 1 }}>
+            Darbo laiko režimas (SDUP)
+            <Tip title="Režimo kodas teikiamas SDUP ataskaitoje (darbo užmokesčio skaidrumas). Dažniausiai – 01: kiekvieną darbo dieną dirbama tiek pat valandų." />
+          </Typography>
+          <TextField select size="small" fullWidth value={f.work_time_mode} SelectProps={{ MenuProps: MENU_PROPS }}
+            onChange={(e) => setF({ ...f, work_time_mode: e.target.value })}>
+            {WORK_MODES.filter(([v]) => v !== "02").map(([v, l]) => <MenuItem key={v} value={v}>{v} – {l}</MenuItem>)}
+          </TextField>
+        </Box>
+      )}
+
+      <ToggleRow label="Įmonės vadovas" checked={f.is_company_head} onChange={(v) => setF({ ...f, is_company_head: v })}
+        tip="Pažymėkite, jei tai juridinio asmens vienasmenis valdymo organas (direktorius). Jam 1-SD teikiamas ne vėliau kaip prieš 1 darbo valandą." />
+
+      {contract.summed_opening && (
+        <Hint>
+          Perkeltas laikotarpio likutis iš ankstesnės programos: dirbta {toComma(contract.summed_opening.worked)} val.,
+          nebuvimai {toComma(contract.summed_opening.absence)} val., jau apmokėta viršvalandžių {toComma(contract.summed_opening.paid_ot)} val.
+        </Hint>
+      )}
+      {error && <Alert severity="error">{error}</Alert>}
+      {dirty && <Box><Button size="small" variant="contained" onClick={save} sx={BTN_SX}>Išsaugoti</Button></Box>}
+    </Section>
   );
 }
 
@@ -800,22 +993,35 @@ function ContractTab({ emp, contract, onChanged }) {
   const [change, setChange] = useState(null);
   const [dismiss, setDismiss] = useState(null);
   const [meta, setMeta] = useState(null);           // sutarties duomenų redagavimas
+  const [menu, setMenu] = useState(null);
+  const [hist, setHist] = useState(false);
+  const [co, setCo] = useState({ m: 3, a: 1 });
   const [error, setError] = useState("");
+  useEffect(() => {
+    payrollApi.settings().then((st) => setCo({ m: st.summed_period_months || 3, a: st.summed_period_anchor || 1 })).catch(() => {});
+  }, []);
   if (!contract) return <Box sx={CARD_SX}><Typography>Darbo sutarties nėra.</Typography></Box>;
   const terms = [...(contract.terms || [])].sort((a, b) => b.valid_from.localeCompare(a.valid_from));
   const current = terms[0];
+  const summed = current?.work_regime === "summed";
+  const fullH = Number(current?.full_time_hours || 40);
   const type = CONTRACT_TYPES.find((t) => t.value === contract.sodra_contract_type)?.label;
   const fixed = ["02", "04", "05"].includes(contract.sodra_contract_type) || String(contract.sodra_contract_subtype || "").endsWith("1");
   const probEnd = contract.probation_months
     ? dayjs(contract.start_date).add(contract.probation_months, "month").subtract(1, "day").format("YYYY-MM-DD") : null;
   const terminated = contract.status === "terminated";
+  const pm = Number(contract.summed_period_months) || co.m;
 
   const saveChange = async () => {
+    const hours = Number(toDot(change.hours)) || 0;
+    const old = hoursOf(current);
+    const week = change.work_regime === "standard" && current?.week_hours?.length === 7 && old > 0
+      ? current.week_hours.map((h) => Math.round((Number(h) * hours / old) * 100) / 100) : null;
     try {
       await payrollApi.createTerms({ contract: contract.id, valid_from: change.valid_from, position: current?.position,
-        pay_form: change.pay_form, base_amount: toDot(change.base_amount), workload: change.workload,
-        work_regime: change.work_regime });
-      setChange(null); setError(""); onChanged("Sutarties sąlygų pakeitimas išsaugotas");
+        pay_form: change.pay_form, base_amount: toDot(change.base_amount), workload: (hours / fullH).toFixed(3),
+        full_time_hours: fullH, work_regime: change.work_regime, week_hours: week });
+      setChange(null); setError(""); onChanged("Naujos darbo sąlygos išsaugotos");
     } catch (e) { setError(apiError(e)); }
   };
   const saveDismiss = async () => {
@@ -832,97 +1038,10 @@ function ContractTab({ emp, contract, onChanged }) {
       setMeta(null); setError(""); onChanged("Sutarties duomenys išsaugoti");
     } catch (e) { setError(apiError(e)); }
   };
+  const changeHours = Number(toDot(change?.hours)) || 0;
 
   return (
     <Stack gap={2}>
-      <Section title="Dabartinės sąlygos" desc={terminated ? `Sutartis nutraukta ${contract.termination_date}` : `Galioja nuo ${current?.valid_from || contract.start_date}`}
-        action={!terminated && (
-          <Stack direction="row" gap={1}>
-            <Button size="small" variant="outlined" onClick={() => setChange({ valid_from: today(), pay_form: current?.pay_form || "monthly",
-              base_amount: toComma(current?.base_amount || ""), workload: String(current?.workload || "1"), work_regime: current?.work_regime || "standard" })}
-              sx={{ ...BTN_SX, fontWeight: 500, color: "#344054", borderColor: "#D0D5DD" }}>Keisti sąlygas</Button>
-            <Button size="small" color="error" onClick={() => setDismiss({ date: today(), basis: "55" })} sx={{ ...BTN_SX, fontWeight: 500 }}>Nutraukti sutartį</Button>
-          </Stack>
-        )}>
-        <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr 1fr", sm: "repeat(4, minmax(0,1fr))" }, gap: 2 }}>
-          <KV label="Pareigos" value={current?.position_name || "Nenurodytos"} color={current?.position_name ? undefined : "#B54708"}
-            sub={current?.group_code ? `${current.group_code} grupė (SDUP)` : current?.position_name ? "be SDUP grupės" : ""} />
-          <KV label="Atlyginimas" value={current ? `${money(current.base_amount)} ${current.pay_form === "hourly" ? "/ val." : "/ mėn."}` : ""} />
-          <KV label="Darbo krūvis" value={current ? `${Number(current.workload).toLocaleString("lt-LT", { minimumFractionDigits: 1, maximumFractionDigits: 3 })} etato` : ""} />
-          <KV label="Darbo laiko apskaita" value={current?.work_regime === "summed" ? "Suminė" : "Standartinė"} />
-        </Box>
-      </Section>
-
-      <Section title="Sutartis" desc="Sutarties rekvizitai ir terminai"
-        action={!meta && <Button size="small" startIcon={<EditOutlinedIcon sx={{ fontSize: "16px !important" }} />}
-          onClick={() => setMeta({ number: contract.number || "", signed_date: contract.signed_date || "", probation_months: String(contract.probation_months || 0), end_date: contract.end_date || "" })}
-          sx={{ ...BTN_SX, fontWeight: 500, color: "#475467" }}>Redaguoti</Button>}>
-        {!meta ? (
-          <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr 1fr", sm: "repeat(4, minmax(0,1fr))" }, gap: 2 }}>
-            <KV label="Rūšis" value={type} sub={contract.sodra_contract_subtype ? (fixed ? "terminuota" : "neterminuota") : ""} />
-            <KV label="Numeris / pasirašyta" value={contract.number || "–"} sub={contract.signed_date || ""} />
-            <KV label="Darbo pradžia" value={contract.start_date} sub={fixed && contract.end_date ? `pabaiga ${contract.end_date}` : ""} />
-            <KV label="Bandomasis laikotarpis" value={contract.probation_months ? `${contract.probation_months} mėn.` : "Nėra"}
-              sub={probEnd ? `iki ${probEnd}` : ""} color={probEnd && probEnd >= today() ? "#175CD3" : undefined} />
-          </Box>
-        ) : (
-          <>
-            <Stack direction={{ xs: "column", sm: "row" }} gap={1.5}>
-              <TextField size="small" label="Sutarties Nr." value={meta.number} onChange={(e) => setMeta({ ...meta, number: e.target.value })} fullWidth />
-              <DateF label="Pasirašyta" value={meta.signed_date} fullWidth onChange={(v) => setMeta({ ...meta, signed_date: v })} />
-              <FormControl size="small" fullWidth>
-                <InputLabel>Bandomasis laikotarpis</InputLabel>
-                <Select label="Bandomasis laikotarpis" value={meta.probation_months} MenuProps={MENU_PROPS} onChange={(e) => setMeta({ ...meta, probation_months: e.target.value })}>
-                  {["0", "1", "2", "3", "4", "5", "6"].map((m) => (
-                    <MenuItem key={m} value={m} disabled={Number(m) > 3 && contract.start_date < "2026-11-01"}>
-                      {m === "0" ? "Nėra" : `${m} mėn.`}{Number(m) > 3 ? " (tik didelė alga)" : ""}
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-              {fixed && <DateF label="Darbo pabaiga" value={meta.end_date} fullWidth onChange={(v) => setMeta({ ...meta, end_date: v })} />}
-            </Stack>
-            <Hint>Išbandymas – iki 3 mėn. Nuo 2026-11-01 – iki 6 mėn., jei alga ne mažesnė kaip 2 šalies VDU (DK 36 str.). Terminuotoje sutartyje – proporcingas jos trukmei.</Hint>
-            <Stack direction="row" gap={1}>
-              <Button variant="contained" size="small" onClick={saveMeta} sx={BTN_SX}>Išsaugoti</Button>
-              <Button size="small" onClick={() => setMeta(null)} sx={{ ...BTN_SX, fontWeight: 500 }}>Atšaukti</Button>
-            </Stack>
-          </>
-        )}
-      </Section>
-
-      {change && (
-        <Section title="Naujos sutarties sąlygos" desc="Jei pakeitimas vidury mėnesio, tą mėnesį atlyginimas bus apskaičiuotas dviem dalimis" sx={{ borderColor: "#B2CCFF" }}>
-          <Stack direction={{ xs: "column", sm: "row" }} gap={1.5}>
-            <DateF label="Galioja nuo" value={change.valid_from} fullWidth onChange={(v) => setChange({ ...change, valid_from: v })} />
-            <TextField size="small" fullWidth label={change.pay_form === "hourly" ? "Už valandą" : "Alga per mėnesį"} value={change.base_amount} inputProps={{ inputMode: "decimal" }}
-              onChange={(e) => setChange({ ...change, base_amount: cleanNum(e.target.value) })}
-              InputProps={{ endAdornment: <InputAdornment position="end">€</InputAdornment> }} />
-          </Stack>
-          <Stack direction={{ xs: "column", sm: "row" }} gap={1.5}>
-            <FormControl size="small" fullWidth>
-              <InputLabel>Darbo krūvis</InputLabel>
-              <Select label="Darbo krūvis" value={change.workload} MenuProps={MENU_PROPS} onChange={(e) => setChange({ ...change, workload: e.target.value })}>
-                <MenuItem value="1">Visas etatas</MenuItem><MenuItem value="0.75">0,75 etato</MenuItem>
-                <MenuItem value="0.5">Pusė etato</MenuItem><MenuItem value="0.25">0,25 etato</MenuItem>
-              </Select>
-            </FormControl>
-            <FormControl size="small" fullWidth>
-              <InputLabel>Darbo laiko apskaita</InputLabel>
-              <Select label="Darbo laiko apskaita" value={change.work_regime || "standard"} MenuProps={MENU_PROPS}
-                onChange={(e) => setChange({ ...change, work_regime: e.target.value })}>
-                <MenuItem value="standard">Standartinė (5 d. per savaitę)</MenuItem>
-                <MenuItem value="summed">Suminė (pagal pamainų grafiką)</MenuItem>
-              </Select>
-            </FormControl>
-          </Stack>
-          <Stack direction="row" gap={1}>
-            <Button variant="contained" size="small" onClick={saveChange} disabled={!change.base_amount || !change.valid_from} sx={BTN_SX}>Išsaugoti</Button>
-            <Button size="small" onClick={() => setChange(null)} sx={{ ...BTN_SX, fontWeight: 500 }}>Atšaukti</Button>
-          </Stack>
-        </Section>
-      )}
-
       {dismiss && (
         <Section title="Sutarties nutraukimas" desc="Kompensacija už nepanaudotas atostogas ir išeitinė išmoka bus apskaičiuotos to mėnesio atlyginimuose"
           sx={{ borderColor: "#FDA29B", bgcolor: "#FFFBFA" }}>
@@ -942,34 +1061,148 @@ function ContractTab({ emp, contract, onChanged }) {
         </Section>
       )}
 
+      {/* ---------- 1. Sutartis ---------- */}
+      <Section title="Darbo sutartis"
+        desc={terminated ? `Nutraukta ${contract.termination_date}` : `${type || "Neterminuota"}${fixed && contract.end_date ? ` iki ${contract.end_date}` : ""}`}
+        action={!meta && (
+          <Stack direction="row" gap={.5}>
+            <Button size="small" startIcon={<EditOutlinedIcon sx={{ fontSize: "16px !important" }} />}
+              onClick={() => setMeta({ number: contract.number || "", signed_date: contract.signed_date || "", probation_months: String(contract.probation_months || 0), end_date: contract.end_date || "" })}
+              sx={{ ...BTN_SX, fontWeight: 500, color: "#475467" }}>Redaguoti</Button>
+            {!terminated && (
+              <>
+                <IconButton size="small" onClick={(e) => setMenu(e.currentTarget)} aria-label="Daugiau"><MoreHorizIcon fontSize="small" /></IconButton>
+                <Menu anchorEl={menu} open={!!menu} onClose={() => setMenu(null)} disableScrollLock
+                  anchorOrigin={{ vertical: "bottom", horizontal: "right" }} transformOrigin={{ vertical: "top", horizontal: "right" }}>
+                  <MenuItem onClick={() => { setMenu(null); setDismiss({ date: today(), basis: "55" }); }} sx={{ color: "#B42318", fontSize: 14 }}>
+                    Nutraukti sutartį…
+                  </MenuItem>
+                </Menu>
+              </>
+            )}
+          </Stack>
+        )}>
+        {!meta ? (
+          <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr 1fr", sm: "repeat(4, minmax(0,1fr))" }, gap: 2 }}>
+            <KV label="Darbo pradžia" value={contract.start_date} sub={fixed && contract.end_date ? `pabaiga ${contract.end_date}` : ""} />
+            <KV label="Bandomasis laikotarpis" value={contract.probation_months ? `${contract.probation_months} mėn.` : "Nėra"}
+              sub={probEnd ? `iki ${probEnd}` : ""} color={probEnd && probEnd >= today() ? "#175CD3" : undefined} />
+            <KV label="Sutarties Nr." value={contract.number || "–"} />
+            <KV label="Pasirašyta" value={contract.signed_date || "–"} />
+          </Box>
+        ) : (
+          <>
+            <Stack direction={{ xs: "column", sm: "row" }} gap={1.5}>
+              <TextField size="small" label="Sutarties Nr." value={meta.number} onChange={(e) => setMeta({ ...meta, number: e.target.value })} fullWidth />
+              <DateF label="Pasirašyta" value={meta.signed_date} fullWidth onChange={(v) => setMeta({ ...meta, signed_date: v })} />
+              <FormControl size="small" fullWidth>
+                <InputLabel>Bandomasis laikotarpis</InputLabel>
+                <Select label="Bandomasis laikotarpis" value={meta.probation_months} MenuProps={MENU_PROPS} onChange={(e) => setMeta({ ...meta, probation_months: e.target.value })}>
+                  {["0", "1", "2", "3", "4", "5", "6"].map((m) => (
+                    <MenuItem key={m} value={m} disabled={Number(m) > 3 && contract.start_date < "2026-11-01"}>
+                      {m === "0" ? "Nėra" : `${m} mėn.`}{Number(m) > 3 ? " (tik didelė alga)" : ""}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+              {fixed && <DateF label="Darbo pabaiga" value={meta.end_date} fullWidth onChange={(v) => setMeta({ ...meta, end_date: v })} />}
+            </Stack>
+            <Typography component="div" sx={{ fontSize: 12, color: "#667085" }}>
+              Bandomasis laikotarpis – iki 3 mėn.
+              <Tip title="Nuo 2026-11-01 – iki 6 mėn., jei alga ne mažesnė kaip 2 šalies VDU (DK 36 str.). Terminuotoje sutartyje – proporcingas jos trukmei. Pratęsti susitarus negalima." />
+            </Typography>
+            <Stack direction="row" gap={1}>
+              <Button variant="contained" size="small" onClick={saveMeta} sx={BTN_SX}>Išsaugoti</Button>
+              <Button size="small" onClick={() => setMeta(null)} sx={{ ...BTN_SX, fontWeight: 500 }}>Atšaukti</Button>
+            </Stack>
+          </>
+        )}
+        <Divider />
+        <ContractDocumentPanel contract={contract} bare />
+      </Section>
+
+      {/* ---------- 2. Darbo sąlygos ---------- */}
+      <Section title="Darbo sąlygos" desc={current ? `Galioja nuo ${current.valid_from}` : ""}
+        tip="Pakeitus atlyginimą, etatą ar apskaitą, sukuriamos naujos sąlygos nuo nurodytos datos – ankstesnės lieka istorijoje. Jei pakeitimas vidury mėnesio, tą mėnesį DU skaičiuojamas dviem dalimis."
+        action={!terminated && !change && (
+          <Button size="small" variant="outlined" onClick={() => setChange({ valid_from: today(), pay_form: current?.pay_form || "monthly",
+            base_amount: toComma(current?.base_amount || ""), hours: toComma(String(Math.round(hoursOf(current) * 100) / 100 || fullH)),
+            work_regime: current?.work_regime || "standard" })}
+            sx={{ ...BTN_SX, fontWeight: 500, color: "#344054", borderColor: "#D0D5DD" }}>Keisti sąlygas</Button>
+        )}>
+        <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr 1fr", sm: "repeat(4, minmax(0,1fr))" }, gap: 2 }}>
+          <KV label="Pareigos" value={current?.position_name || "Nenurodytos"} color={current?.position_name ? undefined : "#B54708"}
+            sub={current?.group_code ? `${current.group_code} grupė (SDUP)` : ""} />
+          <KV label="Atlyginimas" value={current ? `${money(current.base_amount)} ${current.pay_form === "hourly" ? "/ val." : "/ mėn."}` : ""} />
+          <KV label="Darbo laikas" value={current ? `${num(hoursOf(current), 2)} val./sav.` : ""}
+            sub={current ? `${etatas(current.workload)}${fullH !== 40 ? ` · sutrumpinta norma ${num(fullH)} val.` : ""}` : ""} />
+          <KV label="Apskaita" value={summed ? "Suminė" : "Standartinė"}
+            sub={current ? (summed ? `${pm} mėn. laikotarpis` : weekText(current)) : ""} />
+        </Box>
+
+        {change && (
+          <Box sx={{ p: 1.75, borderRadius: 2, bgcolor: "#F5F8FF", border: "1px solid #B2CCFF" }}>
+            <Typography sx={{ fontSize: 13.5, fontWeight: 600, mb: 1.5 }}>Naujos sąlygos</Typography>
+            <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "1fr 1fr" }, gap: 1.5 }}>
+              <DateF label="Galioja nuo" value={change.valid_from} fullWidth onChange={(v) => setChange({ ...change, valid_from: v })} />
+              <TextField size="small" fullWidth label={change.pay_form === "hourly" ? "Už valandą" : "Alga per mėnesį"} value={change.base_amount}
+                inputProps={{ inputMode: "decimal" }} sx={{ bgcolor: "#FFFFFF" }}
+                onChange={(e) => setChange({ ...change, base_amount: cleanNum(e.target.value) })}
+                InputProps={{ endAdornment: <InputAdornment position="end">€</InputAdornment> }} />
+              <TextField size="small" fullWidth label="Valandų per savaitę" value={change.hours} inputProps={{ inputMode: "decimal" }} sx={{ bgcolor: "#FFFFFF" }}
+                onChange={(e) => {
+                  const v = cleanNum(e.target.value);
+                  setChange({ ...change, hours: Number(toDot(v)) > fullH ? toComma(String(fullH)) : v });
+                }}
+                helperText={changeHours > 0 ? `= ${etatas(changeHours / fullH)} (daugiausia ${num(fullH)} val.)` : `Daugiausia ${num(fullH)} val. – 1 etatas`} />
+              <FormControl size="small" fullWidth sx={{ bgcolor: "#FFFFFF" }}>
+                <InputLabel>Darbo laiko apskaita</InputLabel>
+                <Select label="Darbo laiko apskaita" value={change.work_regime} MenuProps={MENU_PROPS}
+                  onChange={(e) => setChange({ ...change, work_regime: e.target.value })}>
+                  <MenuItem value="standard">Standartinė (darbo dienomis)</MenuItem>
+                  <MenuItem value="summed">Suminė (pagal pamainų grafiką)</MenuItem>
+                </Select>
+              </FormControl>
+            </Box>
+            <Stack direction="row" gap={1} mt={1.5}>
+              <Button variant="contained" size="small" onClick={saveChange} sx={BTN_SX}
+                disabled={!change.base_amount || !change.valid_from || !(changeHours > 0)}>Išsaugoti</Button>
+              <Button size="small" onClick={() => setChange(null)} sx={{ ...BTN_SX, fontWeight: 500 }}>Atšaukti</Button>
+            </Stack>
+          </Box>
+        )}
+
+        {terms.length > 1 && (
+          <Box>
+            <Button size="small" onClick={() => setHist(!hist)} endIcon={<ChevronRightIcon sx={{ transform: hist ? "rotate(90deg)" : "none", transition: ".15s" }} />}
+              sx={{ textTransform: "none", px: 0, color: "#475467" }}>Ankstesnės sąlygos ({terms.length - 1})</Button>
+            <Collapse in={hist}>
+              <Box sx={{ mt: 1 }}>
+                {terms.slice(1).map((t, i) => (
+                  <Stack key={t.id} direction="row" gap={1.5} sx={{ position: "relative", pb: i < terms.length - 2 ? 1.5 : 0 }}>
+                    <Box sx={{ position: "relative", width: 10, flexShrink: 0 }}>
+                      <Box sx={{ width: 10, height: 10, borderRadius: "50%", mt: .6, bgcolor: "#D0D5DD" }} />
+                      {i < terms.length - 2 && <Box sx={{ position: "absolute", left: 4, top: 16, bottom: -4, width: 2, bgcolor: "#EAECF0" }} />}
+                    </Box>
+                    <Box>
+                      <Typography sx={{ fontSize: 12, color: "#667085" }}>nuo {t.valid_from}</Typography>
+                      <Typography sx={{ fontSize: 13.5, color: "#101828" }}>
+                        {money(t.base_amount)}{t.pay_form === "hourly" ? " / val." : " / mėn."} · {num(hoursOf(t), 2)} val./sav.
+                        {t.work_regime === "summed" ? " · suminė" : ""}{t.position_name ? ` · ${t.position_name}` : ""}
+                      </Typography>
+                    </Box>
+                  </Stack>
+                ))}
+              </Box>
+            </Collapse>
+          </Box>
+        )}
+      </Section>
+
       {error && <Alert severity="error">{error}</Alert>}
 
-      {!terminated && <WorkTimeSettings key={contract.id} contract={contract} summed={current?.work_regime === "summed"} onChanged={onChanged} />}
-
-      <Box sx={CARD_SX}><ContractDocumentPanel contract={contract} /></Box>
-
-      {terms.length > 0 && (
-        <Section title="Sąlygų istorija">
-          <Box>
-            {terms.map((t, i) => (
-              <Stack key={t.id} direction="row" gap={1.5} sx={{ position: "relative", pb: i < terms.length - 1 ? 1.75 : 0 }}>
-                <Box sx={{ position: "relative", width: 12, flexShrink: 0 }}>
-                  <Box sx={{ width: 12, height: 12, borderRadius: "50%", mt: .5, bgcolor: i === 0 ? "#1570EF" : "#D0D5DD", border: "2px solid #FFFFFF", boxShadow: "0 0 0 1px #D0D5DD" }} />
-                  {i < terms.length - 1 && <Box sx={{ position: "absolute", left: 5, top: 18, bottom: -4, width: 2, bgcolor: "#EAECF0" }} />}
-                </Box>
-                <Box>
-                  <Typography sx={{ fontSize: 12, color: "#667085" }}>nuo {t.valid_from}{i === 0 ? " · dabartinės" : ""}</Typography>
-                  <Typography sx={{ fontSize: 13.5, color: "#101828" }}>
-                    <b style={{ fontWeight: 500 }}>{money(t.base_amount)}{t.pay_form === "hourly" ? " / val." : " / mėn."}</b>
-                    {" · "}{Number(t.workload).toLocaleString("lt-LT", { minimumFractionDigits: 1, maximumFractionDigits: 3 })} etato
-                    {t.work_regime === "summed" ? " · suminė" : ""}{t.position_name ? ` · ${t.position_name}` : ""}
-                  </Typography>
-                </Box>
-              </Stack>
-            ))}
-          </Box>
-        </Section>
-      )}
+      {/* ---------- 3. Papildomi nustatymai ---------- */}
+      {!terminated && <WorkTimeSettings key={contract.id} contract={contract} summed={summed} co={co} onChanged={onChanged} />}
     </Stack>
   );
 }

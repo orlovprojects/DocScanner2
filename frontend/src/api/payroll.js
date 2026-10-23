@@ -26,6 +26,7 @@ export const payrollApi = {
   setVacationBalance: (id, data) => api.post(`${P}/employees/${id}/vacation/`, data).then((r) => r.data),
   createChild: (data) => api.post(`${P}/children/`, data).then((r) => r.data),
   deleteChild: (id) => api.delete(`${P}/children/${id}/`),
+  employeeReported: (id) => api.get(`${P}/employees/${id}/reported/`).then((r) => r.data),
 
   // dokumentai
   generateContract: (id) => api.post(`${P}/contracts/${id}/generate/`).then((r) => r.data),
@@ -161,6 +162,8 @@ export const payrollApi = {
   runLines: (id, employee) => api.get(`${P}/runs/${id}/lines/`, { params: { employee } }).then((r) => r.data),
   addRunLine: (data) => api.post(`${P}/run-lines/`, data).then((r) => r.data),
   deleteRunLine: (id) => api.delete(`${P}/run-lines/${id}/`),
+  payrollReadiness: (year, month) => api.get(`${P}/runs/readiness/`, { params: { year, month } }).then((r) => r.data),
+  payrollPeriod: () => api.get(`${P}/runs/period/`).then((r) => r.data),
 };
 
 // ---------- pagalbinės ----------

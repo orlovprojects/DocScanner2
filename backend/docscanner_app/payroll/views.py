@@ -175,6 +175,12 @@ class EmployeeViewSet(PayrollCompanyMixin, viewsets.ModelViewSet):
             raise ValidationError(str(e))
         return Response({"link": url, "sent": sent, "savitarna_status": payroll_services.savitarna_status(emp)})
 
+    @action(detail=True, methods=["get"])
+    def reported(self, request, pk=None):
+        """Pateiktos Sodros / VMI ataskaitos su šiuo darbuotoju (keičiant asmens kodą reikės tikslinti)."""
+        from .employees_table import reported_forms
+        return Response(reported_forms(self.get_object()))
+
     @action(detail=True, methods=["get", "post"])
     def vacation(self, request, pk=None):
         """
@@ -334,7 +340,14 @@ class TimesheetView(PayrollCompanyMixin, APIView):
                                               with_meta=request.query_params.get("meta") == "1")
         if isinstance(data, dict) and isinstance(data.get("meta"), dict):
             from .roster.repair import roster_stale_flag
+            from .readiness import timesheet_changes
             data["meta"]["roster_stale"] = roster_stale_flag(self.get_company(), year, month)   # Faktas: „grafikas nebeatitinka“
+            tm = TimesheetMonth.objects.filter(company=self.get_company(), year=year, month=month).first()
+            data["meta"]["changes"] = timesheet_changes(tm, data.get("rows") or [])          # pakeista po patvirtinimo
+            from .readiness import approve_from
+            af = approve_from(year, month)
+            data["meta"]["approve_from"] = af.isoformat()                                   # anksčiau tvirtinti negalima
+            data["meta"]["too_early"] = timezone.localdate() < af
         return Response(data)
 
     def post(self, request):
@@ -445,8 +458,29 @@ class PayrollRunViewSet(PayrollCompanyMixin, viewsets.ReadOnlyModelViewSet):
             raise ValidationError("Nurodykite year ir month")
         run = payroll_services.get_or_create_run(self.get_company(), year, month)
         if run.status == "draft":
-            payroll_services.recalculate_run(run)
+            try:
+                payroll_services.recalculate_run(run)
+            except ValueError:            # tabelyje nepatvirtinti pakeitimai - paliekami ankstesni rezultatai
+                pass
         return Response(PayrollRunSerializer(run).data)
+
+    @action(detail=False, methods=["get"])
+    def readiness(self, request):
+        """?year=&month= -> ar galima skaičiuoti / tvirtinti DU (grafikas, tabelis, pakeitimai po patvirtinimo)."""
+        from .readiness import readiness as _readiness
+        try:
+            year, month = int(request.query_params["year"]), int(request.query_params["month"])
+        except (KeyError, ValueError):
+            raise ValidationError("Nurodykite year ir month")
+        return Response(_readiness(self.get_company(), year, month))
+
+    @action(detail=False, methods=["get"])
+    def period(self, request):
+        """Nuo kurio mėnesio DU skaičiuojamas DokSkenas ir kurį mėnesį atidaryti pagal nutylėjimą."""
+        from .readiness import default_month, payroll_start
+        company = self.get_company()
+        start, dflt = payroll_start(company), default_month(company)
+        return Response({"start": f"{start:%Y-%m}" if start else None, "default": f"{dflt:%Y-%m}"})
 
     @action(detail=True, methods=["post"])
     def recalculate(self, request, pk=None):

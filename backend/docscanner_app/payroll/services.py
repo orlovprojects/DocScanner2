@@ -495,8 +495,29 @@ def _expense_account(contract, settings):
 
 @transaction.atomic
 def recalculate_run(run):
+    """Vienu metu - tik vienas to paties DU perskaičiavimas (kitaip eilutės dubliuojasi)."""
+    from django.db import transaction
+    with transaction.atomic():
+        PayrollRun.objects.select_for_update().filter(pk=run.pk).first()
+        run.refresh_from_db(fields=["status"])
+        return _recalculate_run(run)
+
+
+def _recalculate_run(run):
     if run.status in CLOSED_STATUSES:
         raise ValueError("Patvirtinto DU perskaičiuoti negalima")
+
+    from .readiness import calc_state
+    state, who = calc_state(run.company, run.year, run.month)
+    if state == "not_approved":                 # be patvirtinto tabelio atlyginimai neskaičiuojami
+        run.lines.filter(is_manual=False).delete()
+        run.results.all().delete()
+        run.warnings = []
+        run.status = "draft"
+        run.save(update_fields=["warnings", "status", "updated_at"])
+        return run
+    if state == "changes":
+        raise ValueError(f"Tabelyje yra nepatvirtintų pakeitimų ({who}) – patvirtinkite tabelį, tada atlyginimai bus perskaičiuoti")
 
     first, last = month_bounds(run.year, run.month)
     P = get_params(first)
@@ -611,9 +632,11 @@ def approve_run(run, user, advance_decisions=None):
         return run
     if not run.results.exists():
         raise ValueError("Nėra ką tvirtinti - šį mėnesį nėra apskaičiuotų atlyginimų")
-    if getattr(run, "kind", "regular") in ("regular", "monthly") and \
-            timesheet_status(run.company, run.year, run.month) not in ("approved", "locked"):
-        raise ValueError("Pirmiausia patvirtinkite šio mėnesio tabelį (Grafikai ir tabeliai → Tabelis)")
+    if getattr(run, "kind", "regular") in ("regular", "monthly"):
+        from .readiness import readiness
+        r = readiness(run.company, run.year, run.month)
+        if not r["can_approve"]:
+            raise ValueError(f"{r['blockers'][0] if r['blockers'] else 'Tabelis nepatvirtintas'} (Grafikai ir tabeliai → Tabelis)")
     pending = unpaid_advances(run)
     if pending:
         if not advance_decisions or any(str(x["id"]) not in {str(k) for k in advance_decisions} for x in pending):
@@ -922,8 +945,13 @@ def timesheet_set_status(company, year, month, approve, note=""):
     from docscanner_app.models import TimesheetMonth
     tm, _ = TimesheetMonth.objects.get_or_create(company=company, year=year, month=month)
     issues = []
+    rows = None
     if approve:
-        issues = timesheet_issues(company, year, month)
+        from .readiness import check_month_can_close, check_roster_for_timesheet
+        check_month_can_close(year, month)                         # mėnuo dar nesibaigęs - netvirtinama
+        rows = timesheet_for(company, year, month)
+        check_roster_for_timesheet(company, year, month, rows)      # suminė apskaita - be paskelbto grafiko netvirtinama
+        issues = timesheet_issues(company, year, month, rows)
         errors = [i for i in issues if i["level"] == "error"]
         violations = [i for i in issues if i["level"] == "violation"]
         if errors:
@@ -937,7 +965,12 @@ def timesheet_set_status(company, year, month, approve, note=""):
     tm.approved_at = timezone.now() if approve else None
     tm.approval_note = (note or "").strip()[:500] if approve else ""
     tm.approval_issues = [i for i in issues if i["level"] == "violation"] if approve else []
-    tm.save(update_fields=["status", "approved_at", "approval_note", "approval_issues"])
+    fields = ["status", "approved_at", "approval_note", "approval_issues"]
+    if approve:                       # patvirtinto tabelio kopija - vėliau rodoma, kas pasikeitė
+        from .readiness import take_snapshot
+        take_snapshot(tm, rows)
+        fields += ["approved_snapshot", "approved_version"]
+    tm.save(update_fields=fields)
     if approve:                       # patvirtinus tabelį - DU juodraštis perskaičiuojamas pagal galutinį tabelį
         for run in PayrollRun.objects.filter(company=company, year=year, month=month, status="draft"):
             try:
@@ -2565,9 +2598,9 @@ GPM312_ZERO_RATE = {"05", "07", "08", "73", "74"}
 
 
 def _before_du_start(company, year, month):
-    from docscanner_app.models import PayrollMigration
-    mg = PayrollMigration.objects.filter(company=company, status="confirmed").only("du_start").first()
-    return bool(mg and year and month and (year, month) < (mg.du_start.year, mg.du_start.month))
+    from .readiness import payroll_start
+    s = payroll_start(company)
+    return bool(s and year and month and (year, month) < (s.year, s.month))
 
 
 def gpm312_deadline(year):
@@ -2712,10 +2745,7 @@ def declarations_overview(company, year, month):
         items.append({"form": "2-SD", "authority": "Sodra",
                       "title": f"2-SD: {c.employee.full_name} (paskutinė diena {c.termination_date})",
                       "contract": c.id, "deadline": next_work_day(c.termination_date)})
-    if _before_du_start(company, year, month):
-        for it in items:
-            if it["form"] in ("SAM", "GPM313"):
-                it["previous_system"] = True
+    before = _before_du_start(company, year, month)
     absence_items = _absence_overview_items(company, first, last) + _npsd2_overview_items(company, first, last)
     sdup_item = sdup_overview_item(company, year, month)
     if month in (1, 2):
@@ -2731,7 +2761,11 @@ def declarations_overview(company, year, month):
             "manual_values": d.manual_values, "updated_at": d.updated_at, "submitted_at": d.submitted_at,
             "external_status": d.external_status, "external_message": d.external_message,
         }
-    return items + ([sdup_item] if sdup_item else []) + absence_items
+    out = items + ([sdup_item] if sdup_item else []) + absence_items
+    if before:                        # iki DU pradžios DokSkenas - viskas teikta kitoje programoje
+        for it in out:
+            it["previous_system"] = True
+    return out
 
 
 ABSENCE_TITLE = {"unpaid": "nemokamos atostogos", "truancy": "pravaikšta", "suspension": "nušalinimas nuo darbo",
