@@ -310,7 +310,7 @@ function FaqSection() {
   );
 }
 
-const TURNSTILE_SITEKEY = import.meta.env.VITE_TURNSTILE_SITEKEY;
+const TURNSTILE_SITEKEY = import.meta.env.VITE_TURNSTILE_SITE_KEY;
 
 function LeadSection() {
   const [value, setValue] = useState('');
