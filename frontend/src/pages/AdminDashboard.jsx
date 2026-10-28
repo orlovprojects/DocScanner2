@@ -30,6 +30,8 @@ import {
   Receipt,
   CardMembership,
   Email,
+  Groups,
+  WorkspacePremium,
 } from "@mui/icons-material";
 import { api } from "../api/endpoints";
 
@@ -149,6 +151,28 @@ function StatCard({ title, items, icon: Icon, color = "primary" }) {
   );
 }
 
+// DU: kiek įrašų + kiek įmonių (profilių) ir vartotojų
+function DuStatItem({ label, data, unit, hideCount = false }) {
+  const { count = 0, profiles = 0, users = 0 } = data || {};
+  return (
+    <Box sx={{ py: 1.25 }}>
+      <Typography variant="body2" color="text.secondary" gutterBottom>
+        {label}
+      </Typography>
+      <Stack direction="row" alignItems="center" spacing={1.5} flexWrap="wrap">
+        {!hideCount && (
+          <Typography variant="h5" fontWeight={700}>
+            {count.toLocaleString()}
+            {unit && <Typography component="span" variant="body2" color="text.secondary" sx={{ ml: 0.5 }}>{unit}</Typography>}
+          </Typography>
+        )}
+        <Chip size="small" variant="outlined" label={`${profiles.toLocaleString()} įm.`} sx={{ height: 24, fontWeight: 500 }} />
+        <Chip size="small" variant="outlined" label={`${users.toLocaleString()} vart.`} sx={{ height: 24, fontWeight: 500 }} />
+      </Stack>
+    </Box>
+  );
+}
+
 function PaymentStatItem({ label, data }) {
   const { total_eur = 0, count = 0 } = data || {};
   return (
@@ -187,6 +211,7 @@ export default function AdminDashboard() {
   const [stats, setStats] = useState(null);
   const [err, setErr] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [duStats, setDuStats] = useState(null);
 
   const fetchStats = useCallback(async (useCache = true) => {
     if (useCache) {
@@ -214,13 +239,19 @@ export default function AdminDashboard() {
     }
   }, []);
 
+  const fetchDuStats = useCallback(() => {
+    api.get("/admin/du/stats/").then((r) => setDuStats(r.data)).catch(() => setDuStats(null));
+  }, []);
+
   useEffect(() => {
     fetchStats(true);
-  }, [fetchStats]);
+    fetchDuStats();
+  }, [fetchStats, fetchDuStats]);
 
   const handleRefresh = () => {
     sessionStorage.removeItem("dashboardPrefetch");
     fetchStats(false);
+    fetchDuStats();
   };
 
   if (err && !stats) {
@@ -251,6 +282,9 @@ export default function AdminDashboard() {
   const invSubs = israsymas.subscriptions || {};
   const invEmails = israsymas.emails || {};
   const st = docs.scan_types || {};
+
+  const duAct = duStats?.activity || {};
+  const duSubs = duStats?.subscriptions || {};
 
   const fmtPct = (v) => (typeof v === "number" ? `${v.toFixed(2)}%` : "0.00%");
 
@@ -537,6 +571,53 @@ export default function AdminDashboard() {
             </CardContent>
           </Card>
         </Grid>
+        {/* ========== DU SECTION ========== */}
+
+        {/* DU modulio aktyvumas */}
+        <Grid size={{ xs: 12, md: 6 }}>
+          <StatCard
+            title="DU modulio aktyvumas"
+            icon={Groups}
+            color="primary"
+            items={
+              <>
+                <DuStatItem label="Grafikų sugeneruota" unit="mėn." data={duAct.rosters} />
+                <DuStatItem label="Tabelių patvirtinta" unit="mėn." data={duAct.timesheets} />
+                <DuStatItem label="Atlyginimų patvirtinta" unit="mėn." data={duAct.payroll_runs} />
+                <Divider sx={{ my: 1 }} />
+                <DuStatItem label="DU perėjimų pradėta" data={duAct.migrations_started} hideCount />
+                <DuStatItem label="DU perėjimų atlikta" data={duAct.migrations_done} hideCount />
+                <DuStatItem label="Darbo apmokėjimo sistemos (DAS) patvirtinta" unit="vers." data={duAct.das_approved} />
+                <Divider sx={{ my: 1 }} />
+                <DuStatItem label="Aktyvūs darbuotojai (šiandien)" data={duAct.active_employees} />
+              </>
+            }
+          />
+        </Grid>
+
+        {/* DU prenumeratos */}
+        <Grid size={{ xs: 12, md: 6 }}>
+          <StatCard
+            title="DU modulio prenumeratos"
+            icon={WorkspacePremium}
+            color="warning"
+            items={
+              <>
+                <SimpleStatItem label="Bandomieji pradėti" value={duSubs.trial_active} color="info" />
+                <SimpleStatItem label="Bandomieji pasibaigę" value={duSubs.trial_expired} color="warning" />
+                <Divider sx={{ my: 1 }} />
+                <SimpleStatItem label="Mokami: mėnesiniai" value={duSubs.paid_monthly} color="success" />
+                <Stack direction="row" spacing={1} flexWrap="wrap" sx={{ mb: 1 }}>
+                  <Chip size="small" variant="outlined" label={`MRR: €${(duSubs.mrr ?? 0).toLocaleString()}`} />
+                  <Chip size="small" variant="outlined" color="warning" label={`Atšaukiami: ${duSubs.canceling ?? 0}`} />
+                  <Chip size="small" variant="outlined" color="error" label={`Nesumokėta: ${duSubs.past_due ?? 0}`} />
+                  <Chip size="small" variant="outlined" label={`Atšaukti: ${duSubs.canceled ?? 0}`} />
+                </Stack>
+              </>
+            }
+          />
+        </Grid>
+
         {/* ========== IŠRAŠYMAS SECTION ========== */}
         
         {/* Išrašytos sąskaitos */}

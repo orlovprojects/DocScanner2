@@ -144,6 +144,58 @@ def _month_state(qs, done_statuses):
             "updated_at": _dt(getattr(last, "updated_at", None) or getattr(last, "approved_at", None))}
 
 
+def _reach(qs, company="company"):
+    """Kiek įrašų, įmonių (profilių) ir vartotojų."""
+    return {"count": qs.count(), "profiles": qs.values(company).distinct().count(),
+            "users": qs.values(f"{company}__user").distinct().count()}
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def admin_du_stats(request):
+    """Admin skydelis: DU modulio aktyvumas ir prenumeratos (visos įmonės)."""
+    if not request.user.is_superuser:
+        return _forbidden()
+    from django.db.models import Exists, OuterRef
+    from docscanner_app.models import (DasDocument, EmploymentContract, PayrollMigration, PayrollRun,
+                                       PayrollSubscription, Roster, RosterShift, TimesheetMonth)
+    from .billing import price_for
+    today = timezone.localdate()
+    now = timezone.now()
+
+    rosters = Roster.objects.filter(Exists(RosterShift.objects.filter(roster=OuterRef("pk"))))
+    sheets = TimesheetMonth.objects.filter(status__in=("approved", "locked"))
+    runs = PayrollRun.objects.filter(kind="regular", status__in=("approved", "paid", "closed"))
+    mig_started = PayrollMigration.objects.filter(Q(files__isnull=False) | Q(people__isnull=False)).distinct()
+    mig_done = PayrollMigration.objects.filter(status="confirmed")
+    contracts = (EmploymentContract.objects.exclude(status="draft").filter(start_date__lte=today)
+                 .filter(Q(termination_date__isnull=True) | Q(termination_date__gte=today))
+                 .filter(Q(end_date__isnull=True) | Q(end_date__gte=today)))
+    active = {"count": contracts.values("employee").distinct().count(),
+              "profiles": contracts.values("employee__company").distinct().count(),
+              "users": contracts.values("employee__company__user").distinct().count()}
+
+    subs = PayrollSubscription.objects.all()
+    paid = subs.filter(status__in=("active", "past_due")).exclude(stripe_subscription_id="")
+    mrr = sum(price_for(n) for n in paid.values_list("billed_employees", flat=True))
+    return Response({
+        "activity": {
+            "rosters": _reach(rosters), "timesheets": _reach(sheets), "payroll_runs": _reach(runs),
+            "migrations_started": _reach(mig_started), "migrations_done": _reach(mig_done),
+            "das_approved": _reach(DasDocument.objects.all()), "active_employees": active,
+        },
+        "subscriptions": {
+            "trial_active": subs.filter(status="trial", trial_ends_at__gt=now).count(),
+            "trial_expired": subs.filter(status="trial", trial_ends_at__lte=now).count(),
+            "paid_monthly": paid.count(),
+            "canceling": paid.filter(cancel_at_period_end=True).count(),
+            "past_due": subs.filter(status="past_due").count(),
+            "canceled": subs.filter(status="canceled").count(),
+            "mrr": mrr,
+        },
+    })
+
+
 def _cursor(qs, request):
     before = request.GET.get("before")
     if before:

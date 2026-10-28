@@ -150,8 +150,26 @@ def create_checkout(company, user):
         mode="subscription", customer=_customer(user), client_reference_id=str(company.id),
         line_items=[{"price": settings.STRIPE_DU_PRICE_ID, "quantity": n}],
         subscription_data=sub_data, metadata=meta, locale="lt", allow_promotion_codes=True,
-        success_url=_front("/darbo-uzmokestis?du_plan=success"), cancel_url=_front("/darbo-uzmokestis"))
+        success_url=_front("/papildyti?du_success=1#du"), cancel_url=_front("/papildyti?du_canceled=1#du"))
     return session["url"]
+
+
+def _set_cancel(company, cancel):
+    s = _sub(company)
+    if not s.stripe_subscription_id or s.status not in ("active", "past_due", "canceled"):
+        raise ValueError("Aktyvaus DU plano nėra")
+    sub = _stripe().Subscription.modify(s.stripe_subscription_id, cancel_at_period_end=cancel)
+    _apply_subscription(_plain(sub))
+    return payroll_access(company)
+
+
+def cancel_subscription(company):
+    """Atšaukti: pilnas DU galioja iki apmokėto laikotarpio pabaigos."""
+    return _set_cancel(company, True)
+
+
+def resume_subscription(company):
+    return _set_cancel(company, False)
 
 
 def create_portal(company, user):

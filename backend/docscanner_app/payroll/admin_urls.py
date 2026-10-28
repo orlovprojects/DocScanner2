@@ -7,6 +7,7 @@ urlpatterns = [
     path("whoami/", v.admin_du_whoami),
     path("users/", v.admin_du_users),
     path("companies/", v.admin_du_companies),
+    path("stats/", v.admin_du_stats),
     path("errors/", v.admin_du_errors),
     path("uploads/", v.admin_du_uploads),
     path("uploads/<int:pk>/download/", v.admin_du_upload_download),

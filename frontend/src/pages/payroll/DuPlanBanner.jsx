@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
-import { useSearchParams } from "react-router-dom";
-import { Alert, Box, Button, CircularProgress, Tooltip, Typography } from "@mui/material";
+import { useNavigate } from "react-router-dom";
+import { Alert, AlertTitle, Box, Button, CircularProgress, Typography } from "@mui/material";
 import LockIcon from "@mui/icons-material/Lock";
 import RocketLaunchOutlinedIcon from "@mui/icons-material/RocketLaunchOutlined";
 import HourglassTopOutlinedIcon from "@mui/icons-material/HourglassTopOutlined";
@@ -9,8 +9,12 @@ import { api } from "../../api/endpoints";
 
 // DU planas: rodoma tik „Personalas ir DU“ ir „Grafikai ir tabelis“ puslapiuose (App.jsx)
 const URL = "payroll/subscription/";
+const PLAN_PAGE = "/papildyti#du";
 const GRADIENT = "linear-gradient(135deg, #FF9800 0%, #F57C00 100%)";
+const WARN_DAYS = 3;                      // likus tiek dienų - priminimas įsigyti planą
 const fmtDate = (d) => (d ? String(d).slice(0, 10) : "");
+// po 1 dienos, po 2 / 3 dienų
+const inDays = (n) => (n <= 0 ? "šiandien" : `po ${n} ${n === 1 ? "dienos" : "dienų"}`);
 
 function Shell({ icon, iconBg = "#FF9800", title, text, children, soft }) {
   return (
@@ -42,81 +46,66 @@ const Primary = ({ children, ...p }) => (
 );
 
 export default function DuPlanBanner() {
-  const [sp, setSp] = useSearchParams();
+  const navigate = useNavigate();
   const [a, setA] = useState(null);
-  const [busy, setBusy] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [started, setStarted] = useState(false);      // ką tik pradėtas bandomasis - žalias pranešimas
   const [error, setError] = useState("");
-  const success = sp.get("du_plan") === "success";
 
-  const load = useCallback(() => api.get(URL).then((r) => { setA(r.data); return r.data; }).catch(() => null), []);
+  const load = useCallback(() => api.get(URL).then((r) => setA(r.data)).catch(() => null), []);
   useEffect(() => { load(); }, [load]);
 
-  // grįžus iš Stripe - laukiame, kol webhook aktyvuos planą
-  useEffect(() => {
-    if (!success) return undefined;
-    let n = 0;
-    const t = setInterval(async () => {
-      n += 1;
-      const d = await load();
-      if (d?.state === "active" || n >= 10) {
-        clearInterval(t);
-        sp.delete("du_plan");
-        setSp(sp, { replace: true });
-      }
-    }, 3000);
-    return () => clearInterval(t);
-  }, [success]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const act = async (action) => {
-    setBusy(action); setError("");
+  const startTrial = async () => {
+    setBusy(true); setError("");
     try {
-      const { data } = await api.post(URL, { action });
-      if (data?.url) { window.location.assign(data.url); return; }
+      const { data } = await api.post(URL, { action: "start_trial" });
       setA(data);
+      setStarted(true);
     } catch (e) {
       const d = e?.response?.data;
-      setError((Array.isArray(d) ? d.join(" ") : d?.detail || (d && Object.values(d).flat().join(" "))) || "Nepavyko");
+      setError((Array.isArray(d) ? d.join(" ") : d?.detail) || "Nepavyko pradėti bandomojo laikotarpio");
     } finally {
-      setBusy("");
+      setBusy(false);
     }
   };
 
   if (!a || !a.enabled || a.state === "free") return null;
-  const price = `${a.employees} darb. – ${a.price} €/mėn. be PVM`;
-  const priceTip = <Tooltip title={`Kaina: ${a.price_text}. Skaičiuojami darbuotojai, kurių sutartis galiojo mėnesį.`} arrow>
-    <span style={{ borderBottom: "1px dotted #6B4F2A", cursor: "help" }}>{price}</span></Tooltip>;
-  const order = <Primary onClick={() => act("checkout")} disabled={!!busy}>
-    {busy === "checkout" ? <CircularProgress size={16} sx={{ color: "#fff" }} /> : "Užsakyti planą"}</Primary>;
-  const portal = (label) => <Button size="small" onClick={() => act("portal")} disabled={!!busy}
-    sx={{ textTransform: "none", fontWeight: 600, color: "#3B2A1A", whiteSpace: "nowrap" }}>{label}</Button>;
+  const toPlan = <Primary onClick={() => navigate(PLAN_PAGE)}>Įsigyti planą</Primary>;
 
   let body = null;
-  if (success && a.state !== "active") {
-    body = <Alert severity="info" sx={{ mb: 2 }}>Ačiū! Mokėjimas gautas – DU planas aktyvuojamas…</Alert>;
+  if (started && a.state === "trial") {
+    body = (
+      <Alert severity="success" onClose={() => setStarted(false)} sx={{ mb: 2, borderRadius: 3 }}>
+        <AlertTitle sx={{ fontWeight: 700 }}>Bandomasis laikotarpis prasidėjo</AlertTitle>
+        Pasibaigs {fmtDate(a.trial_ends_at)}
+        <br />
+        Galite naudotis visomis DU modulio funkcijomis neribotai
+      </Alert>
+    );
   } else if (a.state === "none") {
     body = (
       <Shell icon={<RocketLaunchOutlinedIcon sx={{ fontSize: 20 }} />} soft
         title={`Išbandykite pilną DU ${a.trial_days} d. nemokamai`}
         text="DU tvirtinimas, algalapiai, deklaracijos, grafikų skelbimas ir darbuotojų savitarna. Kortelės nereikia.">
-        <Primary onClick={() => act("start_trial")} disabled={!!busy}>
-          {busy === "start_trial" ? <CircularProgress size={16} sx={{ color: "#fff" }} /> : "Pradėti bandomąjį laikotarpį"}
+        <Primary onClick={startTrial} disabled={busy}>
+          {busy ? <CircularProgress size={16} sx={{ color: "#fff" }} /> : "Pradėti bandomąjį laikotarpį"}
         </Primary>
       </Shell>
     );
-  } else if (a.state === "trial") {
+  } else if (a.state === "trial" && a.days_left !== null && a.days_left <= WARN_DAYS) {
     body = (
-      <Shell icon={<HourglassTopOutlinedIcon sx={{ fontSize: 20 }} />} soft
-        title={`Bandomasis laikotarpis – liko ${a.days_left} d. (iki ${fmtDate(a.trial_ends_at)})`}
-        text={<>Užsakius dabar, mokėsite tik pasibaigus bandomajam laikotarpiui · {priceTip}</>}>
-        {order}
+      <Shell icon={<HourglassTopOutlinedIcon sx={{ fontSize: 20 }} />}
+        title={`Bandomasis laikotarpis baigiasi ${inDays(a.days_left)}`}
+        text={`Įsigykite DU planą, kad galėtumėte toliau tvirtinti DU ir skelbti grafikus (${fmtDate(a.trial_ends_at)}).`}>
+        {toPlan}
       </Shell>
     );
   } else if (a.state === "expired") {
     body = (
       <Shell icon={<LockIcon sx={{ fontSize: 20 }} />}
         title="Bandomasis laikotarpis baigėsi"
-        text={<>DU tvirtinimas ir grafikų skelbimas užrakinti. Duomenys, skaičiavimai ir SDUP – prieinami · {priceTip}</>}>
-        {order}
+        text="DU tvirtinimas ir grafikų skelbimas užrakinti. Duomenys, skaičiavimai, DAS ir SDUP – prieinami.">
+        {toPlan}
       </Shell>
     );
   } else if (a.state === "past_due") {
@@ -124,19 +113,11 @@ export default function DuPlanBanner() {
       <Shell icon={<WarningAmberOutlinedIcon sx={{ fontSize: 20 }} />}
         title="Nepavyko nuskaičiuoti mokėjimo už DU planą"
         text="Atnaujinkite mokėjimo kortelę, kad DU tvirtinimas nebūtų užrakintas.">
-        {portal("Atnaujinti mokėjimą")}
-      </Shell>
-    );
-  } else if (a.state === "active" && a.cancel_at_period_end) {
-    body = (
-      <Shell icon={<HourglassTopOutlinedIcon sx={{ fontSize: 20 }} />} soft
-        title={`DU planas atšauktas – galioja iki ${fmtDate(a.current_period_end)}`}
-        text="Po šios datos DU tvirtinimas ir grafikų skelbimas bus užrakinti.">
-        {portal("Atnaujinti planą")}
+        <Primary onClick={() => navigate(PLAN_PAGE)}>Tvarkyti planą</Primary>
       </Shell>
     );
   }
-  if (!body) return null;
+  if (!body && !error) return null;
   return (
     <Box sx={{ px: { xs: 2, md: 3 }, pt: 2 }}>
       {body}

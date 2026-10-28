@@ -15,7 +15,7 @@ logger = logging.getLogger("docscanner_app")
 
 
 class PayrollSubscriptionView(PayrollCompanyMixin, APIView):
-    """GET - DU plano būsena; POST {action: start_trial | checkout | portal}."""
+    """GET - DU plano būsena; POST {action: start_trial | checkout | cancel | resume | portal}."""
 
     def get(self, request):
         return Response(billing.payroll_access(self.get_company()))
@@ -28,6 +28,10 @@ class PayrollSubscriptionView(PayrollCompanyMixin, APIView):
                 return Response(billing.start_trial(company))
             if action == "checkout":
                 return Response({"url": billing.create_checkout(company, request.user)})
+            if action == "cancel":
+                return Response(billing.cancel_subscription(company))
+            if action == "resume":
+                return Response(billing.resume_subscription(company))
             if action == "portal":
                 return Response({"url": billing.create_portal(company, request.user)})
         except ValueError as e:
