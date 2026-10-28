@@ -1133,7 +1133,9 @@ def export_pirkimai_group_to_rivile(documents, user, own_company_code=None):
 
                 kodas = (
                     _resolved_field(item, "prekes_kodas")
+                    or _resolved_field(item, "prekes_barkodas")
                     or getattr(doc, "prekes_kodas", None)
+                    or getattr(doc, "prekes_barkodas", None)
                     or "PREKE001"
                 )
                 ET.SubElement(i07, "I07_KODAS").text = rivile_str(kodas)
@@ -1204,7 +1206,11 @@ def export_pirkimai_group_to_rivile(documents, user, own_company_code=None):
         else:
             i07 = ET.SubElement(i06, "I07")
             _apply_line_extras(i07, user, direction="pirkimas", own_company_code=own_company_code)
-            kodas = getattr(doc, "prekes_kodas", None) or "PREKE001"
+            kodas = (
+                getattr(doc, "prekes_kodas", None)
+                or getattr(doc, "prekes_barkodas", None)
+                or "PREKE001"
+            )
             ET.SubElement(i07, "I07_KODAS").text = rivile_str(kodas)
             ET.SubElement(i07, "I07_TIPAS").text = rivile_str(normalize_preke_paslauga_tipas(getattr(doc, "preke_paslauga", None)))
 
@@ -1337,7 +1343,9 @@ def export_pardavimai_group_to_rivile(documents, user, own_company_code=None):
 
                 kodas = (
                     _resolved_field(item, "prekes_kodas")
+                    or _resolved_field(item, "prekes_barkodas")
                     or getattr(doc, "prekes_kodas", None)
+                    or getattr(doc, "prekes_barkodas", None)
                     or "PREKE002"
                 )
                 ET.SubElement(i07, "I07_KODAS").text = rivile_str(kodas)
@@ -1410,7 +1418,11 @@ def export_pardavimai_group_to_rivile(documents, user, own_company_code=None):
         else:
             i07 = ET.SubElement(i06, "I07")
             _apply_line_extras(i07, user, direction="pardavimas", own_company_code=own_company_code)
-            kodas = getattr(doc, "prekes_kodas", None) or "PREKE002"
+            kodas = (
+                getattr(doc, "prekes_kodas", None)
+                or getattr(doc, "prekes_barkodas", None)
+                or "PREKE002"
+            )
             ET.SubElement(i07, "I07_KODAS").text = rivile_str(kodas)
             ET.SubElement(i07, "I07_TIPAS").text = rivile_str(normalize_preke_paslauga_tipas(getattr(doc, "preke_paslauga", None)))
 

@@ -1,5 +1,5 @@
 from celery import shared_task
-
+from .. import admin_tools  # noqa: F401 - Celery klaidos -> PayrollErrorLog (Klaidos skirtukas)
 
 @shared_task(soft_time_limit=600)
 def generate_roster_task(roster_id, n=3, seconds=30):
@@ -56,8 +56,10 @@ def repair_roster_task(roster_id, mode="fill", seconds=20):
         rep = repair_preview(roster, mode, seconds=seconds)
     except ValueError as e:
         rep = {"state": "error", "mode": mode, "error": str(e)}
-    except Exception:  # noqa: BLE001
+    except Exception as e:  # noqa: BLE001
         logging.getLogger("docscanner_app").exception("Roster repair failed: roster=%s", roster_id)
+        admin_tools.log_task_error("payroll.roster.repair_roster_task", e, company_id=roster.company_id,
+                                   args=[roster_id, mode])
         rep = {"state": "error", "mode": mode, "error": "Vidinė klaida ieškant pataisymų"}
     roster.refresh_from_db()
     roster.summary = dict(roster.summary or {}, repair=rep)

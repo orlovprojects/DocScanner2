@@ -133,6 +133,49 @@ def log_error(request, exc):
 
 
 # ============================================================
+# Celery užduočių klaidos (grafikų sudarymas ir kt.) -> tas pats klaidų žurnalas
+# ============================================================
+
+def log_task_error(task_name, exc, tb="", company_id=None, args=None):
+    try:
+        from docscanner_app.models import PayrollErrorLog
+        PayrollErrorLog.objects.create(
+            company_id=company_id, method="TASK", path=(task_name or "")[:500], status=500,
+            error_type=type(exc).__name__[:100], message=f"{type(exc).__name__}: {exc}"[:4000],
+            traceback=(tb or traceback.format_exc())[-10000:],
+            payload={"args": [str(a)[:200] for a in (args or [])][:10]})
+    except Exception:
+        logger.exception("log_task_error: nepavyko įrašyti")
+
+
+def _task_company(task_name, args, kwargs):
+    try:
+        if kwargs.get("company_id"):
+            return kwargs["company_id"]
+        if task_name.endswith("generate_period_task") and args:
+            return args[0]
+        if task_name.endswith(("generate_roster_task", "repair_roster_task")) and args:
+            from docscanner_app.models import Roster
+            return Roster.objects.filter(id=args[0]).values_list("company_id", flat=True).first()
+    except Exception:
+        return None
+    return None
+
+
+try:
+    from celery.signals import task_failure
+
+    @task_failure.connect(weak=False)
+    def _payroll_task_failure(sender=None, task_id=None, exception=None, args=None, kwargs=None, einfo=None, **_):
+        name = getattr(sender, "name", "") or ""
+        if ".payroll." not in name:
+            return
+        log_task_error(name, exception, str(einfo) if einfo else "", _task_company(name, args or [], kwargs or {}), args)
+except ImportError:                                   # be Celery (pvz. testai)
+    pass
+
+
+# ============================================================
 # Valymas
 # ============================================================
 
