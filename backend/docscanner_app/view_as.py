@@ -51,6 +51,7 @@ BLOCKED = [
     (re.compile(r"/payroll/requests/\d+/(approve|reject)/$"), "darbuotojų prašymų sprendimai (laiškai)"),
     (re.compile(r"/payroll/payments/file/$"), "mokėjimų failas bankui"),
     (re.compile(r"/payroll/runs/\d+/(approve|reopen)/$"), "DU tvirtinimas / atšaukimas (algalapiai darbuotojams)"),
+    (re.compile(r"/payroll/subscription/$"), "DU planas ir mokėjimai"),
 ]
 
 READ_ONLY_MESSAGE = "Peržiūros režimas – keisti negalima"

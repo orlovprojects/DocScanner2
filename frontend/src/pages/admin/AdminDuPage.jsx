@@ -32,12 +32,31 @@ const COLS = [
   ["Grafikas", "Paskutinis mėnuo su pamainomis ir jo būsena; iki kurio mėnesio paskelbta"],
   ["Tabelis", "Paskutinis mėnuo su patvirtintu tabeliu arba rankiniais įrašais; iki kurio mėnesio patvirtinta"],
   ["DU", "Paskutinis mėnesio atlyginimų skaičiavimas; iki kurio mėnesio patvirtinta; ⚠ - įspėjimų skaičius"],
+  ["Planas", "DU planas: bandomasis laikotarpis, aktyvus (Stripe), nesumokėta, baigėsi; kaina pagal aktyvius darbuotojus"],
   ["Deklaracijos", "Nepateiktos: su klaidomis / pavėluotos"],
   ["Klaidos 7 d.", "Klaidos DU skiltyje per 7 dienas (500 - serverio klaidos)"],
   ["Failai", "Įkelti failai archyve / neatpažinti"],
   ["Aktyvumas", "Paskutinis DU, grafiko, perėjimo pakeitimas, klaida ar įkeltas failas"],
   [""],
 ];
+
+const PLAN = { free: ["Nemokama", "default"], none: ["Nepradėta", "default"], trial: ["Bandomasis", "info"],
+  active: ["Aktyvus", "success"], past_due: ["Nesumokėta", "error"], expired: ["Baigėsi", "warning"] };
+
+function PlanCell({ p }) {
+  if (!p) return <Typography sx={{ fontSize: 12, color: "text.disabled" }}>–</Typography>;
+  const [label, color] = PLAN[p.state] || [p.state, "default"];
+  return (
+    <>
+      <Chip size="small" label={label} color={color} sx={{ height: 20, fontSize: 11 }} />
+      <Typography sx={{ fontSize: 12, color: "text.secondary", mt: 0.25, whiteSpace: "nowrap" }}>
+        {p.state === "trial" ? `liko ${p.days_left} d.` : p.state === "active" && p.current_period_end
+          ? `${p.cancel_at_period_end ? "galioja" : "kitas mokėjimas"} ${p.current_period_end.slice(0, 10)}` : ""}
+      </Typography>
+      <Typography sx={{ fontSize: 12, color: "text.secondary", whiteSpace: "nowrap" }}>{p.employees} d. · {p.price} €/mėn.</Typography>
+    </>
+  );
+}
 
 function MonthCell({ data, kind }) {
   if (!data) return <Typography sx={{ fontSize: 12, color: "text.disabled" }}>Nenaudoja</Typography>;
@@ -190,6 +209,7 @@ function CompaniesTab({ onErrors, onUploads }) {
                     <TableCell sx={td}><MonthCell data={r.roster} kind="roster" /></TableCell>
                     <TableCell sx={td}><MonthCell data={r.timesheet} kind="timesheet" /></TableCell>
                     <TableCell sx={td}><MonthCell data={r.payroll} kind="payroll" /></TableCell>
+                    <TableCell sx={td}><PlanCell p={r.plan} /></TableCell>
                     <TableCell sx={td}>
                       <Typography sx={{ fontSize: 12 }}>klaidos <Num n={r.declarations_errors} /></Typography>
                       <Typography sx={{ fontSize: 12 }}>vėluoja <Num n={r.declarations_overdue} /></Typography>

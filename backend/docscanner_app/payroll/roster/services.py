@@ -1273,6 +1273,8 @@ def publish(roster, user, confirm_late=False, confirm_violations=False):
     from docscanner_app.models import Employee, RosterAck, RosterChange
     from ..savitarna_emails import notify_roster
     from .changes import diff, late_changes, lines_for
+    from ..billing import require_payroll_access
+    require_payroll_access(roster.company, "grafiko skelbimui")
 
     if not confirm_violations:              # ROS-01: DK pažeidimai - tik sąmoningai patvirtinus
         viol = check([_shift_obj(x) for x in roster.shifts.all()])

@@ -688,6 +688,9 @@ def timesheet_status(company, year, month):
 def approve_run(run, user, advance_decisions=None):
     if run.status in CLOSED_STATUSES:
         return run
+    if getattr(run, "kind", "regular") != "final_settlement":     # galutinis atsiskaitymas atleidžiant - visada (DK 146)
+        from .billing import require_payroll_access
+        require_payroll_access(run.company, "DU tvirtinimui")
     if not run.results.exists():
         raise ValueError("Nėra ką tvirtinti - šį mėnesį nėra apskaičiuotų atlyginimų")
     if getattr(run, "kind", "regular") in ("regular", "monthly"):

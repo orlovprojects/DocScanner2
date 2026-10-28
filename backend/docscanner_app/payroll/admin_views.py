@@ -107,6 +107,7 @@ def admin_du_companies(request):
                 "status": m.status, "mode": getattr(m, "mode", ""), "du_start": _dt(m.du_start),
                 "files": m.files.count(), "people": m.people.count(), "updated_at": _dt(m.updated_at)},
             "roster": roster, "timesheet": sheet, "payroll": payroll,
+            "plan": _plan(cp),
             "declarations_errors": decl.exclude(errors=[]).count(),
             "declarations_overdue": decl.filter(deadline__lt=today).count(),
             "errors_7d": errs.filter(created_at__gte=week).count(),
@@ -116,6 +117,17 @@ def admin_du_companies(request):
         })
     rows.sort(key=lambda r: r["last_activity"] or "", reverse=True)
     return Response(rows)
+
+
+def _plan(cp):
+    try:
+        from .billing import payroll_access
+        a = payroll_access(cp)
+        return {k: _dt(v) if hasattr(v, "isoformat") else v for k, v in a.items()
+                if k in ("state", "days_left", "trial_ends_at", "current_period_end", "employees", "price",
+                         "billed_employees", "cancel_at_period_end")}
+    except Exception:
+        return None
 
 
 def _ym(o):

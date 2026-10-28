@@ -290,6 +290,7 @@ from .payroll.views import (
     PayrollMigrationExcelView, SodraReportsView,
     GarnishmentOrderViewSet, RecurringPayItemViewSet, PayrollOverviewView,
 )
+from .payroll.billing_views import PayrollSubscriptionView, StripeDuWebhookView
 
 
 router = DefaultRouter()
@@ -334,6 +335,8 @@ urlpatterns = [
 
     path('me/', user_me_view),
     path("admin/du/", include("docscanner_app.payroll.admin_urls")),
+    path("payroll/subscription/", PayrollSubscriptionView.as_view()),
+    path("stripe/du-webhook/", StripeDuWebhookView.as_view()),
     path("company-profiles/search/", onboarding_company_search, name="onboarding-company-search"),
     path("api/track-click/", TrackAdClickView.as_view(), name="TrackAdClickView"),
 

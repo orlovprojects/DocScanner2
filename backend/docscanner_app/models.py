@@ -8550,3 +8550,24 @@ class AdminViewAsLog(models.Model):
     class Meta:
         ordering = ["-id"]
  
+
+
+
+class PayrollSubscription(models.Model):
+    """DU planas įmonei: bandomasis laikotarpis ir Stripe prenumerata (kiekis = aktyvūs darbuotojai)."""
+    STATUS_CHOICES = [("none", "Nepradėta"), ("trial", "Bandomasis"), ("active", "Aktyvi"),
+                      ("past_due", "Nesumokėta"), ("canceled", "Atšaukta")]
+    company = models.OneToOneField("CompanyProfile", on_delete=models.CASCADE, related_name="payroll_subscription")
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default="none")
+    trial_started_at = models.DateTimeField(null=True, blank=True)
+    trial_ends_at = models.DateTimeField(null=True, blank=True)
+    stripe_subscription_id = models.CharField(max_length=64, blank=True, default="")
+    stripe_item_id = models.CharField(max_length=64, blank=True, default="")
+    billed_employees = models.PositiveIntegerField(default=0)
+    current_period_end = models.DateTimeField(null=True, blank=True)
+    cancel_at_period_end = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+ 
+    def __str__(self):
+        return f"{self.company} – {self.get_status_display()}"

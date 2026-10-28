@@ -26,6 +26,7 @@ import { useState } from "react";
 import { api } from "./api/endpoints";
 import AddCompanyProfileDialog from "./components/AddCompanyProfileDialog";
 import ViewAsBanner from "./admin/ViewAsBanner";
+import DuPlanBanner from "./pages/payroll/DuPlanBanner";
 
 // ─── Lazy: все страницы ───
 const InvLayout = lazy(() => import('./components/InvLayout'));
@@ -317,8 +318,8 @@ function App() {
                 <Route path="/darbo-uzmokestis/deklaracijos" element={<Navigate to="/deklaravimas" replace />} />
                 <Route path="/darbo-uzmokestis/grafikai" element={<Navigate to="/grafikai-ir-tabeliai" replace />} />
                 <Route path="/darbo-uzmokestis/komandiruotes" element={<Navigate to="/grafikai-ir-tabeliai/komandiruotes" replace />} />
-                <Route path="/darbo-uzmokestis/:tab?" element={<PrivateRoute><ErpRoute><DarboUzmokestisPage /></ErpRoute></PrivateRoute>} />
-                <Route path="/grafikai-ir-tabeliai/:tab?" element={<PrivateRoute><ErpRoute><GrafikaiTabeliaiPage /></ErpRoute></PrivateRoute>} />
+                <Route path="/darbo-uzmokestis/:tab?" element={<PrivateRoute><ErpRoute><DuPlanBanner /><DarboUzmokestisPage /></ErpRoute></PrivateRoute>} />
+                <Route path="/grafikai-ir-tabeliai/:tab?" element={<PrivateRoute><ErpRoute><DuPlanBanner /><GrafikaiTabeliaiPage /></ErpRoute></PrivateRoute>} />
                 <Route path="/deklaravimas" element={<PrivateRoute><ErpRoute><DeklaracijosPage /></ErpRoute></PrivateRoute>} />
 
                 <Route path="/priminti-slaptazodi" element={<PasswordReset />} />

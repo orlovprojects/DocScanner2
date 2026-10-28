@@ -1,5 +1,6 @@
 from celery import shared_task
 from .. import admin_tools  # noqa: F401 - Celery klaidos -> PayrollErrorLog (Klaidos skirtukas)
+from ..billing import sync_payroll_subscriptions  # noqa: F401 - DU plano kiekio sinchronizavimas
 
 @shared_task(soft_time_limit=600)
 def generate_roster_task(roster_id, n=3, seconds=30):
