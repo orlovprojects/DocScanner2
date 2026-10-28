@@ -388,7 +388,7 @@ def _ask_gemini_pdf(pdf_bytes: bytes, prompt: str, model: str = None) -> str:
                 response = client.models.generate_content(
                     model=current_model,
                     contents=contents,
-                    config={"temperature": 0, "max_output_tokens": 32768},
+                    config={"max_output_tokens": 32768},
                 )
                 elapsed = _time.perf_counter() - t0
                 result = (getattr(response, "text", "") or "").strip()
@@ -440,7 +440,7 @@ def _ask_gemini_image(file_bytes: bytes, mime_type: str, prompt: str,
             response = client.models.generate_content(
                 model=current_model,
                 contents=contents,
-                config={"temperature": 0, "max_output_tokens": 16000},
+                config={"max_output_tokens": 16000},
             )
             elapsed = time.perf_counter() - t0
             result = (getattr(response, "text", "") or "").strip()

@@ -31,3 +31,6 @@ backend/companies.xlsx
 backend/celery-beat.pid
 backend/celerybeat-schedule.db
 backend/celerybeat-schedule.db.db
+
+#Dlai admina
+private_media/

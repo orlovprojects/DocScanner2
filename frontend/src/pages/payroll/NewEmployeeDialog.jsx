@@ -101,6 +101,7 @@ function WeekEditor({ days, week, total, onToggle, onHour, onTemplate }) {
   const sum = week.reduce((a, h, i) => a + (days[i] ? Number(h) || 0 : 0), 0);
   const off = Math.abs(sum - total) > 0.01;
   const tooLong = week.some((h, i) => days[i] && Number(h) > 12);
+  const allDays = days.every(Boolean);
   return (
     <Box>
       <Stack direction="row" alignItems="center" justifyContent="space-between" mb={1}>
@@ -129,8 +130,8 @@ function WeekEditor({ days, week, total, onToggle, onHour, onTemplate }) {
           </Box>
         ))}
       </Box>
-      <Typography sx={{ fontSize: 12, color: off || tooLong ? "#B42318" : "#667085", mt: .75 }}>
-        {off ? `Dienų suma ${fmtH(sum)} val., o turi būti ${fmtH(total)} val. per savaitę`
+      <Typography sx={{ fontSize: 12, color: off || tooLong || allDays ? "#B42318" : "#667085", mt: .75 }}>
+        {allDays ? "Ne daugiau kaip 6 darbo dienos per savaitę – bent viena diena poilsiui" : off ? `Dienų suma ${fmtH(sum)} val., o turi būti ${fmtH(total)} val. per savaitę`
           : tooLong ? "Ne daugiau kaip 12 val. per dieną (DK 114 str.)"
             : "Valandos per dieną. Paspauskite dieną, kad ją įjungtumėte ar išjungtumėte."}
       </Typography>
@@ -155,6 +156,14 @@ const EMPTY = {
 };
 
 // 1-SD - ne vėliau kaip prieš 1 darbo dieną iki darbo pradžios (savaitgaliai praleidžiami; šventes tikrina Sodros forma)
+// numatyta darbo pradžia - kita darbo diena (1-SD dar spėjama pateikti šiandien)
+function nextWorkday() {
+  const d = new Date();
+  d.setHours(12);
+  do { d.setDate(d.getDate() + 1); } while (d.getDay() === 0 || d.getDay() === 6);
+  return d.toISOString().slice(0, 10);
+}
+
 function prevWorkday(iso) {
   if (!iso) return "";
   const d = new Date(`${iso}T12:00:00`);
@@ -241,7 +250,9 @@ const STEPS = ["Asmuo", "Darbas", "Kiti duomenys"];
 // ---------- Dialogas ----------
 export default function NewEmployeeDialog({ open, onClose, onCreated }) {
   const [f, setF] = useState(EMPTY);
-  const [step, setStep] = useState(0);
+  const [step, setStepRaw] = useState(0);
+  const [reached, setReached] = useState(0);        // toliausiai pasiektas žingsnis - santrauka rodo tik įvestus duomenis
+  const setStep = (i) => { setStepRaw(i); setReached((r) => Math.max(r, i)); };
   const [positions, setPositions] = useState([]);
   const [leave, setLeave] = useState(null);
   const [leaveEdit, setLeaveEdit] = useState(false);
@@ -250,8 +261,7 @@ export default function NewEmployeeDialog({ open, onClose, onCreated }) {
   const [co, setCo] = useState({ m: 3, a: 1 });   // įmonės apskaitinis laikotarpis (DU nustatymai)
   const set = (v) => setF((s) => ({ ...s, ...v }));
   const setHours = (h) => setF((s) => {
-    const full = Number(s.full_time_hours) || 40;
-    const v = h !== "" && Number(h) > full ? full : h;             // vienoje sutartyje - daugiausia 1 etatas
+    const v = h;                                                  // daugiau nei 1 etatas - klaida (ne apribojimas)
     return { ...s, weekly_hours: v, week: spread(Number(v) || 0, s.days) };
   });
   const setFull = (h) => setF((s) => {
@@ -266,7 +276,7 @@ export default function NewEmployeeDialog({ open, onClose, onCreated }) {
 
   useEffect(() => {
     if (!open) return;
-    setF({ ...EMPTY, start_date: today() }); setError(""); setLeaveEdit(false); setStep(0);
+    setF({ ...EMPTY, start_date: nextWorkday() }); setError(""); setLeaveEdit(false); setStepRaw(0); setReached(0);
     payrollApi.positions().then(setPositions).catch(() => {});
     payrollApi.settings().then((st) => setCo({ m: st.summed_period_months || 3, a: st.summed_period_anchor || 1 })).catch(() => {});
   }, [open]);
@@ -277,6 +287,8 @@ export default function NewEmployeeDialog({ open, onClose, onCreated }) {
   const needsEnd = f.sodra_contract_type === "02" || f.sodra_contract_subtype?.endsWith("1");
   const workload = Number(f.weekly_hours || 0) / Number(f.full_time_hours || 40);
   const workDays = f.days.filter(Boolean).length;
+  // iki 6 mėn. išbandymas - nuo 2026-11-01 ir tik mėnesinei algai (≥ 2 VDU - tikrina vartotojas, žr. paaiškinimą)
+  const longProbation = f.start_date >= LONG_PROBATION_FROM && f.pay_form === "monthly";
   const weekSum = f.week.reduce((a, h, i) => a + (f.days[i] ? Number(h) || 0 : 0), 0);
   const pm = f.period_custom ? Number(f.period_months) : co.m;
   const pa = f.period_custom ? norm(pm, f.period_anchor) : norm(co.m, co.a);
@@ -305,6 +317,8 @@ export default function NewEmployeeDialog({ open, onClose, onCreated }) {
   if (!f.start_date) missing[1].push("darbo pradžia");
   if (!(Number(f.base_amount) > 0)) missing[1].push("atlyginimas");
   if (!(Number(f.weekly_hours) > 0)) missing[1].push("darbo valandos");
+  if (Number(f.weekly_hours) > fullH) missing[1].push(`daugiausia ${fullH} val./sav. vienoje sutartyje`);
+  if (f.work_regime === "standard" && workDays > 6) missing[1].push("ne daugiau kaip 6 darbo dienos per savaitę");
   if (f.shortened && !(fullH >= 20 && fullH < 40)) missing[1].push("sutrumpinta norma – nuo 20 iki 39 val.");
   if (f.work_regime === "standard" && Number(f.weekly_hours) > 0) {
     if (!workDays || Math.abs(weekSum - Number(f.weekly_hours)) > 0.01) missing[1].push("darbo dienų valandos (suma nesutampa)");
@@ -312,7 +326,7 @@ export default function NewEmployeeDialog({ open, onClose, onCreated }) {
   }
   if (type?.subtypes && !f.sodra_contract_subtype) missing[1].push("ar sutartis terminuota");
   if (needsEnd && !f.end_date) missing[1].push("darbo pabaiga");
-  if (Number(f.probation_months) > 3 && f.start_date < LONG_PROBATION_FROM) missing[1].push("išbandymas iki 3 mėn. (ilgesnis – nuo 2026-11-01)");
+  if (Number(f.probation_months) > 3 && !longProbation) missing[1].push("išbandymas – daugiausia 3 mėn.");
   if (f.fill_mode === "invite" && !f.email) missing[2].push("el. paštas kvietimui");
   const allMissing = missing.flat();
 
@@ -361,6 +375,7 @@ export default function NewEmployeeDialog({ open, onClose, onCreated }) {
   const minWage = f.pay_form === "monthly" && Number(f.base_amount) > 0 && Number(f.base_amount) < (est?.mma || 1153) * workload;
   const positionLabel = f.position_name || f.custom_title || f.lpk_title;
   const sd1 = prevWorkday(f.start_date);
+  const sd1Late = !!sd1 && sd1 < today();              // 1-SD - ne vėliau kaip prieš 1 darbo dieną
 
   return (
     <Dialog open={open} onClose={onClose} fullWidth maxWidth="lg" disableScrollLock
@@ -458,11 +473,12 @@ export default function NewEmployeeDialog({ open, onClose, onCreated }) {
                       </Select>
                     </FormControl>
                     <FormControl sx={{ minWidth: 200 }}>
-                      <InputLabel>Bandomasis laikotarpis</InputLabel>
-                      <Select label="Bandomasis laikotarpis" value={f.probation_months} MenuProps={MENU_PROPS} onChange={(e) => set({ probation_months: e.target.value })}>
-                        {["0", "1", "2", "3", "4", "5", "6"].map((m) => (
-                          <MenuItem key={m} value={m} disabled={Number(m) > 3 && f.start_date < LONG_PROBATION_FROM}>
-                            {m === "0" ? "Nėra" : `${m} mėn.`}{Number(m) > 3 ? " (tik didelė alga)" : ""}
+                      <InputLabel>Išbandymas</InputLabel>
+                      <Select label="Išbandymas" value={f.probation_months} MenuProps={MENU_PROPS} onChange={(e) => set({ probation_months: e.target.value })}>
+                        {["0", "1", "2", "3", ...(longProbation ? ["4", "5", "6"] : [])].map((m) => (
+                          <MenuItem key={m} value={m}>
+                            {m === "0" ? "Netaikomas" : `${m} mėn.`}
+                            {Number(m) > 3 && <Typography component="span" sx={{ fontSize: 12, color: "#667085", ml: 1 }}>alga ≥ 2 VDU</Typography>}
                           </MenuItem>
                         ))}
                       </Select>
@@ -470,8 +486,7 @@ export default function NewEmployeeDialog({ open, onClose, onCreated }) {
                   </Stack>
                   {Number(f.probation_months) > 3 && (
                     <Alert severity="info" sx={{ py: 0 }}>
-                      Ilgesnis nei 3 mėn. išbandymas (iki 6 mėn.) leidžiamas nuo 2026-11-01, kai sutartyje nustatyta mėnesinė alga ne mažesnė
-                      kaip 2 šalies vidutiniai darbo užmokesčiai (paskutinis VDA paskelbtas). DK 36 str., įst. Nr. XV-1058.
+                      Išbandymas ilgesnis nei 3 mėn. leidžiamas tik kai mėnesinė alga ne mažesnė kaip 2 šalies vidutiniai darbo užmokesčiai (DK 36 str.).
                     </Alert>
                   )}
                   {fixedTerm && Number(f.probation_months) > 0 && (
@@ -514,7 +529,7 @@ export default function NewEmployeeDialog({ open, onClose, onCreated }) {
                   <Box>
                     <Stack direction="row" gap={2} alignItems="center" flexWrap="wrap">
                       <TextField label="Valandų per savaitę" type="number" value={f.weekly_hours} sx={{ width: 170 }} required
-                        onChange={(e) => setHours(e.target.value)} inputProps={{ min: 1, max: fullH }} />
+                        onChange={(e) => setHours(e.target.value)} inputProps={{ min: 1 }} error={Number(f.weekly_hours) > fullH} />
                       <Stack direction="row" gap={1}>
                         {[fullH, ...QUICK_HOURS.filter((h) => h < fullH)].map((h) => (
                           <Chip key={h} label={h} clickable color={Number(f.weekly_hours) === h ? "primary" : "default"}
@@ -525,9 +540,11 @@ export default function NewEmployeeDialog({ open, onClose, onCreated }) {
                         = {workload === 1 ? "visas etatas" : `${String(Math.round(workload * 1000) / 1000).replace(".", ",")} etato`}
                       </Typography>
                     </Stack>
-                    <Typography sx={{ fontSize: 12, color: "#667085", mt: .75 }}>
-                      Vienoje sutartyje – daugiausia 1 etatas ({fullH} val./sav.). Papildomas darbas toje pačioje įmonėje įforminamas atskiru susitarimu.
-                    </Typography>
+                    {Number(f.weekly_hours) > fullH && (
+                      <Typography sx={{ fontSize: 12, color: "#B42318", mt: .75 }}>
+                        Vienoje sutartyje – daugiausia 1 etatas ({fullH} val./sav.). Papildomas darbas toje pačioje įmonėje įforminamas atskiru susitarimu.
+                      </Typography>
+                    )}
                     {!f.shortened ? (
                       <Link component="button" type="button" variant="caption" onClick={() => { set({ shortened: true }); setFull(36); }} sx={{ mt: 0.5 }}>
                         Pareigybei taikoma sutrumpinta darbo laiko norma
@@ -676,7 +693,10 @@ export default function NewEmployeeDialog({ open, onClose, onCreated }) {
             {`${f.first_name} ${f.last_name}`.trim() || "Vardas Pavardė"}
           </Typography>
           <Typography sx={{ fontSize: 13, color: "#667085" }}>{positionLabel || "Pareigos"}</Typography>
-          <Stack gap={1} mt={2}>
+          {reached < 1 && (
+            <Typography sx={{ fontSize: 12.5, color: "#98A2B3", mt: 2 }}>Darbo sąlygos atsiras čia, kai jas įvesite.</Typography>
+          )}
+          <Stack gap={1} mt={2} sx={{ display: reached < 1 ? "none" : "flex" }}>
             {[["Darbo pradžia", f.start_date || "–"],
               ["Sutartis", `${type?.label || ""}${needsEnd && f.end_date ? ` iki ${f.end_date}` : ""}`],
               ["Darbo laikas", `${f.weekly_hours || 0} val./sav. · ${workload === 1 ? "visas etatas" : `${String(Math.round(workload * 1000) / 1000).replace(".", ",")} etato`}`],
@@ -692,25 +712,30 @@ export default function NewEmployeeDialog({ open, onClose, onCreated }) {
               </Stack>
             ))}
           </Stack>
-          {est && Number(f.base_amount) > 0 && (
+          {reached >= 1 && est && Number(f.base_amount) > 0 && (
             <Box sx={{ mt: 2, p: 1.5, borderRadius: 2, bgcolor: "#F5F8FF" }}>
               <Typography sx={{ fontSize: 12, color: "#475467" }}>Į rankas apytiksliai</Typography>
               <Typography sx={{ fontSize: 22, fontWeight: 600, color: "#1D4ED8" }}>{money(est.net)}</Typography>
               <Typography sx={{ fontSize: 12, color: "#475467" }}>Įmonei kainuos {money(est.cost)} per mėnesį</Typography>
             </Box>
           )}
+          {reached >= 1 && (<>
           <Divider sx={{ my: 2 }} />
           <Typography sx={{ fontSize: 12, fontWeight: 600, color: "#667085", letterSpacing: .4, mb: 1 }}>KAS BUS PADARYTA</Typography>
           <Stack gap={1.25}>
             <Stack direction="row" gap={1}><DescriptionOutlinedIcon sx={{ fontSize: 18, color: "#475467" }} />
               <Typography sx={{ fontSize: 12.5, color: "#344054" }}>Sukurta darbo sutartis – dokumentą paruošite kortelėje</Typography></Stack>
             <Stack direction="row" gap={1}><AccountBalanceOutlinedIcon sx={{ fontSize: 18, color: "#475467" }} />
-              <Typography sx={{ fontSize: 12.5, color: "#344054" }}>Paruoštas <b style={{ fontWeight: 500 }}>1-SD</b> – pateikti Sodrai iki <b style={{ fontWeight: 500 }}>{sd1 || "–"}</b></Typography></Stack>
-            {f.fill_mode === "invite" && (
+              <Typography sx={{ fontSize: 12.5, color: sd1Late ? "#B42318" : "#344054" }}>
+                Paruoštas <b style={{ fontWeight: 500 }}>1-SD</b> – pateikti Sodrai iki <b style={{ fontWeight: 500 }}>{sd1 || "–"}</b>
+                {sd1Late && " – terminas jau praėjo. Pateikite kuo skubiau arba patikslinkite darbo pradžią."}
+              </Typography></Stack>
+            {reached >= 2 && f.fill_mode === "invite" && (
               <Stack direction="row" gap={1}><MarkEmailReadOutlinedIcon sx={{ fontSize: 18, color: "#475467" }} />
                 <Typography sx={{ fontSize: 12.5, color: "#344054" }}>Kvietimas į eSavitarną – {f.email || "nurodykite el. paštą"}</Typography></Stack>
             )}
           </Stack>
+          </>)}
         </Box>
       </Box>
 

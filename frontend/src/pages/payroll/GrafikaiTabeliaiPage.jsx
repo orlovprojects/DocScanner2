@@ -9,6 +9,7 @@ import ModuleTabs from "./ModuleTabs";
 import GrafikaiPage from "./GrafikaiPage";
 import TabelisView from "./TabelisView";
 import KomandiruotesPage from "./KomandiruotesPage";
+import { DuStartNotice, MONTHS_ACC, MONTHS_GEN, isBeforeStart, useDuStart } from "./DuStart";
 
 const TABS = ["grafikai", "tabelis", "komandiruotes"];
 
@@ -37,6 +38,14 @@ export default function GrafikaiTabeliaiPage() {
     const q = `?m=${ym.year}-${String(ym.month).padStart(2, "0")}`;
     navigate((v === "grafikai" ? "/grafikai-ir-tabeliai" : `/grafikai-ir-tabeliai/${v}`) + q);
   };
+  // mėnuo iki DU pradžios DokSkenas - grafikai, tabeliai ir komandiruotės tvarkyti kitoje programoje
+  const { start, period } = useDuStart();
+  const before = isBeforeStart(start, ym.year, ym.month);
+  const beforeText = before && {
+    grafikai: "Darbo grafikų už ankstesnius mėnesius DokSkene sudaryti nereikia.",
+    tabelis: "Dirbto laiko (tabelio) už ankstesnius mėnesius DokSkene pildyti nereikia.",
+    komandiruotes: `Ankstesnes komandiruotes įforminkite ankstesnėje programoje. Jei komandiruotė tęsiasi ir ${MONTHS_ACC[start.month - 1]} – įveskite ją ${MONTHS_GEN[start.month - 1]} mėnesyje.`,
+  }[tab];
 
   const tabs = [
     { value: "grafikai", label: "Grafikai", description: "Planas: pamainos, taisyklės, sudarymas", icon: <CalendarMonthOutlinedIcon />,
@@ -54,9 +63,16 @@ export default function GrafikaiTabeliaiPage() {
         <Typography sx={{ fontSize: 13, color: "text.secondary", mt: 0.5 }}>Darbo laiko planavimas ir apskaita</Typography>
       </Box>
       <ModuleTabs tabs={tabs} value={tab} onChange={go} />
-      {tab === "grafikai" && <GrafikaiPage embedded ym={ym} onYmChange={setYm} />}
-      {tab === "tabelis" && <TabelisView year={ym.year} month={ym.month} onShift={shift} />}
-      {tab === "komandiruotes" && <KomandiruotesPage embedded />}
+      {before ? (
+        <DuStartNotice start={start} year={ym.year} month={ym.month} onShift={shift} text={beforeText}
+          fromMigration={!!period?.from_migration} onGo={() => setYm(start)} />
+      ) : (
+        <>
+          {tab === "grafikai" && <GrafikaiPage embedded ym={ym} onYmChange={setYm} />}
+          {tab === "tabelis" && <TabelisView year={ym.year} month={ym.month} onShift={shift} />}
+          {tab === "komandiruotes" && <KomandiruotesPage embedded ym={ym} onYmChange={setYm} />}
+        </>
+      )}
     </Box>
   );
 }

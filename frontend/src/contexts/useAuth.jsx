@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { is_authenticated, login, register, logout } from "../api/endpoints";
+import { clearViewAs } from "../admin/viewAs";
 
 const AuthContext = createContext();
 
@@ -82,6 +83,7 @@ const AuthProvider = ({ children }) => {
       console.log("Error during logout:", error);
     } finally {
       // Всегда выходим локально, даже если запрос упал
+      clearViewAs();
       setIsAuthenticated(false);
       navigate('/prisijungti');
     }

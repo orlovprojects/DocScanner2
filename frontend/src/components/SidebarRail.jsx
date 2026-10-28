@@ -36,7 +36,9 @@ import GroupsIcon from "@mui/icons-material/Groups";
 import AssignmentTurnedInIcon from "@mui/icons-material/AssignmentTurnedIn";
 import PaymentsOutlinedIcon from "@mui/icons-material/PaymentsOutlined";
 import CalendarMonthOutlinedIcon from "@mui/icons-material/CalendarMonthOutlined";
+import AdminPanelSettingsOutlinedIcon from "@mui/icons-material/AdminPanelSettingsOutlined";
 import { ACCOUNTING_PROGRAMS } from "../page_elements/AccountingPrograms";
+import { getViewAs, stopViewAs, useAdminWhoami } from "../admin/viewAs";
 
 const RAIL_WIDTH = 58;
 const FLYOUT_WIDTH = 238;
@@ -150,8 +152,8 @@ const SECTIONS = [
     icon: GroupsIcon,
     pathPrefix: ["/darbo-uzmokestis", "/grafikai-ir-tabeliai"],
     items: () => [
-      { icon: PaymentsOutlinedIcon, text: "Darbo užmokestis", path: "/darbo-uzmokestis" },
-      { icon: CalendarMonthOutlinedIcon, text: "Grafikai ir tabeliai", path: "/grafikai-ir-tabeliai" },
+      { icon: PaymentsOutlinedIcon, text: "Personalas ir DU", path: "/darbo-uzmokestis" },
+      { icon: CalendarMonthOutlinedIcon, text: "Grafikai ir tabelis", path: "/grafikai-ir-tabeliai" },
     ],
   },
   {
@@ -192,6 +194,10 @@ export default function SidebarRail({
 }) {
   const nav = useNavigate();
   const location = useLocation();
+  const whoami = useAdminWhoami();
+  const bottomItems = whoami?.is_superuser
+    ? [{ id: "admin", label: "Admin", icon: AdminPanelSettingsOutlinedIcon, path: "/admin/du" }, ...BOTTOM_ITEMS]
+    : BOTTOM_ITEMS;
 
   const railRef = useRef(null);
   const flyoutRef = useRef(null);
@@ -307,6 +313,10 @@ export default function SidebarRail({
 
   const handleBottomClick = (item) => {
     setOpenSection(null);
+    if (item.id === "admin" && getViewAs()) {
+      stopViewAs(item.path);          // iš „Žiūrėti kaip“ - atgal į savo paskyrą
+      return;
+    }
     nav(item.path);
   };
 
@@ -486,7 +496,7 @@ export default function SidebarRail({
         >
           <Box sx={{ width: 30, borderTop: "1px solid #DADADA", mb: 0.5 }} />
 
-          {BOTTOM_ITEMS.map((item) => {
+          {bottomItems.map((item) => {
             const Icon = item.icon;
             const isActive = location.pathname === item.path;
 

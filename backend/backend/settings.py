@@ -121,6 +121,7 @@ MIDDLEWARE = [
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "docscanner_app.view_as.ViewAsResetMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 
@@ -131,7 +132,7 @@ MIDDLEWARE = [
 # Django REST Framework настройки
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": (
-        "docscanner_app.authentication.CookiesJWTAuthentication",
+        "docscanner_app.view_as.ViewAsJWTAuthentication",
     ),
     "DEFAULT_PERMISSION_CLASSES": [
         "rest_framework.permissions.AllowAny",
@@ -157,6 +158,9 @@ CORS_ALLOW_HEADERS = [
     "x-csrftoken",
     "x-requested-with",
     "content-disposition",
+    "x-view-as-user",
+    "x-view-as-company",
+    "x-view-as-write",
 ]
 CORS_EXPOSE_HEADERS = [
     "content-disposition",

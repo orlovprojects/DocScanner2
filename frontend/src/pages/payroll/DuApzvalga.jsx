@@ -23,6 +23,7 @@ import CalendarMonthOutlinedIcon from "@mui/icons-material/CalendarMonthOutlined
 import EventAvailableOutlinedIcon from "@mui/icons-material/EventAvailableOutlined";
 import PaymentsOutlinedIcon from "@mui/icons-material/PaymentsOutlined";
 import AccountBalanceWalletOutlinedIcon from "@mui/icons-material/AccountBalanceWalletOutlined";
+import BalanceOutlinedIcon from "@mui/icons-material/BalanceOutlined";
 import AssignmentOutlinedIcon from "@mui/icons-material/AssignmentOutlined";
 import AutoFixHighOutlinedIcon from "@mui/icons-material/AutoFixHighOutlined";
 import AttachFileIcon from "@mui/icons-material/AttachFile";
@@ -133,9 +134,9 @@ function RequestsCard({ rows, loading, status, setStatus, prefs, onRefresh, onOp
         <Tabs value={tab} onChange={(e, v) => setTab(v)}
           sx={{ minHeight: 46, "& .MuiTab-root": { textTransform: "none", fontWeight: 600, fontSize: 14.5, minHeight: 46, px: 1, mr: 1.5 } }}>
           <Tab value="req" label={<Stack direction="row" gap={.8} alignItems="center">Prašymai
-            {pendingCount > 0 && <Box sx={COUNT("#DC2626")}>{pendingCount}</Box>}</Stack>} />
+            {pendingCount > 0 && <Box component="span" sx={{ px: .75, py: .1, borderRadius: 1, fontSize: 12, fontWeight: 700, lineHeight: 1.6, bgcolor: "#FEE4E2", color: "#B42318" }}>{pendingCount}</Box>}</Stack>} />
           <Tab value="pref" label={<Stack direction="row" gap={.8} alignItems="center">Grafiko pageidavimai
-            {prefs.length > 0 && <Box sx={COUNT("#667085")}>{prefs.length}</Box>}</Stack>} />
+            {prefs.length > 0 && <Box component="span" sx={{ px: .75, py: .1, borderRadius: 1, fontSize: 12, fontWeight: 700, lineHeight: 1.6, bgcolor: "#F2F4F7", color: "#475467" }}>{prefs.length}</Box>}</Stack>} />
         </Tabs>
         <Box sx={{ flex: 1 }} />
         {tab === "req" && (
@@ -404,7 +405,8 @@ function RequestDialog({ req, onClose, onDecided }) {
 // Ką reikia padaryti
 // ============================================================
 const ICONS = { roster: CalendarMonthOutlinedIcon, repair: AutoFixHighOutlinedIcon, timesheet: EventAvailableOutlinedIcon,
-  requests: AssignmentOutlinedIcon, payroll: PaymentsOutlinedIcon, payments: AccountBalanceWalletOutlinedIcon, declaration: DescriptionOutlinedIcon };
+  requests: AssignmentOutlinedIcon, payroll: PaymentsOutlinedIcon, payments: AccountBalanceWalletOutlinedIcon, declaration: DescriptionOutlinedIcon,
+  das: BalanceOutlinedIcon };
 const ST = { done: ["#16A34A", "#DCFCE7"], todo: ["#2563EB", "#DBEAFE"], warn: ["#D97706", "#FEF3C7"], late: ["#DC2626", "#FEE2E2"] };
 
 function TodoCard({ items, loading, onGo }) {

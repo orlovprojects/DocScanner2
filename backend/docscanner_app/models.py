@@ -7255,6 +7255,11 @@ class PayrollSettings(models.Model):
     representation_basis = models.CharField(max_length=150, blank=True, default="įmonės įstatai")
     contract_city = models.CharField(max_length=100, blank=True, default="")
     workplace_address = models.CharField(max_length=255, blank=True, default="")
+    collective_agreement = models.CharField(max_length=255, blank=True, default="")
+    training_info = models.TextField(blank=True, default="")
+    social_protection_info = models.TextField(blank=True, default="")
+
+    du_start = models.DateField(null=True, blank=True)   # DU DokSkenas pradžia (mėnesio 1 d.); ankstesni - kita programa
 
     vmi_ws_username = models.CharField(max_length=100, blank=True, default="")
     vmi_ws_password = models.TextField(blank=True, default="")   # užšifruotas
@@ -7742,6 +7747,8 @@ class PositionGroup(models.Model):
     conditions = models.PositiveSmallIntegerField(default=3)
     salary_min = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
     salary_max = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    hourly_min = models.DecimalField(max_digits=8, decimal_places=2, null=True, blank=True)
+    hourly_max = models.DecimalField(max_digits=8, decimal_places=2, null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -7762,8 +7769,12 @@ class DasDocument(models.Model):
     version = models.PositiveIntegerField()
     approved_date = models.DateField()
     manager_name = models.CharField(max_length=150, blank=True, default="")
+    manager_title = models.CharField(max_length=100, blank=True, default="")
+    city = models.CharField(max_length=100, blank=True, default="")
+    changes = models.JSONField(default=list, blank=True)     # kas pasikeitė nuo ankstesnės versijos
     html = models.TextField()
     groups_snapshot = models.JSONField(default=list)
+    settings = models.JSONField(default=dict, blank=True)   # įsakymo Nr., premijų tvarka
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -8343,7 +8354,13 @@ class PayrollMigrationEmployee(models.Model):
     source = models.CharField(max_length=10, default="files")                   # files / excel / manual
     edited = models.JSONField(default=list, blank=True)                         # rankiniu būdu keisti laukai
     employee = models.ForeignKey("Employee", null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
- 
+    gpm_ytd = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)   # GPM nuo sausio iki perėjimo
+    transition_from = models.DateField(null=True, blank=True)          # ligos pradžia (perėjimo dieną serga)
+    week_hours = models.JSONField(null=True, blank=True)               # Pr–S valandos (standartinei apskaitai)
+    is_foreigner = models.BooleanField(default=False)                  # be LT asmens kodo: person_code = "SD" + SD numeris
+    birth_date = models.DateField(null=True, blank=True)
+    gender = models.CharField(max_length=1, blank=True, default="")    # M / F
+
     class Meta:
         unique_together = ("migration", "person_code")
         ordering = ["last_name", "first_name"]
@@ -8452,3 +8469,84 @@ class PublicLead(models.Model):
 
     def __str__(self):
         return f"{self.value} ({self.ip_address})"
+
+
+
+# DU - ADMIN
+
+from django.core.files.storage import FileSystemStorage
+ 
+ 
+def _private_storage():
+    """Ne MEDIA_ROOT - failai neprieinami per /media/ (juose asmens kodai)."""
+    return FileSystemStorage(location=os.path.join(settings.BASE_DIR, "private_media"))
+ 
+ 
+def _archive_path(obj, filename):
+    d = timezone.now()
+    return f"payroll_archive/{obj.company_id or 0}/{d:%Y/%m}/{filename}"
+ 
+ 
+class PayrollUploadArchive(models.Model):
+    """Vartotojų įkelti failai (perėjimas, Excel, ligos S15, S47) - nesitrina su „Pradėti iš naujo“."""
+    SOURCE_CHOICES = [
+        ("migration", "Perėjimas: ataskaitos"),
+        ("excel", "Perėjimas: Excel"),
+        ("sick_import", "Tabelis: ligos (S15)"),
+        ("s47", "Sodra S47 tarifai"),
+        ("other", "Kita"),
+    ]
+    company = models.ForeignKey("CompanyProfile", null=True, blank=True, on_delete=models.CASCADE, related_name="+")
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
+    source = models.CharField(max_length=20, choices=SOURCE_CHOICES)
+    file_name = models.CharField(max_length=255, blank=True, default="")
+    form = models.CharField(max_length=60, blank=True, default="")
+    sha1 = models.CharField(max_length=40, db_index=True)
+    size = models.PositiveIntegerField(default=0)
+    file = models.FileField(storage=_private_storage, upload_to=_archive_path, max_length=255)
+    parsed = models.BooleanField(default=True)
+    error = models.TextField(blank=True, default="")
+    meta = models.JSONField(default=dict, blank=True)
+    times = models.PositiveIntegerField(default=1)
+    created_at = models.DateTimeField(auto_now_add=True)
+    last_uploaded_at = models.DateTimeField(default=timezone.now)
+ 
+    class Meta:
+        ordering = ["-id"]
+        indexes = [models.Index(fields=["company", "-created_at"]), models.Index(fields=["source", "parsed"])]
+        constraints = [models.UniqueConstraint(fields=["company", "sha1", "source"], name="uniq_payroll_upload_archive")]
+ 
+ 
+class PayrollErrorLog(models.Model):
+    """DU API klaidos: 4xx (ValidationError ir kt. - tekstas) ir 500 (traceback)."""
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
+    impersonator = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL,
+                                     related_name="+")
+    company = models.ForeignKey("CompanyProfile", null=True, blank=True, on_delete=models.CASCADE, related_name="+")
+    method = models.CharField(max_length=8, blank=True, default="")
+    path = models.CharField(max_length=500, blank=True, default="")
+    status = models.PositiveSmallIntegerField(default=500)
+    error_type = models.CharField(max_length=100, blank=True, default="")
+    message = models.TextField(blank=True, default="")
+    traceback = models.TextField(blank=True, default="")
+    payload = models.JSONField(null=True, blank=True)
+ 
+    class Meta:
+        ordering = ["-id"]
+        indexes = [models.Index(fields=["company", "-created_at"]), models.Index(fields=["status"])]
+ 
+ 
+class AdminViewAsLog(models.Model):
+    """„Žiūrėti kaip“ su leidimu keisti - kiekvienas keitimas."""
+    created_at = models.DateTimeField(auto_now_add=True)
+    admin = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, on_delete=models.SET_NULL, related_name="+")
+    target = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, on_delete=models.SET_NULL, related_name="+")
+    company = models.ForeignKey("CompanyProfile", null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
+    method = models.CharField(max_length=8)
+    path = models.CharField(max_length=500)
+    body = models.TextField(blank=True, default="")
+ 
+    class Meta:
+        ordering = ["-id"]
+ 

@@ -56,6 +56,20 @@ def _day_hours(d, week, workload):
     return h
 
 
+PRE_HOLIDAY_PAID_FROM = date(2026, 11, 1)   # DK pakeitimai: sutrumpinta prieššventinė valanda apmokama
+
+
+def _pre_holiday_hours(d_from, d_to, week, workload, absent):
+    """Sutrumpintos prieššventinių dienų valandos - valandiniam DU apmokamos nuo 2026-11-01."""
+    h, d = ZERO, max(d_from, PRE_HOLIDAY_PAID_FROM)
+    while d <= d_to:
+        full = week[d.weekday()] * workload
+        if d not in absent and full > 0 and is_pre_holiday(d) and not is_holiday(d):
+            h += min(full, Decimal("1"))
+        d += timedelta(days=1)
+    return h
+
+
 def _worked(d_from, d_to, week, workload, absent, daily_hours=None):
     days, hours = 0, ZERO
     d = d_from
@@ -98,7 +112,9 @@ def calc_base_pay(year, month, segments, absent_dates=frozenset(), employed_from
         res.worked_hours += hours
 
         if seg.pay_form == "hourly":
-            amount = q2(seg.base_amount * hours)
+            paid = hours if seg.daily_hours is not None else \
+                hours + _pre_holiday_hours(s_from, s_to, seg.week, seg.workload, absent)
+            amount = q2(seg.base_amount * paid)
             res.lines.append(GrossLine("VAL", s_from, s_to, days, hours, seg.base_amount, amount))
             if P and seg.base_amount < P.mva:
                 res.warnings.append(f"Valandinis įkainis {seg.base_amount} < MVA {P.mva}")

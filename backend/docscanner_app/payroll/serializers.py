@@ -42,6 +42,13 @@ class PayrollSettingsSerializer(serializers.ModelSerializer):
         for f, (lo, hi, label) in self.LIMITS.items():
             if f in attrs and attrs[f] is not None and not (lo <= attrs[f] <= hi):
                 errors[f] = f"{label}: leistina nuo {lo} iki {hi}"
+        if attrs.get("du_start"):
+            attrs["du_start"] = attrs["du_start"].replace(day=1)
+            if self.instance and attrs["du_start"] != self.instance.du_start:
+                from .readiness import check_du_start_change
+                r = check_du_start_change(self.instance.company, attrs["du_start"])
+                if not r["ok"]:
+                    errors["du_start"] = r["error"]
         if errors:
             raise serializers.ValidationError(errors)
         return attrs
@@ -316,13 +323,17 @@ class PositionGroupSerializer(serializers.ModelSerializer):
         hi = attrs.get("salary_max", getattr(self.instance, "salary_max", None))
         if lo is not None and hi is not None and lo > hi:
             raise serializers.ValidationError({"salary_max": "Maksimali alga negali būti mažesnė už minimalią"})
+        hlo = attrs.get("hourly_min", getattr(self.instance, "hourly_min", None))
+        hhi = attrs.get("hourly_max", getattr(self.instance, "hourly_max", None))
+        if hlo is not None and hhi is not None and hlo > hhi:
+            raise serializers.ValidationError({"hourly_max": "Maksimalus valandinis atlygis negali būti mažesnis už minimalų"})        
         return attrs
 
 
 class DasDocumentSerializer(serializers.ModelSerializer):
     class Meta:
         model = DasDocument
-        fields = ["id", "version", "approved_date", "manager_name", "groups_snapshot", "created_at"]
+        fields = ["id", "version", "approved_date", "manager_name", "manager_title", "city", "changes", "settings", "created_at"]
 
 
 class EmployeeDocumentSerializer(serializers.ModelSerializer):

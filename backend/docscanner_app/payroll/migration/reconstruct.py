@@ -76,6 +76,45 @@ def _emp(r, per):
     return e
 
 
+def _merge_foreign(r):
+    """
+    Užsienietis gali būti vienuose failuose su LT asmens kodu, kituose - tik su SD numeriu ("SD"+serija+numeris).
+    Tokie įrašai sujungiami į vieną - pagal asmens kodą.
+    """
+    by_sd = {}
+    for code, e in r.employees.items():
+        if not code.startswith("SD") and e.sd_series and e.sd_number:
+            by_sd.setdefault(f"SD{e.sd_series}{e.sd_number}", code)
+    for sd_code, code in by_sd.items():
+        src = r.employees.pop(sd_code, None)
+        if src is None:
+            continue
+        dst = r.employees[code]
+        # tas pats mėnuo abiem identifikatoriais - tai tie patys duomenys iš skirtingų failų, nesumuojama
+        for k in ("S50", "SAM", "2SD"):
+            for ym, v in src._src[k].items():
+                dst._src[k].setdefault(ym, v)
+        for ym, v in src.contrib.items():
+            dst.contrib.setdefault(ym, v)
+        for ym, v in src.rates.items():
+            dst.rates.setdefault(ym, v)
+        for item in src.absences:
+            if item not in dst.absences:
+                dst.absences.append(item)
+        dst.sd2_months |= src.sd2_months
+        dst.start = dst.start or src.start
+        if src.end and (not dst.end or src.end > dst.end):
+            dst.end = src.end
+        dst.first_name = dst.first_name or src.first_name
+        dst.last_name = dst.last_name or src.last_name
+        dst.lpk4 = dst.lpk4 or src.lpk4
+        dst.contract_reason = dst.contract_reason or src.contract_reason
+        if sd_code in r.s29_codes:
+            r.s29_codes.discard(sd_code)
+            r.s29_codes.add(code)
+        r.warnings.append(f"{dst.first_name} {dst.last_name}: įrašai su SD numeriu {sd_code[2:]} sujungti su asmens kodu")
+
+
 def build(parsed_list):
     r = Reconstruction()
     sam_by_month, g313_by_month = defaultdict(list), defaultdict(list)
@@ -158,6 +197,8 @@ def build(parsed_list):
             e._src["SAM"][ym] = e._src["SAM"].get(ym, ZERO) + row["income"]
             e.rates.setdefault(ym, row["rate"])
             e.contrib.setdefault(ym, row["contrib"])
+
+    _merge_foreign(r)
 
     # pajamos: S50 (apima ir 2-SD mėnesį) > SAM + 2-SD
     for e in r.employees.values():

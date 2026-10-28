@@ -81,8 +81,8 @@ export const payrollApi = {
   splitPosition: (position) => api.post(`${P}/position-groups/split/`, { position }).then((r) => r.data),
   groupsCheck: () => api.get(`${P}/position-groups/check/`).then((r) => r.data),
   dasList: () => api.get(`${P}/das/`).then((r) => r.data),
-  dasPreview: (date, manager) =>
-    api.get(`${P}/das/`, { params: { preview: 1, date, manager }, responseType: "text" }).then((r) => r.data),
+  dasPreview: (date, manager, title, city, opts) =>
+    api.get(`${P}/das/`, { params: { preview: 1, date, manager, title, city, opts: JSON.stringify(opts || {}) }, responseType: "text" }).then((r) => r.data),
   dasApprove: (data) => api.post(`${P}/das/`, data).then((r) => r.data),
   dasHtml: (id) => api.get(`${P}/das/${id}/`, { responseType: "text" }).then((r) => r.data),
 
@@ -164,6 +164,7 @@ export const payrollApi = {
   deleteRunLine: (id) => api.delete(`${P}/run-lines/${id}/`),
   payrollReadiness: (year, month) => api.get(`${P}/runs/readiness/`, { params: { year, month } }).then((r) => r.data),
   payrollPeriod: () => api.get(`${P}/runs/period/`).then((r) => r.data),
+  payrollPeriodCheck: (ym) => api.get(`${P}/runs/period/`, { params: { check: ym } }).then((r) => r.data),
 };
 
 // ---------- pagalbinės ----------

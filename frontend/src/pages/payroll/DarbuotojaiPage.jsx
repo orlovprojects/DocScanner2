@@ -36,6 +36,7 @@ import MoreHorizIcon from "@mui/icons-material/MoreHoriz";
 import { DatePicker, LocalizationProvider } from "@mui/x-date-pickers";
 import { AdapterDayjs } from "@mui/x-date-pickers/AdapterDayjs";
 import dayjs from "dayjs";
+import { Link as RouterLink } from "react-router-dom";
 import "dayjs/locale/lt";
 
 import {
@@ -55,9 +56,15 @@ const today = () => new Date().toISOString().slice(0, 10);
 const DISMISS_BASES = [
   { value: "54", label: "Šalių susitarimu (DK 54 str.)" },
   { value: "55", label: "Darbuotojo prašymu (DK 55 str.)" },
+  { value: "56", label: "Darbuotojo iniciatyva dėl svarbių priežasčių (DK 56 str.)" },
   { value: "57", label: "Darbdavio iniciatyva be darbuotojo kaltės (DK 57 str.)" },
+  { value: "58", label: "Darbdavio iniciatyva dėl darbuotojo kaltės (DK 58 str.)" },
+  { value: "59", label: "Darbdavio valia (DK 59 str.)" },
   { value: "69", label: "Pasibaigus terminui (DK 69 str.)" },
 ];
+// išeitinė išmoka VDU mėnesiais: DK 57 (ir 56 str. 1 d. 4–6 p.) – 2 mėn., jei dirbo < 1 m. – 0,5; DK 59 – ne mažiau kaip 6
+const severanceDefault = (basis, start, end) =>
+  basis === "59" ? 6 : basis === "57" ? (end && start && dayjs(end).diff(dayjs(start), "year", true) >= 1 ? 2 : 0.5) : 0;
 
 const WORK_MODES = [
   ["01", "Nekintanti darbo dienos (pamainos) trukmė"],
@@ -606,10 +613,13 @@ function TaxTab({ emp, contract, onSaved }) {
   const disNpd = isDisNpd(f.npd_mode);
 
   // Padidintas NPD = yra dalyvumo lygis -> automatiškai įjungiam ir atostogų / grindų požymius
+  // grįžus nuo padidinto NPD prie įprasto - dalyvumo lygis (ir jo grindų išimtis) išjungiami, kad neliktų per klaidą
   const setNpd = (v) => set({
     npd_mode: v,
     ...(isDisNpd(v) ? { has_disability: true } : {}),
     ...(isDisNpd(v) && partTime && !f.grindys_exempt_reason ? { grindys_exempt_reason: "participation" } : {}),
+    ...(!isDisNpd(v) && disNpd ? { has_disability: false } : {}),
+    ...(!isDisNpd(v) && disNpd && f.grindys_exempt_reason === "participation" ? { grindys_exempt_reason: "" } : {}),
   });
 
   return (
@@ -716,7 +726,7 @@ function OpeningVdu({ f, set }) {
 // Darbuotojo kortelė
 // ============================================================
 const KTABS = [["person", "Asmens duomenys"], ["contract", "Sutartis"], ["tax", "Mokesčiai"], ["items", "Priedai ir išskaitos"],
-  ["absences", "Nebuvimai"], ["family", "Šeima"]];
+  ["absences", "Atostogos ir nebuvimai"], ["family", "Šeima"]];
 
 function ProfilePanel({ emp, row, vac, contract, onTab }) {
   const t = row?.table || {};
@@ -919,9 +929,11 @@ function WorkTimeSettings({ contract, summed, co, onChanged }) {
   const pm = f.custom ? f.months : co.m;
   const pa = f.custom ? norm(f.months, f.anchor) : norm(co.m, co.a);
   const now = periodsFrom(new Date(), pm, pa, 0)[0];
+  const periodChanged = summed && (payload.summed_period_months !== orig.summed_period_months
+    || payload.summed_period_anchor !== orig.summed_period_anchor);
 
   return (
-    <Section title="Papildomi darbo laiko nustatymai" desc="Dažniausiai keisti nereikia">
+    <Section title="Darbo laiko nustatymai" desc="Ne darbo sutarties sąlygos – juos nustato darbdavys. Dažniausiai keisti nereikia">
       {summed ? (
         <Box sx={{ pb: 1.1 }}>
           <Stack direction="row" alignItems="center" gap={1.5} flexWrap="wrap">
@@ -952,6 +964,12 @@ function WorkTimeSettings({ contract, summed, co, onChanged }) {
             )}
           </Stack>
           <Typography sx={{ fontSize: 12, color: "#667085", mt: .5 }}>Dabartinis: {iso(now.start)} – {iso(now.end)}</Typography>
+          {periodChanged && (
+            <Alert severity="warning" sx={{ mt: 1, py: .25, fontSize: 12.5 }}>
+              Pakeitimas taikomas iš karto – einamojo laikotarpio valandos (norma, viršvalandžiai) bus perskaičiuotos pagal naują laikotarpį.
+              Laikotarpį keiskite prieš prasidedant naujam ir apie tai raštu informuokite darbuotoją.
+            </Alert>
+          )}
         </Box>
       ) : (
         <InfoRow label="Apskaitinis laikotarpis" value="–" reason="Taikoma tik suminei darbo laiko apskaitai"
@@ -1026,7 +1044,12 @@ function ContractTab({ emp, contract, onChanged }) {
   };
   const saveDismiss = async () => {
     try {
-      await payrollApi.updateContract(contract.id, { termination_date: dismiss.date, termination_basis: { article: dismiss.basis }, status: "terminated" });
+      const sev = dismiss.severance ?? severanceDefault(dismiss.basis, contract.start_date, dismiss.date);
+      await payrollApi.updateContract(contract.id, {
+        termination_date: dismiss.date, status: "terminated",
+        termination_basis: { article: dismiss.basis, ...(Number(sev) ? { severance_months: Number(toDot(String(sev))) } : {}),
+          ...(dismiss.settle_until ? { settlement_until: dismiss.settle_until } : {}) },
+      });
       await payrollApi.updateEmployee(emp.id, { status: "dismissed" });
       setDismiss(null); setError(""); onChanged("Sutartis nutraukta. Galutinis atsiskaitymas bus apskaičiuotas to mėnesio atlyginimuose.");
     } catch (e) { setError(apiError(e)); }
@@ -1043,17 +1066,29 @@ function ContractTab({ emp, contract, onChanged }) {
   return (
     <Stack gap={2}>
       {dismiss && (
-        <Section title="Sutarties nutraukimas" desc="Kompensacija už nepanaudotas atostogas ir išeitinė išmoka bus apskaičiuotos to mėnesio atlyginimuose"
+        <Section title="Sutarties nutraukimas" desc="Kompensacija už nepanaudotas atostogas apskaičiuojama automatiškai, išeitinei išmokai atlyginimuose bus parodyta suma"
           sx={{ borderColor: "#FDA29B", bgcolor: "#FFFBFA" }}>
           <Stack direction={{ xs: "column", sm: "row" }} gap={1.5}>
             <DateF label="Paskutinė darbo diena" value={dismiss.date} fullWidth onChange={(v) => setDismiss({ ...dismiss, date: v })} />
             <FormControl size="small" fullWidth>
               <InputLabel>Pagrindas</InputLabel>
-              <Select label="Pagrindas" value={dismiss.basis} MenuProps={MENU_PROPS} onChange={(e) => setDismiss({ ...dismiss, basis: e.target.value })}>
+              <Select label="Pagrindas" value={dismiss.basis} MenuProps={MENU_PROPS} onChange={(e) => setDismiss({ ...dismiss, basis: e.target.value, severance: undefined })}>
                 {DISMISS_BASES.map((b) => <MenuItem key={b.value} value={b.value}>{b.label}</MenuItem>)}
               </Select>
             </FormControl>
           </Stack>
+          <Stack direction={{ xs: "column", sm: "row" }} gap={1.5}>
+            <TextField size="small" fullWidth label="Išeitinė išmoka, mėn. VDU"
+              value={dismiss.severance ?? severanceDefault(dismiss.basis, contract.start_date, dismiss.date)}
+              onChange={(e) => setDismiss({ ...dismiss, severance: e.target.value })}
+              helperText={dismiss.basis === "56" ? "DK 56 str. 1 d. 4–6 p.: 2 mėn. (dirbo < 1 m. – 0,5)" : dismiss.basis === "59" ? "Ne mažiau kaip 6 mėn. VDU" : " "} />
+            <DateF label="Susitarta atsiskaityti iki (nebūtina)" value={dismiss.settle_until || null} fullWidth
+              onChange={(v) => setDismiss({ ...dismiss, settle_until: v })} />
+          </Stack>
+          <Typography sx={{ fontSize: 12.5, color: "text.secondary" }}>
+            Galutinis atsiskaitymas – paskutinę darbo dieną (DK 146 str.). Vėliau – tik jei atleidžiant raštu susitarta:
+            iki 1 VDU – ne vėliau kaip per 10 darbo dienų, likusi dalis – ne vėliau kaip per 3 mėnesius. Vėluojant – delspinigiai (nuo 2026-11-01 ×5).
+          </Typography>
           <Stack direction="row" gap={1}>
             <Button variant="contained" color="error" size="small" onClick={saveDismiss} disabled={!dismiss.date} sx={BTN_SX}>Nutraukti sutartį</Button>
             <Button size="small" onClick={() => setDismiss(null)} sx={{ ...BTN_SX, fontWeight: 500 }}>Atšaukti</Button>
@@ -1311,26 +1346,66 @@ export function AbsenceForm({ employee, defaults, onSaved, onCancel }) {
   );
 }
 
+// Atostogos ir nebuvimai: tik peržiūra. Nebuvimai įvedami Faktas (tabelyje) arba per darbuotojo prašymus.
+const STAT_PERIODS = [[1, "1 mėn."], [3, "3 mėn."], [12, "12 mėn."]];
+const DAY_MS = 86400000;
+const dOf = (s) => new Date(`${s}T00:00:00`);
+const signed = (v) => (Number(v) > 0 ? `+${toComma(Number(v))}` : toComma(Number(v)));
+
 function AbsencesTab({ emp, vac, onChanged }) {
   const [rows, setRows] = useState(null);
-  const [adding, setAdding] = useState(false);
-  const [fix, setFix] = useState(null);
+  const [period, setPeriod] = useState(3);
+  const [fix, setFix] = useState(null);             // {mode: "adjust"|"set", date, days, reason, balance}
+  const [showHist, setShowHist] = useState(false);
   const [error, setError] = useState("");
-  const load = useCallback(() => payrollApi.absences({ employee: emp.id }).then((r) => setRows(Array.isArray(r) ? r : r.results || [])).catch(() => setRows([])), [emp.id]);
+  const load = useCallback(() => payrollApi.absences({ employee: emp.id })
+    .then((r) => setRows(Array.isArray(r) ? r : r.results || [])).catch(() => setRows([])), [emp.id]);
   useEffect(() => { load(); }, [load]);
-  const saved = () => { load(); onChanged?.(); };
 
   const saveFix = async () => {
-    try { await payrollApi.setVacationBalance(emp.id, { ...fix, balance: toDot(fix.balance) }); setFix(null); setError(""); saved(); }
+    const body = fix.mode === "set"
+      ? { date: fix.date, balance: toDot(fix.balance) }
+      : { date: fix.date, days: toDot(fix.days), reason: fix.reason };
+    try { await payrollApi.setVacationBalance(emp.id, body); setFix(null); setError(""); onChanged?.(); }
     catch (e) { setError(apiError(e)); }
   };
+  const fixOk = fix && fix.date && (fix.mode === "set"
+    ? fix.balance !== ""
+    : fix.days !== "" && Number(toDot(fix.days)) !== 0 && fix.reason.trim());
+
   const bal = vac?.balance != null ? Number(vac.balance) : null;
   const tiles = vac ? [
     ["Sukaupta", days(vac.accrued), "#101828"],
     ["Panaudota", days(vac.used), "#101828"],
-    ["Korekcijos", Number(vac.adjustments) ? days(vac.adjustments) : "–", "#101828"],
+    ["Korekcijos", Number(vac.adjustments) ? signed(vac.adjustments) + " d." : "–", "#101828"],
     ["Likutis", days(vac.balance), bal < 0 ? "#B42318" : "#027A48"],
   ] : [];
+  const ent = vac?.entitlement;
+  const hist = vac?.history || [];
+
+  // statistika: kalendorinės dienos (ir darbo dienos proporcingai) per pasirinktą laikotarpį
+  const stats = useMemo(() => {
+    if (!rows) return [];
+    const to = dOf(today());
+    const from = new Date(to); from.setMonth(from.getMonth() - period); from.setDate(from.getDate() + 1);
+    const by = {};
+    rows.forEach((a) => {
+      if (a.status && a.status !== "approved") return;
+      const s = dOf(a.start_date); const e = dOf(a.end_date || a.start_date);
+      const lo = s > from ? s : from; const hi = e < to ? e : to;
+      if (hi < lo) return;
+      const cal = Math.round((hi - lo) / DAY_MS) + 1;
+      const total = Math.round((e - s) / DAY_MS) + 1;
+      const wd = Number(a.work_days) ? Number(a.work_days) * cal / total : null;
+      const k = a.kind === "vacation_prepaid" ? "vacation" : a.kind;
+      const x = by[k] || (by[k] = { kind: k, times: 0, cal: 0, wd: 0, hasWd: false });
+      x.times += 1; x.cal += cal;
+      if (wd != null) { x.wd += wd; x.hasWd = true; }
+    });
+    return Object.values(by).sort((a, b) => b.cal - a.cal);
+  }, [rows, period]);
+
+  const recent = useMemo(() => (rows || []).slice().sort((a, b) => b.start_date.localeCompare(a.start_date)).slice(0, 8), [rows]);
 
   return (
     <Stack gap={2}>
@@ -1345,41 +1420,102 @@ function AbsencesTab({ emp, vac, onChanged }) {
         </Box>
       )}
 
-      <Section title="Nebuvimai" desc="Atostogos, ligos, mamadieniai ir kt. – iš čia jie patenka į grafiką, tabelį ir DU"
-        action={!adding && (
-          <Stack direction="row" gap={1}>
-            <Button size="small" onClick={() => setFix({ date: today(), balance: "" })} sx={{ ...BTN_SX, fontWeight: 500, color: "#475467" }}>Nustatyti likutį</Button>
-            <Button size="small" variant="contained" startIcon={<AddIcon />} onClick={() => setAdding(true)} sx={BTN_SX}>Pridėti</Button>
-          </Stack>
+      <Section title="Kasmetinės atostogos"
+        desc={ent ? `Priklauso ${ent.total} d. d. per metus` + (ent.parts?.length > 1 ? ` (${ent.parts.map((p) => `${p.days} – ${p.reason}`).join("; ")})` : "") : "Likutis skaičiuojamas automatiškai"}
+        action={!fix && vac?.balance != null && (
+          <Button size="small" startIcon={<EditOutlinedIcon />} sx={{ ...BTN_SX, fontWeight: 500, color: "#475467" }}
+            onClick={() => setFix({ mode: "adjust", date: today(), days: "", reason: "", balance: "" })}>Koreguoti likutį</Button>
         )}>
-        {adding && (
-          <Box sx={{ p: 2, borderRadius: 2, bgcolor: "#F8FAFC", border: "1px solid #EAECF0", maxWidth: 560 }}>
-            <AbsenceForm employee={emp.id} onSaved={() => { setAdding(false); saved(); }} onCancel={() => setAdding(false)} />
-          </Box>
-        )}
+        {vac?.balance == null && <Typography sx={{ fontSize: 13, color: "#667085" }}>Likutis bus skaičiuojamas, kai darbuotojas turės darbo sutartį.</Typography>}
         {fix && (
-          <Box sx={{ p: 2, borderRadius: 2, bgcolor: "#F8FAFC", border: "1px solid #EAECF0", maxWidth: 560 }}>
-            <Typography sx={{ fontSize: 13.5, fontWeight: 600 }}>Atostogų likutis</Typography>
+          <Box sx={{ p: 2, borderRadius: 2, bgcolor: "#F8FAFC", border: "1px solid #EAECF0", maxWidth: 600 }}>
+            <ToggleButtonGroup size="small" exclusive value={fix.mode} onChange={(_, v) => v && setFix({ ...fix, mode: v })}
+              sx={{ mb: 1.5, "& .MuiToggleButton-root": { textTransform: "none", px: 1.5, py: .4, fontSize: 13 } }}>
+              <ToggleButton value="adjust">Pridėti / atimti dienas</ToggleButton>
+              <ToggleButton value="set">Nustatyti likutį</ToggleButton>
+            </ToggleButtonGroup>
             <Typography sx={{ fontSize: 12.5, color: "#667085", mb: 1.5 }}>
-              Kai perkeliate darbuotoją iš kitos programos arba reikia pataisyti – kiek dienų priklauso nurodytą dieną.
+              {fix.mode === "adjust"
+                ? "Pvz. +2 – susitarta dėl papildomų dienų, −1 – pataisoma klaida. Neigiamą skaičių rašykite su minusu."
+                : "Perkeliant iš kitos programos: kiek dienų darbuotojui priklauso nurodytą dieną. Skirtumas įrašomas kaip korekcija."}
             </Typography>
-            <Stack direction="row" gap={1.5}>
+            <Stack direction={{ xs: "column", sm: "row" }} gap={1.5}>
               <DateF label="Data" value={fix.date} onChange={(v) => setFix({ ...fix, date: v })} />
-              <TextField size="small" label="Priklauso dienų" value={fix.balance} inputProps={{ inputMode: "decimal" }}
-                onChange={(e) => setFix({ ...fix, balance: cleanNum(e.target.value) })} autoFocus />
+              {fix.mode === "adjust" ? (
+                <>
+                  <TextField size="small" label="Dienos (+/−)" value={fix.days} sx={{ width: { sm: 130 } }} autoFocus
+                    inputProps={{ inputMode: "decimal" }} onChange={(e) => setFix({ ...fix, days: cleanNum(e.target.value) })} />
+                  <TextField size="small" label="Priežastis" value={fix.reason} sx={{ flex: 1 }}
+                    onChange={(e) => setFix({ ...fix, reason: e.target.value })} />
+                </>
+              ) : (
+                <TextField size="small" label="Priklauso dienų" value={fix.balance} autoFocus inputProps={{ inputMode: "decimal" }}
+                  onChange={(e) => setFix({ ...fix, balance: cleanNum(e.target.value) })} />
+              )}
             </Stack>
             {error && <Alert severity="error" sx={{ mt: 1.5 }}>{error}</Alert>}
             <Stack direction="row" gap={1} mt={1.5}>
-              <Button variant="contained" size="small" disabled={fix.balance === "" || !fix.date} onClick={saveFix} sx={BTN_SX}>Išsaugoti</Button>
-              <Button size="small" onClick={() => setFix(null)} sx={{ ...BTN_SX, fontWeight: 500 }}>Atšaukti</Button>
+              <Button variant="contained" size="small" disabled={!fixOk} onClick={saveFix} sx={BTN_SX}>Išsaugoti</Button>
+              <Button size="small" onClick={() => { setFix(null); setError(""); }} sx={{ ...BTN_SX, fontWeight: 500 }}>Atšaukti</Button>
             </Stack>
           </Box>
         )}
-        {rows === null ? <Skeleton variant="rounded" height={80} /> : rows.length === 0 ? (
+        {hist.length > 0 && (
+          <Box>
+            <Button size="small" onClick={() => setShowHist(!showHist)} sx={{ textTransform: "none", px: 0, color: "#475467" }}>
+              {showHist ? "Slėpti korekcijas" : `Korekcijų istorija (${hist.length})`}
+            </Button>
+            <Collapse in={showHist}>
+              <Stack>
+                {hist.map((h, i) => (
+                  <Stack key={h.id} direction="row" gap={1.5} alignItems="center" sx={{ py: .9, borderTop: i ? "1px solid #F2F4F7" : 0 }}>
+                    <Typography sx={{ fontSize: 13, color: "#667085", width: 90, flexShrink: 0 }}>{h.date}</Typography>
+                    <Typography sx={{ fontSize: 13, fontWeight: 600, width: 70, flexShrink: 0, color: Number(h.days) < 0 ? "#B42318" : "#027A48" }}>
+                      {signed(h.days)} d.
+                    </Typography>
+                    <Typography noWrap sx={{ fontSize: 13, color: "#101828", minWidth: 0 }}>{h.reason || "–"}</Typography>
+                  </Stack>
+                ))}
+              </Stack>
+            </Collapse>
+          </Box>
+        )}
+      </Section>
+
+      <Section title="Nebuvimų statistika" desc="Patvirtinti nebuvimai per pasirinktą laikotarpį"
+        action={(
+          <ToggleButtonGroup size="small" exclusive value={period} onChange={(_, v) => v && setPeriod(v)}
+            sx={{ "& .MuiToggleButton-root": { textTransform: "none", px: 1.25, py: .3, fontSize: 12.5 } }}>
+            {STAT_PERIODS.map(([v, l]) => <ToggleButton key={v} value={v}>{l}</ToggleButton>)}
+          </ToggleButtonGroup>
+        )}>
+        {rows === null ? <Skeleton variant="rounded" height={60} /> : stats.length === 0 ? (
+          <Typography sx={{ fontSize: 13, color: "#667085" }}>Per šį laikotarpį nebuvimų nėra.</Typography>
+        ) : (
+          <Stack>
+            {stats.map((x, i) => {
+              const k = ABSENCE_KINDS[x.kind] || {};
+              return (
+                <Stack key={x.kind} direction="row" alignItems="center" gap={1.5} sx={{ py: .9, borderTop: i ? "1px solid #F2F4F7" : 0 }}>
+                  <Box sx={{ width: 10, height: 10, borderRadius: "50%", bgcolor: k.color || "#98A2B3", flexShrink: 0 }} />
+                  <Typography sx={{ fontSize: 13.5, color: "#101828", flex: 1, minWidth: 0 }} noWrap>{k.label || x.kind}</Typography>
+                  <Typography sx={{ fontSize: 12.5, color: "#667085", whiteSpace: "nowrap" }}>{x.times} k.</Typography>
+                  <Typography sx={{ fontSize: 13.5, fontWeight: 600, color: "#101828", whiteSpace: "nowrap", minWidth: 120, textAlign: "right" }}>
+                    {x.cal} kal. d.{x.hasWd ? <span style={{ fontWeight: 400, color: "#667085" }}> · {num(x.wd)} d. d.</span> : null}
+                  </Typography>
+                </Stack>
+              );
+            })}
+          </Stack>
+        )}
+      </Section>
+
+      <Section title="Paskutiniai nebuvimai" desc="Įvedami grafike / tabelyje arba per darbuotojo prašymus – čia tik peržiūra">
+        {rows === null ? <Skeleton variant="rounded" height={80} /> : recent.length === 0 ? (
           <Typography sx={{ fontSize: 13, color: "#667085" }}>Įrašų dar nėra.</Typography>
         ) : (
           <Stack>
-            {rows.map((a, i) => {
+            {recent.map((a, i) => {
               const k = ABSENCE_KINDS[a.kind] || {};
               return (
                 <Stack key={a.id} direction="row" alignItems="center" gap={1.5} sx={{ py: 1.1, borderTop: i ? "1px solid #F2F4F7" : 0 }}>
@@ -1392,18 +1528,14 @@ function AbsencesTab({ emp, vac, onChanged }) {
                       {Number(a.work_days) ? ` · ${toComma(Number(a.work_days))} d. d.` : ""}{a.comment ? ` · ${a.comment}` : ""}
                     </Typography>
                   </Box>
-                  <Tooltip title="Ištrinti">
-                    <IconButton size="small" onClick={() => window.confirm("Ištrinti šį nebuvimą? Pasikeis grafikas, tabelis ir DU.")
-                      && payrollApi.deleteAbsence(a.id).then(saved).catch((e) => setError(apiError(e)))}>
-                      <DeleteOutlineIcon fontSize="small" />
-                    </IconButton>
-                  </Tooltip>
+                  <Button size="small" endIcon={<ChevronRightIcon />} component={RouterLink}
+                    to={`/grafikai-ir-tabeliai/tabelis?m=${a.start_date.slice(0, 7)}`}
+                    sx={{ textTransform: "none", color: "#475467", whiteSpace: "nowrap" }}>Atidaryti tabelyje</Button>
                 </Stack>
               );
             })}
           </Stack>
         )}
-        {error && !fix && <Alert severity="error">{error}</Alert>}
       </Section>
     </Stack>
   );

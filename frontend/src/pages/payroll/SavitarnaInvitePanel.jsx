@@ -1,14 +1,14 @@
 import { useState } from "react";
-import { Alert, Box, Button, Chip, IconButton, Paper, Stack, TextField, Tooltip, Typography } from "@mui/material";
+import { Alert, Box, Button, Chip, IconButton, Stack, TextField, Tooltip, Typography } from "@mui/material";
 import ContentCopyIcon from "@mui/icons-material/ContentCopy";
 import SendOutlinedIcon from "@mui/icons-material/SendOutlined";
 
 import { apiError, payrollApi } from "../../api/payroll";
 
 const STATUS = {
-  none: { label: "Nepakviestas", color: "default" },
-  invited: { label: "Pakviestas", color: "warning" },
-  active: { label: "Naudojasi savitarna", color: "success" },
+  none: { label: "Nepakviestas", color: "#475467", bg: "#F2F4F7" },
+  invited: { label: "Pakviestas", color: "#B54708", bg: "#FFFAEB" },
+  active: { label: "Naudojasi", color: "#027A48", bg: "#ECFDF3" },
 };
 
 export default function SavitarnaInvitePanel({ emp, onChanged }) {
@@ -17,6 +17,7 @@ export default function SavitarnaInvitePanel({ emp, onChanged }) {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const st = STATUS[emp.savitarna_status] || STATUS.none;
+  const canInvite = !!(emp.email || emp.phone);
 
   const invite = async () => {
     setBusy(true); setError(""); setMsg("");
@@ -29,26 +30,24 @@ export default function SavitarnaInvitePanel({ emp, onChanged }) {
   };
 
   return (
-    <Paper variant="outlined" sx={{ p: 2 }}>
-      <Stack direction={{ xs: "column", sm: "row" }} justifyContent="space-between" alignItems={{ sm: "center" }} gap={1}>
-        <Box>
-          <Stack direction="row" gap={1} alignItems="center">
-            <Typography fontWeight={700}>Savitarna esavitarna.lt</Typography>
-            <Chip size="small" label={st.label} color={st.color} variant="outlined" />
-          </Stack>
-          <Typography variant="body2" color="text.secondary">
-            Darbuotojas pats užpildys duomenis, teiks prašymus ir matys atsiskaitymo lapelius.
-          </Typography>
-        </Box>
-        {emp.status === "active" && (
-          <Button variant={emp.savitarna_status === "none" ? "contained" : "outlined"} startIcon={<SendOutlinedIcon />}
-            disabled={busy || (!emp.email && !emp.phone)} onClick={invite}>
-            {emp.savitarna_status === "none" ? "Pakviesti" : "Siųsti kvietimą iš naujo"}
-          </Button>
-        )}
+    <Box sx={{ p: 1.75, borderRadius: 2, border: "1px solid #EAECF0", bgcolor: "#FCFCFD" }}>
+      <Stack direction="row" alignItems="center" gap={1} flexWrap="wrap">
+        <Typography sx={{ fontSize: 14, fontWeight: 600, color: "#101828" }}>eSavitarna</Typography>
+        <Chip size="small" label={st.label} sx={{ height: 22, fontSize: 12, fontWeight: 600, color: st.color, bgcolor: st.bg }} />
       </Stack>
-      {!emp.email && !emp.phone && (
-        <Alert severity="info" sx={{ mt: 1.5 }}>Kvietimui reikia darbuotojo el. pašto (skiltyje „Duomenys“).</Alert>
+      <Typography sx={{ fontSize: 12.5, color: "#667085", mt: .5 }}>
+        Darbuotojas pats užpildys duomenis, teiks prašymus ir matys atsiskaitymo lapelius.
+      </Typography>
+      {emp.status === "active" && (
+        <Tooltip title={canInvite ? "" : "Pirmiausia įveskite el. paštą"}>
+          <span>
+            <Button size="small" variant={emp.savitarna_status === "none" ? "contained" : "outlined"} disableElevation
+              startIcon={<SendOutlinedIcon sx={{ fontSize: 16 }} />} disabled={busy || !canInvite} onClick={invite}
+              sx={{ mt: 1.25, textTransform: "none", fontWeight: 600, borderRadius: 2, whiteSpace: "nowrap" }}>
+              {emp.savitarna_status === "none" ? "Pakviesti" : "Siųsti kvietimą iš naujo"}
+            </Button>
+          </span>
+        </Tooltip>
       )}
       {msg && <Alert severity={link && msg.startsWith("Kvietimas") ? "success" : "warning"} sx={{ mt: 1.5 }}>{msg}</Alert>}
       {link && (
@@ -63,6 +62,6 @@ export default function SavitarnaInvitePanel({ emp, onChanged }) {
           }} />
       )}
       {error && <Alert severity="error" sx={{ mt: 1.5 }}>{error}</Alert>}
-    </Paper>
+    </Box>
   );
 }

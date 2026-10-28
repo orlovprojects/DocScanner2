@@ -11,6 +11,10 @@ logger = logging.getLogger("docscanner_app")
 def _send(to, subject, text, button_text=None, button_url=None):
     if not to:
         return False
+    from ..view_as import outbound_blocked
+    if outbound_blocked():
+        logger.info("Žiūrėti kaip: laiškas neišsiųstas %s: %s", to, subject)
+        return False
     key = getattr(settings, "MAILGUN_SAVITARNA_API_KEY", "")
     domain = getattr(settings, "MAILGUN_SAVITARNA_DOMAIN", "")
     if not key or not domain:

@@ -8,6 +8,7 @@ import {
 } from "react";
 import { api } from "../api/endpoints";
 import { useAuth } from "./useAuth";
+import { getViewAs, setViewAsCompany } from "../admin/viewAs";
 
 const CompanyProfileContext = createContext(null);
 
@@ -90,6 +91,12 @@ export const CompanyProfileProvider = ({ children }) => {
       const numericId = Number(id);
       if (!numericId || numericId === activeId) return;
 
+      // „Žiūrėti kaip“: kliento aktyvi įmonė DB nekeičiama - tik peržiūros įmonė
+      if (getViewAs()) {
+        setViewAsCompany(numericId, profiles.find((p) => p.id === numericId)?.name || "");
+        return;
+      }
+
       setSwitching(true);
 
       try {
@@ -102,7 +109,7 @@ export const CompanyProfileProvider = ({ children }) => {
         setSwitching(false);
       }
     },
-    [activeId, refresh]
+    [activeId, refresh, profiles]
   );
 
   const activeProfile = useMemo(

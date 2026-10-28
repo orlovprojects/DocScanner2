@@ -81,7 +81,6 @@ def get_ocr_text_gemini(
                 }
             ],
             config={
-                "temperature": temperature,
                 "max_output_tokens": max_output_tokens,
             },
         )

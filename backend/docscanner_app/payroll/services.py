@@ -108,12 +108,28 @@ def _segments(contract):
     return segs
 
 
+MIGRATED_NOTE = "Perkelta iš ankstesnės programos"
+
+
+def _is_migrated(ev):
+    """Nebuvimas, perkeltas perėjimo metu (prasidėjo dar ankstesnėje programoje)."""
+    return (ev.comment or "").startswith(MIGRATED_NOTE)
+
+
 def _events(employee, first, last):
     qs = AbsenceEvent.objects.filter(employee=employee, status="approved",
                                      start_date__lte=last, end_date__gte=first)
-    return [Event(e.kind, e.start_date, e.end_date,
-                  is_continuation=e.parent_event_id is not None or not e.employer_pays_first_days,
-                  ref=e.id) for e in qs]
+    out = []
+    for e in qs:
+        cont = e.parent_event_id is not None or not e.employer_pays_first_days
+        if (e.kind == "sick" and not cont and _is_migrated(e) and e.start_date + timedelta(days=1) == first):
+            # perėjimas: 1-a ligos diena - ankstesnėje programoje, 2-ą (DU pradžios dieną) apmoka DokSkenas
+            out.append(Event(e.kind, first, first, is_continuation=False, ref=e.id))
+            if e.end_date > first:
+                out.append(Event(e.kind, first + timedelta(days=1), e.end_date, is_continuation=True, ref=e.id))
+            continue
+        out.append(Event(e.kind, e.start_date, e.end_date, is_continuation=cont, ref=e.id))
+    return out
 
 
 def _overrides(employee, year, month):
@@ -148,21 +164,37 @@ def _closed_results(employee):
 
 
 def _vdu_months(employee, first):
-    # perėjimas iš kitos programos: VDU iš senos programos pirmus 3 mėnesius (kol nėra savų skaičiavimų)
+    """
+    3 mėnesiai iki `first` VDU skaičiavimui.
+    Mėnesiai iš ankstesnės programos (PayrollHistoryMonth):
+      - įvestas VDU iš senos programos -> uždarbis = VDU x dirbtos dienos (val.): perėjimo mėnesį VDU lygus įvestam,
+        vėliau proporcingai įsimaišo DokSkene apskaičiuoti mėnesiai (pvz. lapkritį: rugpj., rugs. - sena, spalis - savas);
+      - kitaip - Sodros pajamos / dienos pagal kalendorių (apytiksliai: į pajamas patenka atostoginiai, premijos).
+    """
+    from docscanner_app.models import PayrollHistoryMonth
     ov = getattr(employee, "opening_vdu", None)
     until = getattr(employee, "opening_vdu_until", None)
-    if ov and until and first < until:
-        days, hours = Decimal("21"), Decimal("168")
-        earnings = ov * (hours if getattr(employee, "opening_vdu_unit", "day") == "hour" else days)
-        return [VduMonth(first.year, first.month, earnings.quantize(Decimal("0.01")), int(days), hours, int(days))]
-    from docscanner_app.models import PayrollHistoryMonth
+    hourly_unit = getattr(employee, "opening_vdu_unit", "day") == "hour"
+    du_start = None
+    if ov and until:
+        k = until.year * 12 + until.month - 1 - 3                 # opening_vdu_until = DU pradžia + 3 mėn.
+        du_start = date(k // 12, k % 12 + 1, 1)
     months = []
     for y, m in _months_back(first, 3):
         res = _closed_results(employee).filter(run__year=y, run__month=m).first()
         if not res:
             h = PayrollHistoryMonth.objects.filter(employee=employee, year=y, month=m).first()
-            if h:            # perkelta iš ankstesnės programos
+            if h and ov:
+                base = h.worked_hours if hourly_unit else Decimal(h.worked_days)
+                months.append(VduMonth(y, m, (ov * base).quantize(Decimal("0.01")), h.worked_days, h.worked_hours,
+                                       h.worked_days))
+            elif h:          # perkelta iš ankstesnės programos
                 months.append(VduMonth(y, m, h.income, h.worked_days, h.worked_hours, h.worked_days))
+            elif ov and du_start and date(y, m, 1) < du_start:
+                # nėra istorijos (pvz. pridėtas rankiniu būdu) - VDU iš senos programos, standartinis mėnuo
+                days, hours = 21, Decimal("168")
+                months.append(VduMonth(y, m, (ov * (hours if hourly_unit else days)).quantize(Decimal("0.01")),
+                                       days, hours, days))
             continue
         earnings = (PayrollLine.objects
                     .filter(run=res.run, employee=employee, pay_code__vdu_treatment="regular",
@@ -404,6 +436,24 @@ def set_vacation_balance(employee, on_date, balance, reason="Likučio nustatymas
     return vacation_for(employee, on_date)
 
 
+def adjust_vacation(employee, on_date, days, reason):
+    """Korekcija +/- dienomis (pvz. perkeliant iš kitos programos, susitarus dėl papildomų dienų)."""
+    days = Decimal(str(days))
+    if not days:
+        raise ValueError("Nurodykite dienų skaičių (+ arba −)")
+    if not (reason or "").strip():
+        raise ValueError("Nurodykite korekcijos priežastį")
+    if vacation_for(employee, on_date) is None:
+        raise ValueError("Darbuotojas neturi darbo sutarties")
+    VacationAdjustment.objects.create(employee=employee, date=on_date, days=days, reason=reason.strip())
+    return vacation_for(employee, on_date)
+
+
+def vacation_history(employee):
+    return [{"id": a.id, "date": a.date.isoformat(), "days": str(a.days), "reason": a.reason or ""}
+            for a in VacationAdjustment.objects.filter(employee=employee).order_by("-date", "-id")]
+
+
 def requested_vacation_days(employee, date_from, date_to):
     contract = _active_contract(employee, date_from, date_to)
     week = _week_on(contract, date_from) if contract else STANDARD_WEEK
@@ -540,6 +590,14 @@ def _recalculate_run(run):
             continue
         res = calculate_employee_month(P, inp)
 
+        if inp.employed_to and contract.termination_date and not any(l.code == "ISE" for l in res.lines):
+            months, approx = severance_estimate(contract, res.daily_vdu)
+            if months:
+                art = (contract.termination_basis or {}).get("article")
+                res.warnings.append(f"Išeitinė išmoka (DK {art} str.): {months} mėn. VDU ≈ {approx} € – pridėkite eilutę ISE")
+        if inp.employed_to and contract.termination_date:
+            res.warnings.append(f"Galutinis atsiskaitymas – iki {contract.termination_date} (DK 146 str.); vėliau tik jei "
+                                f"atleidžiant raštu susitarta (iki 1 VDU – per 10 d. d., likusi dalis – per 3 mėn.)")
         manual = [e for e in inp.extra_lines if getattr(e, "db_id", None)]
         auto_lines = [l for l in res.lines if all(l is not e for e in manual)] + tax_lines(res.taxes)
         new = []
@@ -655,6 +713,8 @@ def approve_run(run, user, advance_decisions=None):
     create_obligations_for_run(run)
     from .roster.services import close_period_vacation
     close_period_vacation(run)
+    if run.kind == "regular" and (run.year, run.month) >= SDUP_FROM:
+        transaction.on_commit(lambda: _auto_sdup(run))      # SDUP paruošiamas iškart - Deklaravime belieka pateikti
     logger.info("DU patvirtintas: run=%s, JE #%s", run.id, je.id)
     if run.kind == "regular":
         from .savitarna_emails import notify_payslip
@@ -664,6 +724,12 @@ def approve_run(run, user, advance_decisions=None):
                 transaction.on_commit(lambda e=e: notify_payslip(e, run.year, run.month))
     return run
 
+def _auto_sdup(run):
+    """Patvirtinus DU - SDUP paruošiamas automatiškai (jei jau pateiktas ir pasikeitė - patikslinimas)."""
+    try:
+        generate_declaration(run.company, "SDUP", run.year, run.month)
+    except Exception:  # noqa: BLE001
+        logger.exception("SDUP auto: run=%s", run.id)
 
 @transaction.atomic
 def reopen_run(run):
@@ -1082,28 +1148,25 @@ def ensure_mma_minimums(company, on_date=None):
     return changes
 
 
+def _group_has_staff(g):
+    """Ar grupėje yra dirbančių darbuotojų (tuščios grupės į DAS neįtraukiamos)."""
+    return any(_full_time_salaries(p) for p in g.positions.all())
+
+
 def _groups_snapshot(company):
     return sorted(
         [{"code": g.code, "name": g.name, "positions": sorted(p.name for p in g.positions.all()),
           "min": str(g.salary_min or ""), "max": str(g.salary_max or ""),
           "scores": [g.skills, g.qualification, g.effort, g.responsibility, g.conditions],
           "description": g.description}
-         for g in PositionGroup.objects.filter(company=company).prefetch_related("positions")],
+         for g in PositionGroup.objects.filter(company=company).prefetch_related("positions") if _group_has_staff(g)],
         key=lambda x: x["code"])
 
 
 def das_outdated(company):
     """Ar grupės pasikeitė po paskutinės patvirtintos DAS versijos."""
-    last = DasDocument.objects.filter(company=company).order_by("-version").first()
-    if last is None:
-        return False
-    cur = _groups_snapshot(company)
-    if last.groups_snapshot and "scores" not in last.groups_snapshot[0]:
-        # senesnė DAS versija (be vertinimų) - lyginam tik tai, kas buvo išsaugota
-        cur = [{k: g[k] for k in ("code", "name", "positions", "min", "max")} for g in cur]
-    old = sorted([{**g, "positions": sorted(g.get("positions", []))} for g in last.groups_snapshot],
-                 key=lambda x: x["code"])
-    return old != cur
+    from .das_status import das_changes
+    return bool(das_changes(company))
 
 
 # Pradinis vertinimas: pagal 4 lygio LPK grupę (data/lpk_scores.json),
@@ -1277,6 +1340,8 @@ def groups_check(company):
     from .lpk import cluster_for, scores_differ
     keys = ("skills", "qualification", "effort", "responsibility", "conditions")
     for g in PositionGroup.objects.filter(company=company).prefetch_related("positions"):
+        if g.salary_min is None and g.salary_max is None and _group_has_staff(g):
+            issues.append({"type": "no_salary", "group": g.code})
         gs = {k: getattr(g, k) for k in keys}
         odd = [p.name for p in g.positions.all()
                if (c := cluster_for(p.lpk_code)) and c.get("exact") and scores_differ(c, gs)]
@@ -1295,18 +1360,26 @@ def groups_check(company):
                 issues.append({"type": "below_mma", "employee": emp.full_name, "position": pos.name, "group": g.code,
                                "salary": str(sal.quantize(Decimal("0.01"))), "mma": str(mma)})
                 continue
+            unskilled = (pos.lpk_code or "").startswith("9") or (g.qualification or 0) <= 1
+            if abs(sal - mma) < 1 and not unskilled:       # MMA - tik už nekvalifikuotą darbą (DK 141 str.)
+                issues.append({"type": "mma_qualified", "employee": emp.full_name, "position": pos.name, "group": g.code})
             if (g.salary_min and sal < g.salary_min) or (g.salary_max and sal > g.salary_max):
                 issues.append({"type": "out_of_range", "employee": emp.full_name, "position": pos.name,
                                "group": g.code, "salary": str(sal.quantize(Decimal("0.01"))),
                                "min": str(g.salary_min or ""), "max": str(g.salary_max or "")})
-    if das_outdated(company):
-        issues.append({"type": "das_outdated"})
+    from .das_status import das_changes
+    changes = das_changes(company)
+    if changes:
+        issues.append({"type": "das_outdated", "changes": changes})
     return issues
 
 
-def das_context(company, approved_date, manager_name=""):
+def das_context(company, approved_date, manager_name="", manager_title="", city="", settings=None):
+    from docscanner_app.models import Employee
     groups = []
     for g in PositionGroup.objects.filter(company=company).prefetch_related("positions"):
+        if not _group_has_staff(g):                     # grupė be darbuotojų į dokumentą neįtraukiama
+            continue
         groups.append(DasGroup(
             code=g.code, name=g.name, positions=[p.name for p in g.positions.all()],
             scores={"skills": g.skills, "qualification": g.qualification, "effort": g.effort,
@@ -1315,19 +1388,45 @@ def das_context(company, approved_date, manager_name=""):
         ))
     name = getattr(company, "name", "") or getattr(company, "company_name", "") or str(company)
     code = getattr(company, "company_code", "") or getattr(company, "code", "") or ""
-    return DasContext(name, code, manager_name, approved_date, groups)
-
+    last = DasDocument.objects.filter(company=company).order_by("-version").first()
+    employees, hourly = [], False
+    for e in Employee.objects.filter(company=company, status="active").order_by("last_name", "first_name"):
+        c = e.contracts.filter(status="active").order_by("-start_date").first()
+        t = c.terms.order_by("-valid_from").select_related("position").first() if c else None
+        employees.append((e.full_name, t.position.name if t and t.position_id else ""))
+        hourly = hourly or bool(t and t.pay_form == "hourly")
+    st = settings or {}
+    try:
+        pct = max(0, min(100, int(st.get("bonus_max_pct") or 20)))
+    except (TypeError, ValueError):
+        pct = 20
+    return DasContext(name, code, manager_name, approved_date, groups, city=city,
+                      manager_title=manager_title or "Direktorius",
+                      version=(last.version + 1) if last else 1,
+                      previous_date=last.approved_date if last else None,
+                      headcount=len(employees), hourly=hourly, employees=employees,
+                      order_no=str(st.get("order_no") or "")[:30],
+                      bonus="none" if st.get("bonus") == "none" else "results", bonus_max_pct=pct,
+                      bonus_period=st.get("bonus_period") if st.get("bonus_period") in ("month", "quarter", "year") else "quarter",
+                      annual_bonus=bool(st.get("annual_bonus")))
 
 @transaction.atomic
-def approve_das(company, approved_date, manager_name=""):
-    ctx = das_context(company, approved_date, manager_name)
+def approve_das(company, approved_date, manager_name="", manager_title="", city="", settings=None):
+    from .das_status import das_changes
+    ctx = das_context(company, approved_date, manager_name, manager_title, city, settings)
     if not ctx.groups:
         raise ValueError("Pirmiausia sukurkite pareigybių grupes")
+    no_salary = [g.code for g in ctx.groups if g.salary_min is None and g.salary_max is None]
+    if no_salary:
+        raise ValueError(f"Nenurodytos algos ribos: {', '.join(no_salary)} - atidarykite grupę ir nurodykite")
     last = DasDocument.objects.filter(company=company).order_by("-version").first()
+    if last and approved_date < last.approved_date:
+        raise ValueError(f"Data negali būti ankstesnė nei v{last.version} patvirtinimo ({last.approved_date:%Y-%m-%d})")
     return DasDocument.objects.create(
-        company=company, version=(last.version + 1) if last else 1, approved_date=approved_date,
-        manager_name=manager_name, html=render_das_html(ctx),
-        groups_snapshot=_groups_snapshot(company),
+        company=company, version=ctx.version, approved_date=approved_date,
+        manager_name=manager_name, manager_title=ctx.manager_title, city=city, html=render_das_html(ctx),
+        groups_snapshot=_groups_snapshot(company), changes=das_changes(company) if last else [],
+        settings=settings or {},
     )
 
 
@@ -1352,14 +1451,17 @@ def contract_doc_data(contract):
     week = terms_week(terms)
     weekly = sum(week, Decimal("0")) * (terms.workload if terms else Decimal("1"))
     ent = leave_entitlement(emp, contract, contract.start_date, week)
-    workdays = sum(1 for h in week if h > 0)
-    statutory = 24 if workdays >= 6 else 20 if workdays == 5 else 4 * workdays
-    if st.advance_enabled:
-        pay_terms = (f"Darbo užmokestis mokamas du kartus per mėnesį: avansas – iki einamojo mėnesio "
-                     f"{st.advance_day} d., likusi dalis – iki kito mėnesio {st.salary_day} d.")
+    workload = terms.workload if terms else Decimal("1")
+    pay_once = bool(getattr(emp, "pay_once_a_month", False))          # kortelėje „Mokėti kartą per mėnesį“ (DK 139 str. 2 d.)
+    if pay_once:
+        pay_terms = f"Darbo užmokestis už praėjusį mėnesį išmokamas iki kito mėnesio {st.salary_day} d."
     else:
-        pay_terms = (f"Darbo užmokestis mokamas vieną kartą per mėnesį darbuotojo prašymu, "
-                     f"ne vėliau kaip iki kito mėnesio {st.salary_day} d.")
+        # be avanso nustatymo - numatytoji pirmos dalies diena 25 (įspėjimas contract_warnings)
+        pay_terms = (f"Darbo užmokestis mokamas du kartus per mėnesį: pirmoji dalis – iki einamojo mėnesio "
+                     f"{st.advance_day or 25} d., likusi už mėnesį apskaičiuoto darbo užmokesčio dalis – iki kito mėnesio "
+                     f"{st.salary_day} d.")
+    pay_terms += " Darbo santykiams pasibaigus, atsiskaitoma Darbo kodekso 146 straipsnyje nustatyta tvarka."
+    summed = getattr(terms, "work_regime", "standard") == "summed"
     company_address = _company_attr(company, "address", "company_address", "registered_address")
     return ContractDocData(
         number=contract.number or str(contract.id),
@@ -1384,9 +1486,96 @@ def contract_doc_data(contract):
         end_date=contract.end_date, weekly_hours=weekly,
         full_time=bool(terms and terms.workload >= 1),
         start_date=contract.start_date, probation_months=contract.probation_months,
-        leave_days=ent.total if ent.total != statutory else None,
+        leave_days=ent.total,
         extra_terms=contract.extra_terms,
+        leave_parts=list(ent.parts),
+        summed=summed,
+        summed_months=int(contract.summed_period_months or getattr(st, "summed_period_months", None) or 3),
+        day_hours=[h * workload for h in week],
+        pay_once=pay_once,
+        collective_agreement=_clean_text(getattr(st, "collective_agreement", "")),
+        pay_items=_contract_pay_items(emp, contract.start_date),
+        training=_clean_text(getattr(st, "training_info", "")),
+        social_protection=_clean_text(getattr(st, "social_protection_info", "")),
     )
+
+
+def _clean_text(v):
+    """Tekstinis nustatymas: '', None, False ir 'false'/'null' (seni klaidingi įrašai) - tuščia."""
+    if v is None or isinstance(v, bool):
+        return ""
+    v = str(v).strip()
+    return "" if v.lower() in ("false", "true", "none", "null", "undefined") else v
+
+
+def _contract_pay_items(employee, on_date):
+    """Garantuoti nuolatiniai priedai (kortelės „Priedai ir išskaitos“) - sutarčiai ir DK 44 pranešimui."""
+    from docscanner_app.models import RecurringPayItem
+    out = []
+    for it in RecurringPayItem.objects.filter(employee=employee).select_related("pay_code"):
+        if it.valid_to and it.valid_to < on_date:
+            continue
+        name = getattr(it.pay_code, "name", "") or it.comment or it.pay_code.code
+        if it.percent:
+            out.append((name, f"{num_lt(it.percent)} % pareiginės algos per mėnesį"))
+        elif it.amount:
+            out.append((name, f"{num_lt(it.amount, 2)} Eur per mėnesį"))
+    return out
+
+
+def num_lt(v, places=None):
+    v = Decimal(str(v))
+    s = f"{v:.2f}" if places else f"{v.normalize():f}"
+    return s.replace(".", ",")
+
+
+def contract_warnings(contract):
+    """Įspėjimai generuojant sutartį: 1-SD terminas, DU mokėjimas kartą per mėnesį be prašymo, DAS."""
+    out = []
+    emp = contract.employee
+    st = _settings(emp.company)
+    today = timezone.localdate()
+    if contract.start_date and contract.start_date >= today:
+        head = getattr(contract, "is_company_head", False)
+        deadline = contract.start_date if head else prev_work_day(contract.start_date)
+        sent = PayrollDeclaration.objects.filter(form="1-SD", contract=contract, status__in=SUBMITTED).exists()
+        if not sent and deadline <= today:
+            out.append(("1-SD vadovui teikiamas ne vėliau kaip prieš 1 darbo valandą iki darbo pradžios. " if head else
+                        f"1-SD turėjo būti pateiktas ne vėliau kaip {deadline} (1 darbo diena iki darbo pradžios). " if deadline < today else
+                        "1-SD reikia pateikti šiandien – ne vėliau kaip 1 darbo diena iki darbo pradžios. ")
+                       + "Patikrinkite Deklaravime – DokSkenas nepažymėjo, kad jis pateiktas.")
+    if not st.advance_enabled and not getattr(emp, "pay_once_a_month", False):
+        out.append(f"Įmonė DU moka kartą per mėnesį, bet nepažymėtas darbuotojo prašymas – sutartyje įrašyta, kad DU mokamas "
+                   f"du kartus per mėnesį (pirmoji dalis iki {st.advance_day or 25} d.; DK 139 str. 2 d.). "
+                   "Jei darbuotojas prašo mokėti kartą, pažymėkite „Mokėti kartą per mėnesį“.")
+    return out + contract_das_warnings(contract)
+
+
+def contract_das_warnings(contract):
+    """Ar sutarties pareigos ir alga atitinka patvirtintą DAS (DK 140 str.)."""
+    terms = _latest_terms(contract, contract.start_date)
+    if not terms or not terms.position or not terms.base_amount:
+        return []
+    pos = terms.position
+    g = getattr(pos, "group", None)
+    if g is None:
+        return [f"Pareigos „{pos.name}“ nepriskirtos pareigybių grupei – priskirkite DAS puslapyje."]
+    last = DasDocument.objects.filter(company=contract.employee.company).order_by("-version").first()
+    if last is None:
+        return []                        # DAS dar nepatvirtinta - priminimas Apžvalgoje
+    snap = next((x for x in (last.groups_snapshot or []) if x.get("code") == g.code), None)
+    if snap is None:
+        return [f"Grupės {g.code} nėra patvirtintoje DAS (v{last.version}) – pasirašius sutartį patvirtinkite naują DAS versiją."]
+    hourly = terms.pay_form == "hourly"
+    amount = Decimal(terms.base_amount) if hourly else Decimal(terms.base_amount) / Decimal(terms.workload or 1)
+    lo, hi = (snap.get("hmin"), snap.get("hmax")) if hourly else (snap.get("min"), snap.get("max"))
+    if not lo or not hi:
+        return []
+    if Decimal(lo) <= amount <= Decimal(hi):
+        return []
+    unit = " €/val." if hourly else " € (visam etatui)"
+    return [f"{'Valandinis atlygis' if hourly else 'Alga'} {amount:.2f}{unit} nepatenka į patvirtintos DAS grupės {g.code} "
+            f"ribas {lo}–{hi}. Pasirašius sutartį reikės patvirtinti naują DAS versiją."]
 
 
 @transaction.atomic
@@ -2142,7 +2331,7 @@ def gpm313_totals(company, year, month):
     for back, y, m in months:
         run = _closed_run(company, y, m)
         if not run:
-            if back == 1:
+            if back == 1 and not _before_du_start(company, y, m):
                 warnings.append(f"{y}-{m:02d} atlyginimai nepatvirtinti - jų išmokos neįtrauktos")
             continue
         for em in _employee_months(company, run, st):
@@ -2194,11 +2383,32 @@ def build_gpm313_declaration(company, year, month, manual=None):
 
 
 def _compensated_months(contract):
-    basis = (contract.termination_basis or {}).get("article")
-    if basis != "57":
-        return Decimal("0")
-    years = (contract.termination_date - contract.start_date).days / 365.25
-    return Decimal("2") if years >= 1 else Decimal("0.5")
+    """
+    Išeitinės išmokos dydis VDU mėnesiais (2-SD):
+    DK 57 ir DK 56 str. 1 d. 4-6 p. - 2 mėn. (darbo santykiai >= 1 m.) arba 0,5 mėn.; DK 59 - ne mažiau kaip 6 mėn.
+    Didesnė suma (susitarimu / kolektyvine sutartimi) - termination_basis["severance_months"].
+    """
+    basis = contract.termination_basis or {}
+    art, point = str(basis.get("article") or ""), str(basis.get("point") or "")
+    if basis.get("severance_months"):
+        return Decimal(str(basis["severance_months"]))
+    if art == "59":
+        return Decimal("6")
+    if art == "57" or (art == "56" and point in ("4", "5", "6")):
+        years = (contract.termination_date - contract.start_date).days / 365.25
+        return Decimal("2") if years >= 1 else Decimal("0.5")
+    return Decimal("0")
+
+
+def severance_estimate(contract, daily_vdu):
+    """Išeitinė išmoka ≈ dienos VDU x vidutinis darbo dienų per mėnesį skaičius (metų norma / 12) x mėnesiai."""
+    from .work_calendar import month_norm
+    months = _compensated_months(contract)
+    if not months or not contract.termination_date or not daily_vdu:
+        return months, Decimal("0")
+    y = contract.termination_date.year
+    days = sum(month_norm(y, mo).work_days for mo in range(1, 13)) / Decimal("12")
+    return months, (Decimal(str(daily_vdu)) * days * months).quantize(Decimal("0.01"))
 
 
 def build_1sd_declaration(contract):
@@ -2335,6 +2545,23 @@ def _employer_sick_dates(ev):
     return [d for d in days if d.weekday() < 5 and not is_holiday(d)]
 
 
+def _employer_sick_paid(root, dates):
+    """Ligos išmoka iš darbdavio lėšų (LIG) patvirtintuose DU: pagal susietą įvykį, kitaip - tų dienų mėnesio LIG."""
+    lines = PayrollLine.objects.filter(employee=root.employee, pay_code__code="LIG", run__status__in=CLOSED_STATUSES)
+    own = lines.filter(event=root).aggregate(s=Sum("amount"))["s"]
+    if own:
+        return own
+    months = {d.replace(day=1) for d in dates}
+    if not months:
+        return Decimal("0")
+    # be susiejimo: tik jei tais mėnesiais nebuvo kitos ligos su darbdavio dienomis
+    others = AbsenceEvent.objects.filter(employee=root.employee, kind="sick", status="approved",
+                                         employer_pays_first_days=True, parent_event__isnull=True).exclude(id=root.id)
+    if any(others.filter(start_date__year=m.year, start_date__month=m.month).exists() for m in months):
+        return Decimal("0")
+    return lines.filter(event__isnull=True, accrual_month__in=months).aggregate(s=Sum("amount"))["s"] or Decimal("0")
+
+
 def build_npsd2_declaration(root, chain, seg_start, seg_end):
     from django.db.models import Sum
     from .declarations.sodra_forms import SickReport, build_npsd2
@@ -2345,8 +2572,16 @@ def build_npsd2_declaration(root, chain, seg_start, seg_end):
     if root.kind == "sick" and first_seg:
         if root.employer_pays_first_days:
             dates = _employer_sick_dates(root)
-            paid = (PayrollLine.objects.filter(event=root, pay_code__code="LIG", run__status__in=CLOSED_STATUSES)
-                    .aggregate(s=Sum("amount"))["s"])
+            paid = _employer_sick_paid(root, dates)
+            if _is_migrated(root):
+                from .readiness import payroll_start
+                start = payroll_start(root.employee.company)
+                if start and any(d < start for d in dates):
+                    if root.prepaid_amount:
+                        paid += root.prepaid_amount        # ankstesnėje programoje išmokėta dalis
+                    else:
+                        warnings.append("⚠ Nurodykite ligos išmoką už pirmąsias dienas, išmokėtą ankstesnėje programoje "
+                                        "(Perėjimas → darbuotojo kortelė)")
             if dates and paid:
                 r.employer_from, r.employer_to, r.employer_sum = dates[0], dates[-1], paid
                 if len(dates) == 1:
@@ -2372,7 +2607,9 @@ def build_npsd2_declaration(root, chain, seg_start, seg_end):
 
 def _npsd2_overview_items(company, first, last):
     """NP-SD2: laikotarpiai, kurių terminas šį mėnesį, ir visi vėluojantys nepateikti."""
+    from .readiness import payroll_start
     items = []
+    du_start = payroll_start(company)
     since = first - timedelta(days=120)
     evs = (AbsenceEvent.objects.filter(employee__company=company, status="approved", kind__in=NPSD2_KINDS,
                                        end_date__gte=since, start_date__lte=last)
@@ -2383,9 +2620,14 @@ def _npsd2_overview_items(company, first, last):
         if root.id in seen:
             continue
         seen.add(root.id)
+        migrated = _is_migrated(root)
+        if migrated and root.kind == "maternity":
+            continue                                    # pranešimas visam laikotarpiui - pateiktas ankstesnėje programoje
         decls = {d.variant: d for d in PayrollDeclaration.objects.filter(form="NP-SD2", absence_event=root)}
         what = "nėštumo ir gimdymo atostogos" if root.kind == "maternity" else "nedarbingumas"
         for a, b, dl in npsd2_segments(root, chain):
+            if migrated and du_start and b < du_start:
+                continue                                # laikotarpis iki perėjimo - ankstesnė programa
             v = a.isoformat()
             d = decls.get(v)
             submitted = d is not None and d.status in SUBMITTED
@@ -2444,7 +2686,7 @@ def sync_absence_declarations(ev):
 
 def _generate_declaration(company, form, year=None, month=None, contract=None, manual=None,
                           absence_event=None, variant=""):
-    if form in ("SAM", "GPM313") and _before_du_start(company, year, month):
+    if form in ("SAM", "GPM313", "SDUP", "1-SD", "2-SD") and _before_du_start(company, year, month):
         raise ValueError("Šis mėnuo deklaruotas ankstesnėje programoje (DU DokSkenas pradėtas vėliau)")
     if form == "SAM":
         content, errors = build_sam_declaration(company, year, month)
@@ -2552,8 +2794,9 @@ def sdup_overview_item(company, year, month):
             "deadline": sdup_deadline(year, month), "declaration": _decl_json(d), "format": "json",
             # DU DokSkenas neskaičiuojamas (ar mėnuo nepatvirtintas) - pildoma rankiniu būdu / iš S50, SAM
             "manual": run is None}
-    if d and d.status in ("submitted", "accepted") and run and run.approved_at and d.submitted_at \
-            and run.approved_at > d.submitted_at:
+    pending_fix = d and (d.meta or {}).get("correction") and d.status not in ("submitted", "accepted")
+    if run and run.approved_at and (pending_fix or (d and d.status in ("submitted", "accepted") and d.submitted_at
+                                                     and run.approved_at > d.submitted_at)):
         approved = timezone.localtime(run.approved_at).date()
         item.update(correction=True, deadline=next_work_day(next_work_day(approved)),
                     title=item["title"] + " – PATIKSLINTI (DU pakeistas po pateikimo)")
@@ -2595,7 +2838,7 @@ def generate_declaration(company, form, year=None, month=None, contract=None, ma
 GPM312_LIMIT_CODES = {"DOV": "07", "SVD": "73", "GYV": "74"}     # neapmokestinama dalis -> šis kodas, viršijanti -> 01
 GPM312_NATURA = {"AUT": "A", "NAT": "N", "DOV": "N", "SVD": "N", "GYV": "N"}
 GPM312_ZERO_RATE = {"05", "07", "08", "73", "74"}
-
+DU_DECL_FORMS = {"SAM", "GPM313", "GPM312", "SDUP", "1-SD", "2-SD", "9-SD", "12-SD", "NP-SD2"}
 
 def _before_du_start(company, year, month):
     from .readiness import payroll_start
@@ -2762,8 +3005,18 @@ def declarations_overview(company, year, month):
             "external_status": d.external_status, "external_message": d.external_message,
         }
     out = items + ([sdup_item] if sdup_item else []) + absence_items
-    if before:                        # iki DU pradžios DokSkenas - viskas teikta kitoje programoje
-        for it in out:
+    from .readiness import payroll_start
+    start = payroll_start(company)
+    if start is None or not Employee.objects.filter(company=company).exists():
+        # DU modulis dar nenaudojamas (nėra darbuotojų) - DU deklaracijų nerodome
+        return [it for it in out if it["form"] not in DU_DECL_FORMS]
+    for it in out:
+        if it["form"] not in DU_DECL_FORMS:   # ne DU deklaracijos (PVM ir kt.) - visada kaip įprasta
+            continue
+        if it["form"] == "GPM312":    # metinė - DokSkenas, jei bent dalis metų jau DokSkenas (likusi dalis - iš perėjimo)
+            if start and int(it.get("year") or year) < start.year:
+                it["previous_system"] = True
+        elif before:                  # mėnesinės DU formos iki DU pradžios - kita programa
             it["previous_system"] = True
     return out
 
@@ -2792,6 +3045,8 @@ def _absence_overview_items(company, first, last):
         if ev is None or ev.id in seen:
             continue
         seen.add(ev.id)
+        if _is_migrated(ev) and not any(d.variant for d in PayrollDeclaration.objects.filter(absence_event=ev)):
+            continue                                    # perkeltas nebuvimas - pranešimas pateiktas ankstesnėje programoje
         form, _ = absence_form(ev)
         if not form:
             continue
@@ -2891,3 +3146,10 @@ def check_declaration_state(decl):
         decl.errors = ["Failas nebuvo patvirtintas EDS laiku. Paruoškite ir pateikite iš naujo."]
     decl.save(update_fields=["external_status", "last_checked_at", "status", "errors", "updated_at"])
     return decl
+
+
+# --- DAS: grupių ribos, patikros ir dokumentas (perrašo ankstesnes tų pačių pavadinimų funkcijas) ---
+from .das_groups import (  # noqa: E402,F401,F811
+    _group_has_staff, _groups_snapshot, approve_das, das_context, ensure_mma_minimums, groups_check,
+    refresh_auto_ranges,
+)

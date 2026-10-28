@@ -76,9 +76,12 @@ def create_obligations_for_run(run):
 
     first, last = date(y, m, 1), _clip(y, m, 31)
     from docscanner_app.models import EmploymentContract
-    terminated = dict(EmploymentContract.objects.filter(
-        employee__company=run.company, termination_date__gte=first, termination_date__lte=last,
-    ).values_list("employee_id", "termination_date"))
+    terminated = {}                                   # DK 146: paskutinę darbo dieną arba susitartą datą
+    for emp_id, end, basis in EmploymentContract.objects.filter(
+            employee__company=run.company, termination_date__gte=first, termination_date__lte=last,
+    ).values_list("employee_id", "termination_date", "termination_basis"):
+        agreed = (basis or {}).get("settlement_until")
+        terminated[emp_id] = date.fromisoformat(agreed) if agreed else end
     pay_dates = []
 
     for res in run.results.select_related("employee"):

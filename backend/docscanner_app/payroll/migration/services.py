@@ -20,6 +20,7 @@ from .reconstruct import build
 
 logger = logging.getLogger("docscanner_app")
 ZERO = Decimal("0")
+DK_ENABLED = False                       # DK įrašai perėjimui (tarpiniai mėnesiai, 4480 likučiai) - kai bus pilna apskaita
 EMPLOYEE_RATE = Decimal("19.50")         # 2026: VSD 12,52 + PSD 6,98 (darbuotojo dalis)
 PENSION_RATE = Decimal("3.00")
 EDITABLE = ("lpk_code", "position_name", "base_amount", "vacation_balance", "unpaid_amount", "include",
@@ -27,11 +28,52 @@ EDITABLE = ("lpk_code", "position_name", "base_amount", "vacation_balance", "unp
             "annual_leave_days", "work_regime", "single_parent", "iban", "email", "phone", "first_name", "last_name",
             "work_time_mode", "lpk4", "has_disability", "vdu_override", "children", "summed_period_months",
             "summed_period_start", "summed_worked_hours", "summed_absence_hours", "summed_paid_overtime",
-            "transition_state", "transition_until", "vacation_prepaid_amount", "pay_once_a_month", "advance_amount")
+            "transition_state", "transition_until", "vacation_prepaid_amount", "pay_once_a_month", "advance_amount",
+            "gpm_ytd", "transition_from", "week_hours", "birth_date", "gender")
 DECIMAL_FIELDS = ("base_amount", "vacation_balance", "unpaid_amount", "weekly_hours", "vdu_override",
                   "summed_worked_hours", "summed_absence_hours", "summed_paid_overtime", "vacation_prepaid_amount",
-                  "advance_amount")
-DATE_FIELDS = ("start_date", "end_date", "summed_period_start", "transition_until")
+                  "advance_amount", "gpm_ytd")
+DATE_FIELDS = ("start_date", "end_date", "summed_period_start", "transition_until", "transition_from", "birth_date")
+SD_RE = re.compile(r"^([A-Z]{2})\s?(\d{7})$")          # užsieniečio Sodros socialinio draudimo numeris, pvz. AB1234567
+
+
+def foreign_key(sd):
+    """Užsieniečio identifikatorius perėjime (vietoj asmens kodo): „SD“ + SD numeris (11 simbolių)."""
+    mm = SD_RE.match(str(sd or "").strip().upper())
+    return f"SD{mm.group(1)}{mm.group(2)}" if mm else None
+
+
+def is_foreign_key(code):
+    return str(code or "").startswith("SD")
+
+
+EMAIL_RE = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]{2,}$")
+
+
+def check_email(v):
+    v = str(v or "").strip().lower()
+    if v and not EMAIL_RE.match(v):
+        raise ValueError(f"Neteisingas el. pašto adresas „{v}“")
+    return v
+
+
+def check_phone(v):
+    v = re.sub(r"[\s\-()]", "", str(v or ""))
+    if v and not re.match(r"^\+?\d{8,15}$", v):
+        raise ValueError(f"Neteisingas telefono numeris „{v}“")
+    return v
+
+
+def _clean_week(v):
+    """[7 skaičiai] -> [Decimal x7] arba None."""
+    if v in (None, "", []):
+        return None
+    if isinstance(v, str):
+        v = re.split(r"[;,\s]+", v.strip())
+    vals = [Decimal(str(x).replace(",", ".")) if str(x).strip() not in ("", "None") else Decimal("0") for x in v]
+    if len(vals) != 7 or any(x < 0 or x > 24 for x in vals):
+        raise ValueError("Savaitės grafikas: 7 dienų valandos (Pr–S), kiekviena 0–24")
+    return vals if sum(vals) > 0 else None
 
 
 def _q(v):
@@ -360,11 +402,12 @@ def analyze(m):
     s = m.du_start
     last_y, last_m = _month_add(s.year, s.month, -1)
     existing = {p.person_code: p for p in m.people.all()}
+    salary_check = {}                                   # {asmens kodas: {reason, suggested}} - pasiūlyta alga gali būti netiksli
     for code, e in r.employees.items():
         p = existing.get(code) or PayrollMigrationEmployee(migration=m, person_code=code)
         auto = {
             "first_name": e.first_name, "last_name": e.last_name, "start_date": e.start, "end_date": e.end,
-            "sd_series": e.sd_series, "sd_number": e.sd_number,
+            "sd_series": e.sd_series, "sd_number": e.sd_number, "is_foreigner": is_foreign_key(code),
             "lpk4": e.lpk4, "contract_type": e.contract_reason or "01", "pension": e.pension,
             "npd_mode": "none" if e.npd_none else "standard",
             "include": not (e.end and e.end < date(s.year - (1 if s.month <= 3 else 0), 1, 1)),
@@ -389,10 +432,20 @@ def analyze(m):
             else:
                 auto["employed"] = auto["include"] = bool(r.s29_codes and code in r.s29_codes) or not r.s29_codes
         last_income = e.income.get((last_y, last_m))
-        recent = [v for (y, mo), v in sorted(e.income.items()) if (y, mo) < (s.year, s.month) and v > 0][-3:]
+        recent_items = [(ym, v) for ym, v in sorted(e.income.items()) if ym < (s.year, s.month) and v > 0][-3:]
+        recent = [v for _, v in recent_items]
         if recent:
             med = sorted(recent)[len(recent) // 2]          # mediana - vienkartinė premija nepakeičia
             auto["base_amount"] = med
+            why = []
+            if len(recent) < 3:
+                why.append("mažiau nei 3 mėn. duomenų")
+            elif med and (max(recent) - min(recent)) / med > Decimal("0.05"):
+                why.append("mėnesių sumos skiriasi (premijos, viršvalandžiai, liga ar atostogos)")
+            if e.start and e.start.day > 1 and (e.start.year, e.start.month) in [ym for ym, _ in recent_items]:
+                why.append("pirmas mėnuo nepilnas")
+            if why and not (e.end and e.end < s):
+                salary_check[code] = {"reason": "; ".join(why), "suggested": str(med)}
         if last_income:
             if r.lag == 1:
                 net, _ = _net_estimate(last_income, e.pension, e.npd_none)
@@ -401,6 +454,21 @@ def analyze(m):
             if k not in (p.edited or []):
                 setattr(p, k, v)
         p.save()
+
+    # užsienietis, anksčiau rastas tik su SD numeriu, dabar sujungtas su asmens kodu - senos eilutės nebereikia
+    for p in m.people.filter(person_code__startswith="SD", employee__isnull=True).exclude(source__in=("manual", "excel")):
+        if p.person_code in r.employees:
+            continue
+        twin = m.people.filter(sd_series=p.sd_series, sd_number=p.sd_number).exclude(pk=p.pk).first()
+        if twin is None:
+            continue
+        moved = [k for k in (p.edited or []) if k not in (twin.edited or []) and k not in ("person_code", "is_foreigner")]
+        for k in moved:
+            setattr(twin, k, getattr(p, k))
+        if moved:
+            twin.edited = list(twin.edited or []) + moved
+            twin.save()
+        p.delete()
 
     starts = [e.start for e in r.employees.values() if e.start]
     company_start = min(starts) if starts else None
@@ -436,8 +504,14 @@ def analyze(m):
                  and p.employee.status == "active"],
         "s29_date": r.s29_date.isoformat() if r.s29_date else None,
     }
+    # GPM pagal darbuotojus iki perėjimo - tik GPM313 sumos padalijimas, jei dirbo keli ir NPD ne visiems netaikytas
+    earners = {code for code, e in r.employees.items()
+               if any(v > 0 for (y, mo), v in e.income.items() if y == s.year and (y, mo) < (s.year, s.month))}
+    gpm_split_estimated = len(earners) > 1 and not all(r.employees[c].npd_none for c in earners)
     summary = {
         "mode": m.mode, "sdup_check": sdup_check, "sdup_diff": sdup_diff, "insurer_code": r.insurer_code,
+        "salary_check": salary_check, "gpm_split_estimated": gpm_split_estimated,
+        "vacation_date": (s - timedelta(days=1)).isoformat(),
         "s29_missing": s29_missing,
         "du_start": s.isoformat(), "gap_mode": m.gap_mode, "lag": r.lag,
         "files": [{"id": f.id, "name": f.file_name, "form": f.form, "year": f.year, "month": f.month,
@@ -485,9 +559,17 @@ def add_person(m, data):
     from docscanner_app.models import PayrollMigrationEmployee
     from ..personal_code import parse as parse_code
     _editable(m)
-    code = re.sub(r"\D", "", str(data.get("person_code") or ""))
-    if not parse_code(code).valid:
-        raise ValueError("Neteisingas asmens kodas")
+    foreign = bool(data.get("is_foreigner"))
+    if foreign:
+        code = foreign_key(data.get("sd_number"))
+        if not code:
+            raise ValueError("Socialinio draudimo numeris: 2 raidės ir 7 skaitmenys, pvz. AB1234567")
+        if not data.get("birth_date") or data.get("gender") not in ("M", "F"):
+            raise ValueError("Užsieniečiui nurodykite gimimo datą ir lytį")
+    else:
+        code = re.sub(r"\D", "", str(data.get("person_code") or ""))
+        if not parse_code(code).valid:
+            raise ValueError("Neteisingas asmens kodas")
     if m.people.filter(person_code=code).exists():
         p = m.people.get(person_code=code)
         p.include, p.employed = True, True
@@ -499,7 +581,11 @@ def add_person(m, data):
         last_name=(data.get("last_name") or "").strip().title(), lpk_code=lpk[:6], lpk4=lpk[:4],
         weekly_hours=Decimal(str(data.get("weekly_hours") or "40").replace(",", ".")),
         work_time_mode=data.get("work_time_mode") or "01", source="manual", include=True, employed=True,
-        edited=["first_name", "last_name", "lpk_code", "weekly_hours", "work_time_mode", "include", "employed"])
+        is_foreigner=foreign, sd_series=code[2:4] if foreign else "", sd_number=code[4:] if foreign else "",
+        birth_date=date.fromisoformat(str(data["birth_date"])[:10]) if foreign else None,
+        gender=data.get("gender", "") if foreign else "",
+        edited=["first_name", "last_name", "lpk_code", "weekly_hours", "work_time_mode", "include", "employed"]
+        + (["is_foreigner", "sd_series", "sd_number", "birth_date", "gender"] if foreign else []))
 
 
 def remove_person(m, pid):
@@ -532,8 +618,25 @@ def update_person(m, pid, data):
                 v = int(v) if v not in (None, "") else None
             if k == "summed_paid_overtime" and v is None:
                 v = Decimal("0")
+            if k == "week_hours":
+                v = _clean_week(v)
+                if v:
+                    p.weekly_hours = sum(v, ZERO)
+                    edited.add("weekly_hours")
+                v = [str(x) for x in v] if v else None
+            if k == "gender" and v not in ("M", "F"):
+                v = ""
+            if k == "email":
+                v = check_email(v)
+            if k == "phone":
+                v = check_phone(v)
             setattr(p, k, v)
             edited.add(k)
+    if "weekly_hours" in data and "week_hours" not in data and p.week_hours:
+        p.week_hours = None                          # pakeista savaitės norma -> tolygiai Pr–Pn
+    if p.npd_mode in ("d30_55", "d0_25") and not p.has_disability:   # NPD su dalyvumo lygiu -> dalyvumo lygis nustatytas
+        p.has_disability = True
+        edited.add("has_disability")
     if "lpk_code" in data and data["lpk_code"] and not data.get("position_name"):
         from ..lpk import get, short_title
         prof = get(data["lpk_code"])
@@ -632,13 +735,54 @@ def _worked(y, mo, workload=Decimal("1")):
     return n.days, n.hours
 
 
+def _worked_from(y, mo, start=None, end=None):
+    """Darbo dienos / valandos pagal standartinį kalendorių - tik ta mėnesio dalis, kai darbuotojas dirbo."""
+    from ..services import month_bounds
+    first, last = month_bounds(y, mo)
+    a = max(first, start) if start else first
+    b = min(last, end) if end else last
+    if (a, b) == (first, last):
+        return _worked(y, mo)
+    days = _workdays(a, b) if a <= b else 0
+    return days, Decimal(days * 8)
+
+
+def _apply_gpm_ytd(m, p, e):
+    """GPM iš senos programos (šių metų mėnesiai iki perėjimo) - paskirstomas pagal pajamas vietoj GPM313 dalijimo."""
+    from docscanner_app.models import PayrollHistoryMonth
+    total = getattr(p, "gpm_ytd", None)
+    if total is None:
+        return
+    rows = list(PayrollHistoryMonth.objects.filter(employee=e, year=m.du_start.year, month__lt=m.du_start.month)
+                .order_by("month"))
+    income = sum((h.income for h in rows), ZERO)
+    if not income:
+        return
+    left = Decimal(total)
+    for i, h in enumerate(rows):
+        g = left if i == len(rows) - 1 else _q(Decimal(total) * h.income / income)
+        left -= g
+        h.gpm = g
+        h.save(update_fields=["gpm"])
+
+
 def _employee_for(m, p):
     from docscanner_app.models import ContractTerms, Employee, EmploymentContract, Position
     gone = not p.employed
-    e = Employee.objects.filter(company=m.company, personal_code=p.person_code).first()
+    foreign = is_foreign_key(p.person_code)
+    emp_fields = {f.name for f in Employee._meta.get_fields()}
+    if foreign:
+        e = Employee.objects.filter(company=m.company, sd_series=p.sd_series, sd_number=p.sd_number).first()
+    else:
+        e = Employee.objects.filter(company=m.company, personal_code=p.person_code).first()
     if e is None:
+        extra = {}
+        if foreign:
+            extra = {k: v for k, v in (("is_foreigner", True), ("birth_date", p.birth_date), ("gender", p.gender))
+                     if k in emp_fields}
         e = Employee.objects.create(
-            company=m.company, first_name=p.first_name, last_name=p.last_name, personal_code=p.person_code,
+            company=m.company, first_name=p.first_name, last_name=p.last_name, personal_code="" if foreign else p.person_code,
+            **extra,
             sd_series=p.sd_series, sd_number=p.sd_number, npd_mode=p.npd_mode, pension_accumulation=p.pension,
             single_parent=p.single_parent, iban=p.iban, email=p.email, phone=p.phone,
             has_disability=getattr(p, "has_disability", False), status="dismissed" if gone else "active",
@@ -673,10 +817,14 @@ def _employee_for(m, p):
             pos, _ = Position.objects.get_or_create(company=m.company, name=name[:150], defaults={"lpk_code": code[:6]})
         hours = p.weekly_hours or Decimal("40")
         _apply_summed(m, p, c)
+        summed = getattr(p, "work_time_mode", "") == "02"
+        week = {}
+        if p.week_hours and not summed and "week_hours" in {f.name for f in ContractTerms._meta.get_fields()}:
+            week = {"week_hours": [float(x) for x in p.week_hours]}          # faktinės valandos Pr–S (kaip kortelėje)
         ContractTerms.objects.create(contract=c, valid_from=start, position=pos, pay_form=p.pay_form or "monthly",
                                      base_amount=p.base_amount or ZERO, workload=(hours / Decimal("40")).quantize(Decimal("0.0001")),
-                                     full_time_hours=Decimal("40"),
-                                     work_regime="summed" if getattr(p, "work_time_mode", "") == "02" else (p.work_regime or "standard"))
+                                     full_time_hours=Decimal("40"), **week,
+                                     work_regime="summed" if summed else (p.work_regime or "standard"))
     return e
 
 
@@ -728,12 +876,22 @@ def _transition_absence(m, p, e):
     if AbsenceEvent.objects.filter(employee=e, start_date__lte=until, end_date__gte=m.du_start).exists():
         return
     note = "Perkelta iš ankstesnės programos"
+    start, employer = m.du_start, False
+    since = getattr(p, "transition_from", None)
+    if since:
+        note += f"; prasidėjo {since.isoformat()}"
     if kind == "vacation_prepaid" and p.vacation_prepaid_amount:
         note += f"; atostoginiai už šias dienas jau išmokėti ({p.vacation_prepaid_amount} €)"
+    if kind == "sick" and since and since <= m.du_start:
+        # liga įrašoma nuo tikrosios pradžios: jei 2-a ligos diena = DU pradžia, ją apmoka DokSkenas (LIG),
+        # o NP-SD2 pranešime nurodoma ir ankstesnėje programoje išmokėta suma
+        start, employer = since, True
+        if p.vacation_prepaid_amount:
+            note += f"; ligos išmoka iš darbdavio lėšų ankstesnėje programoje {p.vacation_prepaid_amount} €"
     AbsenceEvent.objects.create(
-        employee=e, kind=kind, start_date=m.du_start, end_date=until, status="approved", source="manual",
-        employer_pays_first_days=False, comment=note[:255],
-        prepaid_amount=p.vacation_prepaid_amount if kind == "vacation_prepaid" else None)
+        employee=e, kind=kind, start_date=start, end_date=until, status="approved", source="manual",
+        employer_pays_first_days=employer, comment=note[:255],
+        prepaid_amount=p.vacation_prepaid_amount if kind in ("vacation_prepaid", "sick") else None)
 
 
 def _apply_summed(m, p, c):
@@ -790,8 +948,12 @@ def confirm(m, user):
     problems = []
     for p in m.people.filter(include=True, employed=True):
         mid = (p.work_time_mode == "02" and (p.summed_period_start or summed_default_start(m)) < m.du_start)
+        foreign = is_foreign_key(p.person_code)
         miss = [n for n, ok in (("profesija", p.lpk_code), ("darbo pradžia", p.start_date), ("alga", p.base_amount),
                                 ("atostogų likutis", p.vacation_balance is not None),
+                                ("gimimo data", not foreign or p.birth_date), ("lytis", not foreign or p.gender),
+                                ("ligos pradžia", (p.transition_state or "work") != "sick"
+                                 or (p.transition_from and p.transition_from <= m.du_start)),
                                 ("suminės apskaitos dirbtos val.", not mid or p.summed_worked_hours is not None)) if not ok]
         if miss:
             problems.append(f"{p.first_name} {p.last_name}: {', '.join(miss)}")
@@ -826,11 +988,12 @@ def confirm(m, user):
             else:
                 total = income_by_month[(y, mo)]
                 gpm = _q(gpm_by_paid.get((py, pm), ZERO) * inc / total) if total else ZERO
-            wd, wh = _worked(y, mo)
+            wd, wh = _worked_from(y, mo, p.start_date, p.end_date)
             PayrollHistoryMonth.objects.update_or_create(
                 employee=e, year=y, month=mo,
                 defaults={"company": m.company, "income": inc, "gpm": gpm, "paid_year": py, "paid_month": pm,
                           "worked_days": wd, "worked_hours": wh, "source": "sam"})
+        _apply_gpm_ytd(m, p, e)
         if p.vacation_balance is not None and p.employed:
             set_vacation_balance(e, s - timedelta(days=1), p.vacation_balance, "Perkelta iš ankstesnės programos")
         _transition_absence(m, p, e)
@@ -863,8 +1026,8 @@ def confirm(m, user):
                     purpose=f"Sodros įmokos už {last_y}-{last_m:02d}", breakdown={"4482": str(sodra_total)},
                     due_date=date(s.year, s.month, 15))
 
-    # DK
-    acct = _accounting_info(m)
+    # DK (kol nėra pilnos apskaitos - neįrašoma)
+    acct = _accounting_info(m) if DK_ENABLED else {"mode": "none"}
     je_ids = []
     on = s - timedelta(days=1)
     if acct["mode"] == "gap" and m.gap_mode == "auto":
@@ -894,6 +1057,9 @@ def confirm(m, user):
     auto_create_groups(m.company)                 # SDUP: pareigybių grupės ir algų ribos - automatiškai
     m.status, m.confirmed_at, m.journal_entry_ids = "confirmed", timezone.now(), je_ids
     m.save(update_fields=["status", "confirmed_at", "journal_entry_ids", "updated_at"])
+    st = _settings(m.company)                 # DU DokSkenas pradžia = perėjimo mėnuo (lieka ir atidarius perėjimą iš naujo)
+    st.du_start = m.du_start.replace(day=1)
+    st.save(update_fields=["du_start"])
     logger.info("[Payroll migration] company=%s confirmed: %s employees, JE %s", m.company_id, len(people), je_ids)
     return m
 
@@ -973,9 +1139,12 @@ def payroll_control_amounts(company):
 # ============================================================
 
 def export_excel(m):
+    """Šablone - tik dirbantys (nebedirbantys perkeliami automatiškai iš ataskaitų)."""
     from .excel import export
-    people = [p for p in m.people.all() if p.include] if m.mode == "sdup" else list(m.people.all())
-    return export(people, m.mode)
+    people = [p for p in m.people.all() if p.include and p.employed]
+    summ = m.summary or {}
+    return export(people, m.mode, du_start=m.du_start, salary_check=summ.get("salary_check") or {},
+                  summed_start=summed_default_start(m) if m.mode != "sdup" else None)
 
 
 @transaction.atomic

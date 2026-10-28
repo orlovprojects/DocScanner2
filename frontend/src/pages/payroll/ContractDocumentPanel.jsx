@@ -5,13 +5,13 @@ import {
 } from "@mui/material";
 import CloseIcon from "@mui/icons-material/Close";
 import DescriptionOutlinedIcon from "@mui/icons-material/DescriptionOutlined";
-import PrintOutlinedIcon from "@mui/icons-material/PrintOutlined";
 import UploadFileOutlinedIcon from "@mui/icons-material/UploadFileOutlined";
 import VisibilityOutlinedIcon from "@mui/icons-material/VisibilityOutlined";
 
 import LtDatePicker from "../../components/LtDatePicker"; // ⚠ pataisyk kelią, jei komponentas kitur
 import { apiError, payrollApi } from "../../api/payroll";
 import PayrollSettingsDialog from "./PayrollSettingsDialog";
+import DocPreviewDialog from "./DocPreviewDialog";
 
 const today = () => new Date().toISOString().slice(0, 10);
 const STATUS = {
@@ -20,20 +20,24 @@ const STATUS = {
   signed: { label: "Pasirašyta", color: "success" },
 };
 
-function printHtml(html) {
-  const w = window.open("", "_blank");
-  if (!w) return;
-  w.document.open(); w.document.write(html); w.document.close();
-  w.focus(); setTimeout(() => w.print(), 300);
-}
 
 export default function ContractDocumentPanel({ contract, bare = false }) {
   const [docs, setDocs] = useState(null);
   const [missing, setMissing] = useState([]);
+  const [warnings, setWarnings] = useState([]);    // 1-SD terminas, DU kartą per mėn. be prašymo, DAS neatitikimai
+  const [payOnce, setPayOnce] = useState(false);      // darbuotojo kortelės „Mokėti kartą per mėnesį“ (tas pats laukas)
+  useEffect(() => {
+    payrollApi.employee(contract.employee).then((e) => setPayOnce(!!e.pay_once_a_month)).catch(() => {});
+  }, [contract.employee]);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [preview, setPreview] = useState(null); // {url, type, name}
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [view, setView] = useState(null);        // sutarties peržiūra: {html} (null html - kraunama)
+  const openView = () => {
+    setView({ html: null });
+    payrollApi.documentHtml(doc.id).then((html) => setView({ html })).catch((e) => { setView(null); setError(apiError(e)); });
+  };
   const fileInput = useRef(null);
   const uploadTarget = useRef(null);
 
@@ -44,9 +48,18 @@ export default function ContractDocumentPanel({ contract, bare = false }) {
 
   const doc = docs?.[0];
 
+  // DK 139 str. 2 d.: DU kartą per mėnesį - tik darbuotojo prašymu (įrašoma į sutartį, darbuotojas patvirtina pasirašydamas)
+  const togglePayOnce = async (v) => {
+    setPayOnce(v);
+    try {
+      await payrollApi.updateEmployee(contract.employee, { pay_once_a_month: v });
+      if (doc && doc.status !== "signed" && !doc.employee_signed && !doc.employer_signed) await generate();
+    } catch (e) { setPayOnce(!v); setError(apiError(e)); }
+  };
+
   const generate = async () => {
     setBusy(true); setError("");
-    try { const r = await payrollApi.generateContract(contract.id); setMissing(r.missing); load(); }
+    try { const r = await payrollApi.generateContract(contract.id); setMissing(r.missing); setWarnings(r.warnings || []); load(); }
     catch (e) { setError(apiError(e)); } finally { setBusy(false); }
   };
 
@@ -97,6 +110,19 @@ export default function ContractDocumentPanel({ contract, bare = false }) {
         <Button size="small" onClick={() => setSettingsOpen(true)}>Įmonės duomenys</Button>
       </Stack>
 
+      {(!doc || (doc.status !== "signed" && !doc.employee_signed && !doc.employer_signed)) && (
+        <FormControlLabel sx={{ mb: 1, alignItems: "flex-start", "& .MuiFormControlLabel-label": { pt: "9px" } }}
+          control={<Checkbox size="small" checked={payOnce} onChange={(e) => togglePayOnce(e.target.checked)} />}
+          label={(
+            <Box>
+              <Typography sx={{ fontSize: 13.5 }}>Darbuotojas prašo DU mokėti kartą per mėnesį</Typography>
+              <Typography variant="caption" color="text.secondary">
+                Žymėkite tik jei darbuotojas to prašo – sutartyje bus įrašyta, kad jis tai patvirtina pasirašydamas (DK 139 str. 2 d.).
+              </Typography>
+            </Box>
+          )} />
+      )}
+
       {!doc && (
         <Stack direction={{ xs: "column", sm: "row" }} gap={1}>
           <Button variant="contained" size={bare ? "small" : "medium"} disableElevation disabled={busy} onClick={generate}>Sugeneruoti sutartį</Button>
@@ -113,7 +139,7 @@ export default function ContractDocumentPanel({ contract, bare = false }) {
         <Stack gap={1.5}>
           <Stack direction="row" gap={1} flexWrap="wrap">
             {doc.has_html && (
-              <Button size="small" startIcon={<PrintOutlinedIcon />} onClick={() => payrollApi.documentHtml(doc.id).then(printHtml)}>
+              <Button size="small" startIcon={<VisibilityOutlinedIcon />} onClick={openView}>
                 Peržiūrėti / spausdinti
               </Button>
             )}
@@ -131,10 +157,10 @@ export default function ContractDocumentPanel({ contract, bare = false }) {
           <Box sx={{ p: 1.5, borderRadius: 1, bgcolor: "action.hover" }}>
             <Typography variant="body2" fontWeight={600} mb={0.5}>Ar sutartis pasirašyta?</Typography>
             <Stack direction={{ xs: "column", sm: "row" }} gap={{ sm: 2 }} alignItems={{ sm: "center" }}>
-              <FormControlLabel control={<Checkbox checked={doc.employee_signed}
+              <FormControlLabel disabled={missing.length > 0 && !doc.employee_signed} control={<Checkbox checked={doc.employee_signed}
                 onChange={(e) => update({ employee_signed: e.target.checked, signed_date: doc.signed_date || today() })} />}
                 label="Pasirašė darbuotojas" />
-              <FormControlLabel control={<Checkbox checked={doc.employer_signed}
+              <FormControlLabel disabled={missing.length > 0 && !doc.employer_signed} control={<Checkbox checked={doc.employer_signed}
                 onChange={(e) => update({ employer_signed: e.target.checked, signed_date: doc.signed_date || today() })} />}
                 label="Pasirašė darbdavys" />
               {(doc.employee_signed || doc.employer_signed) && (
@@ -156,7 +182,12 @@ export default function ContractDocumentPanel({ contract, bare = false }) {
       {missing.length > 0 && (
         <Alert severity="warning" sx={{ mt: 1.5 }}
           action={<Button color="inherit" size="small" onClick={() => setSettingsOpen(true)}>Užpildyti</Button>}>
-          Sutartyje liko tuščių vietų: {missing.join(", ")}. Užpildykite ir spauskite „Atnaujinti iš kortelės“.
+          Sutartyje liko tuščių vietų: {missing.join(", ")}. Užpildykite ir spauskite „Atnaujinti iš kortelės“ – iki tol sutarties pažymėti pasirašyta negalima.
+        </Alert>
+      )}
+      {warnings.length > 0 && (
+        <Alert severity="warning" sx={{ mt: 1.5 }}>
+          {warnings.map((w) => <Box key={w} sx={{ "& + &": { mt: .75 } }}>{w}</Box>)}
         </Alert>
       )}
       {error && <Alert severity="error" sx={{ mt: 1.5 }}>{error}</Alert>}
@@ -179,6 +210,8 @@ export default function ContractDocumentPanel({ contract, bare = false }) {
         </DialogActions>
       </Dialog>
 
+      <DocPreviewDialog open={!!view} html={view?.html} onClose={() => setView(null)}
+        title={doc?.title || "Darbo sutartis"} sub={doc?.number ? `Nr. ${doc.number}` : ""} />
       <PayrollSettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} />
     </Paper>
   );

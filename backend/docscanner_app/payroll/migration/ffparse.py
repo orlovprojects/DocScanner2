@@ -39,6 +39,19 @@ class Person:
     sd_series: str = ""
     sd_number: str = ""
 
+    def __post_init__(self):
+        # užsienietis be LT asmens kodo: identifikuojamas Sodros SD numeriu - „SD“ + serija + 7 skaitmenys
+        self.code = (self.code or "").strip()
+        ser = re.sub(r"[^A-Za-z]", "", self.sd_series or "").upper()
+        num = re.sub(r"\D", "", self.sd_number or "")
+        self.sd_series, self.sd_number = ser, (num.zfill(7) if num else "")
+        if not self.code and ser and num:
+            self.code = f"SD{ser}{num.zfill(7)}"
+
+    @property
+    def foreign(self):
+        return self.code.startswith("SD")
+
 
 @dataclass
 class Parsed:
@@ -95,8 +108,8 @@ def _tags(block):
 
 
 def _sd(v):
-    v = (v or "").replace(" ", "")
-    m = re.match(r"^([A-Z]{2})0*(\d+)$", v)
+    v = (v or "").replace(" ", "").upper()
+    m = re.match(r"^([A-Z]{2})(\d+)$", v)
     return (m.group(1), m.group(2)) if m else ("", "")
 
 
@@ -191,13 +204,13 @@ def parse(content, file_name=""):
         for pg, f in pages:
             if pg.startswith("SAM") and pg != "SAM":
                 for r in _rows(f):
-                    if r.get("PersonCode"):
+                    if r.get("PersonCode") or r.get("InsuranceNumber"):          # užsienietis - tik SD numeris
                         p.rows.append({"person": _person(r), "income": dec(r.get("InsIncomeSum")),
                                        "rate": dec(r.get("TaxRate")), "contrib": dec(r.get("PaymentSum"))})
     elif form in ("1-SD", "2-SD", "12-SD"):
         for pg, f in pages:
             for r in _rows(f):
-                if not r.get("PersonCode"):
+                if not (r.get("PersonCode") or r.get("InsuranceNumber")):
                     continue
                 row = {"person": _person(r), "reason": r.get("ReasonCode", ""), "reason_text": r.get("ReasonText", "")}
                 if form == "1-SD":

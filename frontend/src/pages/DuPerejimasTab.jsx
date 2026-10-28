@@ -2,11 +2,13 @@ import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import {
   Alert, Autocomplete, Box, Button, Checkbox, Chip, CircularProgress, Collapse, Dialog, DialogActions, DialogContent,
   DialogTitle, FormControlLabel, IconButton, LinearProgress, MenuItem, Paper, Radio, RadioGroup, Table, TableBody,
-  TableCell, TableContainer, TableHead, TableRow, TextField, Tooltip, Typography,
+  Switch, TableCell, TableContainer, TableHead, TableRow, TextField, ToggleButton, ToggleButtonGroup, Tooltip, Typography,
 } from "@mui/material";
+import CloseIcon from "@mui/icons-material/Close";
 import AddIcon from "@mui/icons-material/Add";
 import ArrowForwardIcon from "@mui/icons-material/ArrowForward";
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
+import CheckIcon from "@mui/icons-material/Check";
 import CancelOutlinedIcon from "@mui/icons-material/CancelOutlined";
 import DeleteOutlineIcon from "@mui/icons-material/DeleteOutline";
 import DownloadIcon from "@mui/icons-material/Download";
@@ -25,6 +27,7 @@ import "dayjs/locale/lt";
 import { apiError, payrollApi } from "../api/payroll";
 
 const STEPS = ["Ataskaitos", "Darbuotojai", "Patvirtinimas"];
+const SHOW_ACCOUNTING = false;                       // DK įrašai perėjimui - kai bus pilna apskaita
 const surfaceSx = { borderRadius: 3, border: "1px solid", borderColor: "divider", boxShadow: "none" };
 const ym = (d) => String(d || "").slice(0, 7);
 const money = (v) => new Intl.NumberFormat("lt-LT", { style: "currency", currency: "EUR" }).format(Number(v || 0));
@@ -40,15 +43,28 @@ const WORK_MODES = [
 const NPD = [["standard", "Taikomas"], ["none", "Netaikomas"], ["d30_55", "30–55 % dalyvumo"], ["d0_25", "0–25 % dalyvumo"]];
 
 const HELP = {
-  profession: "Profesija iš Lietuvos profesijų klasifikatoriaus. Pagal ją sudaromos pareigybių grupės (SDUP ir darbo apmokėjimo sistema).",
-  salary: "Pareiginė alga pagal darbo sutartį už mėnesį (bruto, be premijų). Valandiniam apmokėjimui – įkainis už valandą. Pasiūlyta iš S50 – patikrinkite.",
+  profession: "Profesija iš Lietuvos profesijų klasifikatoriaus (6 skaitmenys). Pagal ją sudaromos pareigybių grupės – SDUP ir darbo apmokėjimo sistemai.",
+  salary: "Pareiginė alga pagal darbo sutartį už mėnesį (bruto, be premijų). Valandiniam apmokėjimui – įkainis už valandą. Pasiūlyta pagal Sodrą – patikrinkite.",
+  sickFrom: "Kada prasidėjo nedarbingumas. Darbdavys moka už 2 pirmąsias ligos dienas, toliau – Sodra. Jei kuri iš jų patenka į DU pradžią, DokSkenas ją apmokės automatiškai.",
+  sickPaid: "Ligos išmoka iš darbdavio lėšų už dienas iki DU pradžios, kurią išmokėjo sena programa. Reikalinga NP-SD2 pranešimui Sodrai (jei jo dar nepateikė sena programa).",
+  week: "Kuriomis dienomis ir kiek valandų dirba. Numatytoji – Pr–Pn po lygiai pagal normą. Norma = dienų valandų suma.",
+  regime: "Standartinė – kiekvieną darbo dieną tiek pat valandų. Suminė – dirbama pagal grafikus, valandos sumuojamos per apskaitinį laikotarpį.",
+  leaveDays: "Įstatymo minimumas – 20 darbo dienų (6 d. savaitei – 24). Pakeiskite tik jei sutartyje daugiau. Papildomos dienos už vaikus, neįgalumą ar stažą pridedamos automatiškai.",
+  gpmYtd: "Išskaičiuotas GPM už šių metų mėnesius iki perėjimo – iš senos programos. Reikia metinei GPM312: iš GPM313 matome tik visos įmonės sumą, o darbuotojams NPD taikomas skirtingai.",
+  transition: "Kur darbuotojas yra pirmą DU dieną DokSkene. Jei atostogose ar serga – nurodykite iki kada, kad nebūtų apmokėta dar kartą.",
+  prepaid: "Atostoginiai už DU mėnesio dienas, kuriuos jau išmokėjo sena programa – DokSkenas jų nemokės dar kartą.",
+  pension: "Kaupia pensijai II pakopoje – nustatyta pagal Sodros įmokų tarifą.",
+  singleParent: "Vienas augina vaiką iki 14 m. – teisė į ilgesnes atostogas ir papildomas poilsio dienas.",
+  payOnce: "Darbuotojo prašymu DU mokamas vieną kartą per mėnesį (DK 139 str.) – avansas nemokamas.",
+  advance: "Tuščia – pagal įmonės nustatymus (avanso procentas).",
+  email: "Reikalingas kvietimui į eSavitarną. Galite įvesti ir vėliau kortelėje.",
   norm: "Vidutinė savaitės norma iš darbo sutarties: visu etatu – 40, puse etato – 20. Jei sutartyje nurodyta per mėnesį ar apskaitinį laikotarpį – padalinkite valandas iš to laikotarpio savaičių skaičiaus (pvz. 488 val. per 3 mėn. ≈ 40 val.).",
   mode: "Darbo laiko režimas pagal darbo sutartį ar darbo tvarkos taisykles. Kodai – kaip Sodros SDUP.",
   vacation: "Kiek kasmetinių atostogų dienų liko dieną prieš perėjimą (iš senos programos), pvz. 12,5.",
   unpaid: "Kiek DU (į rankas) perėjimo dienai dar neišmokėta, pvz. praėjusio mėnesio atlyginimas. Pasiūlyta automatiškai, jei DU mokamas kitą mėnesį.",
   npd: "Nustatyta pagal GPM313: jei GPM lygus 20 % nuo išmokų – NPD netaikytas.",
   disability: "Ar darbuotojui nustatytas 0–55 % dalyvumo lygis (neįgalumas). Nuo jo priklauso atostogų trukmė (25 d.). Nepriklauso nuo NPD taikymo.",
-  vdu: "Nebūtina. Paprastai VDU apskaičiuojame iš S50. Jei paskutiniais 3 mėnesiais buvo atostogų, didelių premijų – įrašykite VDU iš senos programos: standartiniam režimui – dienos, suminei apskaitai ar valandiniam apmokėjimui – valandos. Naudojamas pirmus 3 mėnesius.",
+  vdu: "Vidutinis darbo užmokestis iš senos programos – rasite atostoginių skaičiavime arba VDU pažymoje. Standartinei apskaitai – už dieną, suminei ar valandiniam – už valandą. Neįvedus skaičiuosime iš Sodros duomenų: į juos patenka atostoginiai ir premijos, todėl pirmų 3 mėn. atostoginiai ir ligos išmoka gali būti netikslūs.",
   children: "Vaikai reikalingi papildomoms poilsio dienoms (mamadieniams), papildomoms atostogoms ir vaiko priežiūros atostogoms.",
   summedWorked: "Visos faktiškai dirbtos valandos šio apskaitinio laikotarpio mėnesiais iki perėjimo (įskaitant viršvalandžius, naktinį darbą, darbą poilsio ir švenčių dienomis, komandiruotes).",
   summedAbsence: "Atostogos, liga, mamadieniai, nemokamos ir mokymosi atostogos ir pan. – pagal grafiko valandas (atostogos savaitėmis – po 40 val. per savaitę). Prastovos neįskaitykite. Šios valandos sumažina normą.",
@@ -64,9 +80,17 @@ function reportRows(data) {
   const files = s.files || [];
   const forms = (...f) => files.filter((x) => f.includes(String(x.form || "").replace(/-/g, "")));
   const sd = s.sdup_check || {};
-  const income = s.checklist?.income || [];
-  const gpm = s.checklist?.gpm313 || [];
-  const from = s.history_from;
+  // dar neanalizuota (nėra failų / po „Pradėti iš naujo“) - reikalingi mėnesiai pagal DU pradžią
+  const du = dayjs(data.du_start).startOf("month");
+  const defFrom = du.subtract(1, "year").month(9).startOf("month");      // nuo praeitų metų spalio
+  const monthsBetween = (a, b) => {
+    const out = [];
+    for (let d = a; d.isBefore(b); d = d.add(1, "month")) out.push({ ym: d.format("YYYY-MM"), ok: false });
+    return out;
+  };
+  const income = s.checklist?.income || monthsBetween(defFrom, du);
+  const gpm = s.checklist?.gpm313 || monthsBetween(du.startOf("year"), du);
+  const from = s.history_from || (income.length ? defFrom.format("YYYY-MM-DD") : null);
   const period = from ? `${from} – šiandien` : "Kol kas nereikia";
   const year = Number(String(data.du_start).slice(0, 4));
   const months = (items, codes) => {
@@ -268,7 +292,7 @@ function Sel({ value, options, onChange, disabled, width = 120, error }) {
   );
 }
 
-function ProfessionPicker({ p, locked, onPerson }) {
+function ProfessionPicker({ p, locked, onPerson, width = 250 }) {
   const [q, setQ] = useState("");
   const [found, setFound] = useState([]);
   const inCategory = !!p.lpk4 && (p.lpk_options || []).length > 0;
@@ -281,7 +305,7 @@ function ProfessionPicker({ p, locked, onPerson }) {
   }, [q, inCategory]);
   const value = p.lpk_code ? { code: p.lpk_code, name: p.lpk_name || p.lpk_code } : null;
   return (
-    <Box sx={{ width: 250 }}>
+    <Box sx={{ width }}>
       <Autocomplete size="small" disabled={locked} value={value} options={inCategory ? p.lpk_options : found}
         isOptionEqualToValue={(a, b) => a.code === b.code} getOptionLabel={(o) => o?.name || ""}
         filterOptions={inCategory ? undefined : (x) => x}
@@ -295,33 +319,79 @@ function ProfessionPicker({ p, locked, onPerson }) {
         )}
         noOptionsText={inCategory ? "Nėra" : "Įveskite pavadinimą arba kodą"}
         renderInput={(params) => <TextField {...params} placeholder={inCategory ? "Pasirinkite" : "Ieškoti: pavadinimas ar kodas"} error={!p.lpk_code} />} />
-      <Typography sx={{ fontSize: 11, color: "text.secondary", mt: 0.25 }}>
-        {inCategory ? <>Grupė {p.lpk4}{!locked && <> · <Box component="span" onClick={() => onPerson(p.id, { lpk4: "", lpk_code: "" })}
-          sx={{ color: "primary.main", cursor: "pointer", "&:hover": { textDecoration: "underline" } }}>kita profesija</Box></>}</>
-          : "Visas profesijų sąrašas"}
-      </Typography>
+      {inCategory && <Typography sx={{ fontSize: 11, color: "text.secondary", mt: 0.25 }}>
+        Sodroje: grupė {p.lpk4}{!locked && <> · <Box component="span" onClick={() => onPerson(p.id, { lpk4: "", lpk_code: "" })}
+          sx={{ color: "primary.main", cursor: "pointer", "&:hover": { textDecoration: "underline" } }}>kita profesija</Box></>}
+      </Typography>}
     </Box>
   );
 }
 
+const isForeign = (p) => String(p?.person_code || "").startsWith("SD");
+const codeLabel = (p) => (isForeign(p) ? `SD ${p.person_code.slice(2)} · užsienietis`
+  : `${p.person_code.slice(0, 3)}••••${p.person_code.slice(-2)}`);
+const SD_RE = /^[A-Z]{2}\d{7}$/;
+const MONTHS_GEN = ["sausio", "vasario", "kovo", "balandžio", "gegužės", "birželio", "liepos", "rugpjūčio", "rugsėjo", "spalio",
+  "lapkričio", "gruodžio"];
+const WEEK_DAYS = ["Pr", "An", "Tr", "Kt", "Pn", "Š", "S"];
+const num2 = (v) => Number(v || 0).toLocaleString("lt-LT", { maximumFractionDigits: 2 });
+
+// Savaitės grafikas: įvestas Pr–S arba tolygiai Pr–Pn pagal normą
+function weekOf(p) {
+  if (Array.isArray(p.week_hours) && p.week_hours.length === 7) return p.week_hours.map(Number);
+  const d = Number(p.weekly_hours || 40) / 5;
+  return [d, d, d, d, d, 0, 0];
+}
+
+function weekLabel(w) {
+  const on = w.map((h, i) => [i, h]).filter(([, h]) => h > 0);
+  if (!on.length) return "";
+  const same = on.every(([, h]) => h === on[0][1]);
+  const consecutive = on.every(([i], k) => k === 0 || i === on[k - 1][0] + 1);
+  if (same) return `${consecutive && on.length > 1 ? `${WEEK_DAYS[on[0][0]]}–${WEEK_DAYS[on[on.length - 1][0]]}` : on.map(([i]) => WEEK_DAYS[i]).join(", ")} po ${num2(on[0][1])} val.`;
+  return on.map(([i, h]) => `${WEEK_DAYS[i]} ${num2(h)}`).join(", ");
+}
+
+function weekShort(w) {
+  const on = w.filter((h) => h > 0);
+  return on.every((h) => h === on[0]) ? weekLabel(w) : `${on.length} d. · skirtingai`;
+}
+
 function AddPersonDialog({ open, onClose, onAdd, busy }) {
-  const empty = { first_name: "", last_name: "", person_code: "", weekly_hours: "40", work_time_mode: "01" };
+  const empty = { first_name: "", last_name: "", person_code: "", weekly_hours: "40", work_time_mode: "01",
+    is_foreigner: false, sd_number: "", birth_date: "", gender: "" };
   const [f, setF] = useState(empty);
   useEffect(() => { if (open) setF(empty); }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
-  const ok = f.first_name.trim() && f.last_name.trim() && /^\d{11}$/.test(f.person_code.trim());
+  const names = f.first_name.trim() && f.last_name.trim();
+  const ok = names && (f.is_foreigner ? SD_RE.test(f.sd_number) && f.birth_date && f.gender : /^\d{11}$/.test(f.person_code.trim()));
   return (
     <Dialog open={open} onClose={onClose} fullWidth maxWidth="xs" disableScrollLock>
-      <DialogTitle>Pridėti darbuotoją</DialogTitle>
-      <DialogContent sx={{ display: "grid", gap: 1.5, pt: "8px !important" }}>
+      <DialogTitle>Naujas darbuotojas</DialogTitle>
+      <DialogContent sx={{ display: "grid", gap: 1.75, pt: "8px !important" }}>
         <TextField size="small" label="Vardas" value={f.first_name} onChange={(e) => setF({ ...f, first_name: e.target.value })} />
         <TextField size="small" label="Pavardė" value={f.last_name} onChange={(e) => setF({ ...f, last_name: e.target.value })} />
-        <TextField size="small" label="Asmens kodas" value={f.person_code} inputProps={{ inputMode: "numeric", maxLength: 11 }}
-          onChange={(e) => setF({ ...f, person_code: e.target.value.replace(/\D/g, "") })} />
-        <Typography sx={{ fontSize: 12, color: "text.secondary" }}>Kitus duomenis užpildysite lentelėje.</Typography>
+        <Sw label="Užsienietis – neturi Lietuvos asmens kodo" checked={f.is_foreigner}
+          help="Užsieniečiui Sodra suteikia socialinio draudimo (SD) numerį, pvz. AB1234567 – jis naudojamas SAM, 1-SD ir kitose ataskaitose vietoj asmens kodo."
+          onChange={(v) => setF({ ...f, is_foreigner: v })} />
+        {f.is_foreigner ? (
+          <>
+            <TextField size="small" label="SD numeris" placeholder="AB1234567" value={f.sd_number} inputProps={{ maxLength: 9 }}
+              error={!!f.sd_number && !SD_RE.test(f.sd_number)} helperText="2 raidės ir 7 skaitmenys – iš Sodros"
+              onChange={(e) => setF({ ...f, sd_number: e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "") })} />
+            <DateField label="Gimimo data" value={f.birth_date || null} width="100%" onChange={(v) => setF({ ...f, birth_date: v })} />
+            <FL label="Lytis" help="Reikalinga SDUP ataskaitai (lietuviams nustatoma pagal asmens kodą).">
+              <Seg value={f.gender} options={[["M", "Vyras"], ["F", "Moteris"]]} onChange={(v) => setF({ ...f, gender: v })} />
+            </FL>
+          </>
+        ) : (
+          <TextField size="small" label="Asmens kodas" value={f.person_code} inputProps={{ inputMode: "numeric", maxLength: 11 }}
+            onChange={(e) => setF({ ...f, person_code: e.target.value.replace(/\D/g, "") })} />
+        )}
+        <Typography sx={{ fontSize: 12, color: "text.secondary" }}>Kitus duomenis užpildysite atidarę darbuotoją.</Typography>
       </DialogContent>
       <DialogActions sx={{ px: 3, pb: 2 }}>
-        <Button onClick={onClose}>Atšaukti</Button>
-        <Button variant="contained" disableElevation disabled={!ok || busy} onClick={() => onAdd(f)}>Pridėti</Button>
+        <Button onClick={onClose} sx={{ textTransform: "none" }}>Atšaukti</Button>
+        <Button variant="contained" disableElevation disabled={!ok || busy} onClick={() => onAdd(f)} sx={{ textTransform: "none" }}>Pridėti</Button>
       </DialogActions>
     </Dialog>
   );
@@ -368,6 +438,8 @@ export function peopleMissing(people) {
     ["atostogų likutis", cnt((p) => p.vacation_balance === null || p.vacation_balance === "")],
     ["suminės apskaitos dirbtos val.", cnt((p) => p.summed_mid_period && (p.summed_worked_hours === null || p.summed_worked_hours === ""))],
     ["nebuvimo pabaiga", cnt((p) => (p.transition_state || "work") !== "work" && !p.transition_until)],
+    ["ligos pradžia", cnt((p) => p.transition_state === "sick" && !p.transition_from)],
+    ["gimimo data, lytis", cnt((p) => isForeign(p) && (!p.birth_date || !p.gender))],
   ].filter(([, n]) => n > 0);
   return { active: act.length, parts };
 }
@@ -377,94 +449,365 @@ function rowMissing(p) {
   return [!p.lpk_code, !p.start_date, !(Number(p.base_amount) > 0), !(Number(p.weekly_hours) > 0),
     p.vacation_balance === null || p.vacation_balance === "",
     p.summed_mid_period && (p.summed_worked_hours === null || p.summed_worked_hours === ""),
-    (p.transition_state || "work") !== "work" && !p.transition_until].filter(Boolean).length;
+    (p.transition_state || "work") !== "work" && !p.transition_until,
+    p.transition_state === "sick" && !p.transition_from,
+    isForeign(p) && !p.birth_date, isForeign(p) && !p.gender].filter(Boolean).length;
 }
 
-function Section({ title, children }) {
+// Dialogo blokas ir laukas: * - būtina, ? - paaiškinimas
+function Block({ title, chip, children, sx }) {
   return (
-    <Box sx={{ border: "1px solid", borderColor: "divider", borderRadius: 2, p: 1.5, bgcolor: "background.paper" }}>
-      <Typography sx={{ fontSize: 13, fontWeight: 800, mb: 1 }}>{title}</Typography>
-      <Box sx={{ display: "grid", gap: 1.25 }}>{children}</Box>
+    <Box sx={{ bgcolor: "#FFFFFF", border: "1px solid #EAECF0", borderRadius: 2.5, overflow: "hidden", flexShrink: 0, ...sx }}>
+      <Box sx={{ display: "flex", alignItems: "center", gap: 1, px: 2, py: 1.1, bgcolor: "#F5F6F8", borderBottom: "1px solid #EAECF0" }}>
+        <Typography sx={{ fontSize: 14, fontWeight: 700, color: "#101828" }}>{title}</Typography>
+        {chip}
+      </Box>
+      <Box sx={{ p: 2 }}>{children}</Box>
     </Box>
   );
 }
 
-function Field({ label, help, note, children }) {
+function FL({ label, req, help, children, note, sx }) {
   return (
-    <Box>
-      <Typography component="div" sx={{ fontSize: 12, color: "text.secondary", mb: 0.4 }}>{help ? <HeadHelp label={label} help={help} /> : label}</Typography>
+    <Box sx={{ minWidth: 0, ...sx }}>
+      <Typography component="div" sx={{ fontSize: 12.5, fontWeight: 500, color: "#344054", mb: 0.6, display: "flex", alignItems: "center", gap: 0.5 }}>
+        <span>{label}{req && <Box component="span" sx={{ color: "error.main", ml: 0.25 }}>*</Box>}</span>
+        {help && <Tooltip arrow placement="top" title={<Typography sx={{ fontSize: 12.5, lineHeight: 1.5 }}>{help}</Typography>}>
+          <HelpOutlineIcon sx={{ fontSize: 15, color: "text.disabled", cursor: "help" }} />
+        </Tooltip>}
+      </Typography>
       {children}
-      {note && <Typography sx={{ fontSize: 11, color: "text.secondary", mt: 0.3 }}>{note}</Typography>}
+      {note && <Typography sx={{ fontSize: 11.5, color: "text.secondary", mt: 0.4 }}>{note}</Typography>}
     </Box>
   );
 }
 
-function PersonDetails({ p, data, locked, set, onKids }) {
-  const def = data.summed_default || {};
-  const summed = p.work_time_mode === "02";
-  const state = p.transition_state || "work";
-  const duMonth = dayjs(data.du_start).locale("lt").format("MMMM");
+function Seg({ value, options, onChange, disabled, size = "small" }) {
   return (
-    <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "repeat(3, minmax(0,1fr))" }, gap: 1.5 }}>
-      <Section title="Sutartis">
-        <Field label="Darbo pradžia"><DateField value={p.start_date} disabled={locked} error={!p.start_date} onChange={(v) => set({ start_date: v })} width="100%" /></Field>
-        <Field label="Sutarties rūšis"><Sel value={p.contract_type === "02" ? "02" : "01"} options={[["01", "Neterminuota"], ["02", "Terminuota"]]} width="100%"
-          disabled={locked} onChange={(v) => set({ contract_type: v })} /></Field>
-        <Field label="Apmokėjimas"><Sel value={p.pay_form} options={[["monthly", "Mėnesinė alga"], ["hourly", "Valandinis įkainis"]]} width="100%"
-          disabled={locked} onChange={(v) => set({ pay_form: v })} /></Field>
-      </Section>
-      <Section title="Mokesčiai ir lengvatos">
-        <Field label="NPD" help={HELP.npd}><Sel value={p.npd_mode} options={NPD} width="100%" disabled={locked} onChange={(v) => set({ npd_mode: v })} /></Field>
-        <Field label="Pensijų kaupimas"><Sel value={String(p.pension)} options={[["true", "Taip"], ["false", "Ne"]]} width="100%" disabled={locked}
-          onChange={(v) => set({ pension: v === "true" })} /></Field>
-        <Field label="Dalyvumo lygis" help={HELP.disability}><Sel value={String(!!p.has_disability)} options={[["false", "Ne"], ["true", "Taip"]]} width="100%"
-          disabled={locked} onChange={(v) => set({ has_disability: v === "true" })} /></Field>
-      </Section>
-      <Section title="Išmokėjimas">
-        <Field label="DU kartą per mėnesį"><Sel value={String(!!p.pay_once_a_month)} options={[["false", "Ne"], ["true", "Taip (darbuotojo prašymu)"]]}
-          width="100%" disabled={locked} onChange={(v) => set({ pay_once_a_month: v === "true" })} /></Field>
-        {!p.pay_once_a_month && <Field label="Avanso suma, €" note="Tuščia – pagal įmonės nustatymus">
-          <Num value={p.advance_amount} width="100%" disabled={locked} onSave={(v) => set({ advance_amount: v })} /></Field>}
-        <Field label="IBAN"><TextField size="small" fullWidth defaultValue={p.iban} disabled={locked}
-          onBlur={(e) => e.target.value !== p.iban && set({ iban: e.target.value.replace(/\s/g, "").toUpperCase() })} /></Field>
-      </Section>
-      <Section title={`Perėjimo dieną (${data.du_start})`}>
-        <Field label="Būsena"><Sel value={state} options={TRANSITION} width="100%" disabled={locked} onChange={(v) => set({ transition_state: v })} /></Field>
-        {state !== "work" && <Field label="Iki"><DateField value={p.transition_until} disabled={locked} error={!p.transition_until}
-          onChange={(v) => set({ transition_until: v })} width="100%" /></Field>}
-        {state === "vacation" && <Field label={`Atostoginiai už ${duMonth} dienas jau išmokėti, €`}
-          note="Jau sumokėta ankstesnėje programoje – DokSkenas jų nemokės dar kartą">
-          <Num value={p.vacation_prepaid_amount} width="100%" disabled={locked} onSave={(v) => set({ vacation_prepaid_amount: v })} /></Field>}
-        {state === "sick" && <Typography sx={{ fontSize: 12, color: "text.secondary" }}>Liga prasidėjo iki perėjimo – darbdavio 2 dienos jau apmokėtos.</Typography>}
-        {["childcare", "maternity", "paternity"].includes(state) && <Typography sx={{ fontSize: 12, color: "text.secondary" }}>Išmoką moka Sodra – tik pažymime tabelyje.</Typography>}
-      </Section>
-      {summed && <Section title="Suminė apskaita">
-        <Field label="Apskaitinis laikotarpis"><Sel value={String(p.summed_period_months || def.months || 3)}
-          options={[["1", "1 mėn."], ["2", "2 mėn."], ["3", "3 mėn."]]} width="100%" disabled={locked} onChange={(v) => set({ summed_period_months: v })} /></Field>
-        <Field label="Dabartinis laikotarpis prasidėjo"><DateField month value={p.summed_period_start || def.start} disabled={locked}
-          onChange={(v) => set({ summed_period_start: v })} width="100%" /></Field>
-        {p.summed_mid_period ? <>
-          <Field label="Dirbta iki perėjimo, val." help={HELP.summedWorked}><Num value={p.summed_worked_hours} width="100%" disabled={locked}
-            error={p.summed_worked_hours === null || p.summed_worked_hours === ""} onSave={(v) => set({ summed_worked_hours: v })} /></Field>
-          <Field label="Nebuvimai, val." help={HELP.summedAbsence}><Num value={p.summed_absence_hours} width="100%" disabled={locked}
-            onSave={(v) => set({ summed_absence_hours: v })} /></Field>
-          <Field label="Jau apmokėta viršvalandžių, val." help={HELP.summedPaidOt}><Num value={p.summed_paid_overtime} width="100%" disabled={locked}
-            onSave={(v) => set({ summed_paid_overtime: v })} /></Field>
-        </> : <Typography sx={{ fontSize: 12, color: "text.secondary" }}>Laikotarpis prasideda kartu su DU – likučių nereikia.</Typography>}
-      </Section>}
-      <Section title="Kita">
-        <Field label="VDU iš senos programos" help={HELP.vdu} note="Tuščia – apskaičiuosime iš S50">
-          <Num value={p.vdu_override} width="100%" disabled={locked} suffix={summed || p.pay_form === "hourly" ? "€/val." : "€/d."}
-            onSave={(v) => set({ vdu_override: v })} /></Field>
-        <Field label="Vaikai" help={HELP.children}>
-          <Button size="small" variant="outlined" disabled={locked} onClick={onKids} sx={{ textTransform: "none", justifySelf: "start" }}>
-            {(p.children || []).length ? `${p.children.length} · keisti` : "Pridėti"}
-          </Button>
-        </Field>
-        <Field label="Vienas augina vaiką"><Sel value={String(!!p.single_parent)} options={[["false", "Ne"], ["true", "Taip"]]} width="100%"
-          disabled={locked} onChange={(v) => set({ single_parent: v === "true" })} /></Field>
-      </Section>
+    <ToggleButtonGroup exclusive size={size} value={value} disabled={disabled} onChange={(_, v) => v && v !== value && onChange(v)}
+      sx={{ "& .MuiToggleButton-root": { textTransform: "none", px: 1.25, py: 0.5, fontSize: 13, lineHeight: 1.5 },
+        "& .Mui-selected": { color: "primary.main", fontWeight: 700, bgcolor: "#EFF4FF !important" } }}>
+      {options.map(([v, l]) => <ToggleButton key={v} value={v}>{l}</ToggleButton>)}
+    </ToggleButtonGroup>
+  );
+}
+
+function Sw({ label, help, checked, onChange, disabled, src }) {
+  return (
+    <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", py: 0.5 }}>
+      <Typography component="div" onClick={() => !disabled && onChange(!checked)}
+        sx={{ fontSize: 13.5, display: "flex", alignItems: "center", gap: 0.5, cursor: disabled ? "default" : "pointer" }}>
+        {label}
+        {src && <Chip size="small" label={src} sx={{ height: 18, fontSize: 10.5, bgcolor: "#F2F4F7" }} />}
+        {help && <Tooltip arrow title={<Typography sx={{ fontSize: 12.5, lineHeight: 1.5 }}>{help}</Typography>}>
+          <HelpOutlineIcon sx={{ fontSize: 15, color: "text.disabled", cursor: "help" }} />
+        </Tooltip>}
+      </Typography>
+      <Switch size="small" checked={!!checked} disabled={disabled} onChange={(e) => onChange(e.target.checked)} />
     </Box>
+  );
+}
+
+const grid2 = { display: "grid", gridTemplateColumns: { xs: "1fr", sm: "1fr 1fr" }, gap: 2 };
+const grid3 = { display: "grid", gridTemplateColumns: { xs: "1fr", sm: "1fr 1fr 1fr" }, gap: 2 };
+const DALYV = ["d30_55", "d0_25"];                 // NPD su dalyvumo lygiu -> dalyvumo lygis nustatytas
+const SDUP_MODES = WORK_MODES.filter(([v]) => v !== "02").map(([v, l]) => [v, `${v} – ${l}`]);
+
+function requiredOf(p) {
+  return [
+    !!p.lpk_code, !!p.start_date, Number(p.base_amount) > 0, Number(p.weekly_hours) > 0,
+    !(p.vacation_balance === null || p.vacation_balance === ""),
+    ...(p.summed_mid_period ? [!(p.summed_worked_hours === null || p.summed_worked_hours === "")] : []),
+    ...((p.transition_state || "work") !== "work" ? [!!p.transition_until] : []),
+    ...(p.transition_state === "sick" ? [!!p.transition_from] : []),
+    ...(isForeign(p) ? [!!p.birth_date, !!p.gender] : []),
+  ];
+}
+
+function salaryWarn(p, data) {
+  const chk = data.summary?.salary_check?.[p.person_code];
+  return chk && p.base_amount !== null && p.base_amount !== "" && Number(p.base_amount) === Number(chk.suggested) ? chk.reason : "";
+}
+
+// Paprastas patikrinimas: ar panašu į el. paštą / telefoną (tuščia - gerai)
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+const checkEmail = (x) => (!x || EMAIL_RE.test(x) ? "" : "Neteisingas el. pašto adresas, pvz. vardas@imone.lt");
+const cleanPhone = (x) => x.replace(/[\s\-()]/g, "");
+const checkPhone = (x) => (!x || /^\+?\d{8,15}$/.test(cleanPhone(x)) ? "" : "Neteisingas telefono numeris, pvz. +37061234567");
+
+function TextOnBlur({ value, onSave, disabled, placeholder, transform = (x) => x, validate }) {
+  const [v, setV] = useState(value || "");
+  const [err, setErr] = useState("");
+  useEffect(() => { setV(value || ""); setErr(""); }, [value]);
+  return (
+    <TextField size="small" fullWidth value={v} disabled={disabled} placeholder={placeholder} error={!!err} helperText={err || undefined}
+      onChange={(e) => { setV(e.target.value); if (err) setErr(validate ? validate(e.target.value.trim()) : ""); }}
+      onBlur={() => {
+        const e = validate ? validate(v.trim()) : "";
+        setErr(e);
+        if (e) return;                              // neteisinga - neišsaugoma
+        const out = transform(v.trim());
+        if (out !== (value || "")) onSave(out);
+      }} />
+  );
+}
+
+// VDU laikotarpis: 3 mėnesiai iki DU pradžios (arba nuo darbo pradžios, jei dirba trumpiau); null - nereikia (pradeda DokSkene)
+const MONTHS_NOM = ["sausis", "vasaris", "kovas", "balandis", "gegužė", "birželis", "liepa", "rugpjūtis", "rugsėjis", "spalis",
+  "lapkritis", "gruodis"];
+function vduPeriod(p, data) {
+  const du = dayjs(data.du_start).startOf("month");
+  const from = du.subtract(3, "month");
+  const to = du.subtract(1, "day");
+  const start = p.start_date ? dayjs(p.start_date) : null;
+  if (start && !start.isBefore(du)) return null;
+  const short = !!(start && start.isAfter(from));
+  const a = short ? start : from;
+  const label = a.month() === to.month() ? MONTHS_NOM[to.month()] : `${MONTHS_NOM[a.month()]}–${MONTHS_NOM[to.month()]}`;
+  return { from: a.format("YYYY-MM-DD"), to: to.format("YYYY-MM-DD"), label, short };
+}
+
+function vduHelp(v, hourly) {
+  return `Vidutinis darbo užmokestis už ${v.from} – ${v.to}${v.short ? " (dirba trumpiau nei 3 mėn. – už dirbtą laiką)" : " (3 paskutiniai mėnesiai iki DU pradžios DokSkene)"}. `
+    + `${hourly ? "Už valandą" : "Už dieną"}: dirbtų dienų DU, padalytas iš dirbtų ${hourly ? "valandų" : "dienų"} – be atostoginių, ligos išmokų ir kt. `
+    + "Rasite senos programos atostoginių skaičiavime arba VDU pažymoje. Pagal jį pirmus mėnesius DokSkene skaičiuosime atostogines, "
+    + "ligos išmoką už 2 dienas, mamadienius. Neįvedus – skaičiuosime iš Sodros duomenų, tada sumos gali būti netikslios.";
+}
+
+function WeekEditor({ p, locked, set }) {
+  const w = weekOf(p);
+  const save = (i, v) => {
+    const next = w.map((h, j) => (j === i ? Number(v || 0) : h));
+    if (next.some((h, j) => h !== w[j])) set({ week_hours: next.map(String) });
+  };
+  return (
+    <Box sx={{ mt: 2 }}>
+      <FL label="Darbo dienos ir valandos" help={HELP.week} note={`${weekLabel(w)} · iš viso ${num2(w.reduce((a, b) => a + b, 0))} val. per savaitę`}>
+        <Box sx={{ display: "grid", gridTemplateColumns: "repeat(7, minmax(0, 1fr))", gap: 1, maxWidth: 520 }}>
+          {WEEK_DAYS.map((d, i) => (
+            <Box key={d}>
+              <Typography sx={{ fontSize: 11.5, color: i > 4 ? "error.main" : "text.secondary", textAlign: "center", mb: 0.25 }}>{d}</Typography>
+              <Num value={w[i] ? String(w[i]) : ""} width="100%" disabled={locked} onSave={(v) => save(i, v)} />
+            </Box>
+          ))}
+        </Box>
+      </FL>
+    </Box>
+  );
+}
+
+function PersonDialog({ p, data, locked, onPerson, onClose, onNext, onKids }) {
+  if (!p) return null;
+  const set = (patch) => onPerson(p.id, patch);
+  const def = data.summary?.summed_default || data.summed_default || {};
+  const summed = p.work_time_mode === "02";
+  const hourly = p.pay_form === "hourly";
+  const state = p.transition_state || "work";
+  const sickGap = p.transition_from ? dayjs(data.du_start).diff(dayjs(p.transition_from), "day") : null;
+  const req = requiredOf(p);
+  const done = req.filter(Boolean).length;
+  const vacDate = data.summary?.vacation_date || dayjs(data.du_start).subtract(1, "day").format("YYYY-MM-DD");
+  const warn = salaryWarn(p, data);
+  const vdu = vduPeriod(p, data);
+  const rec = <Chip size="small" label="rekomenduojama" sx={{ height: 20, fontSize: 11, fontWeight: 600, bgcolor: "#FFFAEB", color: "#B54708" }} />;
+  return (
+    <Dialog open onClose={onClose} fullWidth maxWidth="md" disableScrollLock PaperProps={{ sx: { borderRadius: 3 } }}>
+      <Box sx={{ px: 3, pt: 2.5, pb: 2, borderBottom: "1px solid", borderColor: "divider", display: "flex", gap: 2, alignItems: "flex-start" }}>
+        <Box sx={{ flex: 1, minWidth: 0 }}>
+          <Typography sx={{ fontSize: 18, fontWeight: 700 }}>{p.first_name} {p.last_name}</Typography>
+          <Typography sx={{ fontSize: 13, color: "text.secondary" }}>
+            {codeLabel(p)}{p.start_date ? ` · dirba nuo ${p.start_date}` : ""}
+          </Typography>
+          <Box sx={{ display: "flex", alignItems: "center", gap: 1.25, mt: 1 }}>
+            <LinearProgress variant="determinate" value={(100 * done) / req.length} color={done === req.length ? "success" : "warning"}
+              sx={{ width: 220, height: 6, borderRadius: 99, bgcolor: "#EAECF0" }} />
+            <Typography sx={{ fontSize: 12, color: "text.secondary" }}>Būtini laukai: {done} iš {req.length}</Typography>
+          </Box>
+        </Box>
+        <IconButton onClick={onClose} aria-label="Uždaryti"><CloseIcon /></IconButton>
+      </Box>
+
+      <DialogContent sx={{ px: 3, py: 2.5, bgcolor: "#F8FAFC", display: "flex", flexDirection: "column", gap: 2 }}>
+        {isForeign(p) && <Block title="Asmens duomenys (užsienietis)">
+          <Box sx={grid3}>
+            <FL label="SD numeris" help="Sodros socialinio draudimo numeris – naudojamas vietoj asmens kodo.">
+              <TextField size="small" fullWidth value={p.person_code.slice(2)} disabled /></FL>
+            <FL label="Gimimo data" req><DateField value={p.birth_date} disabled={locked} error={!p.birth_date} width="100%"
+              onChange={(v) => set({ birth_date: v })} /></FL>
+            <FL label="Lytis" req help="Reikalinga SDUP ataskaitai."><Seg value={p.gender || ""} disabled={locked}
+              options={[["M", "Vyras"], ["F", "Moteris"]]} onChange={(v) => set({ gender: v })} /></FL>
+          </Box>
+        </Block>}
+        <Block title="Darbo sutartis">
+          <Box sx={grid2}>
+            <FL label="Darbo pradžia" req><DateField value={p.start_date} disabled={locked} error={!p.start_date} width="100%"
+              onChange={(v) => set({ start_date: v })} /></FL>
+            <FL label="Sutarties rūšis" req><Sel value={p.contract_type === "02" ? "02" : "01"} width="100%" disabled={locked}
+              options={[["01", "Neterminuota"], ["02", "Terminuota"]]} onChange={(v) => set({ contract_type: v })} /></FL>
+            <FL label="Profesija (LPK)" req help={HELP.profession} sx={{ gridColumn: { sm: "span 2" } }}>
+              <ProfessionPicker p={p} locked={locked} onPerson={onPerson} width="100%" />
+            </FL>
+          </Box>
+        </Block>
+
+        <Block title="Atlyginimas ir darbo laikas">
+          <Box sx={grid3}>
+            <FL label="Apmokėjimas" req><Seg value={hourly ? "hourly" : "monthly"} disabled={locked}
+              options={[["monthly", "Mėnesinis"], ["hourly", "Valandinis"]]} onChange={(v) => set({ pay_form: v, base_amount: "" })} /></FL>
+            <FL label={hourly ? "Įkainis, € per val." : "Alga, € per mėn."} req help={HELP.salary}
+              note={warn ? <Box component="span" sx={{ color: "warning.dark" }}>⚠ Pagal Sodrą – patikrinkite: {warn}</Box> : null}>
+              <Num value={p.base_amount} width="100%" disabled={locked} error={!(Number(p.base_amount) > 0)} suffix="€"
+                onSave={(v) => set({ base_amount: v })} /></FL>
+            <FL label="Norma, val. per sav." req help={HELP.norm}><Num value={p.weekly_hours} width="100%" disabled={locked}
+              error={!(Number(p.weekly_hours) > 0)} onSave={(v) => set({ weekly_hours: v })} /></FL>
+          </Box>
+          <Box sx={{ ...grid2, mt: 2 }}>
+            <FL label="Darbo laiko apskaita" req help={HELP.regime}><Seg value={summed ? "summed" : "standard"} disabled={locked}
+              options={[["standard", "Standartinė"], ["summed", "Suminė"]]} onChange={(v) => set({ work_time_mode: v === "summed" ? "02" : "01" })} /></FL>
+            {!summed && <FL label="Darbo laiko režimas (SDUP)" help={HELP.mode}><Sel value={p.work_time_mode || "01"} options={SDUP_MODES}
+              width="100%" disabled={locked} onChange={(v) => set({ work_time_mode: v })} /></FL>}
+          </Box>
+          {!summed && <WeekEditor p={p} locked={locked} set={set} />}
+          {summed && (
+            <Box sx={{ mt: 2, p: 2, borderRadius: 2, bgcolor: "#F5F8FF", border: "1px solid #D1E0FF" }}>
+              <Box sx={grid2}>
+                <FL label="Apskaitinis laikotarpis"><Sel value={String(p.summed_period_months || def.months || 3)} width="100%" disabled={locked}
+                  options={[["1", "1 mėn."], ["2", "2 mėn."], ["3", "3 mėn."]]} onChange={(v) => set({ summed_period_months: v })} /></FL>
+                <FL label="Dabartinis laikotarpis prasidėjo"><DateField month value={p.summed_period_start || def.start} disabled={locked}
+                  width="100%" onChange={(v) => set({ summed_period_start: v })} /></FL>
+              </Box>
+              {p.summed_mid_period ? (
+                <>
+                  <Typography sx={{ fontSize: 12.5, color: "#1849A9", mt: 1.75, mb: 1.25 }}>
+                    Laikotarpis prasidėjo iki DU pradžios – įveskite jo valandas iki perėjimo iš senos programos.
+                  </Typography>
+                  <Box sx={grid3}>
+                    <FL label="Dirbta, val." req help={HELP.summedWorked}><Num value={p.summed_worked_hours} width="100%" disabled={locked}
+                      error={p.summed_worked_hours === null || p.summed_worked_hours === ""} onSave={(v) => set({ summed_worked_hours: v })} /></FL>
+                    <FL label="Nebuvimai, val." help={HELP.summedAbsence}><Num value={p.summed_absence_hours} width="100%" disabled={locked}
+                      onSave={(v) => set({ summed_absence_hours: v })} /></FL>
+                    <FL label="Apmokėti viršvalandžiai, val." help={HELP.summedPaidOt}><Num value={p.summed_paid_overtime} width="100%"
+                      disabled={locked} onSave={(v) => set({ summed_paid_overtime: v })} /></FL>
+                  </Box>
+                </>
+              ) : (
+                <Typography sx={{ fontSize: 12.5, color: "#1849A9", mt: 1.5 }}>Laikotarpis prasideda kartu su DU DokSkene – valandų iš senos programos nereikia.</Typography>
+              )}
+            </Box>
+          )}
+        </Block>
+
+        <Block title="Atostogos">
+          <Box sx={grid2}>
+            <FL label={`Likutis ${vacDate}, d.`} req help={HELP.vacation}><Num value={p.vacation_balance} width="100%" disabled={locked}
+              error={p.vacation_balance === null || p.vacation_balance === ""} onSave={(v) => set({ vacation_balance: v })} /></FL>
+            <FL label="Priklauso per metus, d. d." help={HELP.leaveDays}><Num value={p.annual_leave_days || 20} width="100%" disabled={locked}
+              onSave={(v) => set({ annual_leave_days: v || 20 })} /></FL>
+          </Box>
+        </Block>
+
+        {(vdu || data.summary?.gpm_split_estimated) && (
+          <Block title={vdu && data.summary?.gpm_split_estimated ? "VDU ir GPM" : vdu ? "VDU" : "GPM"} chip={rec}>
+            <Box sx={grid2}>
+              {vdu && <FL label={`VDU ${vdu.label}, € per ${summed || hourly ? "valandą" : "dieną"}`}
+                help={vduHelp(vdu, summed || hourly)} note={vdu.short ? `Dirba nuo ${p.start_date} – VDU už dirbtą laiką` : null}>
+                <Num value={p.vdu_override} width="100%" disabled={locked} suffix={summed || hourly ? "€/val." : "€/d."}
+                  onSave={(v) => set({ vdu_override: v })} /></FL>}
+              {data.summary?.gpm_split_estimated && <FL label="GPM nuo sausio iki perėjimo, €" help={HELP.gpmYtd}>
+                <Num value={p.gpm_ytd} width="100%" disabled={locked} suffix="€" onSave={(v) => set({ gpm_ytd: v })} /></FL>}
+            </Box>
+          </Block>
+        )}
+
+        <Block title={`Perėjimo dieną (${data.du_start})`}>
+          <Box sx={grid2}>
+            <FL label="Kur darbuotojas yra" help={HELP.transition}><Sel value={state} options={TRANSITION} width="100%" disabled={locked}
+              onChange={(v) => set({ transition_state: v })} /></FL>
+            {state === "sick" && <FL label="Liga nuo" req help={HELP.sickFrom}><DateField value={p.transition_from} disabled={locked}
+              error={!p.transition_from || p.transition_from > data.du_start} width="100%" onChange={(v) => set({ transition_from: v })} /></FL>}
+            {state !== "work" && <FL label="Iki" req><DateField value={p.transition_until} disabled={locked} error={!p.transition_until}
+              width="100%" onChange={(v) => set({ transition_until: v })} /></FL>}
+            {state === "vacation" && <FL label={`Jau išmokėti atostoginiai už ${MONTHS_GEN[dayjs(data.du_start).month()]} dienas, €`} help={HELP.prepaid}>
+              <Num value={p.vacation_prepaid_amount} width="100%" disabled={locked} suffix="€" onSave={(v) => set({ vacation_prepaid_amount: v })} /></FL>}
+            {state === "sick" && sickGap >= 1 && sickGap <= 14 && (
+              <FL label={`Ligos išmoka už ${sickGap === 1 ? p.transition_from : `${p.transition_from} – ${dayjs(p.transition_from).add(1, "day").format("YYYY-MM-DD")}`}, išmokėta senoje programoje, €`}
+                help={HELP.sickPaid}>
+                <Num value={p.vacation_prepaid_amount} width="100%" disabled={locked} suffix="€" onSave={(v) => set({ vacation_prepaid_amount: v })} /></FL>)}
+          </Box>
+          {state === "sick" && p.transition_from && (sickGap < 0 ? (
+            <Alert severity="error" sx={{ mt: 1.5, py: 0.25 }}>Liga prasidėjo jau DokSkene – čia pasirinkite „Dirba“, o ligą pažymėkite tabelyje.</Alert>
+          ) : sickGap === 0 ? (
+            <Alert severity="info" sx={{ mt: 1.5, py: 0.25 }}>
+              Abi darbdavio apmokamas ligos dienas DokSkenas apmokės automatiškai {MONTHS_GEN[dayjs(data.du_start).month()]} atlyginimuose.
+            </Alert>
+          ) : sickGap === 1 ? (
+            <Alert severity="info" sx={{ mt: 1.5, py: 0.25 }}>
+              Antrą ligos dieną ({data.du_start}) DokSkenas apmokės automatiškai {MONTHS_GEN[dayjs(data.du_start).month()]} atlyginimuose
+              (jei tai darbo diena pagal grafiką).
+            </Alert>
+          ) : (
+            <Typography sx={{ fontSize: 12.5, color: "text.secondary", mt: 1 }}>Darbdavio apmokamos 2 pirmosios ligos dienos buvo iki perėjimo – jas apmokėjo sena programa.</Typography>
+          ))}
+          {["childcare", "maternity", "paternity"].includes(state) && <Typography sx={{ fontSize: 12.5, color: "text.secondary", mt: 1 }}>Išmoką moka Sodra – tik pažymime tabelyje.</Typography>}
+        </Block>
+
+        <Block title="Mokesčiai ir išmokėjimas">
+          <Box sx={grid2}>
+            <FL label="NPD" help={HELP.npd}><Sel value={p.npd_mode || "standard"} options={NPD} width="100%" disabled={locked}
+              onChange={(v) => set({ npd_mode: v, has_disability: DALYV.includes(v) ? true : DALYV.includes(p.npd_mode) ? false : !!p.has_disability })} /></FL>
+            <FL label="Dalyvumo lygis" help={HELP.disability} note={DALYV.includes(p.npd_mode) ? "Pagal pasirinktą NPD" : null}>
+              <Sel value={String(!!p.has_disability || DALYV.includes(p.npd_mode))} width="100%" disabled={locked || DALYV.includes(p.npd_mode)}
+                options={[["false", "Nenustatytas"], ["true", "Nustatytas (0–55 %)"]]} onChange={(v) => set({ has_disability: v === "true" })} /></FL>
+            <FL label={`Neišmokėta perėjimo dienai, €`} help={HELP.unpaid}><Num value={p.unpaid_amount} width="100%" disabled={locked}
+              suffix="€" onSave={(v) => set({ unpaid_amount: v })} /></FL>
+            <FL label="IBAN"><TextOnBlur value={p.iban} disabled={locked} placeholder="LT…"
+              transform={(x) => x.replace(/\s/g, "").toUpperCase()} onSave={(v) => set({ iban: v })} /></FL>
+          </Box>
+          <Box sx={{ mt: 1.5 }}>
+            <Sw label="Pensijų kaupimas" src="iš Sodros" help={HELP.pension} checked={p.pension} disabled={locked} onChange={(v) => set({ pension: v })} />
+            <Sw label="Vienas augina vaiką" help={HELP.singleParent} checked={p.single_parent} disabled={locked} onChange={(v) => set({ single_parent: v })} />
+            <Sw label="Mokėti kartą per mėnesį (be avanso)" help={HELP.payOnce} checked={p.pay_once_a_month} disabled={locked}
+              onChange={(v) => set({ pay_once_a_month: v })} />
+            {!p.pay_once_a_month && <Box sx={{ ...grid2, mt: 1 }}>
+              <FL label="Avanso suma, €" help={HELP.advance}><Num value={p.advance_amount} width="100%" disabled={locked} suffix="€"
+                onSave={(v) => set({ advance_amount: v })} /></FL>
+            </Box>}
+          </Box>
+        </Block>
+
+        <Block title="Vaikai" chip={<Tooltip arrow title={<Typography sx={{ fontSize: 12.5 }}>{HELP.children}</Typography>}>
+          <HelpOutlineIcon sx={{ fontSize: 15, color: "text.disabled", cursor: "help" }} /></Tooltip>}>
+          <Box sx={{ display: "flex", gap: 1, flexWrap: "wrap", alignItems: "center" }}>
+            {(p.children || []).map((c, i) => <Chip key={i} size="small" label={`${c.first_name || "Vaikas"} · ${c.birth_date}`} />)}
+            {!locked && <Button size="small" startIcon={<AddIcon />} onClick={onKids} sx={{ textTransform: "none" }}>
+              {(p.children || []).length ? "Keisti" : "Pridėti vaiką"}</Button>}
+          </Box>
+        </Block>
+
+        <Block title="Kontaktai">
+          <Box sx={grid2}>
+            <FL label="El. paštas" help={HELP.email}><TextOnBlur value={p.email} disabled={locked} placeholder="vardas@imone.lt" validate={checkEmail}
+              transform={(x) => x.toLowerCase()} onSave={(v) => set({ email: v })} /></FL>
+            <FL label="Telefonas"><TextOnBlur value={p.phone} disabled={locked} placeholder="+37061234567" validate={checkPhone}
+              transform={cleanPhone} onSave={(v) => set({ phone: v })} /></FL>
+          </Box>
+        </Block>
+      </DialogContent>
+
+      <Box sx={{ px: 3, py: 1.5, borderTop: "1px solid", borderColor: "divider", display: "flex", alignItems: "center", gap: 1 }}>
+        {!locked && <Tooltip arrow title={<Typography sx={{ fontSize: 12.5 }}>Jei darbuotojas jau išėjo iš darbo – jis bus perkeltas tik metinei GPM312, pildyti nieko nereikės.</Typography>}>
+          <Button size="small" color="inherit" sx={{ textTransform: "none", color: "text.secondary" }}
+            onClick={() => window.confirm(`${p.first_name} ${p.last_name} jau nebedirba įmonėje?`) && (set({ employed: false }), onClose())}>
+            Darbuotojas jau išėjo?
+          </Button>
+        </Tooltip>}
+        <Typography sx={{ flex: 1, fontSize: 12.5, color: "text.secondary", textAlign: "right", pr: 1 }}>
+          Išsaugoma iš karto · <Box component="span" sx={{ color: "error.main" }}>*</Box> – būtina
+        </Typography>
+        {onNext && <Button variant="contained" disableElevation endIcon={<ArrowForwardIcon />} onClick={onNext}
+          sx={{ textTransform: "none", fontWeight: 700 }}>Kitas darbuotojas</Button>}
+      </Box>
+    </Dialog>
   );
 }
 
@@ -472,110 +815,139 @@ function PeopleStep({ data, locked, busy, onPerson, onAction, onExcel }) {
   const fileRef = useRef(null);
   const [adding, setAdding] = useState(false);
   const [kids, setKids] = useState(null);
-  const [open, setOpen] = useState({});
-  const people = data.people.filter((p) => p.include);
+  const [openId, setOpenId] = useState(null);
+  const [showGone, setShowGone] = useState(false);
+  const active = data.people.filter((p) => p.include && p.employed);
+  const gone = data.people.filter((p) => p.include && !p.employed);
+  const openP = data.people.find((p) => p.id === openId) || null;
   const download = async () => {
     const blob = await payrollApi.migrationExcel();
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url; a.download = "darbuotojai_perejimas.xlsx"; a.click(); URL.revokeObjectURL(url);
   };
-  const head = (label, help) => <TableCell sx={{ fontSize: 11.5, fontWeight: 800 }}><HeadHelp label={label} help={help} /></TableCell>;
+  const nextOf = (id) => {
+    const i = active.findIndex((p) => p.id === id);
+    const rest = [...active.slice(i + 1), ...active.slice(0, i)];
+    return (rest.find((p) => rowMissing(p) > 0) || rest[0] || null);
+  };
+  const head = (label, help, w) => <TableCell sx={{ fontSize: 12, fontWeight: 600, color: "text.secondary", bgcolor: "#F9FAFB", width: w }}>
+    <HeadHelp label={label} help={help} /></TableCell>;
   return (
     <Box>
       <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 2, flexWrap: "wrap", mb: 1.5 }}>
         <Box>
           <Typography sx={{ fontSize: 17, fontWeight: 800 }}>Darbuotojai</Typography>
           <Typography sx={{ fontSize: 13, color: "text.secondary", mt: 0.25 }}>
-            Pagrindiniai laukai – lentelėje, kiti – atidarius darbuotojo eilutę. Kas rasta ataskaitose – jau užpildyta.
+            Užpildėme, ką radome Sodros ir VMI ataskaitose. Įveskite trūkstamus būtinus laukus – kitus rasite atidarę darbuotoją.
           </Typography>
         </Box>
         {!locked && (
           <Box sx={{ display: "flex", gap: 1, flexWrap: "wrap" }}>
-            <Button size="small" variant="outlined" startIcon={<AddIcon />} onClick={() => setAdding(true)} sx={{ textTransform: "none" }}>Pridėti</Button>
-            <Button size="small" startIcon={<DownloadIcon />} onClick={download} sx={{ textTransform: "none" }}>Excel šablonas</Button>
+            <Button size="small" variant="outlined" startIcon={<AddIcon />} onClick={() => setAdding(true)} sx={{ textTransform: "none" }}>Naujas darbuotojas</Button>
+            <Tooltip arrow title={<Typography sx={{ fontSize: 12.5 }}>Visi laukai vienoje lentelėje: būtini – kairėje, nebūtini – dešinėje. Užpildykite ir įkelkite atgal.</Typography>}>
+              <Button size="small" startIcon={<DownloadIcon />} onClick={download} sx={{ textTransform: "none" }}>Excel šablonas</Button>
+            </Tooltip>
             <Button size="small" startIcon={<UploadFileIcon />} disabled={busy} onClick={() => fileRef.current?.click()} sx={{ textTransform: "none" }}>Įkelti Excel</Button>
             <input ref={fileRef} hidden type="file" accept=".xlsx" onChange={(e) => { onExcel(e.target.files?.[0]); e.target.value = ""; }} />
           </Box>
         )}
       </Box>
-      {!people.length ? (
+
+      {!active.length && !gone.length ? (
         <Alert severity="info">Darbuotojų dar nėra – įkelkite ataskaitas, Excel šabloną arba pridėkite rankiniu būdu.</Alert>
       ) : (
         <TableContainer component={Paper} sx={{ ...surfaceSx }}>
-          <Table size="small" sx={{ minWidth: 1100, "& td": { verticalAlign: "top", py: 1 } }}>
+          <Table size="small" sx={{ minWidth: 960, "& td": { verticalAlign: "top", py: 1.25, px: 1.25 }, "& th": { px: 1.25 },
+            "& td:first-of-type": { minWidth: 165 } }}>
             <TableHead><TableRow>
-              <TableCell sx={{ width: 36 }} />
-              {head("Darbuotojas")}{head("Profesija", HELP.profession)}{head("Alga, €", HELP.salary)}{head("Norma, val./sav.", HELP.norm)}
-              {head("Režimas", HELP.mode)}{head("Atostogų likutis, d.", HELP.vacation)}{head("Neišmokėta, €", HELP.unpaid)}{head("Būsena")}
-              <TableCell sx={{ width: 40 }} />
+              {head("Darbuotojas", null, 170)}{head("Profesija", HELP.profession, 215)}{head("Atlyginimas", HELP.salary, 200)}
+              {head("Val./sav.", HELP.norm, 80)}{head("Apskaita", HELP.regime, 140)}{head("Atostogų likutis", HELP.vacation, 100)}
+              {head("Būsena", null, 130)}<TableCell sx={{ width: 36, bgcolor: "#F9FAFB" }} />
             </TableRow></TableHead>
             <TableBody>
-              {people.map((p) => {
+              {!active.length && <TableRow><TableCell colSpan={8}><Typography sx={{ fontSize: 13, color: "text.secondary" }}>Dirbančių darbuotojų nėra.</Typography></TableCell></TableRow>}
+              {active.map((p) => {
                 const set = (patch) => onPerson(p.id, patch);
                 const miss = rowMissing(p);
-                const isOpen = !!open[p.id];
+                const warn = salaryWarn(p, data);
+                const hourly = p.pay_form === "hourly";
                 return (
-                  <Fragment key={p.id}>
-                    <TableRow sx={{ bgcolor: p.s29_missing && p.employed ? "#FFF8EE" : undefined, "& > td": { borderBottom: isOpen ? 0 : undefined } }}>
-                      <TableCell padding="checkbox">
-                        {p.employed && <IconButton size="small" onClick={() => setOpen({ ...open, [p.id]: !isOpen })}>
-                          {isOpen ? <ExpandLessIcon fontSize="small" /> : <ExpandMoreIcon fontSize="small" />}
-                        </IconButton>}
-                      </TableCell>
-                      <TableCell sx={{ minWidth: 190 }}>
-                        <Typography sx={{ fontSize: 13, fontWeight: 700 }}>{p.first_name} {p.last_name}</Typography>
-                        <Typography sx={{ fontSize: 11, color: "text.secondary" }}>
-                          {p.person_code.slice(0, 3)}••••{p.person_code.slice(-2)}{p.start_date ? ` · nuo ${p.start_date}` : ""}
-                        </Typography>
-                        <Box sx={{ mt: 0.5 }}><Sel value={String(p.employed)} options={[["true", "Dirba"], ["false", "Nedirba"]]} width={110}
-                          disabled={locked} onChange={(v) => set({ employed: v === "true" })} /></Box>
-                        {p.s29_missing && p.employed && <Typography sx={{ fontSize: 11, color: "warning.dark", mt: 0.25 }}>Nebėra naujame S29 – nebedirba?</Typography>}
-                      </TableCell>
-                      {!p.employed ? (
-                        <TableCell colSpan={7}><Typography sx={{ fontSize: 12, color: "text.secondary" }}>
-                          Nedirba{p.end_date ? ` nuo ${p.end_date}` : ""} – perkeliama tik istorija metinei GPM312</Typography></TableCell>
-                      ) : <>
-                        <TableCell><ProfessionPicker p={p} locked={locked} onPerson={onPerson} /></TableCell>
-                        <TableCell>
-                          <Num value={p.base_amount} width={120} disabled={locked} error={!(Number(p.base_amount) > 0)}
-                            suffix={p.pay_form === "hourly" ? "€/val." : "€"} onSave={(v) => set({ base_amount: v })} />
-                          <Typography sx={{ fontSize: 11, color: "text.secondary", mt: 0.3 }}>{p.pay_form === "hourly" ? "Valandinis" : "Mėnesinė"}</Typography>
-                        </TableCell>
-                        <TableCell><Num value={p.weekly_hours} width={80} disabled={locked} error={!(Number(p.weekly_hours) > 0)}
-                          onSave={(v) => set({ weekly_hours: v })} /></TableCell>
-                        <TableCell><Sel value={p.work_time_mode || "01"} options={WORK_MODES.map(([v, l]) => [v, `${v} – ${l}`])} width={220}
-                          disabled={locked} onChange={(v) => set({ work_time_mode: v })} /></TableCell>
-                        <TableCell><Num value={p.vacation_balance} width={90} disabled={locked}
-                          error={p.vacation_balance === null || p.vacation_balance === ""} onSave={(v) => set({ vacation_balance: v })} /></TableCell>
-                        <TableCell><Num value={p.unpaid_amount} width={110} disabled={locked} onSave={(v) => set({ unpaid_amount: v })} /></TableCell>
-                        <TableCell>
-                          <Chip size="small" label={miss ? `Trūksta ${miss}` : "Užpildyta"} color={miss ? "error" : "success"} variant="outlined"
-                            onClick={() => setOpen({ ...open, [p.id]: true })} sx={{ cursor: "pointer" }} />
-                        </TableCell>
-                      </>}
-                      <TableCell padding="checkbox">
-                        {!locked && <Tooltip title="Pašalinti iš sąrašo">
-                          <IconButton size="small" onClick={() => window.confirm(`Pašalinti ${p.first_name} ${p.last_name}?`) && onAction({ action: "remove_person", id: p.id })}>
-                            <DeleteOutlineIcon sx={{ fontSize: 18 }} />
-                          </IconButton>
-                        </Tooltip>}
-                      </TableCell>
-                    </TableRow>
-                    {p.employed && isOpen && (
-                      <TableRow>
-                        <TableCell colSpan={10} sx={{ bgcolor: "#F6F8FB", py: 1.75 }}>
-                          <PersonDetails p={p} data={data} locked={locked} set={set} onKids={() => setKids(p)} />
-                        </TableCell>
-                      </TableRow>
-                    )}
-                  </Fragment>
+                  <TableRow key={p.id} hover>
+                    <TableCell onClick={() => setOpenId(p.id)} sx={{ cursor: "pointer" }}>
+                      <Typography sx={{ fontSize: 13.5, fontWeight: 700 }}>{p.first_name} {p.last_name}</Typography>
+                      <Typography sx={{ fontSize: 11.5, color: "text.secondary" }}>
+                        {codeLabel(p)}{p.start_date ? ` · nuo ${p.start_date}` : ""}
+                      </Typography>
+                      {p.s29_missing && <Typography sx={{ fontSize: 11.5, color: "warning.dark", mt: 0.5 }}>
+                        Nebėra naujame S29 – {!locked ? <Box component="span" onClick={(e) => { e.stopPropagation(); set({ employed: false }); }}
+                          sx={{ textDecoration: "underline", cursor: "pointer" }}>nebedirba?</Box> : "nebedirba?"}
+                      </Typography>}
+                    </TableCell>
+                    <TableCell><ProfessionPicker p={p} locked={locked} onPerson={onPerson} width={205} /></TableCell>
+                    <TableCell>
+                      <Box sx={{ display: "flex", gap: 0.75, alignItems: "center" }}>
+                        <Num value={p.base_amount} width={100} disabled={locked} error={!(Number(p.base_amount) > 0)}
+                          suffix={hourly ? "€/val." : "€"} onSave={(v) => set({ base_amount: v })} />
+                        <Seg value={hourly ? "hourly" : "monthly"} disabled={locked} options={[["monthly", "mėn."], ["hourly", "val."]]}
+                          onChange={(v) => set({ pay_form: v, base_amount: "" })} />
+                      </Box>
+                      {warn && <Tooltip arrow title={<Typography sx={{ fontSize: 12.5 }}>Pasiūlyta pagal Sodrą: {warn}. Įveskite algą iš darbo sutarties.</Typography>}>
+                        <Typography sx={{ fontSize: 11.5, color: "warning.dark", mt: 0.5, cursor: "help", display: "inline-block" }}>⚠ Pagal Sodrą – patikrinkite</Typography>
+                      </Tooltip>}
+                    </TableCell>
+                    <TableCell><Num value={p.weekly_hours} width={70} disabled={locked} error={!(Number(p.weekly_hours) > 0)}
+                      onSave={(v) => set({ weekly_hours: v })} />
+                      {p.work_time_mode !== "02" && <Typography sx={{ fontSize: 11, color: "text.secondary", mt: 0.4, whiteSpace: "nowrap" }}>
+                        {weekShort(weekOf(p))}</Typography>}</TableCell>
+                    <TableCell><Seg value={p.work_time_mode === "02" ? "summed" : "standard"} disabled={locked}
+                      options={[["standard", "Stand."], ["summed", "Suminė"]]} onChange={(v) => set({ work_time_mode: v === "summed" ? "02" : "01" })} /></TableCell>
+                    <TableCell><Num value={p.vacation_balance} width={80} disabled={locked} suffix="d."
+                      error={p.vacation_balance === null || p.vacation_balance === ""} onSave={(v) => set({ vacation_balance: v })} /></TableCell>
+                    <TableCell>
+                      <Chip size="small" onClick={() => setOpenId(p.id)} sx={{ cursor: "pointer", fontWeight: 600 }}
+                        label={miss ? `Trūksta ${miss}` : !p.vdu_override && vduPeriod(p, data) ? "Patartina: VDU" : "✓ Paruošta"}
+                        color={miss ? "error" : !p.vdu_override && vduPeriod(p, data) ? "warning" : "success"} variant={miss ? "filled" : "outlined"} />
+                      <Box onClick={() => setOpenId(p.id)} sx={{ fontSize: 12.5, color: "primary.main", fontWeight: 600, cursor: "pointer", mt: 0.75 }}>Atidaryti →</Box>
+                    </TableCell>
+                    <TableCell padding="checkbox">
+                      {!locked && <Tooltip title="Pašalinti iš sąrašo">
+                        <IconButton size="small" onClick={() => window.confirm(`Pašalinti ${p.first_name} ${p.last_name}?`) && onAction({ action: "remove_person", id: p.id })}>
+                          <DeleteOutlineIcon sx={{ fontSize: 18 }} />
+                        </IconButton>
+                      </Tooltip>}
+                    </TableCell>
+                  </TableRow>
                 );
               })}
             </TableBody>
           </Table>
         </TableContainer>
       )}
+
+      {gone.length > 0 && (
+        <Paper sx={{ ...surfaceSx, mt: 1.5 }}>
+          <Box onClick={() => setShowGone((v) => !v)} sx={{ px: 2, py: 1.25, display: "flex", alignItems: "center", gap: 1, cursor: "pointer" }}>
+            {showGone ? <ExpandLessIcon fontSize="small" /> : <ExpandMoreIcon fontSize="small" />}
+            <Typography sx={{ fontSize: 13.5 }}><b>Nebedirba ({gone.length})</b> – perkeliami tik metinei GPM312, nieko pildyti nereikia</Typography>
+            {!showGone && <Typography noWrap sx={{ fontSize: 12.5, color: "text.secondary", ml: "auto", minWidth: 0 }}>
+              {gone.map((p) => `${p.first_name} ${p.last_name}`).join(", ")}</Typography>}
+          </Box>
+          <Collapse in={showGone}>
+            {gone.map((p) => (
+              <Box key={p.id} sx={{ px: 2, py: 1, borderTop: "1px solid", borderColor: "divider", display: "flex", alignItems: "center", gap: 2 }}>
+                <Typography sx={{ fontSize: 13, flex: 1 }}>{p.first_name} {p.last_name}
+                  <Box component="span" sx={{ color: "text.secondary", ml: 1, fontSize: 12 }}>
+                    {p.start_date ? `${p.start_date} – ` : ""}{p.end_date || "?"}</Box></Typography>
+                {!locked && <Button size="small" onClick={() => onPerson(p.id, { employed: true })} sx={{ textTransform: "none" }}>Dirba</Button>}
+              </Box>
+            ))}
+          </Collapse>
+        </Paper>
+      )}
+
+      {openP && <PersonDialog p={openP} data={data} locked={locked} onPerson={onPerson} onClose={() => setOpenId(null)}
+        onKids={() => setKids(openP)} onNext={active.length > 1 ? () => setOpenId(nextOf(openP.id)?.id || null) : null} />}
       <ChildrenDialog person={kids} onClose={() => setKids(null)}
         onSave={(rows) => { const id = kids.id; setKids(null); onPerson(id, { children: rows }); }} />
       <AddPersonDialog open={adding} busy={busy} onClose={() => setAdding(false)}
@@ -641,7 +1013,7 @@ function ConfirmStep({ data, busy, onAction }) {
           GPM313 {c.ym}: išmokos {money(c.gpm313_income)}, pagal S50 {money(c.sam_income)} – trūksta failų arba duomenys skiriasi.
         </Alert>
       ))}
-      {acct.mode === "gap" && (
+      {SHOW_ACCOUNTING && acct.mode === "gap" && (
         <Alert severity="info" sx={{ mb: 1.5, "& .MuiAlert-message": { fontSize: 12.5 } }}>
           Apskaita DokSkenas nuo {acct.cutover}. Tarpinių mėnesių ({(acct.gap_months || []).join(", ")}) DU įrašai DK:
           <RadioGroup row value={data.gap_mode} onChange={(e) => onAction({ action: "start", du_start: data.du_start, gap_mode: e.target.value })}>
@@ -663,6 +1035,7 @@ function ConfirmStep({ data, busy, onAction }) {
 
 // ----------------------------------------------------------------------------------------------------
 
+// Perėjimo eiga - horizontaliai virš turinio (turinys - per visą plotį)
 function Progress({ data, step, maxStep, onGo }) {
   const rows = reportRows(data).filter((r) => !r.optional);
   const reportsOk = rows.every((r) => r.state === "ok" || r.state === "notneeded");
@@ -670,31 +1043,46 @@ function Progress({ data, step, maxStep, onGo }) {
   const confirmed = data.status === "confirmed";
   const done = [reportsOk, miss.active > 0 && !miss.parts.length, confirmed];
   const hints = [
-    reportsOk ? "Įkeltos" : `${rows.filter((r) => r.state === "ok" || r.state === "notneeded").length} iš ${rows.length}`,
+    reportsOk ? "Visos įkeltos" : `Įkelta ${rows.filter((r) => r.state === "ok" || r.state === "notneeded").length} iš ${rows.length} rekomenduojamų`,
     !miss.active ? "Nėra darbuotojų" : miss.parts.length ? `Trūksta: ${miss.parts.map(([n]) => n).join(", ")}` : `${miss.active} dirbantys`,
     confirmed ? "DU galima skaičiuoti" : "Paskutinis žingsnis",
   ];
-  const n = done.filter(Boolean).length;
   return (
-    <Paper sx={{ ...surfaceSx, p: 2.25, position: { lg: "sticky" }, top: 24 }}>
-      <Typography sx={{ fontSize: 14.5, fontWeight: 800 }}>Perėjimo eiga</Typography>
-      <Typography sx={{ fontSize: 12, color: "text.secondary", mb: 1.25 }}>{n} iš {STEPS.length} atlikta</Typography>
-      <LinearProgress variant="determinate" value={100 * n / STEPS.length} color="success" sx={{ height: 6, borderRadius: 99, bgcolor: "#EDF1F7", mb: 2 }} />
-      <Box component="ol" sx={{ listStyle: "none", p: 0, m: 0, display: "grid", gap: 1.5 }}>
-        {STEPS.map((title, i) => (
-          <Box component="li" key={title}>
-            <Box component="button" type="button" disabled={i > maxStep} onClick={() => onGo(i)}
-              sx={{ appearance: "none", border: 0, bgcolor: "transparent", p: 0, font: "inherit", textAlign: "left", width: "100%",
-                display: "flex", gap: 1.25, cursor: i > maxStep ? "default" : "pointer", color: "text.primary" }}>
-              {done[i] ? <CheckCircleIcon sx={{ color: "success.main", fontSize: 19 }} />
-                : <RadioButtonUncheckedIcon sx={{ color: i === step ? "primary.main" : "text.disabled", fontSize: 19 }} />}
-              <Box>
-                <Typography sx={{ fontSize: 13, fontWeight: i === step ? 800 : 650 }}>{i + 1}. {title}</Typography>
-                <Typography sx={{ fontSize: 11.75, color: "text.secondary" }}>{hints[i]}</Typography>
+    <Paper sx={{ ...surfaceSx, overflow: "hidden", borderColor: "#D1E0FF", background: "linear-gradient(180deg, #F5F8FF 0%, #FFFFFF 100%)" }}>
+      <Box sx={{ px: 2.25, pt: 1.5, display: "flex", alignItems: "center", gap: 1.5 }}>
+        <Typography sx={{ fontSize: 13, fontWeight: 800, color: "#1849A9", whiteSpace: "nowrap" }}>Perėjimo eiga</Typography>
+        <LinearProgress variant="determinate" value={(100 * done.filter(Boolean).length) / STEPS.length}
+          color={done.every(Boolean) ? "success" : "primary"} sx={{ flex: 1, height: 6, borderRadius: 99, bgcolor: "#DCE6FB" }} />
+        <Typography sx={{ fontSize: 12.5, fontWeight: 700, color: "#1849A9", whiteSpace: "nowrap" }}>{done.filter(Boolean).length} iš {STEPS.length}</Typography>
+      </Box>
+      <Box sx={{ display: "flex", alignItems: "stretch", gap: 1, px: 1.5, py: 1.25, overflowX: "auto" }}>
+        {STEPS.map((title, i) => {
+          const can = i <= maxStep;
+          const cur = i === step;
+          const ok = done[i];
+          return (
+            <Fragment key={title}>
+              {i > 0 && <Box sx={{ flex: "0 0 28px", alignSelf: "center", height: 2, borderRadius: 1, bgcolor: done[i - 1] ? "success.main" : "#C7D7F5" }} />}
+              <Box component="button" type="button" disabled={!can} onClick={() => onGo(i)}
+                sx={{ appearance: "none", font: "inherit", textAlign: "left", flex: 1, minWidth: 190,
+                  display: "flex", alignItems: "center", gap: 1.25, px: 1.5, py: 1, borderRadius: 2.5, color: "text.primary",
+                  border: "1.5px solid", borderColor: cur ? "primary.main" : ok ? "#ABEFC6" : "transparent",
+                  bgcolor: cur ? "#FFFFFF" : ok ? "#ECFDF3" : "transparent",
+                  boxShadow: cur ? "0 2px 8px rgba(21,94,239,.15)" : "none", cursor: can ? "pointer" : "default",
+                  opacity: can ? 1 : 0.6, "&:hover": { bgcolor: can && !cur ? (ok ? "#DCFAE6" : "#EEF3FF") : undefined } }}>
+                <Box sx={{ width: 28, height: 28, borderRadius: "50%", display: "grid", placeItems: "center", flexShrink: 0,
+                  fontSize: 13, fontWeight: 800, fontFamily: "inherit",
+                  bgcolor: ok ? "success.main" : cur ? "primary.main" : "#E4E9F2", color: ok || cur ? "#FFFFFF" : "#667085" }}>
+                  {ok ? <CheckIcon sx={{ fontSize: 18 }} /> : i + 1}
+                </Box>
+                <Box sx={{ minWidth: 0 }}>
+                  <Typography sx={{ fontSize: 13.5, fontWeight: 800, color: cur ? "primary.dark" : ok ? "success.dark" : "#344054" }}>{title}</Typography>
+                  <Typography noWrap sx={{ fontSize: 12, color: ok ? "success.dark" : "text.secondary" }}>{hints[i]}</Typography>
+                </Box>
               </Box>
-            </Box>
-          </Box>
-        ))}
+            </Fragment>
+          );
+        })}
       </Box>
     </Paper>
   );
@@ -772,7 +1160,10 @@ export default function DuPerejimasTab({ onStatus }) {
       {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError("")}>{error}</Alert>}
       {info && <Alert severity="info" sx={{ mb: 2 }} onClose={() => setInfo("")}>{info}</Alert>}
 
-      <Box sx={{ display: "grid", gridTemplateColumns: { xs: "minmax(0,1fr)", lg: "minmax(0,1fr) 250px" }, gap: 2.5, alignItems: "start" }}>
+      <Box sx={{ mb: 2 }}>
+        <Progress data={data} step={step} maxStep={Math.max(maxStep, data.people?.length ? 1 : 0, locked ? 2 : 0)} onGo={setStep} />
+      </Box>
+      <Box>
         <Box sx={{ minWidth: 0 }}>
           <Paper sx={{ ...surfaceSx, p: { xs: 2, md: 3 } }}>
             {step === 0 && <ReportsStep data={data} busy={busy} locked={locked} onUpload={onUpload} onAction={onAction} issues={issues} />}
@@ -793,9 +1184,6 @@ export default function DuPerejimasTab({ onStatus }) {
               </Button>
             </Box>
           )}
-        </Box>
-        <Box sx={{ order: { xs: -1, lg: 0 } }}>
-          <Progress data={data} step={step} maxStep={Math.max(maxStep, data.people?.length ? 1 : 0, locked ? 2 : 0)} onGo={setStep} />
         </Box>
       </Box>
     </Box>

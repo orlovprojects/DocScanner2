@@ -1,4 +1,4 @@
-import { useEffect, lazy, Suspense } from 'react';
+import { useEffect, lazy, Suspense, Fragment } from 'react';
 import { Route, Routes, useLocation, Navigate } from 'react-router-dom';
 
 // ─── Eager: layout shell (всегда нужны сразу) ───
@@ -25,6 +25,7 @@ import { useAuth } from "./contexts/useAuth";
 import { useState } from "react";
 import { api } from "./api/endpoints";
 import AddCompanyProfileDialog from "./components/AddCompanyProfileDialog";
+import ViewAsBanner from "./admin/ViewAsBanner";
 
 // ─── Lazy: все страницы ───
 const InvLayout = lazy(() => import('./components/InvLayout'));
@@ -52,6 +53,7 @@ const AdminVaztarasciai = lazy(() => import("./pages/AdminVaztarasciai"));
 const AdminKlientai = lazy(() => import("./pages/AdminKlientai"));
 const AdminIsrasytosSaskaitos = lazy(() => import('./pages/AdminIsrasytosSaskaitos'));
 const NewsletterPage = lazy(() => import('./pages/NewsletterPage'));
+const AdminDuPage = lazy(() => import("./pages/admin/AdminDuPage"));
 
 const NaudojimoGidas = lazy(() => import('./pages/NaudojimoGidas'));
 const GidoCategories = lazy(() => import('./pages/GidoCategories'));
@@ -171,6 +173,17 @@ function PageLoader() {
       <CircularProgress size={40} />
     </div>
   );
+}
+
+// ─── DU / Deklaravimas: tik dokskenas_erp įmonėms; perjungus įmonę puslapis perkraunamas ───
+function ErpRoute({ children }) {
+  const { activeId, activeProfile, initialized, switching } = useCompanyProfiles();
+
+  if (!initialized || switching) return <PageLoader />;
+  if (activeProfile?.accounting_program !== "dokskenas_erp") return <Navigate to="/suvestine" replace />;
+
+  // key = įmonė: kita įmonė -> puslapis sukuriamas iš naujo ir užkrauna savo duomenis
+  return <Fragment key={activeId}>{children}</Fragment>;
 }
 
 function App() {
@@ -304,9 +317,9 @@ function App() {
                 <Route path="/darbo-uzmokestis/deklaracijos" element={<Navigate to="/deklaravimas" replace />} />
                 <Route path="/darbo-uzmokestis/grafikai" element={<Navigate to="/grafikai-ir-tabeliai" replace />} />
                 <Route path="/darbo-uzmokestis/komandiruotes" element={<Navigate to="/grafikai-ir-tabeliai/komandiruotes" replace />} />
-                <Route path="/darbo-uzmokestis/:tab?" element={<PrivateRoute><DarboUzmokestisPage /></PrivateRoute>} />
-                <Route path="/grafikai-ir-tabeliai/:tab?" element={<PrivateRoute><GrafikaiTabeliaiPage /></PrivateRoute>} />
-                <Route path="/deklaravimas" element={<PrivateRoute><DeklaracijosPage /></PrivateRoute>} />
+                <Route path="/darbo-uzmokestis/:tab?" element={<PrivateRoute><ErpRoute><DarboUzmokestisPage /></ErpRoute></PrivateRoute>} />
+                <Route path="/grafikai-ir-tabeliai/:tab?" element={<PrivateRoute><ErpRoute><GrafikaiTabeliaiPage /></ErpRoute></PrivateRoute>} />
+                <Route path="/deklaravimas" element={<PrivateRoute><ErpRoute><DeklaracijosPage /></ErpRoute></PrivateRoute>} />
 
                 <Route path="/priminti-slaptazodi" element={<PasswordReset />} />
                 <Route path="/buhalterine-apskaita" element={<BuhalterinenApskaita />} />
@@ -321,6 +334,7 @@ function App() {
                 <Route path="/admin-klientai" element={<RequireSuperuser loginPath="/prisijungti" forbiddenPath="/403"><AdminKlientai /></RequireSuperuser>} />
                 <Route path="/admin-israsytos-saskaitos" element={<RequireSuperuser loginPath="/prisijungti" forbiddenPath="/403"><AdminIsrasytosSaskaitos /></RequireSuperuser>} />
                 <Route path="/admin-newsletter" element={<RequireSuperuser loginPath="/prisijungti" forbiddenPath="/403"><NewsletterPage /></RequireSuperuser>} />
+                <Route path="/admin/du" element={<RequireSuperuser loginPath="/prisijungti" forbiddenPath="/403"><AdminDuPage /></RequireSuperuser>} />
 
                 <Route path="*" element={<NotFound />} />
               </Routes>
@@ -329,6 +343,7 @@ function App() {
         </Box>
         <Footer />
         <CookieConsent />
+        <ViewAsBanner />
       </CompanyProfileProvider>
     </AuthProvider>
   );

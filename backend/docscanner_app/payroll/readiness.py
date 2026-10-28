@@ -178,21 +178,17 @@ def check_roster_for_timesheet(company, year, month, rows=None):
 # Nuo kurio mėnesio DU skaičiuojamas DokSkenas
 # ------------------------------------------------------------
 
-def payroll_start(company):
-    """
-    Pirmasis DU mėnuo DokSkenas (date, 1 d.):
-      1) patvirtintas perėjimas iš kitos programos - jo du_start;
-      2) kitaip - mėnuo, kai įvestas pirmasis darbuotojas, bet ne anksčiau nei prasideda pirmoji sutartis
-         (darbuotojai, dirbę anksčiau, buvo apskaitomi kitoje programoje).
-    Skaitmenizavimo / išrašymo naudojimo pradžia čia nesvarbi.
-    None - darbuotojų dar nėra.
-    """
+def _migration_start(company):
+    from docscanner_app.models import PayrollMigration
+    mg = PayrollMigration.objects.filter(company=company, status="confirmed").only("du_start").first()
+    return mg.du_start.replace(day=1) if mg and mg.du_start else None
+
+
+def _guess_start(company):
+    """Mėnuo, kai įvestas pirmasis darbuotojas, bet ne anksčiau nei prasideda pirmoji sutartis."""
     from datetime import date
     from django.db.models import Min
-    from docscanner_app.models import Employee, EmploymentContract, PayrollMigration
-    mg = PayrollMigration.objects.filter(company=company, status="confirmed").only("du_start").first()
-    if mg and mg.du_start:
-        return mg.du_start.replace(day=1)
+    from docscanner_app.models import Employee, EmploymentContract
     created = Employee.objects.filter(company=company).aggregate(m=Min("created_at"))["m"]
     if created is None:
         return None
@@ -201,6 +197,74 @@ def payroll_start(company):
                       .aggregate(m=Min("start_date"))["m"])
     start = max(created, first_contract) if first_contract else created
     return date(start.year, start.month, 1)
+
+
+def payroll_start(company, persist=True):
+    """
+    Pirmasis DU mėnuo DokSkenas (date, 1 d.):
+      1) patvirtintas perėjimas iš kitos programos - jo du_start (keičiama tik per perėjimą);
+      2) DU nustatymuose įrašyta „DU DokSkenas pradžia“ (PayrollSettings.du_start);
+      3) kitaip - mėnuo, kai įvestas pirmasis darbuotojas (ne anksčiau nei pirmoji sutartis). Apskaičiuota reikšmė
+         iškart įrašoma į nustatymus, kad vėliau nesikeistų (pvz. ištrynus bandomąjį darbuotoją).
+    Skaitmenizavimo / išrašymo naudojimo pradžia čia nesvarbi. None - darbuotojų dar nėra.
+    """
+    mg = _migration_start(company)
+    if mg:
+        return mg
+    from .services import _settings
+    st = _settings(company)
+    if getattr(st, "du_start", None):
+        return st.du_start.replace(day=1)
+    guess = _guess_start(company)
+    if guess and persist:
+        st.du_start = guess
+        st.save(update_fields=["du_start"])
+    return guess
+
+
+def _months_between(a, b):
+    """[a, b) mėnesiai kaip (y, m)."""
+    out, y, m = [], a.year, a.month
+    while (y, m) < (b.year, b.month):
+        out.append((y, m))
+        y, m = (y + 1, 1) if m == 12 else (y, m + 1)
+    return out
+
+
+def check_du_start_change(company, new):
+    """
+    Ar galima pakeisti „DU DokSkenas pradžią“ į `new` (date, bet kuri mėnesio diena).
+    -> {"ok", "error", "skipped": [YYYY-MM] (taps „kita programa“), "added": [YYYY-MM] (taps DokSkenas mėnesiais)}
+    """
+    from docscanner_app.models import PayrollDeclaration, PayrollRun
+    from .services import CLOSED_STATUSES
+    new = new.replace(day=1)
+    out = {"ok": True, "error": "", "skipped": [], "added": []}
+    if _migration_start(company):
+        out.update(ok=False, error="Pradžia nustatyta perkeliant duomenis iš kitos programos – ją keisti galima tik "
+                                   "atidarius „Likučių perkėlimas“ iš naujo")
+        return out
+    cur = payroll_start(company, persist=False)
+    if cur is None or new == cur:
+        return out
+    if new > cur:                                         # vėliau: ankstesni mėnesiai taps „kita programa“
+        months = _months_between(cur, new)
+        out["skipped"] = [f"{y}-{m:02d}" for y, m in months]
+        closed = sorted({(r.year, r.month) for r in PayrollRun.objects.filter(company=company, status__in=CLOSED_STATUSES)
+                         if (r.year, r.month) in set(months)})
+        if closed:
+            y, m = closed[0]
+            out.update(ok=False, error=f"{y}-{m:02d} atlyginimai jau patvirtinti DokSkenas – pirmiausia juos atrakinkite")
+            return out
+        sent = (PayrollDeclaration.objects.filter(company=company, status__in=("submitted", "accepted"))
+                .exclude(year__isnull=True).exclude(month__isnull=True))
+        sent = sorted({(d.year, d.month, d.form) for d in sent if (d.year, d.month) in set(months)})
+        if sent:
+            y, m, f = sent[0]
+            out.update(ok=False, error=f"{f} už {y}-{m:02d} jau pateikta iš DokSkenas – pradžios vėlinti negalima")
+    else:                                                 # anksčiau: tie mėnesiai atsiras „Ką reikia padaryti“
+        out["added"] = [f"{y}-{m:02d}" for y, m in _months_between(new, cur)]
+    return out
 
 
 def default_month(company):

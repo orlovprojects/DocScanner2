@@ -85,14 +85,25 @@ def _rosters(company, today, todo, deadlines):
                           f"/grafikai-ir-tabeliai?m={x['ym']}", key=f"stale-{x['ym']}"))
 
 
-def _timesheet(company, py, pm, todo):
-    from docscanner_app.models import TimesheetMonth
-    tm = TimesheetMonth.objects.filter(company=company, year=py, month=pm).first()
+def _timesheet(company, today, py, pm, todo):
+    from .readiness import readiness
+    r = readiness(company, py, pm)
+    ts = r["timesheet"]
     to = f"/grafikai-ir-tabeliai/tabelis?m={_ym(py, pm)}"
-    if tm and tm.status in ("approved", "locked"):
+    if not r["employees"]:
+        return
+    if ts["changes"]:
+        todo.append(_item("warn", "timesheet", f"Patvirtinti {MONTH_GEN[pm - 1]} tabelio pakeitimus",
+                          f"Po patvirtinimo pasikeitė: {_count(len(ts['changes']), 'darbuotojas', 'darbuotojai', 'darbuotojų')}",
+                          "Tabelis", to, key="timesheet"))
+    elif ts["status"] in ("approved", "locked"):
         todo.append(_item("done", "timesheet", f"{MONTH_NOM[pm - 1]} tabelis patvirtintas", key="timesheet"))
-    else:
+    elif ts["too_early"]:
         todo.append(_item("todo", "timesheet", f"Patvirtinti {MONTH_GEN[pm - 1]} tabelį",
+                          f"Nuo {_d(ts['approve_from']):%m-%d}, kai baigsis mėnuo", "Tabelis", to, key="timesheet"))
+    else:
+        late = today.day > 5 and (today.year, today.month) > (py, pm)      # vėluojama, jei jau kito mėnesio 6+ diena
+        todo.append(_item("late" if late else "todo", "timesheet", f"Patvirtinti {MONTH_GEN[pm - 1]} tabelį",
                           "Prieš skaičiuojant atlyginimus", "Tabelis", to, key="timesheet"))
 
 
@@ -116,11 +127,12 @@ def _payroll(company, today, py, pm, todo, deadlines):
     from docscanner_app.models import PayrollRun
     from .payments import payments_overview
     run = PayrollRun.objects.filter(company=company, year=py, month=pm, kind="regular").order_by("-created_at").first()
-    to = "/darbo-uzmokestis/atlyginimai"
+    to = f"/darbo-uzmokestis/atlyginimai?m={_ym(py, pm)}"
     gen = MONTH_GEN[pm - 1]
     if run is None or run.status in ("draft", "checked"):
-        todo.append(_item("todo", "payroll", f"{'Apskaičiuoti' if run is None else 'Patvirtinti'} {gen} atlyginimus",
-                          "Po tabelio patvirtinimo" if run is None else "Apskaičiuota – peržiūrėkite ir patvirtinkite",
+        ready = run is not None and run.results.exists()
+        todo.append(_item("todo", "payroll", f"{'Patvirtinti' if ready else 'Apskaičiuoti'} {gen} atlyginimus",
+                          "Apskaičiuota – peržiūrėkite ir patvirtinkite" if ready else "Po tabelio patvirtinimo",
                           "Atlyginimai", to, key="payroll"))
         return
     if run.status in ("paid", "closed"):
@@ -162,13 +174,40 @@ def _declarations(company, today, months, todo, deadlines):
                 continue
             label = (it.get("declaration") or {}).get("status_label") or "Neparuošta"
             deadlines.append({"date": dl, "title": it.get("title"), "sub": label, "authority": it.get("authority", ""),
-                              "to": "/deklaravimas"})
+                              "to": f"/deklaravimas?m={_ym(y, m)}"})
             if dl < today:
                 todo.append(_item("late", "declaration", f"Pateikti {it.get('title')}", f"Terminas buvo {dl:%m-%d}",
-                                  "Pateikti", "/deklaravimas", key=f"decl-{k}"))
+                                  "Pateikti", f"/deklaravimas?m={_ym(y, m)}", key=f"decl-{k}"))
             elif (dl - today).days <= 5:
                 todo.append(_item("todo", "declaration", f"Pateikti {it.get('title')}", f"Iki {dl:%m-%d} · {label.lower()}",
-                                  "Pateikti", "/deklaravimas", key=f"decl-{k}"))
+                                  "Pateikti", f"/deklaravimas?m={_ym(y, m)}", key=f"decl-{k}"))
+
+
+def _das(company, today, todo, deadlines):
+    """Darbo apmokėjimo sistema: nepatvirtinta / pasikeitė grupės ar ribos / metinė peržiūra."""
+    from .das_status import das_state
+    s = das_state(company, today)
+    if not s["has_staff"]:
+        return
+    to = "/darbo-uzmokestis/sdup"
+    dl = s["deadline"]
+    if not s["approved"]:
+        late = today > dl
+        todo.append(_item("late" if late else "todo", "das", "Patvirtinti darbo apmokėjimo sistemą",
+                          f"Terminas buvo {dl:%Y-%m-%d}" if late else f"Privaloma visiems darbdaviams iki {dl:%Y-%m-%d}",
+                          "Patvirtinti", to, key="das"))
+        if not late:
+            deadlines.append({"date": dl, "title": "Darbo apmokėjimo sistema", "sub": "Patvirtinti",
+                              "authority": "VDI", "to": to})
+    elif s["changes"]:
+        ch = s["changes"]
+        sub = "; ".join(ch[:2]) + (f" ir dar {len(ch) - 2}" if len(ch) > 2 else "")
+        todo.append(_item("warn", "das", f"Patvirtinti naują darbo apmokėjimo sistemos versiją (v{s['version'] + 1})",
+                          sub, "Peržiūrėti", to, key="das"))
+    elif s["review_due"]:
+        todo.append(_item("todo", "das", "Metinė darbo apmokėjimo sistemos peržiūra",
+                          f"Galiojanti v{s['version']} patvirtinta {s['approved_date']:%Y-%m-%d}", "Peržiūrėti", to,
+                          key="das"))
 
 
 def _preferences(company, today):
@@ -186,15 +225,30 @@ def _preferences(company, today):
     return out
 
 
+def _decl_months(start, today, back=3):
+    """Deklaracijų mėnesiai: paskutiniai `back` mėn. iki šio, bet ne anksčiau nei DU pradžia DokSkenas."""
+    out = []
+    for k in range(back, -1, -1):
+        y, m = _shift(today.year, today.month, -k)
+        if start is None or (y, m) >= (start.year, start.month):
+            out.append((y, m))
+    return out
+
+
 def overview(company):
+    from .readiness import default_month, payroll_start
     today = timezone.localdate()
-    py, pm = _shift(today.year, today.month, -1)
+    start = payroll_start(company)
+    dm = default_month(company)                       # seniausias nepatvirtintas mėnuo nuo DU pradžios (ne ankstesnis)
+    py, pm = dm.year, dm.month
     todo, deadlines = [], []
-    for fn in (lambda: _rosters(company, today, todo, deadlines),
-               lambda: _timesheet(company, py, pm, todo),
-               lambda: _requests(company, today, todo),
-               lambda: _payroll(company, today, py, pm, todo, deadlines),
-               lambda: _declarations(company, today, [(py, pm), (today.year, today.month)], todo, deadlines)):
+    parts = [lambda: _rosters(company, today, todo, deadlines), lambda: _requests(company, today, todo),
+             lambda: _das(company, today, todo, deadlines)]
+    if start is not None:                             # be darbuotojų - nei tabelio, nei DU, nei deklaracijų
+        parts += [lambda: _timesheet(company, today, py, pm, todo),
+                  lambda: _payroll(company, today, py, pm, todo, deadlines),
+                  lambda: _declarations(company, today, _decl_months(start, today), todo, deadlines)]
+    for fn in parts:
         try:
             fn()
         except Exception:                                        # noqa: BLE001  viena dalis neturi sugadinti visos apžvalgos

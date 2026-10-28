@@ -44,6 +44,11 @@ class PayrollCompanyMixin:
             raise ValidationError("Nepasirinkta aktyvi įmonė")
         return cp
 
+    def handle_exception(self, exc):
+        from .admin_tools import log_error
+        log_error(self.request, exc)
+        return super().handle_exception(exc)
+
     def check_employee(self, employee):
         if employee is not None and employee.company_id != self.get_company().id:
             raise PermissionDenied("Darbuotojas priklauso kitai įmonei")
@@ -186,10 +191,14 @@ class EmployeeViewSet(PayrollCompanyMixin, viewsets.ModelViewSet):
         """
         GET  ?date=YYYY-MM-DD[&from=..&to=..] -> likutis (+ prašomų dienų skaičius)
         POST {date, balance}                  -> nustatyti likutį (sukuria korekciją)
+        POST {date, days, reason}             -> korekcija +/- dienomis
         """
         emp = self.get_object()
         try:
-            if request.method == "POST":
+            if request.method == "POST" and request.data.get("days") not in (None, ""):
+                b = payroll_services.adjust_vacation(
+                    emp, _date.fromisoformat(request.data["date"]), request.data["days"], request.data.get("reason", ""))
+            elif request.method == "POST":
                 b = payroll_services.set_vacation_balance(
                     emp, _date.fromisoformat(request.data["date"]), request.data["balance"])
             else:
@@ -200,7 +209,8 @@ class EmployeeViewSet(PayrollCompanyMixin, viewsets.ModelViewSet):
         if b is None:
             return Response({"balance": None})
         data = {"date": b.on_date.isoformat(), "accrued": str(b.accrued), "used": str(b.used),
-                "adjustments": str(b.adjustments), "balance": str(b.balance), "excluded_days": b.excluded_days}
+                "adjustments": str(b.adjustments), "balance": str(b.balance), "excluded_days": b.excluded_days,
+                "history": payroll_services.vacation_history(emp)}
         contract = emp.contracts.exclude(status="draft").order_by("-start_date").first()
         if contract:
             ent = payroll_services.leave_entitlement(emp, contract, b.on_date)
@@ -245,8 +255,10 @@ class EmploymentContractViewSet(PayrollCompanyMixin, viewsets.ModelViewSet):
     @action(detail=True, methods=["post"])
     def generate(self, request, pk=None):
         """Sugeneruoti darbo sutarties dokumentą iš kortelės duomenų."""
-        doc, missing = payroll_services.generate_contract_document(self.get_object(), request.user)
-        return Response({"document": EmployeeDocumentSerializer(doc).data, "missing": missing})
+        contract = self.get_object()
+        doc, missing = payroll_services.generate_contract_document(contract, request.user)
+        return Response({"document": EmployeeDocumentSerializer(doc).data, "missing": missing,
+                         "warnings": payroll_services.contract_warnings(contract)})
 
 
 class ContractTermsViewSet(PayrollCompanyMixin, viewsets.ModelViewSet):
@@ -476,11 +488,21 @@ class PayrollRunViewSet(PayrollCompanyMixin, viewsets.ReadOnlyModelViewSet):
 
     @action(detail=False, methods=["get"])
     def period(self, request):
-        """Nuo kurio mėnesio DU skaičiuojamas DokSkenas ir kurį mėnesį atidaryti pagal nutylėjimą."""
-        from .readiness import default_month, payroll_start
+        """
+        Nuo kurio mėnesio DU skaičiuojamas DokSkenas ir kurį mėnesį atidaryti pagal nutylėjimą.
+        ?check=YYYY-MM - ar galima pradžią pakeisti (ką tai pakeis).
+        """
+        from .readiness import _migration_start, check_du_start_change, default_month, payroll_start
         company = self.get_company()
+        if request.query_params.get("check"):
+            try:
+                new = _date.fromisoformat(f"{request.query_params['check'][:7]}-01")
+            except ValueError:
+                raise ValidationError("Neteisingas mėnuo")
+            return Response(check_du_start_change(company, new))
         start, dflt = payroll_start(company), default_month(company)
-        return Response({"start": f"{start:%Y-%m}" if start else None, "default": f"{dflt:%Y-%m}"})
+        return Response({"start": f"{start:%Y-%m}" if start else None, "default": f"{dflt:%Y-%m}",
+                         "from_migration": bool(_migration_start(company))})
 
     @action(detail=True, methods=["post"])
     def recalculate(self, request, pk=None):
@@ -641,8 +663,14 @@ class DasView(PayrollCompanyMixin, APIView):
         company = self.get_company()
         if request.query_params.get("preview"):
             d = request.query_params.get("date")
+            import json
+            qp = request.query_params
+            try:
+                opts = json.loads(qp.get("opts") or "{}")
+            except ValueError:
+                opts = {}
             ctx = payroll_services.das_context(company, _date.fromisoformat(d) if d else _date.today(),
-                                               request.query_params.get("manager", ""))
+                                               qp.get("manager", ""), qp.get("title", ""), qp.get("city", ""), opts)
             return HttpResponse(payroll_services.render_das_html(ctx), content_type="text/html; charset=utf-8")
         docs = DasDocument.objects.filter(company=company)
         return Response(DasDocumentSerializer(docs, many=True).data)
@@ -651,7 +679,8 @@ class DasView(PayrollCompanyMixin, APIView):
         try:
             doc = payroll_services.approve_das(
                 self.get_company(), _date.fromisoformat(request.data["approved_date"]),
-                request.data.get("manager_name", ""))
+                request.data.get("manager_name", ""), request.data.get("manager_title", ""),
+                request.data.get("city", ""), request.data.get("settings") or {})
         except (KeyError, ValueError) as e:
             raise ValidationError(str(e))
         return Response(DasDocumentSerializer(doc).data, status=drf_status.HTTP_201_CREATED)
@@ -1314,7 +1343,12 @@ class BusinessTripViewSet(PayrollCompanyMixin, viewsets.ModelViewSet):
         return qs
 
     def _save(self, serializer, **extra):
+        from .readiness import payroll_start
         from .trips_services import refresh_calc
+        start = payroll_start(self.get_company())
+        end = serializer.validated_data.get("end_at") or getattr(serializer.instance, "end_at", None)
+        if start and end and end.date() < start:
+            raise ValidationError(f"Komandiruotė baigėsi anksčiau, nei DU pradėtas vesti DokSkene ({start:%Y-%m}) – ją įforminkite ankstesnėje programoje")
         trip = serializer.save(**extra)
         refresh_calc(trip)
 
@@ -1424,6 +1458,12 @@ def _migration_payload(m):
             "vacation_prepaid_amount": getattr(p, "vacation_prepaid_amount", None),
             "pay_once_a_month": getattr(p, "pay_once_a_month", False),
             "advance_amount": getattr(p, "advance_amount", None),
+            "gpm_ytd": getattr(p, "gpm_ytd", None),
+            "transition_from": getattr(p, "transition_from", None),
+            "week_hours": getattr(p, "week_hours", None),
+            "is_foreigner": getattr(p, "is_foreigner", False),
+            "birth_date": getattr(p, "birth_date", None),
+            "gender": getattr(p, "gender", ""),
             "summed_mid_period": bool(getattr(p, "work_time_mode", "01") == "02" and
                                       str(getattr(p, "summed_period_start", None) or _summed_default(m)["start"]) < m.du_start.isoformat()),
             "lpk_name": next((x["name"] for x in all_professions() if p.lpk_code and x["code"] == p.lpk_code), ""),
@@ -1492,7 +1532,17 @@ class PayrollMigrationView(PayrollCompanyMixin, APIView):
         m = ms.get_or_create(self.get_company(), request.user)
         try:
             if request.FILES.get("excel"):
-                upd, new, errors = ms.import_excel(m, request.FILES["excel"])
+                from .admin_tools import archive_upload
+                f = request.FILES["excel"]
+                raw = f.read()
+                f.seek(0)
+                try:
+                    upd, new, errors = ms.import_excel(m, f)
+                except ValueError as e:
+                    archive_upload(m.company, request.user, "excel", f.name, raw, form="Excel", ok=False, error=str(e))
+                    raise
+                archive_upload(m.company, request.user, "excel", f.name, raw, form="Excel",
+                               error="; ".join(map(str, errors[:10])), meta={"updated": upd, "added": new})
                 return Response(dict(_migration_payload(m), excel={"updated": upd, "added": new, "errors": errors}))
             if request.FILES:
                 import zipfile
@@ -1507,6 +1557,13 @@ class PayrollMigrationView(PayrollCompanyMixin, APIView):
                     else:
                         items.append((f.name, f.read()))
                 ok, skipped = ms.add_files(m, items)
+                from .admin_tools import archive_upload
+                why = dict(skipped)
+                for n, content in items:
+                    r = why.get(n, "")
+                    dup = r == "Toks failas jau įkeltas"
+                    archive_upload(m.company, request.user, "migration", n, content,
+                                   ok=not r or dup, error="" if dup else r)
                 ms.analyze(m)
                 return Response(dict(_migration_payload(m), uploaded=ok,
                                      skipped=[{"name": n, "reason": r} for n, r in skipped]))
@@ -1583,14 +1640,18 @@ class SodraReportsView(PayrollCompanyMixin, APIView):
         apply = str(request.data.get("apply")) == "1"
         for f in files:
             content = f.read()
+            from .admin_tools import archive_upload
             rows = sodra_tariffs.parse(content)
             if rows is not None:
                 out["s47"] = sodra_tariffs.run_check(company, rows)
+                archive_upload(company, request.user, "s47", f.name, content, form="S47", meta={"rows": len(rows)})
                 continue
             try:
                 out["s15"] = sick_import.run_import(company, content, apply=apply)
-            except (ValueError, ET.ParseError):
+                archive_upload(company, request.user, "sick_import", f.name, content, form="S15")
+            except (ValueError, ET.ParseError) as e:
                 out["unknown"].append(f.name)
+                archive_upload(company, request.user, "sick_import", f.name, content, ok=False, error=str(e))
         if apply and out["s15"]:
             from .roster.repair import affected_rosters
             out["rosters"] = affected_rosters(company)

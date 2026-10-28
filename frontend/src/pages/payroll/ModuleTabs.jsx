@@ -23,7 +23,12 @@ export default function ModuleTabs({ tabs, value, onChange }) {
                     {tab.icon}
                   </Box>
                 );
-                return Number(tab.badge) > 0 ? <Badge color="error" badgeContent={tab.badge}>{icon}</Badge> : icon;
+                return Number(tab.badge) > 0 ? (
+                  <Badge color="error" badgeContent={tab.badge} max={99}
+                    sx={{ "& .MuiBadge-badge": { minWidth: 16, height: 16, px: .5, fontSize: 10, fontWeight: 700, top: 2, right: 2 } }}>
+                    {icon}
+                  </Badge>
+                ) : icon;
               })()}
               <Box sx={{ minWidth: 0 }}>
                 <Typography sx={{ fontSize: 14, fontWeight: 800, lineHeight: 1.2 }}>{tab.label}</Typography>

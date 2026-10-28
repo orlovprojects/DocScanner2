@@ -40,6 +40,7 @@ import SodraReportsDialog from "./SodraReportsDialog";
 import { TripPeriodBlock } from "./TripPeriodChoice";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import IsmokejimaiPage from "./IsmokejimaiPage";
+import { DuStartNotice } from "./DuStart";
 
 const MENU_PROPS = { disableScrollLock: true };
 const WEEKDAYS = ["S", "Pr", "A", "T", "K", "Pn", "Š"];
@@ -97,14 +98,17 @@ export default function MenesioDUPage({ mode = "full", embedded = false } = {}) 
   const parseYm = (v) => { const m = /^(\d{4})-(\d{2})$/.exec(v || ""); return m ? { year: Number(m[1]), month: Number(m[2]) } : null; };
   const [ymState, setYm] = useState(() => parseYm(params.get("m")));
   const [period, setPeriod] = useState(null);        // {start: "YYYY-MM" | null, default: "YYYY-MM"}
+  const [periodDone, setPeriodDone] = useState(false);
   useEffect(() => {
     payrollApi.payrollPeriod()
       .then((p) => { setPeriod(p); setYm((cur) => cur || parseYm(p.default) || defaultMonth()); })
-      .catch(() => setYm((cur) => cur || defaultMonth()));
+      .catch(() => setYm((cur) => cur || defaultMonth()))
+      .finally(() => setPeriodDone(true));
   }, []);
   const { year, month } = ymState || { year: 0, month: 0 };
   const startYm = parseYm(period?.start);
-  const atStart = !!startYm && (year < startYm.year || (year === startYm.year && month <= startYm.month));
+  // mėnuo iki DU pradžios DokSkenas - skaičiuota kitoje programoje: nieko neskaičiuojam ir nekuriam
+  const beforeStart = !!startYm && (year < startYm.year || (year === startYm.year && month < startYm.month));
   useEffect(() => {
     if (!year) return;
     const v = `${year}-${String(month).padStart(2, "0")}`;
@@ -128,7 +132,8 @@ export default function MenesioDUPage({ mode = "full", embedded = false } = {}) 
 
   const inflight = useRef("");                   // tas pats mėnuo neperskaičiuojamas du kartus vienu metu
   const loadAll = useCallback(async () => {
-    if (!year) return;
+    if (!year || !periodDone) return;
+    if (beforeStart) { setRun(null); setResults([]); setTimesheet([]); setReady(null); setLoading(false); return; }
     const key = `${year}-${month}`;
     if (inflight.current === key) return;
     inflight.current = key;
@@ -144,7 +149,7 @@ export default function MenesioDUPage({ mode = "full", embedded = false } = {}) 
       if (inflight.current === key) inflight.current = "";
       setLoading(false);
     }
-  }, [year, month]);
+  }, [year, month, periodDone, beforeStart]);
 
   useEffect(() => { loadAll(); }, [loadAll]);
 
@@ -160,7 +165,6 @@ export default function MenesioDUPage({ mode = "full", embedded = false } = {}) 
   };
 
   const shiftMonth = (delta) => {
-    if (delta < 0 && atStart) return;
     const d = new Date(year, month - 1 + delta, 1);
     setYm({ year: d.getFullYear(), month: d.getMonth() + 1 });
     setStep(0);
@@ -173,11 +177,7 @@ export default function MenesioDUPage({ mode = "full", embedded = false } = {}) 
       {mode === "payroll" && (
         <Stack direction="row" alignItems="center" gap={1.25} mb={2} flexWrap="wrap">
           <Box sx={{ display: "flex", alignItems: "center", gap: .35, px: .6, py: .45, border: "1px solid #E4E7EC", borderRadius: 2, bgcolor: "#FFFFFF" }}>
-            <Tooltip arrow title={atStart ? `Darbo užmokestis DokSkenas skaičiuojamas nuo ${period.start} – ankstesni mėnesiai buvo skaičiuoti kitoje programoje` : ""}>
-              <span>
-                <IconButton size="small" aria-label="Ankstesnis mėnuo" disabled={atStart} onClick={() => shiftMonth(-1)} sx={{ borderRadius: 1.35, width: 31, height: 31 }}><ChevronLeftIcon fontSize="small" /></IconButton>
-              </span>
-            </Tooltip>
+            <IconButton size="small" aria-label="Ankstesnis mėnuo" onClick={() => shiftMonth(-1)} sx={{ borderRadius: 1.35, width: 31, height: 31 }}><ChevronLeftIcon fontSize="small" /></IconButton>
             <Box sx={{ minWidth: 150, textAlign: "center" }}>
               <Typography sx={{ fontSize: 10, color: "#98A2B3", lineHeight: 1.15, fontWeight: 600, letterSpacing: .3 }}>MĖNUO</Typography>
               <Typography sx={{ fontSize: 15, fontWeight: 600, color: "#101828", lineHeight: 1.5 }}>{MONTHS[month - 1]} {year}</Typography>
@@ -264,7 +264,11 @@ export default function MenesioDUPage({ mode = "full", embedded = false } = {}) 
       {importantWarnings(run?.warnings).length > 0 && step < 1 + (mode === "payroll" ? 0 : 1) && <Warnings items={importantWarnings(run.warnings)} />}
       {mode !== "timesheet" && run && <TripPeriodBlock year={year} month={month} locked={locked} onChanged={recalc} />}
 
-      {loading ? (
+      {beforeStart ? (
+        <DuStartNotice start={startYm} year={year} month={month} fromMigration={!!period?.from_migration}
+          text="Atlyginimus, mokesčius ir išmokėjimus už ankstesnius mėnesius tvarkykite ankstesnėje programoje."
+          onGo={() => { setYm(startYm); setStep(0); }} />
+      ) : loading ? (
         <Box sx={{ py: 8, textAlign: "center" }}><CircularProgress /></Box>
       ) : timesheet.length === 0 ? (
         <Paper variant="outlined" sx={{ p: 5, textAlign: "center" }}>

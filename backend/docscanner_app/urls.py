@@ -333,6 +333,7 @@ urlpatterns = [
     path('download/apskaita5-adapter/', download_apskaita5_adapter, name='download_apskaita5_adapter'),
 
     path('me/', user_me_view),
+    path("admin/du/", include("docscanner_app.payroll.admin_urls")),
     path("company-profiles/search/", onboarding_company_search, name="onboarding-company-search"),
     path("api/track-click/", TrackAdClickView.as_view(), name="TrackAdClickView"),
 

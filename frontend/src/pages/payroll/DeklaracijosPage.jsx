@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import {
   Alert,
   Box,
@@ -35,8 +36,10 @@ import MoreHorizIcon from "@mui/icons-material/MoreHoriz";
 import PeopleOutlineIcon from "@mui/icons-material/PeopleOutline";
 import RefreshIcon from "@mui/icons-material/Refresh";
 import ScheduleOutlinedIcon from "@mui/icons-material/ScheduleOutlined";
+import WarningAmberRoundedIcon from "@mui/icons-material/WarningAmberRounded";
 
 import { MONTHS, apiError, payrollApi } from "../../api/payroll";
+import { MONTHS_GEN, isBeforeStart, monthAcc, parseYm, useDuStart, ymKey } from "./DuStart";
 
 const G_FIELDS = [
   ["g8", "8. Su darbo santykiais nesusijusios A kl. išmokos (pvz. dividendai)"],
@@ -109,14 +112,20 @@ function itemKey(it) {
   return `${it.form}-${it.contract ?? ""}-${it.absence_event ?? ""}-${it.variant ?? ""}`;
 }
 
+// DU deklaracija už laikotarpį iki DU pradžios DokSkenas - pateikta kitoje programoje (jei DokSkenas dar neparuošta)
+function isPrevSystem(it) {
+  return Boolean(it.previous_system && !it.declaration);
+}
+
 function isOverdue(it, today) {
   return Boolean(
-    it.deadline && it.deadline < today && !["submitted", "accepted"].includes(it.declaration?.status)
+    !isPrevSystem(it) && it.deadline && it.deadline < today && !["submitted", "accepted"].includes(it.declaration?.status)
   );
 }
 
 function needsAction(it) {
   const d = it.declaration;
+  if (isPrevSystem(it)) return false;
   return (
     !d ||
     ["ready", "error", "rejected"].includes(d.status) ||
@@ -193,6 +202,32 @@ function SummaryTile({ icon: Icon, label, value, color, bg, activeGradient, acti
         <Box sx={{ width: 40, height: 40, borderRadius: 2.2, bgcolor: selected ? "rgba(255,255,255,.55)" : bg, display: "grid", placeItems: "center", flexShrink: 0, border: selected ? `1px solid ${activeBorder}22` : "none" }}>
           <Icon sx={{ color, fontSize: 20 }} />
         </Box>
+      </Stack>
+    </Paper>
+  );
+}
+
+function PrevSystemCard({ it, start }) {
+  const since = start ? `${start.year} m. ${MONTHS_GEN[start.month - 1]}` : "";
+  return (
+    <Paper variant="outlined" sx={{ px: { xs: 1.6, md: 2 }, py: { xs: 1.3, md: 1.5 }, borderRadius: 2.5, borderColor: "#EAECF0", bgcolor: "#FCFCFD" }}>
+      <Stack direction={{ xs: "column", sm: "row" }} justifyContent="space-between" alignItems={{ sm: "center" }} gap={1}>
+        <Box sx={{ minWidth: 0 }}>
+          <Stack direction="row" alignItems="center" gap={.7}>
+            <Chip size="small" label={it.form} sx={{ bgcolor: "#F2F4F7", fontWeight: 800, borderRadius: 1.2, height: 23, fontSize: 11.5, color: "#667085" }} />
+            <Typography variant="caption" sx={{ color: "text.secondary", fontWeight: 700 }}>{it.authority}</Typography>
+          </Stack>
+          <Typography sx={{ mt: .6, fontSize: 15, fontWeight: 700, color: "#667085" }}>{it.title}</Typography>
+          <Stack direction="row" alignItems="center" gap={.6} mt={.4}>
+            <WarningAmberRoundedIcon sx={{ fontSize: 16, color: "#F79009" }} />
+            <Typography variant="caption" sx={{ color: "#B54708", fontWeight: 600 }}>
+              {it.form === "GPM312"
+                ? `Teikite ankstesnėje programoje – DU DokSkene vedamas tik nuo ${since}.`
+                : `Teikite ankstesnėje programoje – DU DokSkene vedamas nuo ${since}.`}
+            </Typography>
+          </Stack>
+        </Box>
+        <Chip size="small" label="Ankstesnė programa" sx={{ height: 26, bgcolor: "#FFFAEB", color: "#B54708", fontWeight: 700, fontSize: 12, borderRadius: 1.5 }} />
       </Stack>
     </Paper>
   );
@@ -416,7 +451,7 @@ function DeclarationCard({ it, today, busy, onGenerate, onDownload, onSubmitVmi,
   );
 }
 
-function DeclarationSection({ group, rows, today, busy, handlers, showEmpty = false }) {
+function DeclarationSection({ group, rows, today, busy, handlers, start, showEmpty = false }) {
   const Icon = group.icon;
   if (!rows.length && !showEmpty) return null;
 
@@ -445,8 +480,9 @@ function DeclarationSection({ group, rows, today, busy, handlers, showEmpty = fa
 
       {rows.length > 0 ? (
         <Stack gap={1.15}>
-          {rows.map((it) => (
-            <DeclarationCard key={itemKey(it)} it={it} today={today} busy={busy} {...handlers} />
+          {rows.map((it) => (isPrevSystem(it)
+            ? <PrevSystemCard key={itemKey(it)} it={it} start={start} />
+            : <DeclarationCard key={itemKey(it)} it={it} today={today} busy={busy} {...handlers} />
           ))}
         </Stack>
       ) : (
@@ -468,7 +504,21 @@ function DeclarationSection({ group, rows, today, busy, handlers, showEmpty = fa
 }
 
 export default function DeklaracijosPage() {
-  const [{ year, month }, setYm] = useState(prevMonth);
+  // mėnuo: iš nuorodos (?m=YYYY-MM, pvz. iš Apžvalgos / Išmokėjimų), kitaip - praėjęs mėnuo (bet ne anksčiau nei DU pradžia)
+  const [params, setParams] = useSearchParams();
+  const [{ year, month }, setYm] = useState(() => parseYm(params.get("m")) || prevMonth());
+  const fromLink = useRef(Boolean(parseYm(params.get("m"))));
+  const { start } = useDuStart();
+  const beforeStart = isBeforeStart(start, year, month);
+  useEffect(() => {                                    // tik atidarius be ?m= - toliau mėnesį renkasi vartotojas
+    if (!start || fromLink.current) return;
+    fromLink.current = true;
+    if (isBeforeStart(start, year, month)) setYm(start);
+  }, [start]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    const v = ymKey(year, month);
+    if (params.get("m") !== v) setParams((p) => { const n = new URLSearchParams(p); n.set("m", v); return n; }, { replace: true });
+  }, [year, month]); // eslint-disable-line react-hooks/exhaustive-deps
   const [items, setItems] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -612,8 +662,20 @@ export default function DeklaracijosPage() {
 
       {error && <Alert severity="error" onClose={() => setError("")} sx={{ mb: 2.3, borderRadius: 2 }}>{error}</Alert>}
 
+      {beforeStart && (
+        <Alert severity="warning" icon={<WarningAmberRoundedIcon />} sx={{ mb: 2.3, borderRadius: 2, alignItems: "center" }}
+          action={(
+            <Button size="small" color="inherit" onClick={() => { setFilter("all"); setYm(start); }} sx={{ fontWeight: 700, textTransform: "none", whiteSpace: "nowrap" }}>
+              Eiti į {monthAcc(start.year, start.month)}
+            </Button>
+          )}>
+          DU DokSkene vedamas nuo <b>{start.year} m. {MONTHS_GEN[start.month - 1]}</b>. DU deklaracijas už ankstesnius laikotarpius
+          teikite ankstesnėje programoje.
+        </Alert>
+      )}
+
       <Box sx={{ display: "grid", gridTemplateColumns: { xs: "repeat(2, minmax(0, 1fr))", lg: "repeat(4, minmax(0, 1fr))" }, gap: { xs: 1.2, sm: 1.8 }, mb: 3.1 }}>
-        <SummaryTile icon={AssignmentOutlinedIcon} label="Iš viso" value={items === null ? "—" : allItems.length}
+        <SummaryTile icon={AssignmentOutlinedIcon} label="Iš viso" value={items === null ? "—" : allItems.filter((it) => !isPrevSystem(it)).length}
           color="#344054" bg="#F2F4F7" activeGradient="linear-gradient(180deg, #FCFCFD 0%, #F2F4F7 100%)" activeBorder="#98A2B3"
           selected={filter === "all"} onClick={() => setFilter("all")} />
         <SummaryTile icon={ScheduleOutlinedIcon} label="Reikia veiksmų" value={items === null ? "—" : attentionCount}
@@ -649,6 +711,7 @@ export default function DeklaracijosPage() {
               today={today}
               busy={busy}
               handlers={handlers}
+              start={start}
               showEmpty={filter === "all"}
             />
           ))}
@@ -659,6 +722,7 @@ export default function DeklaracijosPage() {
               today={today}
               busy={busy}
               handlers={handlers}
+              start={start}
             />
           )}
         </Stack>
