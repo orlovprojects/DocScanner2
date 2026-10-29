@@ -1707,6 +1707,8 @@ class Payments(models.Model):
     stripe_invoice_id = models.CharField(max_length=255, blank=True, default="")
     invoice_pdf_url = models.URLField(blank=True, default="")
 
+    meta = models.JSONField(default=dict, blank=True)   # DU: company_id, company_name, employees; Išrašymas: interval
+
 
 
 

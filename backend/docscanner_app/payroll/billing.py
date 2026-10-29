@@ -218,9 +218,72 @@ def handle_webhook(payload, sig_header):
     elif t.startswith("customer.subscription."):
         _apply_subscription(obj)
     elif t in ("invoice.payment_failed", "invoice.paid"):
-        sub_id = obj.get("subscription") or ((obj.get("parent") or {}).get("subscription_details") or {}).get("subscription")
+        sub_id = _invoice_sub_id(obj)
         if sub_id:
-            _apply_subscription(_plain(stripe.Subscription.retrieve(sub_id)))
+            s = _apply_subscription(_plain(stripe.Subscription.retrieve(sub_id)))
+            if s and t == "invoice.paid":
+                _record_payment(obj, s)
+
+
+def _invoice_sub_id(inv):
+    return inv.get("subscription") or ((inv.get("parent") or {}).get("subscription_details") or {}).get("subscription")
+
+
+def _next_dok_number():
+    """Tas pats numeravimas kaip kreditų / Išrašymo mokėjimų (max + 2..7). Kviesti transaction.atomic() viduje."""
+    import random
+    from django.db.models import IntegerField
+    from django.db.models.functions import Cast
+    from docscanner_app.models import Payments
+    last = (Payments.objects.select_for_update().filter(dok_number__isnull=False).exclude(dok_number="")
+            .annotate(n=Cast("dok_number", IntegerField())).order_by("-n").values_list("n", flat=True).first())
+    return str((last or 0) + random.randint(2, 7))
+
+
+def _record_payment(inv, s):
+    """Apmokėta DU sąskaita -> Payments įrašas (mūsų PDF sąskaita „Mokėjimų istorijoje“)."""
+    from datetime import datetime, timezone as dt_tz
+    from django.contrib.auth import get_user_model
+    from django.db import transaction
+    from docscanner_app.models import Payments
+    inv_id = inv.get("id") or ""
+    amount = int(inv.get("amount_paid") or 0)
+    if not inv_id or amount <= 0:                       # bandomojo laikotarpio 0 € sąskaita - nerašome
+        return None
+    if Payments.objects.filter(stripe_invoice_id=inv_id).exists():
+        return None
+    User = get_user_model()
+    sub_meta = ((inv.get("parent") or {}).get("subscription_details") or {}).get("metadata") \
+        or (inv.get("subscription_details") or {}).get("metadata") or {}
+    user = (User.objects.filter(stripe_customer_id=inv.get("customer")).first() if inv.get("customer") else None) \
+        or (User.objects.filter(id=sub_meta.get("user_id")).first() if sub_meta.get("user_id") else None)
+    if not user:
+        logger.error("DU planas: sąskaita %s apmokėta, bet vartotojas nerastas (įmonė %s)", inv_id, s.company_id)
+        return None
+    lines = (inv.get("lines") or {}).get("data") or []
+    line = lines[0] if lines else {}
+    period = line.get("period") or {}
+    day = lambda ts: datetime.fromtimestamp(ts, tz=dt_tz.utc).date() if ts else None
+    qty = int(line.get("quantity") or s.billed_employees or 1)
+    tax = int(inv.get("tax") or 0) or sum(int(x.get("amount") or 0) for x in (inv.get("total_taxes") or []))
+    with transaction.atomic():
+        if Payments.objects.select_for_update().filter(stripe_invoice_id=inv_id).exists():
+            return None
+        p = Payments.objects.create(
+            user=user, stripe_event_id=f"du_{inv_id}", session_id="",
+            payment_intent_id=inv.get("payment_intent") or "", customer_id=inv.get("customer") or "",
+            amount_subtotal=int(inv.get("subtotal") or amount - tax), amount_tax=tax, amount_total=amount,
+            stripe_fee=0, net_amount=amount, currency=inv.get("currency") or "eur", credits_purchased=0,
+            dok_number=_next_dok_number(), buyer_email=inv.get("customer_email") or user.email,
+            buyer_address_json=inv.get("customer_address") or {}, payment_status="paid",
+            payment_type="du_subscription", plan="du",
+            period_start=day(period.get("start")), period_end=day(period.get("end")),
+            stripe_invoice_id=inv_id, invoice_pdf_url=inv.get("invoice_pdf") or "",
+            meta={"company_id": s.company_id, "company_name": getattr(s.company, "name", "") or "",
+                  "employees": qty},
+        )
+    logger.info("DU planas: mokėjimas %s (%s €, %s darb.), įmonė %s", p.dok_number, amount / 100, qty, s.company_id)
+    return p
 
 
 @shared_task

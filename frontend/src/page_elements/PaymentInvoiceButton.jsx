@@ -40,7 +40,10 @@ export default function PaymentInvoiceButton({ payment }) {
       });
 
       const currencyCode = (data.currency || "EUR").toUpperCase();
-      const amountNet = formatMoney(data.net_amount || payment.net_amount);
+      // klientas sumokėjo amount_total; net_amount - po Stripe mokesčio
+      const amountNet = formatMoney(
+        data.amount_total ?? payment.amount_total ?? data.net_amount ?? payment.net_amount
+      );
 
       const asStr = (v) => v.toFixed(2).replace(".", ",");
 
@@ -92,8 +95,12 @@ export default function PaymentInvoiceButton({ payment }) {
       const lineCredits = toNumber(
         data.credits_purchased || payment.credits_purchased
       );
+      const item = data.item || payment.item || null;
       const serviceCode =
-        SERVICE_CODE_BY_CREDITS[lineCredits] || "CREDITS";
+        item?.kodas || SERVICE_CODE_BY_CREDITS[lineCredits] || "CREDITS";
+      const lineName = item?.pavadinimas || `${lineCredits} DokSkeno kreditų`;
+      const lineUnit =
+        item && item.vienetas && item.vienetas !== "paketas" ? item.vienetas : "vnt.";
 
       const invoiceData = {
         valiuta: currencyCode,
@@ -110,12 +117,12 @@ export default function PaymentInvoiceButton({ payment }) {
 
         eilutes: [
           {
-            pavadinimas: `${lineCredits} DokSkeno kreditų`,
+            pavadinimas: lineName,
             kodas: serviceCode,
             barkodas: "",
             kiekis: 1,
             kainaBePvm: amountNet,
-            matoVnt: "vnt.",
+            matoVnt: lineUnit,
           },
         ],
 

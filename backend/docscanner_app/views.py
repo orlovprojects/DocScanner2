@@ -492,7 +492,8 @@ def superuser_dashboard_stats(request):
     inv_30d = _invoice_count_last_n_days(30)
     inv_total = _invoice_count_total()
 
-    inv_subs = _inv_subscription_stats()
+    from docscanner_app.payment_lines import inv_paid_split
+    inv_subs = {**_inv_subscription_stats(), **inv_paid_split()}
 
     email_today = _email_stats_by_date(today)
     email_yesterday = _email_stats_by_date(yesterday)
@@ -5796,10 +5797,18 @@ def payment_invoice(request, pk):
         "salis": user.company_country_iso or "",
     }
 
+    from docscanner_app.payment_lines import du_buyer, payment_line
+    if payment.payment_type == "du_subscription":
+        buyer.update(du_buyer(payment) or {})      # DU perkamas įmonei - pirkėjas = DU įmonė
+
     data = {
         "id": payment.id,
         "dok_number": payment.dok_number,
         "paid_at": payment.paid_at,
+        "payment_type": payment.payment_type,
+        "item": payment_line(payment),             # {pavadinimas, kiekis, vienetas, kaina, suma}
+        "amount_total": payment.amount_total,
+        "amount_tax": payment.amount_tax,
         "credits_purchased": payment.credits_purchased,
         "net_amount": payment.net_amount,
         "currency": (payment.currency or "EUR").upper(),

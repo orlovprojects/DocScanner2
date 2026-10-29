@@ -632,7 +632,7 @@ export default function DeklaracijosPage() {
             Deklaracijos
           </Typography>
           <Typography color="text.secondary" variant="body2" sx={{ mt: .55 }}>
-            Paruoškite DU deklaracijas, stebėkite terminus ir pateikimo būsenas.
+            Paruoškite reikiamas deklaracijas automatiškai ir išsiųskite į EDS (VMI) bei Sodrą
           </Typography>
         </Box>
         <Stack direction="row" alignItems="center" gap={1} sx={{ alignSelf: { xs: "stretch", sm: "flex-start", md: "center" } }}>

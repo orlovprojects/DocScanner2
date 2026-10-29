@@ -423,6 +423,7 @@ def analyze(m):
             if c["person"].code == code and c["start"] < s <= c["end"]:
                 auto["transition_state"] = "maternity" if c.get("kind") == "NESP" else "sick"
                 auto["transition_until"] = c["end"]
+                auto["transition_from"] = c["start"]          # ligos pradžia - 2-os dienos apmokėjimui
         if m.mode == "sdup":
             # tik SDUP: sprendžia bukalteris (2 žingsnis); seni S31 / 2-SD atleidimai sąrašo nekeičia
             if r.s29_codes and code in r.s29_codes:

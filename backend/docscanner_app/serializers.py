@@ -1906,18 +1906,26 @@ class MobileInboxDocumentSerializer(serializers.ModelSerializer):
 
 class PaymentSerializer(serializers.ModelSerializer):
     invoice_url = serializers.SerializerMethodField()
+    item = serializers.SerializerMethodField()
 
     class Meta:
         model = Payments
         fields = [
             'id',
             'paid_at',
+            'payment_type',
+            'item',
             'credits_purchased',
+            'amount_total',
             'net_amount',
             'currency',
             'dok_number',
             'invoice_url',
         ]
+
+    def get_item(self, obj):
+        from docscanner_app.payment_lines import payment_line
+        return payment_line(obj)
 
     def get_invoice_url(self, obj):
         """

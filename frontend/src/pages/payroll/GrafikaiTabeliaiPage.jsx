@@ -57,10 +57,10 @@ export default function GrafikaiTabeliaiPage() {
   ];
   return (
     <Box sx={{ p: isMobile ? 2 : 4 }}>
-      <Helmet><title>Grafikai ir tabeliai - DokSkenas</title></Helmet>
+      <Helmet><title>Grafikai ir tabelis - DokSkenas</title></Helmet>
       <Box sx={{ mb: 2.5 }}>
-        <Typography variant={isMobile ? "h6" : "h5"} sx={{ fontWeight: 800, lineHeight: 1.2 }}>Grafikai ir tabeliai</Typography>
-        <Typography sx={{ fontSize: 13, color: "text.secondary", mt: 0.5 }}>Darbo laiko planavimas ir apskaita</Typography>
+        <Typography variant={isMobile ? "h6" : "h5"} sx={{ fontWeight: 800, lineHeight: 1.2 }}>Grafikai ir tabelis</Typography>
+        <Typography sx={{ fontSize: 13, color: "text.secondary", mt: 0.5 }}>Darbo grafikų generavimas, faktinio darbo laiko apskaita bei komandiruotės</Typography>
       </Box>
       <ModuleTabs tabs={tabs} value={tab} onChange={go} />
       {before ? (

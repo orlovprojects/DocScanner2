@@ -45,18 +45,18 @@ export default function DarboUzmokestisPage() {
       color: "#16A34A", bg: "#F0FDF4" },
     { value: "atlyginimai", label: "Atlyginimai", description: "Skaičiavimas, patvirtinimas ir išmokėjimai", icon: <PaymentsOutlinedIcon />,
       color: "#DC2626", bg: "#FEF2F2" },
-    { value: "sdup", label: "SDUP", description: "Pareigybių grupės, DAS ir SDUP pranešimai", icon: <BalanceOutlinedIcon />,
+    { value: "sdup", label: "Darbo apmokėjimo sistema (DAS / SDUP)", description: "Pareigybių grupės, DAS ir SDUP pranešimai", icon: <BalanceOutlinedIcon />,
       color: "#7C3AED", bg: "#F5F3FF" },
   ];
 
   return (
     <Box sx={{ p: isMobile ? 2 : 4 }}>
-      <Helmet><title>Darbo užmokestis - DokSkenas</title></Helmet>
+      <Helmet><title>Personalas ir DU - DokSkenas</title></Helmet>
       <Box sx={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", mb: 2.5, gap: 2 }}>
         <Box>
-          <Typography variant={isMobile ? "h6" : "h5"} sx={{ fontWeight: 800, lineHeight: 1.2 }}>Darbo užmokestis</Typography>
+          <Typography variant={isMobile ? "h6" : "h5"} sx={{ fontWeight: 800, lineHeight: 1.2 }}>Personalas ir DU</Typography>
           <Typography sx={{ fontSize: 13, color: "text.secondary", mt: 0.5 }}>
-            Darbuotojai, atlyginimai, išmokėjimai ir skaidrus DU vienoje vietoje
+            Darbuotojai, atlyginimų bei mokesčių apskaičiavimas, darbo apmokėjimo sistema
           </Typography>
         </Box>
         <Tooltip title="Nustatymai">

@@ -95,7 +95,7 @@ def StripeWebhookView(request):
     # ── Inv subscription events ──
     if evt_type == "invoice.paid":
         invoice_data = event["data"]["object"]
-        sub_id = invoice_data.get("subscription")
+        sub_id = invoice_data.get("subscription") or (((invoice_data.get("parent") or {}).get("subscription_details") or {}).get("subscription"))
         if sub_id:
             from ..models import InvSubscription
             inv_sub = InvSubscription.objects.filter(stripe_subscription_id=sub_id).first()
@@ -135,6 +135,11 @@ def StripeWebhookView(request):
 
     # Check if this is an inv subscription checkout
     if _handle_inv_checkout_completed(session):
+        return HttpResponse(status=200)
+
+    # DU planą (ir kitas prenumeratas) apdoroja /api/stripe/du-webhook/ - tai ne kreditų pirkimas
+    if session.get("mode") == "subscription" or (session.get("metadata") or {}).get("product") == "du":
+        logger.info("[STRIPE] Subscription checkout %s - skipping credits flow", session_id)
         return HttpResponse(status=200)
 
     # 4) Проверяем, что оплата реально прошла
@@ -413,6 +418,8 @@ def _handle_inv_invoice_paid(invoice, inv_sub):
         if period.get("end"):
             period_end = datetime.fromtimestamp(period["end"], tz=dt_timezone.utc).date()
 
+    interval = "year" if period_start and period_end and (period_end - period_start).days > 40 else "month"
+
     # Update subscription
     inv_sub.status = "active"
     inv_sub.plan = "pro"
@@ -453,6 +460,7 @@ def _handle_inv_invoice_paid(invoice, inv_sub):
             period_end=period_end,
             stripe_invoice_id=stripe_invoice_id,
             invoice_pdf_url=pdf_url,
+            meta={"interval": interval},
         )
 
     logger.info(

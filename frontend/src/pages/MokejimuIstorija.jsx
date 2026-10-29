@@ -51,15 +51,21 @@ const formatDate = (dateStr) => {
 };
 
 const getPaslaugaLabel = (payment) => {
+  if (payment.item?.pavadinimas) return payment.item.pavadinimas;
   const credits = toNumber(payment.credits_purchased);
   if (!credits) return "DokSkeno kreditai";
   return `${credits} DokSkeno kreditų`;
 };
 
 const getPaslaugosKodas = (payment) => {
+  if (payment.item?.kodas) return payment.item.kodas;
   const credits = toNumber(payment.credits_purchased);
   return SERVICE_CODE_BY_CREDITS[credits] || "—";
 };
+
+// klientas sumokėjo amount_total; net_amount - po Stripe mokesčio (sąskaitai netinka)
+const getSuma = (payment) =>
+  payment.amount_total != null ? payment.amount_total : payment.net_amount;
 
 export default function MokejimuIstorija() {
   const [payments, setPayments] = useState([]);
@@ -274,7 +280,7 @@ export default function MokejimuIstorija() {
                     Suma
                   </Typography>
                   <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                    {formatAmount(payment.net_amount, payment.currency)}
+                    {formatAmount(getSuma(payment), payment.currency)}
                   </Typography>
                 </Box>
               </Box>
@@ -344,7 +350,7 @@ export default function MokejimuIstorija() {
 
                   <TableCell>
                     <Typography variant="body2">
-                      {formatAmount(payment.net_amount, payment.currency)}
+                      {formatAmount(getSuma(payment), payment.currency)}
                     </Typography>
                   </TableCell>
 
