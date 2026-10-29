@@ -733,7 +733,7 @@ def reset(m):
 def _worked(y, mo, workload=Decimal("1")):
     from ..work_calendar import STANDARD_WEEK, month_norm
     n = month_norm(y, mo, STANDARD_WEEK, workload)
-    return n.days, n.hours
+    return n.work_days, n.hours
 
 
 def _worked_from(y, mo, start=None, end=None):
