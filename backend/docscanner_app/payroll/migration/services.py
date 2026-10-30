@@ -899,13 +899,22 @@ def vdu_auto(m, p):
     unit_word = "val." if hourly else "d."
     flags, notes = [], []
 
+    # palyginimo bazė: alga, jei ją įvedė bukalteris; kitaip - pilnų (be nebuvimų) mėnesių pajamų mediana,
+    # nes pasiūlyta alga gali būti paimta iš nepilnų mėnesių
+    ref_base = base
+    if "base_amount" not in (getattr(p, "edited", None) or []) and p.pay_form != "hourly":
+        full = sorted(x["income"] for x in used if not x["excluded"] and not x["partial"])
+        ref_base = full[len(full) // 2] if full else None
+    elif "base_amount" not in (getattr(p, "edited", None) or []):
+        ref_base = None                                  # valandinis įkainis nežinomas - lyginama su kitais mėnesiais
+
     def ratio(x, median):
         """Mėnesio pajamos / tikėtinos pajamos: alga x dirbta mėnesio dalis (val. įkainis x val.) arba kitų mėn. vidurkis."""
-        if base and base > 0:
+        if ref_base and ref_base > 0:
             if p.pay_form == "hourly":
-                exp = base * x["units"] if hourly else None
+                exp = ref_base * x["units"] if hourly else None
             else:
-                exp = base * x["units"] / x["norm"] if x["norm"] else None
+                exp = ref_base * x["units"] / x["norm"] if x["norm"] else None
             if exp:
                 return x["adj"] / exp, VDU_HIGH, VDU_LOW
         return (x["rate"] / median if median else Decimal("1")), VDU_HIGH_NOBASE, VDU_LOW_NOBASE
@@ -1197,10 +1206,17 @@ def confirm(m, user):
 
     # GPM pagal mėnesius: NPD netaikytas -> 20 %; kitaip - GPM313 suma proporcingai pajamoms
     gpm_by_paid = {ym: g["G6"] + g["G7"] for ym, g in r.gpm313.items()}
-    income_by_month = defaultdict(lambda: ZERO)
+
+    def paid_month(hist_e, y, mo):
+        """Išmokėjimo mėnuo: pagal poslinkį, bet atleidimo mėnesio DU (galutinis atsiskaitymas) - tą patį mėnesį."""
+        if lag and not (r.final_same_month and hist_e and hist_e.end and (hist_e.end.year, hist_e.end.month) == (y, mo)):
+            return _month_add(y, mo, lag)
+        return y, mo
+
+    paid_total = defaultdict(lambda: ZERO)              # išmokėta per mėnesį (GPM313 G5 atitikmuo)
     for e in r.employees.values():
-        for ym, v in e.income.items():
-            income_by_month[ym] += v
+        for (y, mo), v in e.income.items():
+            paid_total[paid_month(e, y, mo)] += v
 
     people = {p.person_code: p for p in m.people.filter(include=True)}
     emp_objs = {}
@@ -1213,11 +1229,11 @@ def confirm(m, user):
         for (y, mo), inc in sorted((hist.income if hist else {}).items()):
             if (y, mo) >= (s.year, s.month):
                 continue
-            py, pm = _month_add(y, mo, lag)
+            py, pm = paid_month(hist, y, mo)
             if p.npd_mode == "none":
                 gpm = _q(inc * Decimal("0.20"))
             else:
-                total = income_by_month[(y, mo)]
+                total = paid_total[(py, pm)]
                 gpm = _q(gpm_by_paid.get((py, pm), ZERO) * inc / total) if total else ZERO
             wd, wh = _worked_from(y, mo, p.start_date, p.end_date)
             PayrollHistoryMonth.objects.update_or_create(

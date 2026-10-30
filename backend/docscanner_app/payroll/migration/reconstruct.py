@@ -66,6 +66,7 @@ class Reconstruction:
     insurer_code: str = ""                           # Sodros draudėjo kodas (SDUP insurerCode)
     s15: list = field(default_factory=list)          # nedarbingumo pažymėjimai (S15)
     sick_suspect: list = field(default_factory=list) # (y, m) pajamų mėnesiai, kai GPM313 rodo darbdavio apmokėtą ligą
+    final_same_month: bool = True                    # atleistiems galutinis atsiskaitymas - atleidimo mėnesį (ne kitą)
 
 
 def _emp(r, per):
@@ -227,32 +228,49 @@ def build(parsed_list):
             r.warnings.append(f"GPM313 {ym[0]}-{ym[1]:02d}: kelios versijos su skirtingomis DU sumomis - nurodykite galutinę")
         r.gpm313[ym] = items[-1].rows[0]
 
-    def income_of(ym):
-        return sum((e.income.get(ym, ZERO) for e in r.employees.values()), ZERO)
+    def end_ym(e):
+        return (e.end.year, e.end.month) if e.end else None
 
-    score = {0: 0, 1: 0}
+    def paid_in(ym, lag, final_same=None):
+        """Kiek DU išmokėta mėnesį ym: lag 1 - praeito mėn. DU; atleistiems galutinis atsiskaitymas paprastai -
+        atleidimo mėnesį (DK: paskutinę darbo dieną), kai kurios įmonės - kartu su kitais kitą mėnesį."""
+        if lag == 0:
+            return sum((e.income.get(ym, ZERO) for e in r.employees.values()), ZERO)
+        src = _prev(*ym)
+        if not (r.final_same_month if final_same is None else final_same):
+            return sum((e.income.get(src, ZERO) for e in r.employees.values()), ZERO)
+        return (sum((e.income.get(src, ZERO) for e in r.employees.values() if end_ym(e) != src), ZERO)
+                + sum((e.income.get(ym, ZERO) for e in r.employees.values() if end_ym(e) == ym), ZERO))
+
+    score = {(0, True): 0, (1, True): 0, (1, False): 0}
     for ym, g in r.gpm313.items():
-        for lag in (0, 1):
-            src = ym if lag == 0 else _prev(*ym)
-            if g["G5"] > 0 and abs(income_of(src) - g["G5"]) <= TOL:
-                score[lag] += 1
-    r.lag = max(score, key=score.get) if any(score.values()) else None
+        for lag, fs in score:
+            if g["G5"] > 0 and abs(paid_in(ym, lag, fs) - g["G5"]) <= TOL:
+                score[(lag, fs)] += 1
+    if any(score.values()):
+        best = max(score, key=lambda k: (score[k], k == (1, True)))
+        r.lag, r.final_same_month = best
 
     if r.lag is not None:
         none_months = all_months = 0
         for ym, g in sorted(r.gpm313.items()):
             src = ym if r.lag == 0 else _prev(*ym)
-            inc = income_of(src)
+            inc = paid_in(ym, r.lag)
             gpm = g["G6"] + g["G7"]
             known = src in r.income_months
-            r.checks.append((ym, g["G5"], inc, gpm, known and abs(inc - g["G5"]) <= TOL))
             diff = g["G5"] - inc
-            if known and inc > 0 and TOL < diff <= inc * Decimal("0.15"):
+            sick_diff = known and inc > 0 and TOL < diff <= inc * Decimal("0.15")     # paaiškinama darbdavio liga
+            r.checks.append((ym, g["G5"], inc, gpm, known and (abs(diff) <= TOL or sick_diff)))
+            if sick_diff:
                 r.sick_suspect.append(src)
                 # išmokėta daugiau nei Sodros pajamose - dažniausiai darbdavio apmokėtos 2 ligos dienos (be Sodros įmokų)
                 r.warnings.append(f"GPM313 {ym[0]}-{ym[1]:02d}: išmokėta {diff} € daugiau nei Sodros pajamose už "
                                   f"{src[0]}-{src[1]:02d} – tikėtina darbdavio apmokėtos ligos dienos (Sodros įmokomis "
                                   f"neapmokestinamos). Įkelkite S15, kad tiksliau apskaičiuotume VDU")
+            elif known and inc > 0 and not g["G5"]:
+                r.warnings.append(f"GPM313 {ym[0]}-{ym[1]:02d}: DU išmokų nedeklaruota, nors Sodroje už "
+                                  f"{src[0]}-{src[1]:02d} yra {inc} € pajamų – patikrinkite, ar tas DU išmokėtas tą patį "
+                                  f"mėnesį, ar GPM313 pateikta be jo")
             if inc > 0:
                 all_months += 1
                 if abs(gpm - (inc * Decimal("0.20")).quantize(Decimal("0.01"))) <= TOL:
