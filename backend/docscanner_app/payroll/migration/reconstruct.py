@@ -65,6 +65,7 @@ class Reconstruction:
     s29_codes: set = field(default_factory=set)      # kas dirba pagal naujausią S29
     insurer_code: str = ""                           # Sodros draudėjo kodas (SDUP insurerCode)
     s15: list = field(default_factory=list)          # nedarbingumo pažymėjimai (S15)
+    sick_suspect: list = field(default_factory=list) # (y, m) pajamų mėnesiai, kai GPM313 rodo darbdavio apmokėtą ligą
 
 
 def _emp(r, per):
@@ -208,7 +209,8 @@ def build(parsed_list):
                 e.income[ym] = e._src["S50"][ym]
             else:
                 e.income[ym] = e._src["SAM"].get(ym, ZERO) + e._src["2SD"].get(ym, ZERO)
-        for rate in e.rates.values():
+        # pensijų kaupimas / terminuota sutartis - pagal naujausio mėnesio tarifą (kaupimą galima nutraukti)
+        for rate in ([e.rates[max(e.rates)]] if e.rates else []):
             rest = rate - EMPLOYEE_RATE - EMPLOYER_STD
             for pen in PENSION:
                 if abs(rest - pen) <= TOL or abs(rest - pen - FIXED_TERM_EXTRA) <= TOL:
@@ -244,6 +246,13 @@ def build(parsed_list):
             gpm = g["G6"] + g["G7"]
             known = src in r.income_months
             r.checks.append((ym, g["G5"], inc, gpm, known and abs(inc - g["G5"]) <= TOL))
+            diff = g["G5"] - inc
+            if known and inc > 0 and TOL < diff <= inc * Decimal("0.15"):
+                r.sick_suspect.append(src)
+                # išmokėta daugiau nei Sodros pajamose - dažniausiai darbdavio apmokėtos 2 ligos dienos (be Sodros įmokų)
+                r.warnings.append(f"GPM313 {ym[0]}-{ym[1]:02d}: išmokėta {diff} € daugiau nei Sodros pajamose už "
+                                  f"{src[0]}-{src[1]:02d} – tikėtina darbdavio apmokėtos ligos dienos (Sodros įmokomis "
+                                  f"neapmokestinamos). Įkelkite S15, kad tiksliau apskaičiuotume VDU")
             if inc > 0:
                 all_months += 1
                 if abs(gpm - (inc * Decimal("0.20")).quantize(Decimal("0.01"))) <= TOL:

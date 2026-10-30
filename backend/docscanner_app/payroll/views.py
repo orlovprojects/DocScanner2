@@ -1436,9 +1436,11 @@ def _summed_default(m):
 
 def _migration_payload(m):
     from .lpk import all_clusters, all_professions
+    from .migration.services import vdu_auto
     people = []
     for p in m.people.all():
         people.append({
+            "vdu_auto": vdu_auto(m, p),
             "id": p.id, "person_code": p.person_code, "first_name": p.first_name, "last_name": p.last_name,
             "start_date": p.start_date, "end_date": p.end_date, "lpk4": p.lpk4, "lpk_code": p.lpk_code,
             "position_name": p.position_name, "contract_type": p.contract_type, "pension": p.pension,

@@ -115,6 +115,13 @@ function reportRows(data) {
     { code: "S4S5", name: "S4, S5 – vaiko priežiūra, nemokamos atostogos", src: "Sodra · XML", why: "Tik jei tokių laikotarpių buvo",
       period, optional: true, ...(forms("S4", "S5", "9SD", "12SD").length ? { state: "ok", text: "Įkelta" } : { state: "optional", text: "Neįkelta" }),
       files: forms("S4", "S5", "9SD", "12SD") },
+    { code: "S15", name: "S15 – nedarbingumo pažymėjimai", src: "Sodra · XML", why: "Tikslesnis VDU, liga perėjimo dieną",
+      period: `${du.subtract(3, "month").format("YYYY-MM-DD")} – šiandien`, optional: true, recommended: true,
+      ...(forms("S15").length ? { state: "ok", text: "Įkelta" } : { state: "optional", text: "Neįkelta" }),
+      issue: !forms("S15").length && s.sick_suspect?.length
+        ? `GPM313 rodo darbdavio apmokėtas ligos dienas (${s.sick_suspect.join(", ")}) – įkelkite S15, kad ligos dienos nebūtų įskaičiuotos į VDU.`
+        : undefined,
+      files: forms("S15") },
     { code: "GPM312", name: "GPM312 – metinė deklaracija", src: "VMI EDS · FFDATA", why: "Kitos išmokos gyventojams (nuoma ir pan.)",
       period: `${year - 1} m.`, optional: true,
       ...(forms("GPM312").length ? { state: "ok", text: "Įkelta" } : { state: "optional", text: "Neįkelta" }), files: forms("GPM312") },
@@ -168,7 +175,8 @@ function ReportsStep({ data, busy, locked, onUpload, onAction, issues }) {
             <Box sx={grid}>
               <Box>
                 <Typography sx={{ fontSize: 13.5, fontWeight: 700 }}>
-                  {r.name}{r.optional && <Chip size="small" label="nebūtina" variant="outlined" sx={{ ml: 0.75, height: 18, fontSize: 10.5 }} />}
+                  {r.name}{r.optional && <Chip size="small" label={r.recommended ? "rekomenduojama" : "nebūtina"} variant="outlined"
+                    color={r.recommended ? "primary" : "default"} sx={{ ml: 0.75, height: 18, fontSize: 10.5 }} />}
                 </Typography>
                 <Typography sx={{ fontSize: 12, color: "text.secondary" }}>{r.src}</Typography>
               </Box>
@@ -262,12 +270,13 @@ const toComma = (v) => (v === null || v === undefined || v === "" ? "" : String(
 const toDot = (v) => String(v ?? "").replace(/\s/g, "").replace(",", ".");
 
 // Skaičiai visada su kableliu: vartotojas gali įvesti ir taškelį – rodoma „1850,50“, į serverį siunčiama „1850.50“
-function Num({ value, onSave, disabled, width = 90, error, suffix }) {
+function Num({ value, onSave, disabled, width = 90, error, suffix, placeholder }) {
   const [v, setV] = useState(toComma(value));
   useEffect(() => setV(toComma(value)), [value]);
   const bad = v !== "" && Number.isNaN(Number(toDot(v)));
   return (
-    <TextField size="small" value={v} disabled={disabled} error={error || bad} sx={{ width }} inputProps={{ inputMode: "decimal" }}
+    <TextField size="small" value={v} disabled={disabled} error={error || bad} sx={{ width }} placeholder={placeholder}
+      inputProps={{ inputMode: "decimal" }}
       onChange={(e) => setV(e.target.value.replace(".", ",").replace(/[^\d,\s-]/g, ""))}
       onBlur={() => { if (bad) return; const out = v === "" ? "" : toDot(v); if (out !== String(value ?? "")) onSave(out); }}
       InputProps={suffix ? { endAdornment: <Typography sx={{ fontSize: 12, color: "text.secondary", whiteSpace: "nowrap" }}>{suffix}</Typography> } : undefined} />
@@ -568,10 +577,65 @@ function vduPeriod(p, data) {
 }
 
 function vduHelp(v, hourly) {
-  return `Vidutinis darbo užmokestis už ${v.from} – ${v.to}${v.short ? " (dirba trumpiau nei 3 mėn. – už dirbtą laiką)" : " (3 paskutiniai mėnesiai iki DU pradžios DokSkene)"}. `
-    + `${hourly ? "Už valandą" : "Už dieną"}: dirbtų dienų DU, padalytas iš dirbtų ${hourly ? "valandų" : "dienų"} – be atostoginių, ligos išmokų ir kt. `
-    + "Rasite senos programos atostoginių skaičiavime arba VDU pažymoje. Pagal jį pirmus mėnesius DokSkene skaičiuosime atostogines, "
-    + "ligos išmoką už 2 dienas, mamadienius. Neįvedus – skaičiuosime iš Sodros duomenų, tada sumos gali būti netikslios.";
+  return `Vidutinis darbo užmokestis už ${v.from} – ${v.to}${v.short ? " (dirba trumpiau nei 3 mėn. – už dirbtą laiką)" : " (3 paskutiniai mėnesiai iki DU pradžios DokSkene)"}, `
+    + `${hourly ? "už valandą" : "už dieną"}. Pagal jį pirmus mėnesius DokSkene skaičiuosime atostogines, ligos išmoką už 2 dienas, mamadienius. `
+    + "Apskaičiuojame patys iš Sodros duomenų: pajamos (S50) / darbo dienos pagal grafiką, neįskaitant ligos (S15) ir nebuvimų (S4). "
+    + "Sodra nemato premijų, atostoginių ir nemokamų atostogų – jei jų buvo, įveskite VDU iš senos programos "
+    + "(Site.pro / B1: DU → DU spausdinimai → Mėnesinė atostogų kaupinių pažyma).";
+}
+
+const vduCheck = (p) => !p.vdu_override && p.vdu_auto?.status === "check";
+
+// VDU iš Sodros duomenų: reikšmė, įspėjimai, skaičiavimas pagal mėnesius
+function VduAuto({ p, locked, set, unit }) {
+  const [open, setOpen] = useState(false);
+  const a = p.vdu_auto;
+  if (!a || !a.value) return null;
+  const manual = p.vdu_override !== null && p.vdu_override !== undefined && p.vdu_override !== "";
+  const check = !manual && a.status === "check";
+  return (
+    <Box sx={{ mt: 1, p: 1.25, borderRadius: 2, border: "1px solid", fontSize: 12.5,
+      borderColor: manual ? "#EAECF0" : check ? "#FEDF89" : "#ABEFC6", bgcolor: manual ? "#F9FAFB" : check ? "#FFFAEB" : "#F6FEF9" }}>
+      <Box sx={{ display: "flex", alignItems: "center", gap: 1, flexWrap: "wrap" }}>
+        {manual ? <Typography sx={{ fontSize: 12.5, color: "text.secondary" }}>
+          Įvesta ranka. Pagal Sodros duomenis būtų <b>{toComma(a.value)} {unit}</b>
+          {!locked && <> · <Box component="span" onClick={() => set({ vdu_override: "" })}
+            sx={{ color: "primary.main", cursor: "pointer", textDecoration: "underline" }}>naudoti apskaičiuotą</Box></>}
+        </Typography> : <>
+          {check ? <WarningAmberOutlinedIcon sx={{ fontSize: 17, color: "#B54708" }} /> : <CheckCircleIcon sx={{ fontSize: 17, color: "#079455" }} />}
+          <Typography sx={{ fontSize: 12.5 }}>
+            Apskaičiuota iš Sodros duomenų: <b>{toComma(a.value)} {unit}</b>
+            {check ? " – patikrinkite" : " – atrodo tikslu, įvesti nereikia"}
+          </Typography>
+        </>}
+        {a.months?.length > 0 && <Box component="span" onClick={() => setOpen(!open)}
+          sx={{ ml: "auto", color: "primary.main", cursor: "pointer", fontSize: 12, whiteSpace: "nowrap" }}>
+          {open ? "slėpti skaičiavimą" : "kaip apskaičiuota"}</Box>}
+      </Box>
+      {!manual && a.flags?.map((f) => <Typography key={f} sx={{ fontSize: 12, color: "#B54708", mt: 0.5 }}>• {f}</Typography>)}
+      {a.notes?.map((f) => <Typography key={f} sx={{ fontSize: 12, color: "text.secondary", mt: 0.5 }}>• {f}</Typography>)}
+      <Collapse in={open}>
+        <Table size="small" sx={{ mt: 1, "& td, & th": { fontSize: 12, py: 0.4, px: 1 } }}>
+          <TableHead><TableRow>
+            <TableCell>Mėnuo</TableCell><TableCell align="right">Pajamos (S50)</TableCell>
+            <TableCell align="right">Darbo {a.unit === "hour" ? "val." : "d."}</TableCell>
+            <TableCell align="right">Neįskaičiuota d.</TableCell><TableCell align="right">VDU</TableCell>
+          </TableRow></TableHead>
+          <TableBody>
+            {a.months.map((x) => (
+              <TableRow key={x.ym}>
+                <TableCell>{x.ym}</TableCell>
+                <TableCell align="right">{x.income !== null ? `${toComma(x.income)} €` : "–"}</TableCell>
+                <TableCell align="right">{toComma(x.units)}</TableCell>
+                <TableCell align="right">{x.excluded || "–"}</TableCell>
+                <TableCell align="right">{x.rate !== null ? `${toComma(x.rate)} €` : "–"}</TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </Collapse>
+    </Box>
+  );
 }
 
 function WeekEditor({ p, locked, set }) {
@@ -609,7 +673,9 @@ function PersonDialog({ p, data, locked, onPerson, onClose, onNext, onKids }) {
   const vacDate = data.summary?.vacation_date || dayjs(data.du_start).subtract(1, "day").format("YYYY-MM-DD");
   const warn = salaryWarn(p, data);
   const vdu = vduPeriod(p, data);
-  const rec = <Chip size="small" label="rekomenduojama" sx={{ height: 20, fontSize: 11, fontWeight: 600, bgcolor: "#FFFAEB", color: "#B54708" }} />;
+  const rec = vduCheck(p) ? <Chip size="small" label="patikrinkite" sx={{ height: 20, fontSize: 11, fontWeight: 600, bgcolor: "#FFFAEB", color: "#B54708" }} />
+    : !vdu && data.summary?.gpm_split_estimated ? <Chip size="small" label="nebūtina" sx={{ height: 20, fontSize: 11, fontWeight: 600, bgcolor: "#F2F4F7", color: "#475467" }} /> : null;
+  const vduUnit = summed || hourly ? "€/val." : "€/d.";
   return (
     <Dialog open onClose={onClose} fullWidth maxWidth="md" disableScrollLock PaperProps={{ sx: { borderRadius: 3 } }}>
       <Box sx={{ px: 3, pt: 2.5, pb: 2, borderBottom: "1px solid", borderColor: "divider", display: "flex", gap: 2, alignItems: "flex-start" }}>
@@ -662,7 +728,11 @@ function PersonDialog({ p, data, locked, onPerson, onClose, onNext, onKids }) {
               error={!(Number(p.weekly_hours) > 0)} onSave={(v) => set({ weekly_hours: v })} /></FL>
           </Box>
           <Box sx={{ ...grid2, mt: 2 }}>
-            <FL label="Darbo laiko apskaita" req help={HELP.regime}><Seg value={summed ? "summed" : "standard"} disabled={locked}
+            <FL label="Darbo laiko apskaita" req help={HELP.regime}
+              note={!summed && data.summary?.summed_hint?.[p.person_code]
+                ? <Box component="span" sx={{ color: "warning.dark" }}>Galbūt suminė: {data.summary.summed_hint[p.person_code]}. Patikrinkite darbo sutartyje</Box>
+                : null}>
+              <Seg value={summed ? "summed" : "standard"} disabled={locked}
               options={[["standard", "Standartinė"], ["summed", "Suminė"]]} onChange={(v) => set({ work_time_mode: v === "summed" ? "02" : "01" })} /></FL>
             {!summed && <FL label="Darbo laiko režimas (SDUP)" help={HELP.mode}><Sel value={p.work_time_mode || "01"} options={SDUP_MODES}
               width="100%" disabled={locked} onChange={(v) => set({ work_time_mode: v })} /></FL>}
@@ -710,9 +780,11 @@ function PersonDialog({ p, data, locked, onPerson, onClose, onNext, onKids }) {
           <Block title={vdu && data.summary?.gpm_split_estimated ? "VDU ir GPM" : vdu ? "VDU" : "GPM"} chip={rec}>
             <Box sx={grid2}>
               {vdu && <FL label={`VDU ${vdu.label}, € per ${summed || hourly ? "valandą" : "dieną"}`}
-                help={vduHelp(vdu, summed || hourly)} note={vdu.short ? `Dirba nuo ${p.start_date} – VDU už dirbtą laiką` : null}>
-                <Num value={p.vdu_override} width="100%" disabled={locked} suffix={summed || hourly ? "€/val." : "€/d."}
-                  onSave={(v) => set({ vdu_override: v })} /></FL>}
+                help={vduHelp(vdu, summed || hourly)} sx={{ gridColumn: "1 / -1" }}>
+                <Num value={p.vdu_override} width={200} disabled={locked} suffix={vduUnit}
+                  placeholder={p.vdu_auto?.value ? toComma(p.vdu_auto.value) : ""}
+                  onSave={(v) => set({ vdu_override: v })} />
+                <VduAuto p={p} locked={locked} set={set} unit={vduUnit} /></FL>}
               {data.summary?.gpm_split_estimated && <FL label="GPM nuo sausio iki perėjimo, €" help={HELP.gpmYtd}>
                 <Num value={p.gpm_ytd} width="100%" disabled={locked} suffix="€" onSave={(v) => set({ gpm_ytd: v })} /></FL>}
             </Box>
@@ -901,13 +973,17 @@ function PeopleStep({ data, locked, busy, onPerson, onAction, onExcel }) {
                       {p.work_time_mode !== "02" && <Typography sx={{ fontSize: 11, color: "text.secondary", mt: 0.4, whiteSpace: "nowrap" }}>
                         {weekShort(weekOf(p))}</Typography>}</TableCell>
                     <TableCell><Seg value={p.work_time_mode === "02" ? "summed" : "standard"} disabled={locked}
-                      options={[["standard", "Stand."], ["summed", "Suminė"]]} onChange={(v) => set({ work_time_mode: v === "summed" ? "02" : "01" })} /></TableCell>
+                      options={[["standard", "Stand."], ["summed", "Suminė"]]} onChange={(v) => set({ work_time_mode: v === "summed" ? "02" : "01" })} />
+                      {p.work_time_mode !== "02" && data.summary?.summed_hint?.[p.person_code] && (
+                        <Tooltip arrow title={<Typography sx={{ fontSize: 12.5 }}>{data.summary.summed_hint[p.person_code]}. Jei darbo sutartyje nustatyta suminė apskaita – perjunkite.</Typography>}>
+                          <Typography sx={{ fontSize: 11.5, color: "warning.dark", mt: 0.5, cursor: "help", display: "inline-block" }}>⚠ Galbūt suminė?</Typography>
+                        </Tooltip>)}</TableCell>
                     <TableCell><Num value={p.vacation_balance} width={80} disabled={locked} suffix="d."
                       error={p.vacation_balance === null || p.vacation_balance === ""} onSave={(v) => set({ vacation_balance: v })} /></TableCell>
                     <TableCell>
                       <Chip size="small" onClick={() => setOpenId(p.id)} sx={{ cursor: "pointer", fontWeight: 600 }}
-                        label={miss ? `Trūksta ${miss}` : !p.vdu_override && vduPeriod(p, data) ? "Patartina: VDU" : "✓ Paruošta"}
-                        color={miss ? "error" : !p.vdu_override && vduPeriod(p, data) ? "warning" : "success"} variant={miss ? "filled" : "outlined"} />
+                        label={miss ? `Trūksta ${miss}` : vduCheck(p) ? "Patikrinkite VDU" : "✓ Paruošta"}
+                        color={miss ? "error" : vduCheck(p) ? "warning" : "success"} variant={miss ? "filled" : "outlined"} />
                       <Box onClick={() => setOpenId(p.id)} sx={{ fontSize: 12.5, color: "primary.main", fontWeight: 600, cursor: "pointer", mt: 0.75 }}>Atidaryti →</Box>
                     </TableCell>
                     <TableCell padding="checkbox">

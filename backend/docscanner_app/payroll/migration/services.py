@@ -394,6 +394,34 @@ def _net_estimate(income, pension, npd_none):
     return (_q(income - sodra - gpm) if gpm is not None else None), gpm
 
 
+# Profesijos (LPK 4 ženklai), kuriose dažnai taikoma suminė darbo laiko apskaita (pamainos, budėjimai)
+SHIFT_LPK = {
+    "8322": "lengvųjų automobilių vairuotojai", "8331": "autobusų vairuotojai", "8332": "sunkiasvorių transporto vairuotojai",
+    "8311": "mašinistai", "5411": "ugniagesiai", "5413": "pataisos įstaigų prižiūrėtojai", "5414": "apsaugos darbuotojai",
+    "2211": "gydytojai", "2212": "gydytojai specialistai", "2221": "slaugytojai", "3221": "slaugytojai",
+    "3258": "greitosios pagalbos darbuotojai", "5321": "slaugytojų padėjėjai", "5322": "slaugos darbuotojai namuose",
+    "5120": "virėjai", "5131": "padavėjai", "5132": "barmenai", "5111": "kelionių palydovai", "3153": "pilotai",
+    "4321": "sandėlio darbuotojai", "9333": "krovikai", "5153": "pastatų prižiūrėtojai", "8160": "maisto pramonės operatoriai",
+    "8189": "stacionarių įrenginių operatoriai", "8219": "surinkėjai", "3131": "elektrinių operatoriai",
+    "3139": "procesų valdymo technikai", "5152": "namų ūkio prižiūrėtojai", "5329": "sveikatos priežiūros darbuotojai",
+}
+
+
+def _summed_hint(e, s):
+    """Užuomina, kad gali būti suminė apskaita: pamaininė profesija ar reguliarūs priedai prie pastovios algos."""
+    why = []
+    if e.lpk4 in SHIFT_LPK:
+        why.append(f"profesija ({SHIFT_LPK[e.lpk4]}) dažnai dirba pamainomis")
+    vals = [v for ym, v in sorted(e.income.items()) if ym < (s.year, s.month) and v > 0][-12:]
+    if len(vals) >= 6:
+        base = sorted(vals)[len(vals) // 2]
+        extra = sum(1 for v in vals if base * Decimal("1.03") < v <= base * Decimal("1.30"))
+        if extra >= 3:
+            why.append(f"{extra} iš {len(vals)} mėn. pajamos šiek tiek didesnės už įprastas – būdinga naktinio, "
+                       f"švenčių ar viršvalandžių darbo priedams")
+    return "; ".join(why)
+
+
 @transaction.atomic
 def analyze(m):
     """Perskaito visus failus, atnaujina darbuotojų sąrašą (nekeičia rankinių pakeitimų), grąžina suvestinę."""
@@ -403,6 +431,8 @@ def analyze(m):
     last_y, last_m = _month_add(s.year, s.month, -1)
     existing = {p.person_code: p for p in m.people.all()}
     salary_check = {}                                   # {asmens kodas: {reason, suggested}} - pasiūlyta alga gali būti netiksli
+    not_employees = []                                  # S31 be pabaigos, bet nėra S29 ir pajamų (pvz. MB nariai)
+    summed_hint = {}                                    # {asmens kodas: priežastis} - galbūt suminė apskaita (tik užuomina)
     for code, e in r.employees.items():
         p = existing.get(code) or PayrollMigrationEmployee(migration=m, person_code=code)
         auto = {
@@ -424,6 +454,10 @@ def analyze(m):
                 auto["transition_state"] = "maternity" if c.get("kind") == "NESP" else "sick"
                 auto["transition_until"] = c["end"]
                 auto["transition_from"] = c["start"]          # ligos pradžia - 2-os dienos apmokėjimui
+        if (m.mode != "sdup" and r.s29_codes and code not in r.s29_codes and not e.end
+                and not any(v > 0 for v in e.income.values()) and (not e.start or e.start <= r.s29_date)):
+            auto["employed"] = auto["include"] = False
+            not_employees.append(f"{e.first_name} {e.last_name}")
         if m.mode == "sdup":
             # tik SDUP: sprendžia bukalteris (2 žingsnis); seni S31 / 2-SD atleidimai sąrašo nekeičia
             if r.s29_codes and code in r.s29_codes:
@@ -447,6 +481,9 @@ def analyze(m):
                 why.append("pirmas mėnuo nepilnas")
             if why and not (e.end and e.end < s):
                 salary_check[code] = {"reason": "; ".join(why), "suggested": str(med)}
+        hint = _summed_hint(e, s)
+        if hint and not (e.end and e.end < s):
+            summed_hint[code] = hint
         if last_income:
             if r.lag == 1:
                 net, _ = _net_estimate(last_income, e.pension, e.npd_none)
@@ -512,6 +549,10 @@ def analyze(m):
     summary = {
         "mode": m.mode, "sdup_check": sdup_check, "sdup_diff": sdup_diff, "insurer_code": r.insurer_code,
         "salary_check": salary_check, "gpm_split_estimated": gpm_split_estimated,
+        "vdu_inputs": _vdu_inputs(r, m),
+        "summed_hint": summed_hint,
+        # S15 rekomenduojamas: GPM313 rodo darbdavio apmokėtas ligos dienas, o S15 neįkeltas
+        "sick_suspect": [f"{y}-{mo:02d}" for y, mo in r.sick_suspect] if not r.s15 else [],
         "vacation_date": (s - timedelta(days=1)).isoformat(),
         "s29_missing": s29_missing,
         "du_start": s.isoformat(), "gap_mode": m.gap_mode, "lag": r.lag,
@@ -528,7 +569,9 @@ def analyze(m):
         "checks": [{"ym": f"{y}-{mo:02d}", "gpm313_income": str(g5), "sam_income": str(inc), "gpm": str(gpm), "ok": ok}
                    for (y, mo), g5, inc, gpm, ok in r.checks],
         "warnings": r.warnings + (["Nepavyko nustatyti, kada mokamas DU (trūksta GPM313 arba SAM) - "
-                                   "neišmokėtas sumas įveskite patys"] if r.lag is None else []),
+                                   "neišmokėtas sumas įveskite patys"] if r.lag is None else [])
+                    + ([f"{', '.join(not_employees)}: yra S31, bet nėra S29 ir Sodros pajamų – greičiausiai MB nariai "
+                        f"ar nebedirbantys. Į DU neįtraukti (jei dirba – pažymėkite „Dirba“)"] if not_employees else []),
         "gpm312_prev_years": sorted(r.gpm312),
         "other_codes": sorted({row["income_code"] for rows in r.gpm312.values() for row in rows
                                if row["income_code"] not in ("01", "03", "05", "07", "08")}),
@@ -730,6 +773,188 @@ def reset(m):
 # Patvirtinimas
 # ============================================================
 
+# ============================================================
+# VDU iš Sodros duomenų (kai VDU iš senos programos neįvestas)
+# ============================================================
+
+VDU_HIGH, VDU_LOW = Decimal("1.10"), Decimal("0.90")   # mėnesio pajamos vs alga (pagal dirbtą dalį mėnesio)
+VDU_HIGH_NOBASE, VDU_LOW_NOBASE = Decimal("1.15"), Decimal("0.85")   # be algos - lyginama su kitų mėnesių vidurkiu
+MONTHS_GEN = ("sausio", "vasario", "kovo", "balandžio", "gegužės", "birželio", "liepos", "rugpjūčio", "rugsėjo",
+              "spalio", "lapkričio", "gruodžio")
+
+
+def _vdu_window(m):
+    """VDU laikotarpis: 3 kalendoriniai mėnesiai iki DU pradžios DokSkene."""
+    s = m.du_start
+    y, mo = _month_add(s.year, s.month, -3)
+    return date(y, mo, 1), s - timedelta(days=1)
+
+
+def _vdu_inputs(r, m):
+    """Analizės metu: kiekvienam darbuotojui - VDU laikotarpio pajamos (S50/SAM), nebuvimai (S4/9-SD/12-SD), liga (S15)."""
+    a, b = _vdu_window(m)
+    out = {}
+    for code, e in r.employees.items():
+        codes = {code}
+        if e.sd_series and e.sd_number:
+            codes.add(f"SD{e.sd_series}{e.sd_number}")             # užsienietis - S15 gali būti su SD numeriu
+        out[code] = {
+            "income": {f"{y}-{mo:02d}": str(v) for (y, mo), v in e.income.items() if a <= date(y, mo, 1) <= b},
+            "off": [[x[1].isoformat(), x[2].isoformat(), x[0]] for x in (e.absences or [])
+                    if x[1] and x[2] and x[2] >= a and x[1] <= b],
+            "sick": sorted([c["start"].isoformat(), c["end"].isoformat(), c.get("kind") or "", c.get("reason") or ""]
+                           for c in r.s15 if c["person"].code in codes
+                           and c["end"] >= a - timedelta(days=31) and c["start"] <= b),
+        }
+    return out
+
+
+def _person_week(p):
+    """Darbo valandos Pr..Sk: pagal įvestą savaitės grafiką arba tolygiai Pr–Pn."""
+    try:
+        w = _clean_week(getattr(p, "week_hours", None))
+    except ValueError:
+        w = None
+    if w:
+        return w
+    per_day = (Decimal(str(p.weekly_hours)) / 5) if p.weekly_hours else Decimal("8")
+    return [per_day] * 5 + [ZERO, ZERO]
+
+
+def _dates(a, b):
+    d = a
+    while d <= b:
+        yield d
+        d += timedelta(days=1)
+
+
+def vdu_auto(m, p):
+    """
+    VDU iš Sodros duomenų: pajamos (S50) / darbo dienos (val.) pagal grafiką, neįskaitant ligos (S15) ir
+    nebuvimų (S4 / 9-SD / 12-SD). Darbdavio mokama ligos išmoka už 2 d. į S50 nepatenka (Sodros įmokomis
+    neapmokestinama) - atimti nereikia.
+    Grąžina {value, unit, status: ok|check, months, flags} arba None (VDU nereikia arba nėra duomenų).
+    """
+    from ..work_calendar import is_holiday, is_pre_holiday
+    data = ((m.summary or {}).get("vdu_inputs") or {}).get(p.person_code)
+    a, b = _vdu_window(m)
+    if data is None or (p.start_date and p.start_date > b) or (p.end_date and p.end_date < m.du_start):
+        return None
+    hourly = getattr(p, "work_time_mode", "01") == "02" or p.pay_form == "hourly"
+    week = _person_week(p)
+
+    def day_units(d):
+        h = week[d.weekday()]
+        if h <= 0 or is_holiday(d):
+            return ZERO
+        if is_pre_holiday(d):
+            h = max(h - 1, ZERO)
+        return h if hourly else Decimal("1")
+
+    off, sick = {}, {}
+    for s_, e_, kind in data.get("off") or []:
+        for d in _dates(date.fromisoformat(s_), date.fromisoformat(e_)):
+            off[d] = "vaiko priežiūros atostogos" if kind == "9-SD" else "nemokamos atostogos / nebuvimas"
+    for s_, e_, kind, _reason in data.get("sick") or []:
+        for d in _dates(date.fromisoformat(s_), date.fromisoformat(e_)):
+            sick[d] = "nėštumo ir gimdymo atostogos" if kind == "NESP" else "liga"
+
+    months, missing = [], []
+    y, mo = a.year, a.month
+    while date(y, mo, 1) <= b:
+        first = date(y, mo, 1)
+        last = date(*_month_add(y, mo, 1), 1) - timedelta(days=1)
+        lo, hi = max(first, p.start_date or first), min(last, p.end_date or last)
+        ym = f"{y}-{mo:02d}"
+        if lo <= hi:
+            units, norm, excluded, reasons = ZERO, ZERO, 0, {}
+            for d in _dates(first, last):
+                u = day_units(d)
+                if u <= 0:
+                    continue
+                norm += u
+                if not (lo <= d <= hi):
+                    continue
+                why = sick.get(d) or off.get(d)
+                if why:
+                    excluded += 1
+                    reasons[why] = reasons.get(why, 0) + 1
+                    continue
+                units += u
+            inc = data["income"].get(ym)
+            if inc is None and units > 0:                   # dirbo, bet pajamų nėra - trūksta S50 / SAM
+                missing.append(ym)
+            months.append({"ym": ym, "y": y, "mo": mo, "income": Decimal(inc) if inc is not None else None,
+                           "units": units, "norm": norm, "excluded": excluded, "reasons": reasons,
+                           "partial": (lo, hi) != (first, last)})
+        y, mo = _month_add(y, mo, 1)
+
+    used = [x for x in months if x["income"] is not None and x["units"] > 0]
+    total_units = sum((x["units"] for x in used), ZERO)
+    for x in used:
+        x["adj"] = x["income"]
+        x["rate"] = x["adj"] / x["units"]
+
+    base = Decimal(str(p.base_amount)) if p.base_amount not in (None, "") else None
+    unit_word = "val." if hourly else "d."
+    flags, notes = [], []
+
+    def ratio(x, median):
+        """Mėnesio pajamos / tikėtinos pajamos: alga x dirbta mėnesio dalis (val. įkainis x val.) arba kitų mėn. vidurkis."""
+        if base and base > 0:
+            if p.pay_form == "hourly":
+                exp = base * x["units"] if hourly else None
+            else:
+                exp = base * x["units"] / x["norm"] if x["norm"] else None
+            if exp:
+                return x["adj"] / exp, VDU_HIGH, VDU_LOW
+        return (x["rate"] / median if median else Decimal("1")), VDU_HIGH_NOBASE, VDU_LOW_NOBASE
+
+    if used:
+        value = _q(sum((x["adj"] for x in used), ZERO) / total_units)
+        rates = sorted(x["rate"] for x in used)
+        median = rates[len(rates) // 2]
+        for x in used:
+            k, hi_k, lo_k = ratio(x, median)
+            name = MONTHS_GEN[x["mo"] - 1]
+            if k > hi_k:
+                flags.append(f"{x['ym']}: pajamos didesnės nei įprastai – galėjo būti premija, priedas, viršvalandžiai "
+                             f"ar atostoginiai. Jei taip – įveskite VDU iš senos programos")
+            elif k < lo_k:
+                flags.append(f"{x['ym']}: pajamos mažesnės nei įprastai – galėjo būti nemokamos atostogos, prastova "
+                             f"ar pravaikštos (Sodra jų nemato). Jei taip – įveskite VDU iš senos programos")
+            if x["reasons"]:
+                notes.append(f"{name.capitalize()} neįskaičiuota: " + ", ".join(f"{k} {v} d." for k, v in x["reasons"].items()))
+    else:
+        # 3 mėn. nedirbo (liga, vaiko priežiūra) - VDU pagal pareiginę algą
+        last_norm = months[-1]["norm"] if months else ZERO
+        if base is None:
+            return {"value": None, "unit": "hour" if hourly else "day", "status": "check", "months": [],
+                    "flags": ["Nėra duomenų VDU apskaičiuoti – įveskite VDU iš senos programos"], "notes": []}
+        value = _q(base if p.pay_form == "hourly" else (base / last_norm if last_norm else ZERO))
+        notes.append("Per 3 mėnesius nedirbo – VDU apskaičiuotas pagal pareiginę algą")
+    last_ym = f"{b.year}-{b.month:02d}"
+    for ym in missing:
+        if ym == last_ym and used:
+            notes.append(f"{ym}: Sodroje dar nėra (SAM teikiamas iki kito mėn. 15 d.) – VDU apskaičiuotas iš ankstesnių "
+                         f"mėnesių. Įkėlus naują S50, perskaičiuosime")
+        else:
+            flags.append(f"{ym}: nėra pajamų duomenų (S50 ar SAM) – mėnuo neįskaičiuotas")
+    if hourly and getattr(p, "work_time_mode", "01") == "02":
+        flags.append("Suminė apskaita: valandos imtos pagal grafiką, ne faktiškai dirbtos – jei buvo viršvalandžių, "
+                     "patikrinkite VDU senoje programoje")
+    if p.start_date and p.start_date > a:
+        notes.append(f"Dirba nuo {p.start_date} – VDU už dirbtą laiką")
+    return {
+        "value": str(value), "unit": "hour" if hourly else "day", "status": "check" if flags else "ok",
+        "flags": flags, "notes": notes,
+        "months": [{"ym": x["ym"], "income": str(x["income"]) if x["income"] is not None else None,
+                    "units": str(_q(x["units"]) if hourly else int(x["units"])), "unit": unit_word,
+                    "excluded": x["excluded"],
+                    "rate": str(_q(x["rate"])) if "rate" in x else None} for x in months],
+    }
+
+
 def _worked(y, mo, workload=Decimal("1")):
     from ..work_calendar import STANDARD_WEEK, month_norm
     n = month_norm(y, mo, STANDARD_WEEK, workload)
@@ -836,9 +1061,13 @@ def _apply_opening(m, p, e):
     if getattr(p, "has_disability", False) != e.has_disability:
         e.has_disability = p.has_disability
         changed.append("has_disability")
-    if getattr(p, "vdu_override", None):
+    vdu = getattr(p, "vdu_override", None)
+    if not vdu:                                       # neįvestas - apskaičiuotas iš Sodros duomenų
+        auto = vdu_auto(m, p)
+        vdu = Decimal(auto["value"]) if auto and auto.get("value") and Decimal(auto["value"]) > 0 else None
+    if vdu:
         mode = getattr(p, "work_time_mode", "01")
-        e.opening_vdu = p.vdu_override
+        e.opening_vdu = vdu
         e.opening_vdu_unit = "hour" if (mode == "02" or p.pay_form == "hourly") else "day"
         y, mo = _month_add(m.du_start.year, m.du_start.month, 3)
         e.opening_vdu_until = date(y, mo, 1)
@@ -964,6 +1193,7 @@ def confirm(m, user):
     last_y, last_m = _month_add(s.year, s.month, -1)
     lag = r.lag if r.lag is not None else 1
     st = _settings(m.company)
+    m.summary = dict(m.summary or {}, vdu_inputs=_vdu_inputs(r, m))     # VDU įvertinimui - pagal dabartinius failus
 
     # GPM pagal mėnesius: NPD netaikytas -> 20 %; kitaip - GPM313 suma proporcingai pajamoms
     gpm_by_paid = {ym: g["G6"] + g["G7"] for ym, g in r.gpm313.items()}

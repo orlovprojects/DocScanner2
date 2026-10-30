@@ -172,11 +172,30 @@ def _parse_report(xml, file_name):
     return p
 
 
+# Sodros paskyros ataskaita be duomenų: <ROWSET><ROW><ELEM><error>Informuojame, kad ... neturėjo.</error>
+EMPTY_REPORTS = (("vaiko priežiūros atostogos", "S4"), ("nedraudiminius laikotarpius", "S5"))
+
+
+def _parse_empty_report(xml, file_name):
+    import html
+    text = " ".join(html.unescape(re.sub(r"<[^>]+>", " ", xml)).split())
+    form = next((f for key, f in EMPTY_REPORTS if key in text), None)
+    if form is None:
+        return None
+    p = Parsed(form, file_name=file_name, header={"empty": True, "message": text[:500]})
+    mm = re.search(r"nuo (\d{4}-\d{2}-\d{2}) iki (\d{4}-\d{2}-\d{2})", text)
+    if mm:
+        p.period = (dt(mm.group(1)), dt(mm.group(2)))
+    return p
+
+
 def parse(content, file_name=""):
     """bytes|str -> Parsed | None (nepalaikoma forma)"""
     xml = content.decode("utf-8", errors="ignore") if isinstance(content, bytes) else content
     if "<Ataskaita " in xml[:3000]:
         return _parse_report(xml, file_name)
+    if "<ROWSET>" in xml[:500] and "<error>" in xml:
+        return _parse_empty_report(xml, file_name)          # S4 / S5 be įrašų - „neturėjo“
     if "DraudejoAtaskaita" in xml[:600] and "epts" in xml[:600]:
         # S15 - nedarbingumo pažymėjimai (skaitoma payroll.sick_import)
         from ..sick_import import parse as parse_s15
