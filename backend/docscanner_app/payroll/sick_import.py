@@ -107,8 +107,43 @@ def parse(content):
             start=start, end=end, reason=_pick(f, r"Priezast", exclude=(r"Anuliav",)),
             annulled=bool(_pick(f, r"Busena$") == "ANULIUOTAS" or _pick(f, r"AnuliavimoData")),
         ))
+    if not out:
+        out = _parse_rows(root)
     out.sort(key=lambda c: (c.person_code, c.start))
     return out, True
+
+
+# Sodros paskyros S15 ataskaita (lentelė): <Eilute> su AsmensKodas, PazymejimoTipas, LaikotarpisNuo / Iki,
+# NedarbingumoPriezastis (tekstu), ArPazymejimasPanaikintas
+TEXT_REASONS = ((r"darbe|kelyje", "6"), (r"buityje", "7"), (r"profesin", "5"), (r"slaug", "4"),
+                (r"vaiko prie", "8"), (r"epidem", "2"), (r"protez", "3"), (r"donor", "9"), (r"^liga", "1"))
+
+
+def _parse_rows(root):
+    out, seen = [], set()
+    for el in root.iter():
+        if _local(el.tag) != "Eilute" or not len(el):
+            continue
+        f = _flat(el)
+        code = re.sub(r"\D", "", _pick(f, r"^AsmensKodas$"))
+        start, end = _date(_pick(f, r"^LaikotarpisNuo$")), _date(_pick(f, r"^LaikotarpisIki$"))
+        if not (code and start and end):
+            continue
+        kind = "NESP" if re.search(r"nėštum|nestum|gimdym", _pick(f, r"^PazymejimoTipas$"), re.I) else "NEDP"
+        text = _pick(f, r"^NedarbingumoPriezastis$").strip()
+        reason = next((c for pat, c in TEXT_REASONS if re.search(pat, text, re.I)), "")
+        number = (_pick(f, r"^PazymejimoNumeris$").split(",")[0]).strip()
+        key = f"{_pick(f, r'^PazymejimoSerija$')}{number}"
+        if key in seen:                              # tas pats pažymėjimas keliomis eilutėmis (tęsinys)
+            number = f"{number}-{start:%m%d}"
+        seen.add(key)
+        out.append(Certificate(
+            kind=kind, series=_pick(f, r"^PazymejimoSerija$"), number=number, person_code=code,
+            name=" ".join(x for x in (_pick(f, r"^AsmensVardas$"), _pick(f, r"^AsmensPavarde$")) if x).title(),
+            start=start, end=end, reason=reason,
+            annulled=_pick(f, r"^ArPazymejimasPanaikintas$").lower() == "true",
+        ))
+    return out
 
 
 def plan(certs, existing, employees):

@@ -67,6 +67,7 @@ class Reconstruction:
     s15: list = field(default_factory=list)          # nedarbingumo pažymėjimai (S15)
     sick_suspect: list = field(default_factory=list) # (y, m) pajamų mėnesiai, kai GPM313 rodo darbdavio apmokėtą ligą
     final_same_month: bool = True                    # atleistiems galutinis atsiskaitymas - atleidimo mėnesį (ne kitą)
+    paid_same_month: set = field(default_factory=set)  # mėnesiai, kurių DU išmokėtas tą patį mėnesį (pvz. gruodis)
 
 
 def _emp(r, per):
@@ -237,10 +238,14 @@ def build(parsed_list):
         if lag == 0:
             return sum((e.income.get(ym, ZERO) for e in r.employees.values()), ZERO)
         src = _prev(*ym)
-        if not (r.final_same_month if final_same is None else final_same):
-            return sum((e.income.get(src, ZERO) for e in r.employees.values()), ZERO)
-        return (sum((e.income.get(src, ZERO) for e in r.employees.values() if end_ym(e) != src), ZERO)
-                + sum((e.income.get(ym, ZERO) for e in r.employees.values() if end_ym(e) == ym), ZERO))
+        fs = r.final_same_month if final_same is None else final_same
+        total = ZERO
+        for e in r.employees.values():
+            if src not in r.paid_same_month and not (fs and end_ym(e) == src):
+                total += e.income.get(src, ZERO)            # praeito mėnesio DU
+            if ym in r.paid_same_month or (fs and end_ym(e) == ym):
+                total += e.income.get(ym, ZERO)             # šio mėnesio DU, išmokėtas tą patį mėnesį
+        return total
 
     score = {(0, True): 0, (1, True): 0, (1, False): 0}
     for ym, g in r.gpm313.items():
@@ -250,6 +255,15 @@ def build(parsed_list):
     if any(score.values()):
         best = max(score, key=lambda k: (score[k], k == (1, True)))
         r.lag, r.final_same_month = best
+    # gruodžio DU dažnai išmokamas dar gruodį (prieš šventes) - tada sausio GPM313 jo neturi
+    if r.lag == 1:
+        for ym, g in sorted(r.gpm313.items()):
+            src = _prev(*ym)
+            expected = paid_in(ym, 1)
+            if ym[1] == 1 and src in r.income_months and expected > 0 and g["G5"] < expected * Decimal("0.5"):
+                r.paid_same_month.add(src)
+                r.warnings.append(f"GPM313 {ym[0]}-01 neturi {src[0]} m. gruodžio DU – laikome, kad jis išmokėtas dar "
+                                  f"gruodį (į {ym[0]} m. išmokas ir GPM312 neįtraukiamas)")
 
     if r.lag is not None:
         none_months = all_months = 0

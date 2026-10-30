@@ -925,15 +925,13 @@ def vdu_auto(m, p):
         median = rates[len(rates) // 2]
         for x in used:
             k, hi_k, lo_k = ratio(x, median)
-            name = MONTHS_GEN[x["mo"] - 1]
             if k > hi_k:
                 flags.append(f"{x['ym']}: pajamos didesnės nei įprastai – galėjo būti premija, priedas, viršvalandžiai "
                              f"ar atostoginiai. Jei taip – įveskite VDU iš senos programos")
             elif k < lo_k:
                 flags.append(f"{x['ym']}: pajamos mažesnės nei įprastai – galėjo būti nemokamos atostogos, prastova "
                              f"ar pravaikštos (Sodra jų nemato). Jei taip – įveskite VDU iš senos programos")
-            if x["reasons"]:
-                notes.append(f"{name.capitalize()} neįskaičiuota: " + ", ".join(f"{k} {v} d." for k, v in x["reasons"].items()))
+
     else:
         # 3 mėn. nedirbo (liga, vaiko priežiūra) - VDU pagal pareiginę algą
         last_norm = months[-1]["norm"] if months else ZERO
@@ -943,6 +941,10 @@ def vdu_auto(m, p):
         value = _q(base if p.pay_form == "hourly" else (base / last_norm if last_norm else ZERO))
         notes.append("Per 3 mėnesius nedirbo – VDU apskaičiuotas pagal pareiginę algą")
     last_ym = f"{b.year}-{b.month:02d}"
+    for x in months:
+        if x["reasons"]:
+            notes.append(f"{MONTHS_GEN[x['mo'] - 1].capitalize()} neįskaičiuota: "
+                         + ", ".join(f"{k} {v} d." for k, v in x["reasons"].items()))
     for ym in missing:
         if ym == last_ym and used:
             notes.append(f"{ym}: Sodroje dar nėra (SAM teikiamas iki kito mėn. 15 d.) – VDU apskaičiuotas iš ankstesnių "
@@ -1209,6 +1211,8 @@ def confirm(m, user):
 
     def paid_month(hist_e, y, mo):
         """Išmokėjimo mėnuo: pagal poslinkį, bet atleidimo mėnesio DU (galutinis atsiskaitymas) - tą patį mėnesį."""
+        if (y, mo) in r.paid_same_month:
+            return y, mo
         if lag and not (r.final_same_month and hist_e and hist_e.end and (hist_e.end.year, hist_e.end.month) == (y, mo)):
             return _month_add(y, mo, lag)
         return y, mo
