@@ -175,6 +175,9 @@ const Footer = () => {
                   <Link href="/tinklarastis" underline="none" color="inherit" sx={linkSx}>
                     Tinklaraštis
                   </Link>
+                  <Link href="/tinklarastis/darbo-apmokeimo-sistemos-das-dokumento-generatorius" underline="none" color="inherit" sx={linkSx}>
+                    Darbo apmokėjimo sistemos (DAS) dokumento generatorius
+                  </Link>
                   <Link href="/saskaita-faktura" underline="none" color="inherit" sx={linkSx}>
                     Nemokamas sąskaitos-faktūros generatorius
                   </Link>

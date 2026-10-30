@@ -269,6 +269,17 @@ class ContractTermsViewSet(PayrollCompanyMixin, viewsets.ModelViewSet):
         c = self.request.query_params.get("contract")
         return qs.filter(contract_id=c) if c else qs
 
+    def create(self, request, *args, **kwargs):
+        # tos pačios dienos sąlygos jau yra (pvz. sutartis sukurta šiandien ar alga keista antrą kartą) - atnaujinamos
+        existing = self.get_queryset().filter(contract_id=request.data.get("contract"),
+                                              valid_from=request.data.get("valid_from")).first()
+        if existing:
+            serializer = self.get_serializer(existing, data=request.data, partial=True)
+            serializer.is_valid(raise_exception=True)
+            self.perform_update(serializer)
+            return Response(serializer.data)
+        return super().create(request, *args, **kwargs)
+
     def perform_create(self, serializer):
         self.check_employee(serializer.validated_data["contract"].employee)
         payroll_services.ensure_position_group(serializer.save())
