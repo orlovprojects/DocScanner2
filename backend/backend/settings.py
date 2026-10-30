@@ -12,7 +12,7 @@ load_dotenv(BASE_DIR / ".env")
 # Безопасность и основные параметры
 SECRET_KEY = os.getenv("SECRET_KEY")
 DEBUG = os.getenv("DEBUG", "False").lower() == "true"
-ALLOWED_HOSTS = os.getenv("ALLOWED_HOSTS", "").split(",")
+ALLOWED_HOSTS = [h.strip() for h in os.getenv("ALLOWED_HOSTS", "").split(",") if h.strip()]
 
 # Пользовательская модель
 AUTH_USER_MODEL = 'docscanner_app.CustomUser'
@@ -59,6 +59,7 @@ MAILGUN_INVOICE_WEBHOOK_SIGNING_KEY = os.getenv('MAILGUN_INVOICE_WEBHOOK_SIGNING
 
 # esavitarna.lt (darbuotojų savitarna)
 SAVITARNA_HOSTS = ["esavitarna.lt", "www.esavitarna.lt"]
+ALLOWED_HOSTS += [h for h in SAVITARNA_HOSTS if h not in ALLOWED_HOSTS]
 SAVITARNA_BASE_URL = os.getenv("SAVITARNA_BASE_URL", "https://esavitarna.lt")
 MAILGUN_SAVITARNA_API_KEY = os.getenv("MAILGUN_SAVITARNA_API_KEY", MAILGUN_INVOICE_API_KEY)
 MAILGUN_SAVITARNA_DOMAIN = "m.esavitarna.lt"
