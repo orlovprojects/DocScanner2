@@ -44,6 +44,7 @@ def generate_invoice_from_recurring(recurring: RecurringInvoice) -> Invoice:
                 invoice_date=invoice_date,
                 due_date=due_date,
                 currency=recurring.currency,
+                language=recurring.language,
                 pvm_tipas=recurring.pvm_tipas,
                 vat_percent=recurring.vat_percent,
                 note=recurring.note,

@@ -50,6 +50,9 @@ import { GridSkeleton, ListSkeleton } from "./PayrollSkeletons";
 import { PALETTE, shiftColor, shiftText } from "./GrafikaiPage";
 import { TripChoiceBanner, tripExcess } from "./TripPeriodChoice";
 import SodraReportsDialog from "./SodraReportsDialog";
+import PrintOutlinedIcon from "@mui/icons-material/PrintOutlined";
+import { printTabelis } from "./printTabelis";
+import { useCompanyProfiles } from "../../contexts/useCompanyProfiles";
 
 const WD = ["Pr", "An", "Tr", "Kt", "Pn", "Št", "Sk"];
 const num = (v) => Number(v || 0);
@@ -1329,6 +1332,7 @@ function TableView({ rows, days, today, locked, issues, issueDays, onCell, shift
 
 export default function TabelisView({ year, month, onShift }) {
   const navigate = useNavigate();
+  const { activeProfile } = useCompanyProfiles();
   const [data, setData] = useState(null);
   const [error, setError] = useState("");
   const [dlg, setDlg] = useState(null);             // {row, day} - dienos keitimo langas
@@ -1502,6 +1506,12 @@ export default function TabelisView({ year, month, onShift }) {
               </>
             )}
             <Box sx={{ flexGrow: 1 }} />
+            <Button size="small" variant="outlined" startIcon={<PrintOutlinedIcon sx={{ fontSize: 17 }} />}
+              disabled={!shownRows.length}
+              onClick={() => printTabelis({ rows: shownRows, days, meta, year, month, company: activeProfile || {} })}
+              sx={{ textTransform: "none", fontWeight: 600, fontSize: 12.5, height: 32, color: "#475467", borderColor: "#E4E7EC" }}>
+              Spausdinti / PDF
+            </Button>
             <ToggleButtonGroup size="small" exclusive value={view} onChange={(e, v) => v && setView(v)}
               sx={{ "& .MuiToggleButton-root": { textTransform: "none", fontWeight: 600, fontSize: 12.5, height: 32, px: 1.4, gap: .6,
                 color: "#475467", borderColor: "#E4E7EC", "&.Mui-selected": { bgcolor: "#EEF4FF", color: "#2958BD", "&:hover": { bgcolor: "#E0EAFF" } } } }}>

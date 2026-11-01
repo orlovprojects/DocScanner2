@@ -2701,6 +2701,8 @@ def _generate_declaration(company, form, year=None, month=None, contract=None, m
         content, errors = build_gpm312_declaration(company, year)
         deadline, key = gpm312_deadline(year), dict(year=year, month=None, contract=None)
     elif form == "SDUP":
+        from .billing import require_payroll_access
+        require_payroll_access(company, "SDUP generavimui")
         return _generate_sdup(company, year, month)
     elif form == "1-SD":
         content, errors = build_1sd_declaration(contract)

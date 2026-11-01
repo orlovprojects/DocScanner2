@@ -141,19 +141,43 @@ class LogoutView(SavitarnaView):
         return resp
 
 
+RESET_COOLDOWN = timedelta(minutes=2)
+RESET_PER_DAY = 5
+RESET_PER_IP_HOUR = 20
+
+
+def _client_ip(request):
+    fwd = request.META.get("HTTP_X_FORWARDED_FOR", "")
+    return (fwd.split(",")[0].strip() if fwd else request.META.get("REMOTE_ADDR", "")) or "?"
+
+
 class PasswordResetRequestView(PublicView):
     def post(self, request):
+        from django.core.cache import cache
+        ok = Response({"detail": "Jei toks prisijungimas yra, išsiuntėme laišką su nuoroda."})
+        ip_key = f"sv_reset_ip:{_client_ip(request)}"
+        n = cache.get(ip_key, 0)
+        if n >= RESET_PER_IP_HOUR:
+            raise ValidationError({"detail": "Per daug bandymų. Pabandykite po valandos."})
+        cache.set(ip_key, n + 1, 3600)
         acc = EmployeeAccount.objects.filter(login=normalize_login(request.data.get("login")), is_active=True).first()
         if acc and "@" in acc.login:
             from .savitarna_auth import RESET_HOURS
             from .savitarna_utils import new_token
+            now = timezone.now()
+            recent = EmployeeAccountToken.objects.filter(account=acc, kind="reset",
+                                                         created_at__gte=now - timedelta(hours=24))
+            last = recent.order_by("-created_at").first()
+            if (last and last.created_at > now - RESET_COOLDOWN) or recent.count() >= RESET_PER_DAY:
+                return ok  # laiškas neseniai jau išsiųstas - tyliai nesiunčiam
+            recent.filter(used_at__isnull=True).update(used_at=now)  # senos nuorodos nebegalioja
             raw, h = new_token()
             EmployeeAccountToken.objects.create(account=acc, kind="reset", token_hash=h,
-                                                expires_at=timezone.now() + timedelta(hours=RESET_HOURS))
+                                                expires_at=now + timedelta(hours=RESET_HOURS))
             send_password_reset(acc, f"{base_url()}/slaptazodis/{raw}")
         # visada tas pats atsakymas - neatskleidžiam, ar toks prisijungimas yra
-        return Response({"detail": "Jei toks prisijungimas yra, išsiuntėme laišką su nuoroda."})
-
+        return ok
+    
 
 class PasswordResetConfirmView(PublicView):
     @transaction.atomic

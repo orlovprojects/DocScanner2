@@ -51,6 +51,9 @@ import FilterListIcon from "@mui/icons-material/FilterList";
 import { alpha } from "@mui/material/styles";
 
 import { MONTHS, apiError, payrollApi } from "../../api/payroll";
+import PrintOutlinedIcon from "@mui/icons-material/PrintOutlined";
+import { printGrafikas } from "./printGrafikas";
+import { useCompanyProfiles } from "../../contexts/useCompanyProfiles";
 import LtDatePicker from "../../components/LtDatePicker"; // ⚠ pataisyk kelią, jei komponentas kitur
 
 const WD = ["Pr", "An", "Tr", "Kt", "Pn", "Št", "Sk"];
@@ -996,6 +999,7 @@ function RosterSidebar({ data, types, color, cell, absences }) {
 // ============================================================
 
 function RosterTab({ year, month, onMonthShift, onOpenSettings }) {
+  const { activeProfile } = useCompanyProfiles();
   const [data, setData] = useState(null);
   const [error, setError] = useState("");
   const [info, setInfo] = useState("");
@@ -1305,6 +1309,13 @@ function RosterTab({ year, month, onMonthShift, onOpenSettings }) {
             );
           })()}
           <Box sx={{ flexGrow: 1 }} />
+          <Tooltip title="Spausdinti / PDF">
+            <IconButton size="small" aria-label="Spausdinti"
+              onClick={() => printGrafikas({ data, absences, positions: positionMap, year, month, company: activeProfile || {} })}
+              sx={{ border: "1px solid #E4E7EC", borderRadius: 1.5, width: 34, height: 34, color: "#475467" }}>
+              <PrintOutlinedIcon sx={{ fontSize: 18 }} />
+            </IconButton>
+          </Tooltip>
           <Tooltip title="Pamainos ir taisyklės">
             <IconButton size="small" aria-label="Pamainos ir taisyklės" onClick={() => onOpenSettings(2)}
               sx={{ border: "1px solid #E4E7EC", borderRadius: 1.5, width: 34, height: 34, color: "#475467" }}>

@@ -29,6 +29,7 @@ import { useInvSubscription } from '../contexts/InvSubscriptionContext';
 import LockOutlinedIcon from '@mui/icons-material/LockOutlined';
 import { useCompanyProfiles } from '../contexts/useCompanyProfiles';
 import { fixedAssetsApi } from '../api/fixedAssetsApi';
+import { INVOICE_LANGUAGES as LANGUAGE_OPTIONS, paymentRefNote as noteTemplate } from '../components/invoiceI18n';
 
 // ═══════════════════════════════════════════════════════════
 // Helpers
@@ -94,6 +95,7 @@ const TYPE_LABELS = {
   saskaita:     'Sąskaita faktūra',
   kreditine:    'Kreditinė sąskaita faktūra',
 };
+
 
 const parseLocalDate = (value) => {
   if (!value) return null;
@@ -469,6 +471,7 @@ const InvoiceEditorPage = () => {
     due_date: '',
     order_number: '',
     currency: 'EUR',
+    language: 'lt',
     pvm_tipas: 'taikoma',
     vat_percent: '21',
     note: '',
@@ -781,10 +784,10 @@ const InvoiceEditorPage = () => {
   const isAutoNumberMode = isNew || form.status === 'draft';
 
   // ── Note template builder ──
-  const buildNoteTemplate = useCallback((series, number) => {
-    const fullNum = series && number ? `${series}-${number}` : (series || number || '___');
-    return `Apmokėdami paskirtyje būtinai nurodykite ${fullNum}`;
-  }, []);
+  const buildNoteTemplate = useCallback(
+    (series, number) => noteTemplate(form.language, series, number),
+    [form.language],
+  );
 
   const filteredSeries = useMemo(() => {
     return availableSeries.filter((s) => s.invoice_type === form.invoice_type);
@@ -947,6 +950,7 @@ const InvoiceEditorPage = () => {
           pvm_tipas: data.pvm_tipas || prev.pvm_tipas,
           vat_percent: String(data.vat_percent ?? prev.vat_percent),
           currency: data.currency || prev.currency,
+          language: data.language || prev.language,
           note: data.note || '',
           order_number: data.order_number || '',
 
@@ -1090,6 +1094,7 @@ const InvoiceEditorPage = () => {
           invoice_type: data.invoice_type || 'pvm_saskaita',
           document_series: data.document_series || prev.document_series,
           currency: data.currency || prev.currency,
+          language: data.language || prev.language,
           pvm_tipas: data.pvm_tipas || prev.pvm_tipas,
           vat_percent: String(data.vat_percent ?? prev.vat_percent),
           note: data.note || '',
@@ -1352,6 +1357,7 @@ const InvoiceEditorPage = () => {
           due_date: data.due_date || '',
           order_number: data.order_number || '',
           currency: data.currency || 'EUR',
+          language: data.language || 'lt',
           pvm_tipas: data.pvm_tipas || 'taikoma',
           vat_percent: String(data.vat_percent ?? 21),
           note: data.note || '',
@@ -1464,8 +1470,7 @@ const InvoiceEditorPage = () => {
         originalNumberRef.current = data.document_number || '';
         prevTypeRef.current = data.invoice_type || 'pvm_saskaita';
         if (data.note) {
-          const tmpl = `Apmokėdami paskirtąjai būtinai nurodykite ${data.full_number || `${data.document_series || ''}-${data.document_number || ''}`}`;
-          noteIsTemplateRef.current = data.note === tmpl;
+          noteIsTemplateRef.current = data.note === noteTemplate(data.language || 'lt', data.document_series, data.document_number);
         }
         if (data.status === 'draft' && data.document_series) {
           const next = await fetchAutoNumberOnly(data.document_series, data.invoice_type || 'pvm_saskaita');
@@ -1782,6 +1787,7 @@ const InvoiceEditorPage = () => {
     due_date: form.due_date || null,
     order_number: form.order_number,
     currency: form.currency,
+    language: form.language,
     pvm_tipas: form.pvm_tipas,
     vat_percent: parseNum(form.vat_percent),
     note: showNote ? form.note : '',
@@ -1854,6 +1860,7 @@ const InvoiceEditorPage = () => {
     invoice_type: form.invoice_type,
     document_series: form.document_series,
     currency: form.currency,
+    language: form.language,
     pvm_tipas: form.pvm_tipas,
     vat_percent: parseNum(form.vat_percent),
     note: showNote ? form.note : '',
@@ -3059,6 +3066,15 @@ const InvoiceEditorPage = () => {
                 renderInput={(params) => <TextField {...params} label="Valiuta *" />}
                 componentsProps={{ popper: { disablePortal: false, modifiers: [{ name: 'preventOverflow', enabled: true }] } }}
               />
+            </Grid2>
+            <Grid2 size={{ xs: 6, sm: 2 }}>
+              <TextField fullWidth select label="Sąskaitos kalba" value={form.language}
+                onChange={(e) => u('language', e.target.value)} disabled={!isEditable}
+                SelectProps={{ MenuProps: menuProps }}>
+                {LANGUAGE_OPTIONS.map((o) => (
+                  <MenuItem key={o.value} value={o.value}>{o.label}</MenuItem>
+                ))}
+              </TextField>
             </Grid2>
           </Grid2>
         </Box>

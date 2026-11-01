@@ -22,6 +22,7 @@ from django.db import models
 from django.utils import timezone
 
 from ..models import Invoice, InvoiceEmail
+from ..utils.invoice_i18n import get_lang, tr, doc_title, doc_title_acc
 
 logger = logging.getLogger("docscanner_app")
 
@@ -113,7 +114,8 @@ def _get_invoice_pdf(invoice):
 
     try:
         pdf_bytes = generate_invoice_pdf(invoice, logo_path=logo_path, watermark=watermark)
-        filename = f"saskaita-{invoice.document_series}{invoice.document_number}.pdf"
+        prefix = tr(get_lang(invoice), "file_prefix")
+        filename = f"{prefix}-{invoice.document_series}{invoice.document_number}.pdf"
         return pdf_bytes, filename
     except Exception:
         return None, None
@@ -123,10 +125,18 @@ def _get_invoice_pdf(invoice):
 #  Formatting helpers
 # ════════════════════════════════════════════════════════════
 
+_CURRENCY_SYMBOLS = {
+    "EUR": "€", "USD": "$", "GBP": "£", "PLN": "zł", "CZK": "Kč",
+    "SEK": "kr", "NOK": "kr", "DKK": "kr", "CHF": "CHF", "UAH": "₴",
+    "RUB": "₽", "JPY": "¥", "CNY": "¥",
+}
+
+
 def _fmt_amount(value, currency="EUR"):
     """12345.67 -> '12 345,67 €'"""
+    sym = _CURRENCY_SYMBOLS.get(currency, currency)
     if value is None:
-        return "0,00 €"
+        return f"0,00 {sym}"
 
     v = Decimal(str(value)).quantize(Decimal("0.01"))
     sign = "-" if v < 0 else ""
@@ -135,9 +145,6 @@ def _fmt_amount(value, currency="EUR"):
     integer_part = int(v)
     decimal_part = str(v).split(".")[1] if "." in str(v) else "00"
     int_str = f"{integer_part:,}".replace(",", " ")
-
-    symbols = {"EUR": "€", "USD": "$", "GBP": "£"}
-    sym = symbols.get(currency, currency)
     return f"{sign}{int_str},{decimal_part} {sym}"
 
 
@@ -151,18 +158,8 @@ def _invoice_no(invoice):
     return f"{invoice.document_series}-{invoice.document_number}"
 
 
-def _document_label(invoice):
-    mapping = {
-        "isankstine": "Išankstinė sąskaita faktūra",
-        "pvm_saskaita": "PVM sąskaita faktūra",
-        "saskaita": "Sąskaita faktūra",
-        "kreditine": "Kreditinė sąskaita faktūra",
-    }
-    return mapping.get(invoice.invoice_type, "Sąskaita faktūra")
-
-
-def _is_pvm_invoice(invoice):
-    return invoice.invoice_type == "pvm_saskaita"
+def _seller(invoice):
+    return invoice.seller_name or "DokSkenas"
 
 
 def _frontend_invoice_url(invoice):
@@ -284,9 +281,9 @@ _BASE_STYLE = """
 """
 
 
-def _wrap_html(body_content, title=""):
+def _wrap_html(body_content, title="", lang="lt"):
     return f"""<!DOCTYPE html>
-<html lang="lt">
+<html lang="{lang}">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -311,31 +308,31 @@ def _render_meta_block(lines):
     return f'<div class="meta">{"".join(rows)}</div>'
 
 
-def _render_footer(invoice):
-    seller_name = invoice.seller_name or "pardavėju"
+def _render_footer(invoice, lang):
+    seller_name = invoice.seller_name or tr(lang, "seller_fallback")
 
     contact_parts = []
     if invoice.seller_email:
-        contact_parts.append(f'el. paštu: {invoice.seller_email}')
+        contact_parts.append(tr(lang, "contact_email", v=invoice.seller_email))
     if invoice.seller_phone:
-        contact_parts.append(f'telefonu: {invoice.seller_phone}')
+        contact_parts.append(tr(lang, "contact_phone", v=invoice.seller_phone))
 
+    contact_line = tr(lang, "footer_contact", seller=seller_name)
     if contact_parts:
-        contact_line = f'Jei turite klausimų, susisiekite su {seller_name} ' + " arba ".join(contact_parts) + "."
-    else:
-        contact_line = f"Jei turite klausimų, susisiekite su {seller_name}."
+        contact_line += " " + tr(lang, "contact_or").join(contact_parts)
+    contact_line += "."
 
     return f"""
     <div class="footer">
-        <p>Tai automatinis pranešimas, prašome į šį laišką neatsakyti.</p>
+        <p>{tr(lang, "footer_auto")}</p>
         <p>{contact_line}</p>
     </div>
     """
 
 
-def _render_view_button(invoice, text=None):
+def _render_view_button(invoice, lang, text=None):
     url = _frontend_invoice_url(invoice)
-    label = text or "Peržiūrėti sąskaitą"
+    label = text or tr(lang, "view_button")
     return f"""
     <div class="button-wrap">
         <a href="{url}" target="_blank" class="button">{label}</a>
@@ -343,13 +340,20 @@ def _render_view_button(invoice, text=None):
     """
 
 
-def _render_payment_button(invoice):
+def _render_payment_button(invoice, lang):
     if not invoice.payment_link_url:
-        return _render_view_button(invoice, "Peržiūrėti ir apmokėti sąskaitą")
+        return _render_view_button(invoice, lang, tr(lang, "view_pay_button"))
 
     from .payment_link_render import render_payment_button_html
 
     return render_payment_button_html(invoice)
+
+
+def _amount_meta(invoice, lang, due_key="due"):
+    return [
+        (tr(lang, "amount"), _fmt_amount(invoice.amount_with_vat, invoice.currency or "EUR")),
+        (tr(lang, due_key), _fmt_date(invoice.due_date)),
+    ]
 
 
 # ────────────────────────────────────────────────
@@ -357,30 +361,25 @@ def _render_payment_button(invoice):
 # ────────────────────────────────────────────────
 
 def _render_invoice_sent(invoice):
-    invoice_no = _invoice_no(invoice)
-    seller_name = invoice.seller_name or "DokSkenas"
+    lang = get_lang(invoice)
+    no, seller = _invoice_no(invoice), _seller(invoice)
 
-    subject = f"Gavote sąskaitą {invoice_no} iš {seller_name}"
-
-    meta_lines = [
-        ("Suma", _fmt_amount(invoice.amount_with_vat, invoice.currency or "EUR")),
-        ("Apmokėti iki", _fmt_date(invoice.due_date)),
-    ]
+    subject = tr(lang, "invoice_subject", no=no, seller=seller)
 
     body = f"""
     <div class="content">
-        <h1 class="title">{_document_label(invoice)}</h1>
+        <h1 class="title">{doc_title(lang, invoice.invoice_type)}</h1>
 
-        <p class="text">Sveiki,</p>
-        <p class="text">Siunčiame sąskaitą Nr. {invoice_no} iš {seller_name}.</p>
+        <p class="text">{tr(lang, "hello")}</p>
+        <p class="text">{tr(lang, "invoice_text", no=no, seller=seller)}</p>
 
-        {_render_meta_block(meta_lines)}
-        {_render_payment_button(invoice)}
+        {_render_meta_block(_amount_meta(invoice, lang))}
+        {_render_payment_button(invoice, lang)}
     </div>
-    {_render_footer(invoice)}
+    {_render_footer(invoice, lang)}
     """
 
-    return subject, _wrap_html(body, title=subject)
+    return subject, _wrap_html(body, title=subject, lang=lang)
 
 
 # ────────────────────────────────────────────────
@@ -388,31 +387,30 @@ def _render_invoice_sent(invoice):
 # ────────────────────────────────────────────────
 
 def _render_invoice_paid(invoice):
-    invoice_no = _invoice_no(invoice)
-    seller_name = invoice.seller_name or "DokSkenas"
-    doc_label = "PVM sąskaita faktūra" if _is_pvm_invoice(invoice) else "Sąskaita faktūra"
-    doc_label_acc = "PVM sąskaitą faktūrą" if _is_pvm_invoice(invoice) else "Sąskaitą faktūrą"
+    lang = get_lang(invoice)
+    no, seller = _invoice_no(invoice), _seller(invoice)
+    doc_label = doc_title(lang, "pvm_saskaita" if invoice.invoice_type == "pvm_saskaita" else "saskaita")
 
-    subject = f"{doc_label} {invoice_no}"
+    subject = f"{doc_label} {no}"
 
     body = f"""
     <div class="content">
         <h1 class="title">{doc_label}</h1>
 
-        <span class="status status-paid">Apmokėta</span>
+        <span class="status status-paid">{tr(lang, "paid_status")}</span>
 
-        <p class="text">Sveiki,</p>
+        <p class="text">{tr(lang, "hello")}</p>
         <p class="text">
-            Siunčiame {doc_label_acc.lower()} Nr. {invoice_no} iš {seller_name}, išrašytą po apmokėtos išankstinės sąskaitos.
+            {tr(lang, "paid_text", doc=doc_title_acc(lang, invoice.invoice_type), no=no, seller=seller)}
         </p>
 
-        <p class="note">PDF sąskaita prisegta šiame laiške.</p>
-        <p class="note">Papildomo apmokėjimo nereikia.</p>
+        <p class="note">{tr(lang, "pdf_attached")}</p>
+        <p class="note">{tr(lang, "no_more_payment")}</p>
     </div>
-    {_render_footer(invoice)}
+    {_render_footer(invoice, lang)}
     """
 
-    return subject, _wrap_html(body, title=subject)
+    return subject, _wrap_html(body, title=subject, lang=lang)
 
 
 # ────────────────────────────────────────────────
@@ -420,26 +418,26 @@ def _render_invoice_paid(invoice):
 # ────────────────────────────────────────────────
 
 def _render_invoice_info(invoice):
-    invoice_no = _invoice_no(invoice)
-    seller_name = invoice.seller_name or "DokSkenas"
-    doc_label = "PVM sąskaita faktūra" if _is_pvm_invoice(invoice) else "Sąskaita faktūra"
+    lang = get_lang(invoice)
+    no, seller = _invoice_no(invoice), _seller(invoice)
+    doc_label = doc_title(lang, invoice.invoice_type)
 
-    subject = f"{doc_label} {invoice_no}"
+    subject = f"{doc_label} {no}"
 
     body = f"""
     <div class="content">
         <h1 class="title">{doc_label}</h1>
 
-        <p class="text">Sveiki,</p>
-        <p class="text">Siunčiame {doc_label.lower()} Nr. {invoice_no} iš {seller_name}.</p>
+        <p class="text">{tr(lang, "hello")}</p>
+        <p class="text">{tr(lang, "info_text", doc=doc_title_acc(lang, invoice.invoice_type), no=no, seller=seller)}</p>
 
-        <p class="note">PDF sąskaita prisegta šiame laiške.</p>
-        {_render_view_button(invoice)}
+        <p class="note">{tr(lang, "pdf_attached")}</p>
+        {_render_view_button(invoice, lang)}
     </div>
-    {_render_footer(invoice)}
+    {_render_footer(invoice, lang)}
     """
 
-    return subject, _wrap_html(body, title=subject)
+    return subject, _wrap_html(body, title=subject, lang=lang)
 
 
 # ────────────────────────────────────────────────
@@ -447,44 +445,36 @@ def _render_invoice_info(invoice):
 # ────────────────────────────────────────────────
 
 def _render_reminder_before(invoice, days_until_due):
-    invoice_no = _invoice_no(invoice)
-    seller_name = invoice.seller_name or "DokSkenas"
+    lang = get_lang(invoice)
+    no, seller = _invoice_no(invoice), _seller(invoice)
 
-    is_last_day = days_until_due == 0
-    if is_last_day:
-        subject = f"Paskutinė diena apmokėti sąskaitą {invoice_no}"
-        first_text = (
-            f"Pranešame, kad šiandien yra paskutinė diena apmokėti sąskaitą Nr. {invoice_no} iš {seller_name}."
-        )
-        second_text = "Prašome atlikti apmokėjimą šiandien."
+    if days_until_due == 0:
+        subject = tr(lang, "reminder_last_subject", no=no)
+        first_text = tr(lang, "reminder_last_text", no=no, seller=seller)
+        second_text = tr(lang, "reminder_last_text2")
     else:
-        subject = f"Priminimas apmokėti sąskaitą {invoice_no}"
-        first_text = f"Primename, kad sąskaita Nr. {invoice_no} iš {seller_name} dar neapmokėta."
+        subject = tr(lang, "reminder_subject", no=no)
+        first_text = tr(lang, "reminder_text", no=no, seller=seller)
         second_text = None
-
-    meta_lines = [
-        ("Suma", _fmt_amount(invoice.amount_with_vat, invoice.currency or "EUR")),
-        ("Apmokėti iki", _fmt_date(invoice.due_date)),
-    ]
 
     second_paragraph = f'<p class="note">{second_text}</p>' if second_text else ""
 
     body = f"""
     <div class="content">
-        <h1 class="title">Priminimas dėl apmokėjimo</h1>
+        <h1 class="title">{tr(lang, "reminder_title")}</h1>
 
-        <p class="text">Sveiki,</p>
+        <p class="text">{tr(lang, "hello")}</p>
         <p class="text">{first_text}</p>
 
-        {_render_meta_block(meta_lines)}
+        {_render_meta_block(_amount_meta(invoice, lang))}
         {second_paragraph}
-        <p class="note">Sąskaitą galite peržiūrėti ir apmokėti paspaudę žemiau.</p>
-        {_render_payment_button(invoice)}
+        <p class="note">{tr(lang, "view_and_pay_text")}</p>
+        {_render_payment_button(invoice, lang)}
     </div>
-    {_render_footer(invoice)}
+    {_render_footer(invoice, lang)}
     """
 
-    return subject, _wrap_html(body, title=subject)
+    return subject, _wrap_html(body, title=subject, lang=lang)
 
 
 # ────────────────────────────────────────────────
@@ -492,36 +482,29 @@ def _render_reminder_before(invoice, days_until_due):
 # ────────────────────────────────────────────────
 
 def _render_reminder_overdue(invoice, days_overdue):
-    invoice_no = _invoice_no(invoice)
-    seller_name = invoice.seller_name or "DokSkenas"
+    lang = get_lang(invoice)
+    no, seller = _invoice_no(invoice), _seller(invoice)
 
-    subject = f"Turite pradelstą sąskaitą {invoice_no}"
-
-    meta_lines = [
-        ("Suma", _fmt_amount(invoice.amount_with_vat, invoice.currency or "EUR")),
-        ("Apmokėjimo terminas iki", _fmt_date(invoice.due_date)),
-    ]
+    subject = tr(lang, "overdue_subject", no=no)
 
     body = f"""
     <div class="content">
-        <h1 class="title">Pradelsta sąskaita</h1>
+        <h1 class="title">{tr(lang, "overdue_title")}</h1>
 
-        <span class="status status-overdue">Mokėjimas vėluoja</span>
+        <span class="status status-overdue">{tr(lang, "overdue_status")}</span>
 
-        <p class="text">Sveiki,</p>
-        <p class="text">
-            Pranešame, kad sąskaitos Nr. {invoice_no} iš {seller_name} apmokėjimo terminas jau yra pasibaigęs.
-        </p>
+        <p class="text">{tr(lang, "hello")}</p>
+        <p class="text">{tr(lang, "overdue_text", no=no, seller=seller)}</p>
 
-        {_render_meta_block(meta_lines)}
-        <p class="note">Sąskaitą prašome apmokėti kuo greičiau.</p>
-        <p class="note">Sąskaitą galite peržiūrėti ir apmokėti paspaudę žemiau.</p>
-        {_render_payment_button(invoice)}
+        {_render_meta_block(_amount_meta(invoice, lang, "due_term"))}
+        <p class="note">{tr(lang, "pay_asap")}</p>
+        <p class="note">{tr(lang, "view_and_pay_text")}</p>
+        {_render_payment_button(invoice, lang)}
     </div>
-    {_render_footer(invoice)}
+    {_render_footer(invoice, lang)}
     """
 
-    return subject, _wrap_html(body, title=subject)
+    return subject, _wrap_html(body, title=subject, lang=lang)
 
 
 # ────────────────────────────────────────────────
@@ -529,36 +512,29 @@ def _render_reminder_overdue(invoice, days_overdue):
 # ────────────────────────────────────────────────
 
 def _render_manual_reminder(invoice):
-    invoice_no = _invoice_no(invoice)
-    seller_name = invoice.seller_name or "DokSkenas"
+    lang = get_lang(invoice)
+    no, seller = _invoice_no(invoice), _seller(invoice)
 
-    subject = f"Turite pradelstą sąskaitą {invoice_no}"
-
-    meta_lines = [
-        ("Suma", _fmt_amount(invoice.amount_with_vat, invoice.currency or "EUR")),
-        ("Apmokėjimo terminas iki", _fmt_date(invoice.due_date)),
-    ]
+    subject = tr(lang, "overdue_subject", no=no)
 
     body = f"""
     <div class="content">
-        <h1 class="title">Priminimas dėl apmokėjimo</h1>
+        <h1 class="title">{tr(lang, "reminder_title")}</h1>
 
-        <span class="status status-overdue">Mokėjimas negautas</span>
+        <span class="status status-overdue">{tr(lang, "manual_status")}</span>
 
-        <p class="text">Sveiki,</p>
-        <p class="text">
-            Primename, kad vis dar negavome apmokėjimo už sąskaitą Nr. {invoice_no} iš {seller_name}.
-        </p>
+        <p class="text">{tr(lang, "hello")}</p>
+        <p class="text">{tr(lang, "manual_text", no=no, seller=seller)}</p>
 
-        {_render_meta_block(meta_lines)}
-        <p class="note">Sąskaitą prašome apmokėti kuo greičiau.</p>
-        <p class="note">Sąskaitą galite peržiūrėti ir apmokėti paspaudę žemiau.</p>
-        {_render_payment_button(invoice)}
+        {_render_meta_block(_amount_meta(invoice, lang, "due_term"))}
+        <p class="note">{tr(lang, "pay_asap")}</p>
+        <p class="note">{tr(lang, "view_and_pay_text")}</p>
+        {_render_payment_button(invoice, lang)}
     </div>
-    {_render_footer(invoice)}
+    {_render_footer(invoice, lang)}
     """
 
-    return subject, _wrap_html(body, title=subject)
+    return subject, _wrap_html(body, title=subject, lang=lang)
 
 
 # ────────────────────────────────────────────────
@@ -566,26 +542,26 @@ def _render_manual_reminder(invoice):
 # ────────────────────────────────────────────────
 
 def _render_cancelled(invoice):
-    invoice_no = _invoice_no(invoice)
-    seller_name = invoice.seller_name or "DokSkenas"
+    lang = get_lang(invoice)
+    no, seller = _invoice_no(invoice), _seller(invoice)
 
-    subject = f"Sąskaita Nr. {invoice_no} atšaukta"
+    subject = tr(lang, "cancelled_subject", no=no)
 
     body = f"""
     <div class="content">
-        <h1 class="title">Sąskaita atšaukta</h1>
+        <h1 class="title">{tr(lang, "cancelled_title")}</h1>
 
-        <span class="status status-cancelled">Atšaukta</span>
+        <span class="status status-cancelled">{tr(lang, "cancelled_status")}</span>
 
-        <p class="text">Sveiki,</p>
-        <p class="text">Informuojame, kad sąskaita Nr. {invoice_no} iš {seller_name} yra atšaukta.</p>
+        <p class="text">{tr(lang, "hello")}</p>
+        <p class="text">{tr(lang, "cancelled_text", no=no, seller=seller)}</p>
 
-        <p class="note">Prašome šios sąskaitos neapmokėti ir ignoruoti ankstesnius priminimus.</p>
+        <p class="note">{tr(lang, "cancelled_note")}</p>
     </div>
-    {_render_footer(invoice)}
+    {_render_footer(invoice, lang)}
     """
 
-    return subject, _wrap_html(body, title=subject)
+    return subject, _wrap_html(body, title=subject, lang=lang)
 
 
 # ════════════════════════════════════════════════════════════

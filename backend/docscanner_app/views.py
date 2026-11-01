@@ -7896,7 +7896,7 @@ class CreateCreditInvoiceView(APIView):
         "buyer_iban", "buyer_swift", "buyer_is_person",
         "buyer_vat_val", "buyer_extra_info", "buyer_delivery_address",
         # Суммы
-        "currency", "pvm_tipas", "vat_percent",
+        "currency", "language", "pvm_tipas", "vat_percent",
         "amount_wo_vat", "vat_amount", "amount_with_vat",
         "invoice_discount_with_vat", "invoice_discount_wo_vat",
         "delivery_fee", "separate_vat", "doc_96_str",
@@ -7981,9 +7981,11 @@ class CreateCreditInvoiceView(APIView):
         credit.due_date = None  # у кредитной нет срока оплаты
 
         # Примечание со ссылкой на оригинал
-        credit.note = (
-            f"Kreditinė sąskaita pagal {original.full_number}"
-            f"{(' nuo ' + str(original.invoice_date)) if original.invoice_date else ''}"
+        from .utils.invoice_i18n import get_lang, credit_note_text
+        credit.note = credit_note_text(
+            get_lang(original),
+            original.full_number,
+            str(original.invoice_date) if original.invoice_date else None,
         )
 
         # Korespondencija: pardavimo pajamų sąskaita (5000/5001) ir PVM sąskaita

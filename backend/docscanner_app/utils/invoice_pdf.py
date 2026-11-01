@@ -7,6 +7,7 @@ import io
 import os
 import platform
 from decimal import Decimal, ROUND_HALF_UP
+from functools import partial
 import logging
 
 from reportlab.lib import colors
@@ -25,6 +26,9 @@ from reportlab.pdfbase.pdfmetrics import registerFontFamily
 
 
 from django.core.files.base import ContentFile
+
+from .invoice_i18n import get_lang, tr, doc_title, unit_label
+from .amount_in_words import amount_in_words
 
 logger = logging.getLogger("docscanner_app")
 
@@ -421,130 +425,14 @@ def _make_logo(logo_path, max_width_mm=25, max_height_mm=10):
 
 
 # ════════════════════════════════════════════════════════════
-# Suma žodžiais
-# ════════════════════════════════════════════════════════════
-
-def _sum_in_words_lt(amount, currency="EUR"):
-    def ones(n):
-        return ["", "vienas", "du", "trys", "keturi", "penki",
-                "šeši", "septyni", "aštuoni", "devyni"][n]
-
-    def teens(n):
-        return ["dešimt", "vienuolika", "dvylika", "trylika", "keturiolika",
-                "penkiolika", "šešiolika", "septyniolika", "aštuoniolika", "devyniolika"][n]
-
-    def tens(n):
-        return ["", "dešimt", "dvidešimt", "trisdešimt", "keturiasdešimt",
-                "penkiasdešimt", "šešiasdešimt", "septyniasdešimt",
-                "aštuoniasdešimt", "devyniasdešimt"][n]
-
-    def hundreds_word(n):
-        if n == 1:
-            return "šimtas"
-        return ["", "šimtas", "du šimtai", "trys šimtai", "keturi šimtai",
-                "penki šimtai", "šeši šimtai", "septyni šimtai",
-                "aštuoni šimtai", "devyni šimtai"][n]
-
-    def below_thousand(n):
-        if n == 0:
-            return ""
-        parts = []
-        if n >= 100:
-            parts.append(hundreds_word(n // 100))
-            n %= 100
-        if 10 <= n <= 19:
-            parts.append(teens(n - 10))
-            return " ".join(parts)
-        if n >= 20:
-            parts.append(tens(n // 10))
-            n %= 10
-        if n > 0:
-            parts.append(ones(n))
-        return " ".join(parts)
-
-    def thousand_form(n):
-        if n % 100 in range(11, 20):
-            return "tūkstančių"
-        last = n % 10
-        if last == 1:
-            return "tūkstantis"
-        if last == 0:
-            return "tūkstančių"
-        return "tūkstančiai"
-
-    def million_form(n):
-        if n % 100 in range(11, 20):
-            return "milijonų"
-        last = n % 10
-        if last == 1:
-            return "milijonas"
-        if last == 0:
-            return "milijonų"
-        return "milijonai"
-
-    def currency_form(n, unit="eur"):
-        if unit == "eur":
-            if n % 100 in range(11, 20) or n % 10 == 0:
-                return "eurų"
-            if n % 10 == 1:
-                return "euras"
-            return "eurai"
-        else:
-            if n % 100 in range(11, 20) or n % 10 == 0:
-                return "centų"
-            if n % 10 == 1:
-                return "centas"
-            return "centai"
-
-    amount = Decimal(str(amount)).quantize(
-        Decimal("0.01"),
-        rounding=ROUND_HALF_UP,
-    )
-    is_negative = amount < 0
-    amount = abs(amount)
-
-    euros = int(amount)
-    cents = int(round((amount - euros) * 100))
-
-    parts = []
-    if euros == 0:
-        parts.append("nulis")
-    else:
-        e = euros
-        if e >= 1_000_000:
-            m = e // 1_000_000
-            parts.append(f"{below_thousand(m)} {million_form(m)}")
-            e %= 1_000_000
-        if e >= 1000:
-            t = e // 1000
-            parts.append(f"{below_thousand(t)} {thousand_form(t)}")
-            e %= 1000
-        if e > 0:
-            parts.append(below_thousand(e))
-
-    parts.append(currency_form(euros))
-
-    if cents > 0:
-        parts.append(f"{below_thousand(cents)} {currency_form(cents, 'cent')}")
-
-    text = " ".join(p for p in parts if p).strip()
-
-    if not text:
-        return ""
-
-    if is_negative:
-        text = f"minus {text}"
-
-    return text[0].upper() + text[1:]
-
-
-# ════════════════════════════════════════════════════════════
 # Page numbering — footer font matched to preview (6.5px → 5pt)
 # ════════════════════════════════════════════════════════════
 
 class _PageCountCanvas(Canvas):
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, inv_lang="lt", **kwargs):
+        # "lang" kwarg naudoja pats ReportLab (PDF metaduomenys) — todėl inv_lang
         super().__init__(*args, **kwargs)
+        self._lang = inv_lang
         self._saved_page_states = []
 
     def showPage(self):
@@ -563,7 +451,7 @@ class _PageCountCanvas(Canvas):
         self.saveState()
         self.setFont("InvFont", 5)
         self.setFillColor(C_FOOTER)
-        text = f"Puslapis {self._pageNumber}/{page_count}"
+        text = tr(self._lang, "page", n=self._pageNumber, total=page_count)
         self.drawRightString(PAGE_W - MARGIN_H, 10 * mm, text)
         self.restoreState()
 
@@ -581,7 +469,7 @@ class _WatermarkPageCountCanvas(_PageCountCanvas):
     def _draw_branding_footer(self):
         self.saveState()
         y = 10 * mm
-        text = "Sąskaita sugeneruota su"
+        text = tr(self._lang, "generated_with")
         self.setFont("InvFont", 5)
         self.setFillColor(colors.HexColor("#999999"))
 
@@ -602,7 +490,7 @@ class _WatermarkPageCountCanvas(_PageCountCanvas):
                 mask="auto",
             )
         else:
-            fallback = "Sąskaita sugeneruota DokSkenas"
+            fallback = tr(self._lang, "generated_fallback")
             self.drawString(MARGIN_H, y, fallback)
 
         self.restoreState()
@@ -611,14 +499,6 @@ class _WatermarkPageCountCanvas(_PageCountCanvas):
 # ════════════════════════════════════════════════════════════
 # Build elements
 # ════════════════════════════════════════════════════════════
-
-TYPE_LABELS = {
-    "isankstine": "IŠANKSTINĖ SĄSKAITA FAKTŪRA",
-    "pvm_saskaita": "PVM SĄSKAITA FAKTŪRA",
-    "saskaita": "SĄSKAITA FAKTŪRA",
-    "kreditine": "KREDITINĖ SĄSKAITA FAKTŪRA",
-}
-
 
 def _separator():
     sep = Table([["", ""]], colWidths=[CONTENT_W, 0])
@@ -632,12 +512,17 @@ def _separator():
 
 def _build_header(inv, logo_path, s):
     elements = []
-    doc_title = TYPE_LABELS.get(inv.invoice_type, "SĄSKAITA FAKTŪRA")
-    series_line = f"Serija {inv.document_series or ''} Nr. {inv.document_number or ''}"
+    lang = get_lang(inv)
+    title = doc_title(lang, inv.invoice_type, upper=True)
+    series_line = tr(
+        lang, "series_line",
+        series=inv.document_series or "",
+        number=inv.document_number or "",
+    )
 
-    right_lines = [f"Data: <b>{_format_date(inv.invoice_date)}</b>"]
+    right_lines = [f"{tr(lang, 'date')}: <b>{_format_date(inv.invoice_date)}</b>"]
     if inv.due_date:
-        right_lines.append(f"Apmokėti iki: <b>{_format_date(inv.due_date)}</b>")
+        right_lines.append(f"{tr(lang, 'due')}: <b>{_format_date(inv.due_date)}</b>")
     right_content = [Paragraph(line, s["date_label"]) for line in right_lines]
 
     # ── Logo ─────────────────────────────────────────────
@@ -666,24 +551,24 @@ def _build_header(inv, logo_path, s):
         elements.append(Spacer(1, 4 * mm))
 
         # Centered title block
-        elements.append(Paragraph(doc_title, s["doc_type"]))
+        elements.append(Paragraph(title, s["doc_type"]))
         elements.append(Spacer(1, 1 * mm))
         elements.append(Paragraph(series_line, s["doc_number"]))
         if inv.order_number:
             elements.append(Spacer(1, 0.5 * mm))
-            elements.append(Paragraph(f"Užsakymo Nr.: {inv.order_number}", s["order_number"]))
+            elements.append(Paragraph(f"{tr(lang, 'order_no')}: {inv.order_number}", s["order_number"]))
         elements.append(Spacer(1, 5 * mm))
     else:
         # No logo layout
         left_content = [
-            Paragraph(doc_title, s["doc_type_left"]),
+            Paragraph(title, s["doc_type_left"]),
             Spacer(1, 1 * mm),
             Paragraph(series_line, s["doc_number_left"]),
         ]
         if inv.order_number:
             left_content.append(Spacer(1, 0.5 * mm))
             left_content.append(
-                Paragraph(f"Užsakymo Nr.: {inv.order_number}", s["order_number_left"])
+                Paragraph(f"{tr(lang, 'order_no')}: {inv.order_number}", s["order_number_left"])
             )
 
         data = [[left_content, right_content]]
@@ -713,8 +598,10 @@ def _info_line(label, value, s):
 
 
 def _build_parties(inv, s):
+    lang = get_lang(inv)
+
     def party_block(title, person_type, name, code, vat, address, phone, email, bank, iban, swift, delivery_address="", extra_info=""):
-        code_label = "Asmens / ind. veiklos kodas" if person_type == "fizinis" else "Įm. kodas"
+        code_label = tr(lang, "code_person") if person_type == "fizinis" else tr(lang, "code_company")
 
         lines = [
             Paragraph(
@@ -733,21 +620,21 @@ def _build_parties(inv, s):
         if code:
             lines.append(_info_line(code_label, code, s))
         if vat:
-            lines.append(_info_line("PVM kodas", vat, s))
+            lines.append(_info_line(tr(lang, "vat_code"), vat, s))
         if address:
-            lines.append(_info_line("Adresas", address, s))
+            lines.append(_info_line(tr(lang, "address"), address, s))
         if phone:
-            lines.append(_info_line("Tel.", phone, s))
+            lines.append(_info_line(tr(lang, "phone"), phone, s))
         if email:
-            lines.append(_info_line("El. paštas", email, s))
+            lines.append(_info_line(tr(lang, "email"), email, s))
         if bank:
-            lines.append(_info_line("Bankas", bank, s))
+            lines.append(_info_line(tr(lang, "bank"), bank, s))
         if iban:
             lines.append(_info_line("IBAN", iban, s))
         if swift:
             lines.append(_info_line("SWIFT", swift, s))
         if delivery_address:
-            lines.append(_info_line("Pristatymo adresas", delivery_address, s))
+            lines.append(_info_line(tr(lang, "delivery_address"), delivery_address, s))
         if extra_info:
             lines.append(Spacer(1, 1 * mm))
             lines.append(Paragraph(
@@ -764,8 +651,8 @@ def _build_parties(inv, s):
         return lines
 
     seller = party_block(
-        "PARDAVĖJAS",
-        getattr(inv, "seller_type", "juridinis"),
+        tr(lang, "seller"),
+        "fizinis" if getattr(inv, "seller_is_person", False) else "juridinis",
         inv.seller_name,
         inv.seller_id,
         inv.seller_vat_code,
@@ -778,8 +665,8 @@ def _build_parties(inv, s):
         extra_info=getattr(inv, "seller_extra_info", "") or "",
     )
     buyer = party_block(
-        "PIRKĖJAS",
-        getattr(inv, "buyer_type", "juridinis"),
+        tr(lang, "buyer"),
+        "fizinis" if getattr(inv, "buyer_is_person", False) else "juridinis",
         inv.buyer_name,
         inv.buyer_id,
         inv.buyer_vat_code,
@@ -806,6 +693,7 @@ def _build_parties(inv, s):
 
 
 def _build_line_items(inv, s):
+    lang = get_lang(inv)
     is_pvm = inv.pvm_tipas == "taikoma"
     is_credit = inv.invoice_type == "kreditine"
     currency = inv.currency or "EUR"
@@ -826,26 +714,28 @@ def _build_line_items(inv, s):
         vat_rates.add(float(vat_pct))
     multi_vat = is_pvm and len(vat_rates) > 1
 
-    price_header = f"Kaina {currency}<br/>be PVM" if is_pvm else f"Kaina {currency}"
-    sum_header = f"Suma {currency}<br/>be PVM" if is_pvm else f"Suma {currency}"
+    wo_vat = f"<br/>{tr(lang, 'th_wo_vat')}" if is_pvm else ""
+    price_header = f"{tr(lang, 'th_price')} {currency}{wo_vat}"
+    sum_header = f"{tr(lang, 'th_sum')} {currency}{wo_vat}"
 
-    headers = [("Nr.", "th", 8 * mm)]
-    headers.append(("Pavadinimas", "th_left", None))
+    # (raktas, antraštė, stilius, plotis)
+    headers = [("no", tr(lang, "th_no"), "th", 8 * mm)]
+    headers.append(("name", tr(lang, "th_name"), "th_left", None))
     if has_code:
-        headers.append(("Kodas", "th_left", None))
-    headers.append(("Kiekis", "th_right", 12 * mm))
-    headers.append(("Mato<br/>vnt.", "th", 16 * mm))
-    headers.append((price_header, "th_right", 24 * mm))
+        headers.append(("code", tr(lang, "th_code"), "th_left", None))
+    headers.append(("qty", tr(lang, "th_qty"), "th_right", 12 * mm))
+    headers.append(("unit", tr(lang, "th_unit").replace(" ", "<br/>", 1), "th", 16 * mm))
+    headers.append(("price", price_header, "th_right", 24 * mm))
     if has_discount:
-        headers.append(("Nuol.", "th_right", 16 * mm))
-    headers.append((sum_header, "th_right", 24 * mm))
+        headers.append(("discount", tr(lang, "th_discount"), "th_right", 16 * mm))
+    headers.append(("sum", sum_header, "th_right", 24 * mm))
     if multi_vat:
-        headers.append(("PVM %", "th_right", 14 * mm))
+        headers.append(("vat_pct", tr(lang, "th_vat_pct"), "th_right", 14 * mm))
 
     min_name_w = 42 * mm
     min_code_w = 26 * mm if has_code else 0
 
-    fixed_w = sum(h[2] for h in headers if h[2] is not None)
+    fixed_w = sum(h[3] for h in headers if h[3] is not None)
     remaining_w = CONTENT_W - fixed_w
 
     if has_code:
@@ -858,20 +748,13 @@ def _build_line_items(inv, s):
             name_w = remaining_w - code_w
 
         if name_w < min_name_w:
-            adjusted_headers = []
-            for title, style, width in headers:
-                if title.startswith("Kaina ") and width is not None:
-                    width = 21 * mm
-                elif title.startswith("Suma ") and width is not None:
-                    width = 21 * mm
-                elif title == "Nuol." and width is not None:
-                    width = 14 * mm
-                elif title == "Kiekis" and width is not None:
-                    width = 11 * mm
-                adjusted_headers.append((title, style, width))
-            headers = adjusted_headers
+            narrow = {"price": 21 * mm, "sum": 21 * mm, "discount": 14 * mm, "qty": 11 * mm}
+            headers = [
+                (key, title, style, narrow.get(key, width) if width is not None else None)
+                for key, title, style, width in headers
+            ]
 
-            fixed_w = sum(h[2] for h in headers if h[2] is not None)
+            fixed_w = sum(h[3] for h in headers if h[3] is not None)
             remaining_w = CONTENT_W - fixed_w
             code_w = max(min_code_w, remaining_w * 0.38)
             name_w = remaining_w - code_w
@@ -881,7 +764,7 @@ def _build_line_items(inv, s):
 
         col_widths = []
         flex_index = 0
-        for _, _, width in headers:
+        for _, _, _, width in headers:
             if width is not None:
                 col_widths.append(width)
             else:
@@ -889,9 +772,9 @@ def _build_line_items(inv, s):
                 flex_index += 1
     else:
         name_w = remaining_w
-        col_widths = [h[2] if h[2] is not None else name_w for h in headers]
+        col_widths = [h[3] if h[3] is not None else name_w for h in headers]
 
-    header_row = [Paragraph(h[0], s[h[1]]) for h in headers]
+    header_row = [Paragraph(h[1], s[h[2]]) for h in headers]
     data = [header_row]
 
     for idx, li in enumerate(lines, 1):
@@ -932,14 +815,14 @@ def _build_line_items(inv, s):
 
         name_text = li.prekes_pavadinimas or ""
         if li.prekes_barkodas:
-            name_text += f'<br/><font size="5.5" color="{C_LABEL.hexval()}">Barkodas: {li.prekes_barkodas}</font>'
+            name_text += f'<br/><font size="5.5" color="{C_LABEL.hexval()}">{tr(lang, "barcode")}: {li.prekes_barkodas}</font>'
         row.append(Paragraph(name_text, s["td"]))
 
         if has_code:
             row.append(Paragraph(f'<font size="7.2">{li.prekes_kodas or ""}</font>', s["td"]))
 
         row.append(Paragraph(_fmt_qty(qty), s["td_right"]))
-        row.append(Paragraph(li.unit or "", s["td_center"]))
+        row.append(Paragraph(unit_label(lang, li.unit), s["td_center"]))
         row.append(Paragraph(_fmt_price(price), s["td_right"]))
 
         if has_discount:
@@ -987,6 +870,7 @@ def _build_totals(inv, s):
     - vat_amount
     - amount_with_vat
     """
+    lang = get_lang(inv)
     is_pvm = inv.pvm_tipas == "taikoma"
     is_credit = inv.invoice_type == "kreditine"
     sym = _sym(inv.currency or "EUR")
@@ -1154,20 +1038,20 @@ def _build_totals(inv, s):
     if abs(inv_discount) > ZERO:
         rows.append((
             "normal",
-            "Tarpinė suma:",
+            f"{tr(lang, 'subtotal')}:",
             f"{_fmt(sum_net)} {sym}",
         ))
 
         rows.append((
             "normal",
-            "Nuolaida:",
+            f"{tr(lang, 'discount')}:",
             f"-{_fmt(abs(inv_discount))} {sym}",
         ))
 
     if is_pvm:
         rows.append((
             "normal",
-            "Suma be PVM:",
+            f"{tr(lang, 'sum_wo_vat')}:",
             f"{_fmt(base)} {sym}",
         ))
 
@@ -1181,7 +1065,7 @@ def _build_totals(inv, s):
 
                 rows.append((
                     "indent",
-                    f"Apmokestinama PVM {rate}%:",
+                    f"{tr(lang, 'taxable', rate=rate)}:",
                     f"{_fmt(group['net'])} {sym}",
                 ))
 
@@ -1195,7 +1079,7 @@ def _build_totals(inv, s):
 
                     rows.append((
                         "normal",
-                        f"PVM {rate}%:",
+                        f"{tr(lang, 'vat_rate', rate=rate)}:",
                         f"{_fmt(group['vat'])} {sym}",
                     ))
         else:
@@ -1213,19 +1097,19 @@ def _build_totals(inv, s):
 
             rows.append((
                 "normal",
-                f"PVM {formatted_rate}%:",
+                f"{tr(lang, 'vat_rate', rate=formatted_rate)}:",
                 f"{_fmt(vat_total)} {sym}",
             ))
 
         rows.append((
             "grand",
-            "Suma su PVM:",
+            f"{tr(lang, 'sum_with_vat')}:",
             f"{_fmt(grand)} {sym}",
         ))
     else:
         rows.append((
             "grand",
-            "Bendra suma:",
+            f"{tr(lang, 'total')}:",
             f"{_fmt(base)} {sym}",
         ))
 
@@ -1288,7 +1172,7 @@ def _build_totals(inv, s):
     if inv.note:
         left_parts.append(
             Paragraph(
-                "PASTABA:",
+                f"{tr(lang, 'note')}:",
                 s["note_title"],
             )
         )
@@ -1300,11 +1184,15 @@ def _build_totals(inv, s):
             )
         )
 
-    if (
-        is_pvm
-        and grand
-        and (inv.currency or "EUR") == "EUR"
-    ):
+    # Suma žodžiais — visoms valiutoms, pagal sąskaitos kalbą
+    words_amount = grand if is_pvm else base
+    words_text = (
+        amount_in_words(words_amount, inv.currency or "EUR", lang)
+        if words_amount
+        else ""
+    )
+
+    if words_text:
         if left_parts:
             left_parts.append(
                 Spacer(1, 5 * mm)
@@ -1312,7 +1200,7 @@ def _build_totals(inv, s):
 
         left_parts.append(
             Paragraph(
-                "SUMA ŽODŽIAIS:",
+                f"{tr(lang, 'in_words')}:",
                 s["note_title"],
             )
         )
@@ -1321,7 +1209,7 @@ def _build_totals(inv, s):
         )
         left_parts.append(
             Paragraph(
-                _sum_in_words_lt(grand),
+                words_text,
                 s["words"],
             )
         )
@@ -1359,6 +1247,7 @@ def _build_note(inv, s):
 
 
 def _build_signatures(inv, s):
+    lang = get_lang(inv)
     issued_by = getattr(inv, "issued_by", "") or ""
     received_by = getattr(inv, "received_by", "") or ""
 
@@ -1371,13 +1260,13 @@ def _build_signatures(inv, s):
     )
 
     left = [
-        Paragraph("SĄSKAITĄ IŠRAŠĖ:", s["note_title"]),
+        Paragraph(f"{tr(lang, 'issued_by')}:", s["note_title"]),
         Spacer(1, 1 * mm),
         Paragraph(issued_by, value_style),
     ]
 
     right = [
-        Paragraph("SĄSKAITĄ PRIĖMĖ:", s["note_title"]),
+        Paragraph(f"{tr(lang, 'received_by')}:", s["note_title"]),
         Spacer(1, 1 * mm),
         Paragraph(received_by, value_style),
     ]
@@ -1404,6 +1293,7 @@ def _build_footer(inv, s):
 def generate_invoice_pdf(invoice, logo_path=None, watermark=False):
     _register_fonts()
     s = _styles()
+    lang = get_lang(invoice)
     buffer = io.BytesIO()
 
     doc = SimpleDocTemplate(
@@ -1413,7 +1303,7 @@ def generate_invoice_pdf(invoice, logo_path=None, watermark=False):
         bottomMargin=MARGIN_V + 5 * mm,
         leftMargin=MARGIN_H,
         rightMargin=MARGIN_H,
-        title=f"Sąskaita {invoice.document_series}{invoice.document_number}",
+        title=f"{tr(lang, 'pdf_title')} {invoice.document_series}{invoice.document_number}",
         author=invoice.seller_name or "DokSkenas",
     )
 
@@ -1426,10 +1316,8 @@ def generate_invoice_pdf(invoice, logo_path=None, watermark=False):
     elements.extend(_build_signatures(invoice, s))
     elements.extend(_build_footer(invoice, s))
 
-    if watermark:
-        doc.build(elements, canvasmaker=_WatermarkPageCountCanvas)
-    else:
-        doc.build(elements, canvasmaker=_PageCountCanvas)
+    canvas_cls = _WatermarkPageCountCanvas if watermark else _PageCountCanvas
+    doc.build(elements, canvasmaker=partial(canvas_cls, inv_lang=lang))
 
     pdf_bytes = buffer.getvalue()
     buffer.close()
@@ -1454,7 +1342,7 @@ def save_invoice_pdf(invoice):
         logger.error("[PDF] watermark check failed: %s", e)
 
     pdf_bytes = generate_invoice_pdf(invoice, logo_path=logo_path, watermark=watermark)
-    filename = f"saskaita_{invoice.document_series}{invoice.document_number}.pdf"
+    filename = f"{tr(get_lang(invoice), 'file_prefix')}_{invoice.document_series}{invoice.document_number}.pdf"
     invoice.pdf_file.save(filename, ContentFile(pdf_bytes), save=False)
     invoice.save(update_fields=["pdf_file"])
     return pdf_bytes

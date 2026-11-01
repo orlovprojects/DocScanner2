@@ -145,6 +145,7 @@ export default function PayrollSettingsDialog({ open, onClose, onSaved, tab: ini
   const persist = async () => {
     await payrollApi.saveSettings({
       ...f,
+      du_start: f.du_start || undefined,
       ...(pw.edas ? { edas_password: pw.edas } : {}),
       ...(pw.vmi ? { vmi_ws_password: pw.vmi } : {}),
     });

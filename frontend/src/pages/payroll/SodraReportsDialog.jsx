@@ -36,7 +36,7 @@ export default function SodraReportsDialog({ open, onClose, onDone, s15Only = fa
       if (apply) onDone?.();
     } catch (e) { setError(apiError(e)); } finally { setBusy(false); }
   };
-  const pick = (fs) => { if (!fs?.length) return; setFiles(fs); send(fs, false); };
+  const pick = (fs) => { if (!fs?.length) return; const arr = Array.from(fs); setFiles(arr); send(arr, false); };
   const fix = async (i, issue) => {
     try {
       await payrollApi.sodraFix(issue.employee_id, issue.fix.field, issue.fix.value);

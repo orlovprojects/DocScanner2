@@ -2644,6 +2644,7 @@ class InvoiceDetailSerializer(InvoiceScanPreviewMixin, serializers.ModelSerializ
             "buyer_delivery_address",
             # Суммы
             "currency",
+            "language",
             "pvm_tipas",
             "vat_percent",
             "amount_wo_vat",
@@ -2879,6 +2880,7 @@ class InvoiceWriteSerializer(serializers.ModelSerializer):
             "buyer_delivery_address",
             # Суммы
             "currency",
+            "language",
             "pvm_tipas",
             "vat_percent",
             "amount_wo_vat",
@@ -3234,6 +3236,7 @@ class InvoicePublicSerializer(serializers.ModelSerializer):
             "buyer_address",
             # Суммы
             "currency",
+            "language",
             "pvm_tipas",
             "vat_percent",
             "amount_wo_vat",
@@ -3401,7 +3404,7 @@ class RecurringInvoiceDetailSerializer(serializers.ModelSerializer):
         fields = [
             "id", "uuid", "status",
             # Что создавать
-            "invoice_type", "document_series", "currency",
+            "invoice_type", "document_series", "currency", "language",
             "pvm_tipas", "vat_percent", "note", "order_number",
             "public_link_enabled",
             # Расписание
@@ -3446,7 +3449,7 @@ class RecurringInvoiceWriteSerializer(serializers.ModelSerializer):
         model = RecurringInvoice
         fields = [
             # Что создавать
-            "invoice_type", "document_series", "currency",
+            "invoice_type", "document_series", "currency", "language",
             "pvm_tipas", "vat_percent", "note", "order_number",
             "public_link_enabled",
             # Расписание

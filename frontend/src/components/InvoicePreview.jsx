@@ -19,6 +19,8 @@ import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import {
   PARDAVIMO_OPTIONS, getAccountName,
 } from './KorespondencijaComponents';
+import { amountInWords } from './amountInWords';
+import { getInvoiceLang, tr, docTitle, unitLabel } from './invoiceI18n';
 
 // ═══════════════════════════════════════════════════════════
 // Helpers
@@ -54,15 +56,11 @@ const fmtQty = (value) => {
 
 const fmtDate = (d) => d || '';
 
-const getCodeLabel = (personType) =>
-  personType === 'fizinis' ? 'Asmens / ind. veiklos kodas' : 'Įm. kodas';
+// Editoriaus duomenyse yra *_type ('fizinis'), iš API ateina *_is_person
+const isPerson = (type, flag) => (type ? type === 'fizinis' : Boolean(flag));
 
-const TYPE_LABELS = {
-  isankstine: 'IŠANKSTINĖ SĄSKAITA FAKTŪRA',
-  pvm_saskaita: 'PVM SĄSKAITA FAKTŪRA',
-  saskaita: 'SĄSKAITA FAKTŪRA',
-  kreditine: 'KREDITINĖ SĄSKAITA FAKTŪRA',
-};
+const getCodeLabel = (lang, person) =>
+  tr(lang, person ? 'code_person' : 'code_company');
 
 const CURRENCY_SYMBOLS = {
   EUR: '€', USD: '$', GBP: '£', PLN: 'zł', CZK: 'Kč', CHF: 'CHF',
@@ -70,63 +68,6 @@ const CURRENCY_SYMBOLS = {
 };
 
 const getSym = (c) => CURRENCY_SYMBOLS[c] || c;
-
-// ═══════════════════════════════════════════════════════════
-// Lithuanian amount in words
-// ═══════════════════════════════════════════════════════════
-
-const sumInWordsLt = (amount) => {
-  const ones = ['', 'vienas', 'du', 'trys', 'keturi', 'penki', 'šeši', 'septyni', 'aštuoni', 'devyni'];
-  const teens = ['dešimt', 'vienuolika', 'dvylika', 'trylika', 'keturiolika', 'penkiolika', 'šešiolika', 'septyniolika', 'aštuoniolika', 'devyniolika'];
-  const tens = ['', 'dešimt', 'dvidešimt', 'trisdešimt', 'keturiasdešimt', 'penkiasdešimt', 'šešiasdešimt', 'septyniasdešimt', 'aštuoniasdešimt', 'devyniasdešimt'];
-  const hundreds = ['', 'šimtas', 'du šimtai', 'trys šimtai', 'keturi šimtai', 'penki šimtai', 'šeši šimtai', 'septyni šimtai', 'aštuoni šimtai', 'devyni šimtai'];
-
-  const belowThousand = (n) => {
-    if (!n) return '';
-    const parts = [];
-    if (n >= 100) { parts.push(hundreds[Math.floor(n / 100)]); n %= 100; }
-    if (n >= 10 && n <= 19) { parts.push(teens[n - 10]); return parts.join(' '); }
-    if (n >= 20) { parts.push(tens[Math.floor(n / 10)]); n %= 10; }
-    if (n > 0) parts.push(ones[n]);
-    return parts.join(' ');
-  };
-  const thousandForm = (n) => { if (n % 100 >= 11 && n % 100 <= 19) return 'tūkstančių'; const l = n % 10; return l === 1 ? 'tūkstantis' : l === 0 ? 'tūkstančių' : 'tūkstančiai'; };
-  const millionForm = (n) => { if (n % 100 >= 11 && n % 100 <= 19) return 'milijonų'; const l = n % 10; return l === 1 ? 'milijonas' : l === 0 ? 'milijonų' : 'milijonai'; };
-  const currencyForm = (n, unit = 'eur') => {
-    if (unit === 'eur') { if ((n % 100 >= 11 && n % 100 <= 19) || n % 10 === 0) return 'eurų'; return n % 10 === 1 ? 'euras' : 'eurai'; }
-    if ((n % 100 >= 11 && n % 100 <= 19) || n % 10 === 0) return 'centų'; return n % 10 === 1 ? 'centas' : 'centai';
-  };
-
-  const numericAmount = Number(amount || 0);
-  const isNegative = numericAmount < 0;
-
-  const rounded = Math.round(
-    (Math.abs(numericAmount) + Number.EPSILON) * 100
-  ) / 100;
-  const euros = Math.floor(rounded);
-  const cents = Math.round((rounded - euros) * 100);
-  const parts = [];
-  if (euros === 0) { parts.push('nulis'); }
-  else {
-    let e = euros;
-    if (e >= 1_000_000) { const m = Math.floor(e / 1_000_000); parts.push(`${belowThousand(m)} ${millionForm(m)}`); e %= 1_000_000; }
-    if (e >= 1000) { const t = Math.floor(e / 1000); parts.push(`${belowThousand(t)} ${thousandForm(t)}`); e %= 1000; }
-    if (e > 0) parts.push(belowThousand(e));
-  }
-  parts.push(currencyForm(euros));
-  if (cents > 0) parts.push(`${belowThousand(cents)} ${currencyForm(cents, 'cent')}`);
-  const text = parts.filter(Boolean).join(' ').trim();
-
-  if (!text) {
-    return '';
-  }
-
-  if (isNegative) {
-    return `Minus ${text}`;
-  }
-
-  return text.charAt(0).toUpperCase() + text.slice(1);
-  };
 
 // ═══════════════════════════════════════════════════════════
 // Small components
@@ -444,6 +385,15 @@ const InvoiceA4 = forwardRef(({
   const visibleRows = computedLines.slice(rowStart, Math.min(rowEnd, computedLines.length));
   const hasLogo = Boolean(logoUrl);
 
+  const lang = getInvoiceLang(inv);
+  const title = docTitle(lang, inv.invoice_type, true);
+  const seriesLine = tr(lang, 'series_line', { series: inv.document_series || '', number: inv.document_number || '' });
+  const sellerCodeLabel = getCodeLabel(lang, isPerson(inv.seller_type, inv.seller_is_person));
+  const buyerCodeLabel = getCodeLabel(lang, isPerson(inv.buyer_type, inv.buyer_is_person));
+  const wordsAmount = isPvm ? grand : base;
+  const wordsText = wordsAmount ? amountInWords(wordsAmount, currency, lang) : '';
+  const fmtRate = (r) => (Number.isInteger(r) ? r : fmt(r));
+
   return (
     <Box
       ref={ref}
@@ -479,28 +429,28 @@ const InvoiceA4 = forwardRef(({
                     <Box component="img" src={logoUrl} alt="Logo" sx={{ maxWidth: 90, maxHeight: 36, objectFit: 'contain', display: 'block' }} />
                   </Box>
                   <Box sx={{ textAlign: 'right' }}>
-                    <Typography sx={{ fontSize: 8.8, color: '#555', lineHeight: 1.35 }}>Data: <strong>{fmtDate(inv.invoice_date)}</strong></Typography>
-                    {inv.due_date && <Typography sx={{ fontSize: 8.8, color: '#555', lineHeight: 1.35 }}>Apmokėti iki: <strong>{fmtDate(inv.due_date)}</strong></Typography>}
+                    <Typography sx={{ fontSize: 8.8, color: '#555', lineHeight: 1.35 }}>{tr(lang, 'date')}: <strong>{fmtDate(inv.invoice_date)}</strong></Typography>
+                    {inv.due_date && <Typography sx={{ fontSize: 8.8, color: '#555', lineHeight: 1.35 }}>{tr(lang, 'due')}: <strong>{fmtDate(inv.due_date)}</strong></Typography>}
                   </Box>
                 </Box>
                 <Divider sx={{ borderColor: '#333', borderWidth: 1.2, mt: 1.8 }} />
                 <Box sx={{ textAlign: 'center', mt: 2, mb: 0.5 }}>
-                  <Typography sx={{ fontSize: 17, fontWeight: 800, color: '#222', lineHeight: 1.1 }}>{TYPE_LABELS[inv.invoice_type] || 'SĄSKAITA FAKTŪRA'}</Typography>
-                  <Typography sx={{ fontSize: 12, fontWeight: 700, color: '#555', mt: 0.4 }}>Serija {inv.document_series || ''} Nr. {inv.document_number || ''}</Typography>
-                  {inv.order_number && <Typography sx={{ fontSize: 8.2, color: '#888', mt: 0.35, lineHeight: 1.2 }}>Užsakymo Nr.: {inv.order_number}</Typography>}
+                  <Typography sx={{ fontSize: 17, fontWeight: 800, color: '#222', lineHeight: 1.1 }}>{title}</Typography>
+                  <Typography sx={{ fontSize: 12, fontWeight: 700, color: '#555', mt: 0.4 }}>{seriesLine}</Typography>
+                  {inv.order_number && <Typography sx={{ fontSize: 8.2, color: '#888', mt: 0.35, lineHeight: 1.2 }}>{tr(lang, 'order_no')}: {inv.order_number}</Typography>}
                 </Box>
               </>
             ) : (
               <>
                 <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                   <Box>
-                    <Typography sx={{ fontSize: 17, fontWeight: 800, color: '#222', lineHeight: 1.1 }}>{TYPE_LABELS[inv.invoice_type] || 'SĄSKAITA FAKTŪRA'}</Typography>
-                    <Typography sx={{ fontSize: 12, fontWeight: 700, color: '#222', mt: 0.4 }}>Serija {inv.document_series || ''} Nr. {inv.document_number || ''}</Typography>
-                    {inv.order_number && <Typography sx={{ fontSize: 9, color: '#888', mt: 0.35, lineHeight: 1.2 }}>Užsakymo Nr.: {inv.order_number}</Typography>}
+                    <Typography sx={{ fontSize: 17, fontWeight: 800, color: '#222', lineHeight: 1.1 }}>{title}</Typography>
+                    <Typography sx={{ fontSize: 12, fontWeight: 700, color: '#222', mt: 0.4 }}>{seriesLine}</Typography>
+                    {inv.order_number && <Typography sx={{ fontSize: 9, color: '#888', mt: 0.35, lineHeight: 1.2 }}>{tr(lang, 'order_no')}: {inv.order_number}</Typography>}
                   </Box>
                   <Box sx={{ textAlign: 'right' }}>
-                    <Typography sx={{ fontSize: 8.8, color: '#555', lineHeight: 1.35 }}>Data: <strong>{fmtDate(inv.invoice_date)}</strong></Typography>
-                    {inv.due_date && <Typography sx={{ fontSize: 8.8, color: '#555', lineHeight: 1.35 }}>Apmokėti iki: <strong>{fmtDate(inv.due_date)}</strong></Typography>}
+                    <Typography sx={{ fontSize: 8.8, color: '#555', lineHeight: 1.35 }}>{tr(lang, 'date')}: <strong>{fmtDate(inv.invoice_date)}</strong></Typography>
+                    {inv.due_date && <Typography sx={{ fontSize: 8.8, color: '#555', lineHeight: 1.35 }}>{tr(lang, 'due')}: <strong>{fmtDate(inv.due_date)}</strong></Typography>}
                   </Box>
                 </Box>
                 <Divider sx={{ borderColor: '#333', borderWidth: 1.2, mt: 1.8 }} />
@@ -513,14 +463,14 @@ const InvoiceA4 = forwardRef(({
         {showParties && (
           <Box data-section="parties" sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4, mb: '46px' }}>
             <Box sx={{ minWidth: 0 }}>
-              <Typography sx={{ fontSize: 9, fontWeight: 700, color: '#888', mb: 0.4, letterSpacing: 0.5 }}>PARDAVĖJAS</Typography>
+              <Typography sx={{ fontSize: 9, fontWeight: 700, color: '#888', mb: 0.4, letterSpacing: 0.5 }}>{tr(lang, 'seller')}</Typography>
               <Typography sx={{ fontSize: 12.5, fontWeight: 700, mb: 0.5 }}>{inv.seller_name || ''}</Typography>
-              {inv.seller_id && <InfoRow label={getCodeLabel(inv.seller_type)} value={inv.seller_id} />}
-              {inv.seller_vat_code && <InfoRow label="PVM kodas" value={inv.seller_vat_code} />}
-              {inv.seller_address && <InfoRow label="Adresas" value={inv.seller_address} />}
-              {inv.seller_phone && <InfoRow label="Tel." value={inv.seller_phone} />}
-              {inv.seller_email && <InfoRow label="El. paštas" value={inv.seller_email} />}
-              {inv.seller_bank_name && <InfoRow label="Bankas" value={inv.seller_bank_name} />}
+              {inv.seller_id && <InfoRow label={sellerCodeLabel} value={inv.seller_id} />}
+              {inv.seller_vat_code && <InfoRow label={tr(lang, 'vat_code')} value={inv.seller_vat_code} />}
+              {inv.seller_address && <InfoRow label={tr(lang, 'address')} value={inv.seller_address} />}
+              {inv.seller_phone && <InfoRow label={tr(lang, 'phone')} value={inv.seller_phone} />}
+              {inv.seller_email && <InfoRow label={tr(lang, 'email')} value={inv.seller_email} />}
+              {inv.seller_bank_name && <InfoRow label={tr(lang, 'bank')} value={inv.seller_bank_name} />}
               {inv.seller_iban && <InfoRow label="IBAN" value={inv.seller_iban} />}
               {inv.seller_swift && <InfoRow label="SWIFT" value={inv.seller_swift} />}
               {inv.seller_extra_info && (
@@ -530,17 +480,17 @@ const InvoiceA4 = forwardRef(({
               )}
             </Box>
             <Box sx={{ minWidth: 0 }}>
-              <Typography sx={{ fontSize: 9, fontWeight: 700, color: '#888', mb: 0.4, letterSpacing: 0.5 }}>PIRKĖJAS</Typography>
+              <Typography sx={{ fontSize: 9, fontWeight: 700, color: '#888', mb: 0.4, letterSpacing: 0.5 }}>{tr(lang, 'buyer')}</Typography>
               <Typography sx={{ fontSize: 12.5, fontWeight: 700, mb: 0.5 }}>{inv.buyer_name || ''}</Typography>
-              {inv.buyer_id && <InfoRow label={getCodeLabel(inv.buyer_type)} value={inv.buyer_id} />}
-              {inv.buyer_vat_code && <InfoRow label="PVM kodas" value={inv.buyer_vat_code} />}
-              {inv.buyer_address && <InfoRow label="Adresas" value={inv.buyer_address} />}
-              {inv.buyer_phone && <InfoRow label="Tel." value={inv.buyer_phone} />}
-              {inv.buyer_email && <InfoRow label="El. paštas" value={inv.buyer_email} />}
-              {inv.buyer_bank_name && <InfoRow label="Bankas" value={inv.buyer_bank_name} />}
+              {inv.buyer_id && <InfoRow label={buyerCodeLabel} value={inv.buyer_id} />}
+              {inv.buyer_vat_code && <InfoRow label={tr(lang, 'vat_code')} value={inv.buyer_vat_code} />}
+              {inv.buyer_address && <InfoRow label={tr(lang, 'address')} value={inv.buyer_address} />}
+              {inv.buyer_phone && <InfoRow label={tr(lang, 'phone')} value={inv.buyer_phone} />}
+              {inv.buyer_email && <InfoRow label={tr(lang, 'email')} value={inv.buyer_email} />}
+              {inv.buyer_bank_name && <InfoRow label={tr(lang, 'bank')} value={inv.buyer_bank_name} />}
               {inv.buyer_iban && <InfoRow label="IBAN" value={inv.buyer_iban} />}
               {inv.buyer_swift && <InfoRow label="SWIFT" value={inv.buyer_swift} />}
-              {inv.buyer_delivery_address && <InfoRow label="Pristatymo adresas" value={inv.buyer_delivery_address} />}
+              {inv.buyer_delivery_address && <InfoRow label={tr(lang, 'delivery_address')} value={inv.buyer_delivery_address} />}
               {inv.buyer_extra_info && (
                 <Typography sx={{ fontSize: 9.5, color: '#555', mt: 0.8, whiteSpace: 'pre-wrap', lineHeight: 1.45 }}>
                   {inv.buyer_extra_info}
@@ -556,19 +506,19 @@ const InvoiceA4 = forwardRef(({
             <Table size="small" sx={{ '& td, & th': { borderLeft: 'none', borderRight: 'none' }, tableLayout: 'fixed', width: '100%' }}>
               <TableHead data-section="table-head">
                 <TableRow>
-                  <TableCell sx={{ ...cellHeadSx, width: 34 }}>Nr.</TableCell>
-                  <TableCell sx={cellHeadSx}>Pavadinimas</TableCell>
-                  {hasCode && <TableCell sx={{ ...cellHeadSx, width: 86 }}>Kodas</TableCell>}
-                  <TableCell sx={{ ...cellHeadSx, textAlign: 'right', width: 52 }}>Kiekis</TableCell>
-                  <TableCell sx={{ ...cellHeadSx, textAlign: 'center', width: 60 }}>Mato vnt.</TableCell>
+                  <TableCell sx={{ ...cellHeadSx, width: 34 }}>{tr(lang, 'th_no')}</TableCell>
+                  <TableCell sx={cellHeadSx}>{tr(lang, 'th_name')}</TableCell>
+                  {hasCode && <TableCell sx={{ ...cellHeadSx, width: 86 }}>{tr(lang, 'th_code')}</TableCell>}
+                  <TableCell sx={{ ...cellHeadSx, textAlign: 'right', width: 52 }}>{tr(lang, 'th_qty')}</TableCell>
+                  <TableCell sx={{ ...cellHeadSx, textAlign: 'center', width: 60 }}>{tr(lang, 'th_unit')}</TableCell>
                   <TableCell sx={{ ...cellHeadSx, textAlign: 'right', width: 90 }}>
-                    <Box sx={{ lineHeight: 1.15 }}><div>Kaina {currency}</div>{isPvm && <div>be PVM</div>}</Box>
+                    <Box sx={{ lineHeight: 1.15 }}><div>{tr(lang, 'th_price')} {currency}</div>{isPvm && <div>{tr(lang, 'th_wo_vat')}</div>}</Box>
                   </TableCell>
-                  {hasDiscount && <TableCell sx={{ ...cellHeadSx, textAlign: 'right', width: 60 }}>Nuol.</TableCell>}
+                  {hasDiscount && <TableCell sx={{ ...cellHeadSx, textAlign: 'right', width: 60 }}>{tr(lang, 'th_discount')}</TableCell>}
                   <TableCell sx={{ ...cellHeadSx, textAlign: 'right', width: 90 }}>
-                    <Box sx={{ lineHeight: 1.15 }}><div>Suma {currency}</div>{isPvm && <div>be PVM</div>}</Box>
+                    <Box sx={{ lineHeight: 1.15 }}><div>{tr(lang, 'th_sum')} {currency}</div>{isPvm && <div>{tr(lang, 'th_wo_vat')}</div>}</Box>
                   </TableCell>
-                  {isPvm && multiVat && <TableCell sx={{ ...cellHeadSx, textAlign: 'right', width: 52 }}>PVM %</TableCell>}
+                  {isPvm && multiVat && <TableCell sx={{ ...cellHeadSx, textAlign: 'right', width: 52 }}>{tr(lang, 'th_vat_pct')}</TableCell>}
                 </TableRow>
               </TableHead>
               <TableBody>
@@ -589,11 +539,11 @@ const InvoiceA4 = forwardRef(({
                     </TableCell>
                     <TableCell sx={cellTextSx}>
                       <Typography sx={{ fontSize: 10.5, color: '#222', lineHeight: 1.35 }}>{li.prekes_pavadinimas || ''}</Typography>
-                      {li.prekes_barkodas && <Typography sx={{ fontSize: 8.5, color: '#888', lineHeight: 1.2, mt: 0.2 }}>Barkodas: {li.prekes_barkodas}</Typography>}
+                      {li.prekes_barkodas && <Typography sx={{ fontSize: 8.5, color: '#888', lineHeight: 1.2, mt: 0.2 }}>{tr(lang, 'barcode')}: {li.prekes_barkodas}</Typography>}
                     </TableCell>
                     {hasCode && <TableCell sx={cellTextSx}><Typography sx={{ fontSize: 9.5, lineHeight: 1.2 }}>{li.prekes_kodas || ''}</Typography></TableCell>}
                     <TableCell sx={{ ...cellSx, textAlign: 'right' }}>{fmtQty(li.qty)}</TableCell>
-                    <TableCell sx={{ ...cellSx, textAlign: 'center' }}>{li.unit || ''}</TableCell>
+                    <TableCell sx={{ ...cellSx, textAlign: 'center' }}>{unitLabel(lang, li.unit)}</TableCell>
                     <TableCell sx={{ ...cellSx, textAlign: 'right' }}>{fmtPrice(li.price)}</TableCell>
                     {hasDiscount && (
                       <TableCell sx={{ ...cellSx, textAlign: 'right' }}>
@@ -614,15 +564,15 @@ const InvoiceA4 = forwardRef(({
           <Box data-section="totals" sx={{ display: 'grid', gridTemplateColumns: '1fr 280px', gap: 3, mb: 3, alignItems: 'start' }}>
             <Box sx={{ minWidth: 0 }}>
               {inv.note && (
-                <Box sx={{ mb: isPvm && currency === 'EUR' ? 2.5 : 0 }}>
-                  <Typography sx={{ fontSize: 9.5, fontWeight: 700, color: '#888', mb: 0.4 }}>PASTABA:</Typography>
+                <Box sx={{ mb: wordsText ? 2.5 : 0 }}>
+                  <Typography sx={{ fontSize: 9.5, fontWeight: 700, color: '#888', mb: 0.4 }}>{tr(lang, 'note')}:</Typography>
                   <Typography sx={{ fontSize: 10.5, color: '#222', whiteSpace: 'pre-wrap', wordBreak: 'break-word', overflowWrap: 'anywhere', lineHeight: 1.45 }}>{inv.note}</Typography>
                 </Box>
               )}
-              {isPvm && grand && currency === 'EUR' && (
+              {wordsText && (
                 <Box>
-                  <Typography sx={{ fontSize: 9.5, fontWeight: 700, color: '#888', mb: 0.4 }}>SUMA ŽODŽIAIS:</Typography>
-                  <Typography sx={{ fontSize: 10, color: '#555', lineHeight: 1.45 }}>{sumInWordsLt(grand)}</Typography>
+                  <Typography sx={{ fontSize: 9.5, fontWeight: 700, color: '#888', mb: 0.4 }}>{tr(lang, 'in_words')}:</Typography>
+                  <Typography sx={{ fontSize: 10, color: '#555', lineHeight: 1.45 }}>{wordsText}</Typography>
                 </Box>
               )}
             </Box>
@@ -630,26 +580,26 @@ const InvoiceA4 = forwardRef(({
               {Math.abs(invoiceDiscount) > 0 && (
               <>
                 <TotalRow
-                  label="Tarpinė suma:"
+                  label={`${tr(lang, 'subtotal')}:`}
                   value={`${fmt(sumNet)} ${sym}`}
                 />
 
                 <TotalRow
-                  label="Nuolaida:"
+                  label={`${tr(lang, 'discount')}:`}
                   value={`-${fmt(Math.abs(invoiceDiscount))} ${sym}`}
                 />
               </>
             )}
               {isPvm ? (
                 <>
-                  <TotalRow label="Suma be PVM:" value={`${fmt(base)} ${sym}`} />
+                  <TotalRow label={`${tr(lang, 'sum_wo_vat')}:`} value={`${fmt(base)} ${sym}`} />
                   {multiVat ? (
-                    <>{vatBreakdown.map((g) => <TotalRow key={`b-${g.rate}`} indent label={`Apmokestinama PVM ${Number.isInteger(g.rate) ? g.rate : fmt(g.rate)}%:`} value={`${fmt(g.net)} ${sym}`} />)}
-                    {vatBreakdown.filter((g) => g.rate > 0).map((g) => <TotalRow key={`v-${g.rate}`} label={`PVM ${Number.isInteger(g.rate) ? g.rate : fmt(g.rate)}%:`} value={`${fmt(g.vat)} ${sym}`} />)}</>
-                  ) : <TotalRow label={`PVM ${vatBreakdown[0]?.rate ?? inv.vat_percent}%:`} value={`${fmt(vatTotal)} ${sym}`} />}
-                  <TotalRow label="Suma su PVM:" value={`${fmt(grand)} ${sym}`} bold />
+                    <>{vatBreakdown.map((g) => <TotalRow key={`b-${g.rate}`} indent label={`${tr(lang, 'taxable', { rate: fmtRate(g.rate) })}:`} value={`${fmt(g.net)} ${sym}`} />)}
+                    {vatBreakdown.filter((g) => g.rate > 0).map((g) => <TotalRow key={`v-${g.rate}`} label={`${tr(lang, 'vat_rate', { rate: fmtRate(g.rate) })}:`} value={`${fmt(g.vat)} ${sym}`} />)}</>
+                  ) : <TotalRow label={`${tr(lang, 'vat_rate', { rate: vatBreakdown[0]?.rate ?? inv.vat_percent })}:`} value={`${fmt(vatTotal)} ${sym}`} />}
+                  <TotalRow label={`${tr(lang, 'sum_with_vat')}:`} value={`${fmt(grand)} ${sym}`} bold />
                 </>
-              ) : <TotalRow label="Bendra suma:" value={`${fmt(base)} ${sym}`} bold />}
+              ) : <TotalRow label={`${tr(lang, 'total')}:`} value={`${fmt(base)} ${sym}`} bold />}
             </Box>
           </Box>
         )}
@@ -657,8 +607,8 @@ const InvoiceA4 = forwardRef(({
         {/* ── Signatures ── */}
         {showSignatures && (
           <Box data-section="signatures" sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4, mt: 1 }}>
-            <SignatureBlock label="SĄSKAITĄ IŠRAŠĖ:" name={inv.issued_by} />
-            <SignatureBlock label="SĄSKAITĄ PRIĖMĖ:" name={inv.received_by} />
+            <SignatureBlock label={`${tr(lang, 'issued_by')}:`} name={inv.issued_by} />
+            <SignatureBlock label={`${tr(lang, 'received_by')}:`} name={inv.received_by} />
           </Box>
         )}
       </Box>
@@ -675,13 +625,13 @@ const InvoiceA4 = forwardRef(({
       }}>
         {watermark ? (
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-            <Typography sx={{ fontSize: 10, color: '#999' }}>Sąskaita sugeneruota su</Typography>
+            <Typography sx={{ fontSize: 10, color: '#999' }}>{tr(lang, 'generated_with')}</Typography>
             <Box component="img" src="/dokskenas_logo_for_invoice.jpg" alt="DokSkenas" sx={{ height: 28, opacity: 0.6 }}
               onError={(e) => { e.target.style.display = 'none'; if (e.target.nextElementSibling) e.target.nextElementSibling.style.display = 'inline'; }} />
             <Typography sx={{ fontSize: 10, color: '#999', fontWeight: 700, display: 'none' }}>DokSkenas</Typography>
           </Box>
         ) : <Box />}
-        <Typography sx={{ fontSize: 6.5, color: '#aaa' }}>Puslapis {pageNumber}/{totalPages}</Typography>
+        <Typography sx={{ fontSize: 6.5, color: '#aaa' }}>{tr(lang, 'page', { n: pageNumber, total: totalPages })}</Typography>
       </Box>
     </Box>
   );

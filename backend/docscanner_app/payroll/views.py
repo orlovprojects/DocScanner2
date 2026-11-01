@@ -556,6 +556,11 @@ class PayrollRunViewSet(PayrollCompanyMixin, viewsets.ReadOnlyModelViewSet):
     def sdup(self, request, pk=None):
         """SDUP JSON: ?download=1 - failas, kitaip {data, errors} peržiūrai."""
         run = self.get_object()
+        from .billing import PlanRequired, require_payroll_access
+        try:
+            require_payroll_access(run.company, "SDUP generavimui")
+        except PlanRequired as e:
+            raise ValidationError({"detail": str(e)})
         data, errors = payroll_services.sdup_for_run(run)
         if request.query_params.get("download"):
             if errors:

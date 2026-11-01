@@ -10,6 +10,8 @@ from reportlab.platypus import Flowable
 
 from django.conf import settings
 
+from ..utils.invoice_i18n import get_lang, tr
+
 
 # ════════════════════════════════════════════════════════════
 # PDF — ReportLab Flowable button for header
@@ -31,8 +33,9 @@ class PaymentButton(Flowable):
             )
     """
 
-    def __init__(self, url, amount, currency, width=36 * mm, height=11 * mm):
+    def __init__(self, url, amount, currency, width=36 * mm, height=11 * mm, lang="lt"):
         super().__init__()
+        self.lang = lang
         self.url = url
         self.amount = amount
         self.currency = currency
@@ -56,7 +59,7 @@ class PaymentButton(Flowable):
         c.drawCentredString(
             self.width / 2,
             self.height - 4.5 * mm,
-            "Apmokėti sąskaitą",
+            tr(self.lang, "pay_button"),
         )
 
         # ── Amount ──
@@ -96,6 +99,7 @@ def render_payment_button_html(invoice, payment_url: str = "") -> str:
     from .invoice_email_service import _frontend_invoice_url
     public_url = _frontend_invoice_url(invoice)
 
+    lang = get_lang(invoice)
     amount = invoice.amount_with_vat
     currency = getattr(invoice, "currency", "EUR") or "EUR"
 
@@ -113,7 +117,7 @@ def render_payment_button_html(invoice, payment_url: str = "") -> str:
     <div style="text-align: center; margin: 28px 0 8px;">
         <p style="color: #666; font-size: 14px; margin: 0 0 16px;
                   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
-            S&#261;skait&#261; galite per&#382;i&#363;r&#279;ti ir apmok&#279;ti paspaud&#281; mygtuk&#261; &#382;emiau.
+            {tr(lang, "view_and_pay_text")}
         </p>
         <a href="{public_url}"
            target="_blank"
@@ -127,7 +131,7 @@ def render_payment_button_html(invoice, payment_url: str = "") -> str:
                   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
                   display: inline-block;
                   ">
-            Per&#382;i&#363;r&#279;ti ir apmok&#279;ti s&#261;skait&#261;{amount_line}
+            {tr(lang, "view_pay_button")}{amount_line}
         </a>
     </div>
     """

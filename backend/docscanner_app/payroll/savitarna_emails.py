@@ -63,10 +63,13 @@ def send_password_reset(account, url):
     )
 
 
-def notify_accountant(employee, subject, text):
-    user = getattr(employee.company, "user", None)
-    return _send(getattr(user, "email", ""), subject, text)
+# def notify_accountant(employee, subject, text):
+#     user = getattr(employee.company, "user", None)
+#     return _send(getattr(user, "email", ""), subject, text)
 
+def notify_accountant(employee, subject, text):
+    """Buhalteriui laiškų nesiunčiam - nauji prašymai ir pakeitimai matomi DokSkenas."""
+    return False
 
 def _company_name(company):
     for n in ("name", "company_name"):

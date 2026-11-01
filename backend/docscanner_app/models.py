@@ -2674,6 +2674,13 @@ class InvoiceSettings(models.Model):
 # 3. Invoice — счёт
 # ────────────────────────────────────────────────────────────
 
+INVOICE_LANGUAGE_CHOICES = [
+    ("lt", "Lietuvių"),
+    ("en", "English"),
+    ("pl", "Polski"),
+    ("de", "Deutsch"),
+]
+
 class Invoice(models.Model):
     """
     Исходящий счёт.
@@ -2793,6 +2800,7 @@ class Invoice(models.Model):
 
     # ---- Суммы ----
     currency = models.CharField(max_length=20, default="EUR")
+    language = models.CharField("Sąskaitos kalba", max_length=5, choices=INVOICE_LANGUAGE_CHOICES, default="lt")
     pvm_tipas = models.CharField(max_length=20, choices=PVM_TYPE_CHOICES, default="taikoma")
     vat_percent = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True, default=21)
     amount_wo_vat = models.DecimalField(max_digits=12, decimal_places=4, null=True, blank=True)
@@ -3627,6 +3635,7 @@ class RecurringInvoice(models.Model):
     )
     document_series = models.CharField("Serija", max_length=50, blank=True, default="")
     currency = models.CharField(max_length=20, default="EUR")
+    language = models.CharField("Sąskaitos kalba", max_length=5, choices=INVOICE_LANGUAGE_CHOICES, default="lt")
 
     pvm_tipas = models.CharField(
         max_length=20,

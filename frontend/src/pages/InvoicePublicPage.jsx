@@ -24,6 +24,7 @@ import {
 } from '@mui/icons-material';
 import { invoicingApi } from '../api/invoicingApi';
 import { PaginatedInvoice, usePrintInvoice } from '../components/InvoicePreview';
+import { getInvoiceLang } from '../components/invoiceI18n';
 
 // Helpers
 
@@ -41,12 +42,144 @@ const fmtFullNumber = (series, number) => {
   return series || number || '-';
 };
 
+// ── Puslapio tekstai pagal sąskaitos kalbą ──
+const PAGE_TEXTS = {
+  lt: {
+    status_pending: 'Laukiama apmokėjimo',
+    status_partial: 'Dalinai apmokėta',
+    status_paid: 'Apmokėta',
+    status_cancelled: 'Atšaukta',
+    copied: 'Nukopijuota!',
+    copy: 'Kopijuoti',
+    not_found: 'Sąskaita nerasta arba nėra vieša.',
+    load_failed: 'Nepavyko įkelti sąskaitos.',
+    error_hint: 'Jei manote, kad tai klaida, susisiekite su sąskaitos siuntėju.',
+    pdf_failed: 'Nepavyko atsisiųsti PDF',
+    remaining: 'Liko apmokėti',
+    amount_due: 'Mokėtina suma',
+    due: 'Apmokėti iki',
+    paid_so_far: 'Sumokėta',
+    pay_button: 'Apmokėti sąskaitą',
+    bank_transfer: 'Apmokėjimas bankiniu pavedimu',
+    details_below: 'Rekvizitai pateikti žemiau',
+    is_paid: 'Ši sąskaita yra apmokėta',
+    is_cancelled: 'Ši sąskaita buvo atšaukta.',
+    payment_details: 'Mokėjimo rekvizitai',
+    recipient: 'Gavėjas',
+    reference: 'Mokėjimo paskirtis',
+    bank: 'Bankas',
+    print: 'Spausdinti',
+    download: 'Atsisiųsti PDF',
+    file_prefix: 'saskaita',
+    footer_before: 'Ši sąskaita sugeneruota naudojant',
+    footer_after: 'sąskaitų išrašymo platformą',
+  },
+  en: {
+    status_pending: 'Awaiting payment',
+    status_partial: 'Partially paid',
+    status_paid: 'Paid',
+    status_cancelled: 'Cancelled',
+    copied: 'Copied!',
+    copy: 'Copy',
+    not_found: 'Invoice not found or not publicly available.',
+    load_failed: 'Failed to load the invoice.',
+    error_hint: 'If you think this is a mistake, please contact the sender of the invoice.',
+    pdf_failed: 'Failed to download PDF',
+    remaining: 'Remaining balance',
+    amount_due: 'Amount due',
+    due: 'Due date',
+    paid_so_far: 'Paid',
+    pay_button: 'Pay invoice',
+    bank_transfer: 'Payment by bank transfer',
+    details_below: 'Payment details below',
+    is_paid: 'This invoice has been paid',
+    is_cancelled: 'This invoice has been cancelled.',
+    payment_details: 'Payment details',
+    recipient: 'Recipient',
+    reference: 'Payment reference',
+    bank: 'Bank',
+    print: 'Print',
+    download: 'Download PDF',
+    file_prefix: 'invoice',
+    footer_before: 'This invoice was generated with the',
+    footer_after: 'invoicing platform',
+  },
+  pl: {
+    status_pending: 'Oczekuje na płatność',
+    status_partial: 'Częściowo opłacona',
+    status_paid: 'Opłacona',
+    status_cancelled: 'Anulowana',
+    copied: 'Skopiowano!',
+    copy: 'Kopiuj',
+    not_found: 'Nie znaleziono faktury lub nie została ona udostępniona.',
+    load_failed: 'Nie udało się załadować faktury.',
+    error_hint: 'Jeśli uważają Państwo, że to pomyłka, prosimy o kontakt z wystawcą faktury.',
+    pdf_failed: 'Nie udało się pobrać PDF',
+    remaining: 'Pozostało do zapłaty',
+    amount_due: 'Kwota do zapłaty',
+    due: 'Termin płatności',
+    paid_so_far: 'Zapłacono',
+    pay_button: 'Zapłać fakturę',
+    bank_transfer: 'Płatność przelewem bankowym',
+    details_below: 'Dane do przelewu poniżej',
+    is_paid: 'Ta faktura została opłacona',
+    is_cancelled: 'Ta faktura została anulowana.',
+    payment_details: 'Dane do przelewu',
+    recipient: 'Odbiorca',
+    reference: 'Tytuł przelewu',
+    bank: 'Bank',
+    print: 'Drukuj',
+    download: 'Pobierz PDF',
+    file_prefix: 'faktura',
+    footer_before: 'Ta faktura została wygenerowana za pomocą systemu',
+    footer_after: ', platformy do wystawiania faktur.',
+  },
+  de: {
+    status_pending: 'Zahlung ausstehend',
+    status_partial: 'Teilweise bezahlt',
+    status_paid: 'Bezahlt',
+    status_cancelled: 'Storniert',
+    copied: 'Kopiert!',
+    copy: 'Kopieren',
+    not_found: 'Die Rechnung wurde nicht gefunden oder ist nicht öffentlich zugänglich.',
+    load_failed: 'Rechnung konnte nicht geladen werden.',
+    error_hint: 'Wenn Sie glauben, dass dies ein Fehler ist, wenden Sie sich bitte an den Absender der Rechnung.',
+    pdf_failed: 'PDF konnte nicht heruntergeladen werden',
+    remaining: 'Noch zu zahlen',
+    amount_due: 'Fälliger Betrag',
+    due: 'Fällig am',
+    paid_so_far: 'Bezahlt',
+    pay_button: 'Rechnung bezahlen',
+    bank_transfer: 'Zahlung per Banküberweisung',
+    details_below: 'Bankverbindung siehe unten',
+    is_paid: 'Diese Rechnung wurde bezahlt',
+    is_cancelled: 'Diese Rechnung wurde storniert.',
+    payment_details: 'Zahlungsdaten',
+    recipient: 'Empfänger',
+    reference: 'Verwendungszweck',
+    bank: 'Bank',
+    print: 'Drucken',
+    download: 'PDF herunterladen',
+    file_prefix: 'rechnung',
+    footer_before: 'Diese Rechnung wurde mit der Rechnungsplattform',
+    footer_after: 'erstellt',
+  },
+};
+
+// Kol sąskaita neįkelta (klaidos atvejis) — pagal naršyklės kalbą, kitaip lt
+const browserLang = () => {
+  const l = String((typeof navigator !== 'undefined' && navigator.language) || 'lt').slice(0, 2).toLowerCase();
+  return PAGE_TEXTS[l] ? l : 'lt';
+};
+
+const pt = (lang, key) => (PAGE_TEXTS[lang] || PAGE_TEXTS.lt)[key] ?? PAGE_TEXTS.lt[key];
+
 const STATUS_CONFIG = {
-  issued: { label: 'Laukiama apmokėjimo', bg: '#FFF4E5', color: '#B45309', border: '#F6D7B8' },
-  sent: { label: 'Laukiama apmokėjimo', bg: '#FFF4E5', color: '#B45309', border: '#F6D7B8' },
-  partially_paid: { label: 'Dalinai apmokėta', bg: '#FEF3C7', color: '#92400E', border: '#F3D98A' },
-  paid: { label: 'Apmokėta', bg: '#DCFCE7', color: '#166534', border: '#A7E3BC' },
-  cancelled: { label: 'Atšaukta', bg: '#F3F4F6', color: '#4B5563', border: '#D1D5DB' },
+  issued: { key: 'status_pending', bg: '#FFF4E5', color: '#B45309', border: '#F6D7B8' },
+  sent: { key: 'status_pending', bg: '#FFF4E5', color: '#B45309', border: '#F6D7B8' },
+  partially_paid: { key: 'status_partial', bg: '#FEF3C7', color: '#92400E', border: '#F3D98A' },
+  paid: { key: 'status_paid', bg: '#DCFCE7', color: '#166534', border: '#A7E3BC' },
+  cancelled: { key: 'status_cancelled', bg: '#F3F4F6', color: '#4B5563', border: '#D1D5DB' },
 };
 
 const cardBorder = '1px solid #E5E7EB';
@@ -54,7 +187,7 @@ const softShadow = '0 8px 24px rgba(15, 23, 42, 0.06)';
 
 // Copy button
 
-const CopyButton = ({ text, size = 14 }) => {
+const CopyButton = ({ text, size = 14, lang = 'lt' }) => {
   const [copied, setCopied] = useState(false);
 
   const handleCopy = async (e) => {
@@ -67,7 +200,7 @@ const CopyButton = ({ text, size = 14 }) => {
   };
 
   return (
-    <Tooltip title={copied ? 'Nukopijuota!' : 'Kopijuoti'} arrow>
+    <Tooltip title={copied ? pt(lang, 'copied') : pt(lang, 'copy')} arrow>
       <IconButton
         size="small"
         onClick={handleCopy}
@@ -93,7 +226,7 @@ const CopyButton = ({ text, size = 14 }) => {
 
 // UI blocks
 
-const FieldRow = ({ label, value, copyable = false, mono = false }) => {
+const FieldRow = ({ label, value, copyable = false, mono = false, lang = 'lt' }) => {
   if (!value) return null;
 
   return (
@@ -138,13 +271,13 @@ const FieldRow = ({ label, value, copyable = false, mono = false }) => {
         >
           {value}
         </Typography>
-        {copyable && <CopyButton text={value} size={14} />}
+        {copyable && <CopyButton text={value} size={14} lang={lang} />}
       </Box>
     </Box>
   );
 };
 
-const SmallMeta = ({ label, value, copyable = false }) => {
+const SmallMeta = ({ label, value, copyable = false, lang = 'lt' }) => {
   if (!value) return null;
 
   return (
@@ -180,7 +313,7 @@ const SmallMeta = ({ label, value, copyable = false }) => {
         {value}
       </Typography>
 
-      {copyable && <CopyButton text={value} size={14} />}
+      {copyable && <CopyButton text={value} size={14} lang={lang} />}
     </Box>
   );
 };
@@ -269,16 +402,14 @@ const InvoicePublicPage = () => {
         const { data } = await invoicingApi.getPublicInvoice(uuid);
         setInvoice(data);
       } catch (e) {
-        setError(
-          e.response?.status === 404
-            ? 'Sąskaita nerasta arba nėra vieša.'
-            : 'Nepavyko įkelti sąskaitos.'
-        );
+        setError(e.response?.status === 404 ? 'not_found' : 'load_failed');
       } finally {
         setLoading(false);
       }
     })();
   }, [uuid]);
+
+  const lang = invoice ? getInvoiceLang(invoice) : browserLang();
 
   const handleDownloadPdf = async () => {
     if (!uuid) return;
@@ -290,13 +421,13 @@ const InvoicePublicPage = () => {
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `saskaita-${invoice?.document_series || ''}-${invoice?.document_number || ''}.pdf`;
+      a.download = `${pt(lang, 'file_prefix')}-${invoice?.document_series || ''}-${invoice?.document_number || ''}.pdf`;
       document.body.appendChild(a);
       a.click();
       window.URL.revokeObjectURL(url);
       document.body.removeChild(a);
     } catch {
-      setSnack({ open: true, msg: 'Nepavyko atsisiųsti PDF' });
+      setSnack({ open: true, msg: pt(lang, 'pdf_failed') });
     } finally {
       setPdfLoading(false);
     }
@@ -332,10 +463,10 @@ const InvoicePublicPage = () => {
             404
           </Typography>
           <Typography sx={{ fontSize: 18, fontWeight: 600, color: '#111827', mb: 1 }}>
-            {error}
+            {pt(lang, error)}
           </Typography>
           <Typography sx={{ fontSize: 14, color: '#6B7280' }}>
-            Jei manote, kad tai klaida, susisiekite su sąskaitos siuntėju.
+            {pt(lang, 'error_hint')}
           </Typography>
         </Box>
       </Box>
@@ -381,7 +512,7 @@ const InvoicePublicPage = () => {
             </Typography>
 
             <Chip
-              label={statusCfg.label}
+              label={pt(lang, statusCfg.key)}
               size="medium"
               sx={{
                 backgroundColor: statusCfg.bg,
@@ -425,7 +556,7 @@ const InvoicePublicPage = () => {
             >
               <Box sx={{ minWidth: 0 }}>
                 <Typography sx={{ fontSize: 13, fontWeight: 600, color: '#6B7280', mb: 1 }}>
-                  {isPartiallyPaid ? 'Liko apmokėti' : 'Mokėtina suma'}
+                  {isPartiallyPaid ? pt(lang, 'remaining') : pt(lang, 'amount_due')}
                 </Typography>
 
                 <Typography
@@ -448,13 +579,13 @@ const InvoicePublicPage = () => {
                 >
                   {invoice.due_date && (
                     <Typography sx={{ fontSize: 14 }}>
-                      Apmokėti iki <strong>{invoice.due_date}</strong>
+                      {pt(lang, 'due')} <strong>{invoice.due_date}</strong>
                     </Typography>
                   )}
 
                   {isPartiallyPaid && (
                     <Typography sx={{ fontSize: 14 }}>
-                      Sumokėta {fmtAmount(paidAmount, invoice.currency)}
+                      {pt(lang, 'paid_so_far')} {fmtAmount(paidAmount, invoice.currency)}
                     </Typography>
                   )}
                 </Stack>
@@ -490,7 +621,7 @@ const InvoicePublicPage = () => {
                   }}
                 >
                   <span style={{ fontSize: 16, fontWeight: 700, lineHeight: 1.3 }}>
-                    Apmokėti sąskaitą
+                    {pt(lang, 'pay_button')}
                   </span>
                   <span style={{ fontSize: 13, fontWeight: 500, opacity: 0.75, lineHeight: 1.2 }}>
                     {fmtAmount(displayAmount, invoice.currency)}
@@ -508,10 +639,10 @@ const InvoicePublicPage = () => {
                   }}
                 >
                   <Typography sx={{ fontSize: 12, color: '#6B7280', mb: 0.4 }}>
-                    Apmokėjimas bankiniu pavedimu
+                    {pt(lang, 'bank_transfer')}
                   </Typography>
                   <Typography sx={{ fontSize: 14, fontWeight: 600, color: '#111827' }}>
-                    Rekvizitai pateikti žemiau
+                    {pt(lang, 'details_below')}
                   </Typography>
                 </Box>
               )}
@@ -552,7 +683,7 @@ const InvoicePublicPage = () => {
 
             <Box>
               <Typography sx={{ fontSize: 15, fontWeight: 700, color: '#166534' }}>
-                Ši sąskaita yra apmokėta
+                {pt(lang, 'is_paid')}
               </Typography>
             </Box>
           </Paper>
@@ -572,7 +703,7 @@ const InvoicePublicPage = () => {
             }}
           >
             <Typography sx={{ fontSize: 15, fontWeight: 600, color: '#6B7280', textAlign: 'center' }}>
-              Ši sąskaita buvo atšaukta.
+              {pt(lang, 'is_cancelled')}
             </Typography>
           </Paper>
         )}
@@ -606,16 +737,16 @@ const InvoicePublicPage = () => {
                   lineHeight: 1.2,
                 }}
               >
-                Mokėjimo rekvizitai
+                {pt(lang, 'payment_details')}
               </Typography>
             </Box>
 
             <Box sx={{ px: { xs: 2, md: 2.5 }, py: 0.25 }}>
-              <FieldRow label="Gavėjas" value={invoice.seller_name} copyable />
+              <FieldRow label={pt(lang, 'recipient')} value={invoice.seller_name} copyable lang={lang} />
               <Box sx={{ borderTop: '1px solid #F3F4F6' }} />
-              <FieldRow label="IBAN" value={invoice.seller_iban} copyable />
+              <FieldRow label="IBAN" value={invoice.seller_iban} copyable lang={lang} />
               <Box sx={{ borderTop: '1px solid #F3F4F6' }} />
-              <FieldRow label="Mokėjimo paskirtis" value={fullNumber} copyable />
+              <FieldRow label={pt(lang, 'reference')} value={fullNumber} copyable lang={lang} />
             </Box>
 
             {(invoice.seller_bank_name || invoice.seller_swift) && (
@@ -632,10 +763,10 @@ const InvoicePublicPage = () => {
                 }}
               >
                 {invoice.seller_bank_name && (
-                  <SmallMeta label="Bankas" value={invoice.seller_bank_name} copyable />
+                  <SmallMeta label={pt(lang, 'bank')} value={invoice.seller_bank_name} copyable lang={lang} />
                 )}
                 {invoice.seller_swift && (
-                  <SmallMeta label="SWIFT" value={invoice.seller_swift} copyable />
+                  <SmallMeta label="SWIFT" value={invoice.seller_swift} copyable lang={lang} />
                 )}
               </Box>
             )}
@@ -685,7 +816,7 @@ const InvoicePublicPage = () => {
               },
             }}
           >
-            Spausdinti
+            {pt(lang, 'print')}
           </Button>
 
           <Button
@@ -722,7 +853,7 @@ const InvoicePublicPage = () => {
               },
             }}
           >
-            Atsisiųsti PDF
+            {pt(lang, 'download')}
           </Button>
         </Box>
       </Box>
@@ -751,14 +882,15 @@ const InvoicePublicPage = () => {
       {/* Footer */}
       <Box sx={{ textAlign: 'center', mt: 5, px: 2 }}>
         <Typography sx={{ fontSize: 12, color: '#9CA3AF' }}>
-          Ši sąskaita sugeneruota naudojant{' '}
+          {pt(lang, 'footer_before')}{' '}
           <a
             href="https://atlyginimoskaiciuokle.com/saskaitu-israsymas"
             style={{ color: '#404040', textDecoration: 'none', fontWeight: 500 }}
           >
             DokSkenas
-          </a>{' '}
-          sąskaitų išrašymo platformą
+          </a>
+          {/^[,.]/.test(pt(lang, 'footer_after')) ? '' : ' '}
+          {pt(lang, 'footer_after')}
         </Typography>
       </Box>
 
