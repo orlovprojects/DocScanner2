@@ -682,12 +682,13 @@ def export_documents(request):
         inv_sub = None
         inv_usage = None
         try:
-            from .models import InvSubscription, InvMonthlyUsage
-            inv_sub = InvSubscription.objects.filter(user=user).first()
+            from .inv_plan import inv_sub as _inv_sub, inv_usage as _inv_usage
+            cp_id = invoices[0].company_profile_id if invoices else None
+            inv_sub = _inv_sub(user, cp_id)
             if inv_sub:
                 inv_sub.check_and_expire()
                 if inv_sub.status == "free":
-                    inv_usage = InvMonthlyUsage.get_current(user)
+                    inv_usage = _inv_usage(user, cp_id)
                     new_ids = [inv.pk for inv in invoices if inv.pk not in inv_usage.exported_invoice_ids]
                     slots_left = 10 - inv_usage.exports_used
                     if len(new_ids) > slots_left:
@@ -5798,7 +5799,7 @@ def payment_invoice(request, pk):
     }
 
     from docscanner_app.payment_lines import du_buyer, payment_line
-    if payment.payment_type == "du_subscription":
+    if payment.payment_type in ("du_subscription", "inv_subscription"):
         buyer.update(du_buyer(payment) or {})      # DU perkamas įmonei - pirkėjas = DU įmonė
 
     data = {
@@ -8117,7 +8118,8 @@ def invoice_public(request, uuid):
     # --- Watermark for free plan ---
     show_watermark = False
     try:
-        sub = getattr(invoice.user, "inv_subscription", None)
+        from .inv_plan import inv_sub_for_invoice
+        sub = inv_sub_for_invoice(invoice)
         if sub:
             sub.check_and_expire()
             show_watermark = sub.status == "free"
@@ -8143,8 +8145,8 @@ def invoice_public_pdf(request, uuid):
     # --- Watermark for free plan ---
     watermark = False
     try:
-        from docscanner_app.models import InvSubscription
-        sub = InvSubscription.objects.filter(user=invoice.user).first()
+        from docscanner_app.inv_plan import inv_sub_for_invoice
+        sub = inv_sub_for_invoice(invoice)
         if sub:
             sub.check_and_expire()
             watermark = sub.status == "free"
@@ -8810,8 +8812,8 @@ def invoice_pdf(request, pk):
     # --- Watermark for free plan ---
     watermark = False
     try:
-        from docscanner_app.models import InvSubscription
-        sub = InvSubscription.objects.filter(user=request.user).first()
+        from docscanner_app.inv_plan import inv_sub_for_invoice
+        sub = inv_sub_for_invoice(invoice)
         if sub:
             sub.check_and_expire()
             watermark = sub.status == "free"
@@ -13643,38 +13645,31 @@ def mailgun_invoice_tracking_webhook(request):
 # ════════════════════════════════════════════════════════════
 #  Subscriptions - israsymas only
 # ════════════════════════════════════════════════════════════
-
-def get_inv_access(user):
+def get_inv_access(user, company_profile_id=None):
     """
-    Возвращает полный статус подписки Išrašymas + лимиты + фичи.
+    Возвращает полный статус подписки Išrašymas активной фирмы + лимиты + фичи.
     Lazy-expire: если trial/active истёк — переводит в free.
     """
-    sub = getattr(user, "inv_subscription", None)
-    if sub is None:
-        # На случай если запись не создана (старый user до миграции)
-        from .models import InvSubscription
-        sub, _ = InvSubscription.objects.get_or_create(user=user)
-
-    # Lazy expire
-    sub.check_and_expire()
+    from .inv_plan import inv_sub, inv_trial_used, inv_usage
+    sub = inv_sub(user, company_profile_id)
+    trial_used = inv_trial_used(user)
 
     features = sub.get_features()
     days_left = sub.days_left
 
     # Баннер-логика
     banner = None
-    if sub.status == "free" and not sub.trial_used:
+    if sub.status == "free" and not trial_used:
         banner = "trial_available"       # «Начните 14-дневный trial»
     elif sub.status == "trial" and sub.show_trial_banner:
         banner = "trial_ending"          # «Осталось X дней»
-    elif sub.status == "free" and sub.trial_used:
+    elif sub.status == "free" and trial_used:
         banner = "trial_expired"         # «Trial закончился, купите план»
 
     # Лимиты (только для free)
     limits = None
     if sub.status == "free":
-        from .models import InvMonthlyUsage
-        usage = InvMonthlyUsage.get_current(user)
+        usage = inv_usage(user, company_profile_id)
         limits = {
             "exports_max": 30,
             "exports_used": usage.exports_used,
@@ -13682,27 +13677,26 @@ def get_inv_access(user):
             "emails_used": usage.emails_used,
         }
 
+    cp = getattr(sub, "company_profile", None) if sub.company_profile_id else None
     return {
         "status": sub.status,
-        "trial_used": sub.trial_used,
+        "trial_used": trial_used,
         "days_left": days_left,
         "banner": banner,
         "features": features,
         "limits": limits,
+        "company_profile_id": sub.company_profile_id,
+        "company_name": getattr(cp, "name", "") or "",
     }
 
 
-def check_inv_feature(user, feature_name):
+def check_inv_feature(user, feature_name, company_profile_id=None):
     """
-    Быстрая проверка одной фичи. Для использования в view перед действием.
+    Быстрая проверка одной фичи (по фирме). Для использования в view перед действием.
     Возвращает (allowed: bool, error_response_data: dict|None)
     """
-    sub = getattr(user, "inv_subscription", None)
-    if sub is None:
-        from .models import InvSubscription
-        sub, _ = InvSubscription.objects.get_or_create(user=user)
-
-    sub.check_and_expire()
+    from .inv_plan import inv_sub
+    sub = inv_sub(user, company_profile_id)
     features = sub.get_features()
 
     if feature_name in features and not features[feature_name]:
@@ -13716,20 +13710,16 @@ def check_inv_feature(user, feature_name):
 
 def check_inv_export_limit(user, invoice_id):
     """
-    Проверка лимита экспорта. Вызывать перед экспортом фактуры.
+    Проверка лимита экспорта (по фирме счёта). Вызывать перед экспортом фактуры.
     Возвращает (allowed, error_data).
     """
-    sub = getattr(user, "inv_subscription", None)
-    if sub is None:
-        from .models import InvSubscription
-        sub, _ = InvSubscription.objects.get_or_create(user=user)
-
-    sub.check_and_expire()
+    from .inv_plan import cp_for_invoice_id, inv_sub, inv_usage
+    cp_id = cp_for_invoice_id(user, invoice_id)
+    sub = inv_sub(user, cp_id)
     if sub.status in ("trial", "active"):
         return True, None
 
-    from .models import InvMonthlyUsage
-    usage = InvMonthlyUsage.get_current(user)
+    usage = inv_usage(user, cp_id)
     if not usage.can_export(invoice_id):
         return False, {
             "error": "limit_reached",
@@ -13742,16 +13732,13 @@ def check_inv_export_limit(user, invoice_id):
 
 
 def check_inv_email_limit(user, invoice_id):
-    from .models import InvSubscription, InvMonthlyUsage
-    sub = InvSubscription.objects.filter(user=user).first()
-    if sub is None:
-        return True, None
-
-    sub.check_and_expire()
+    from .inv_plan import cp_for_invoice_id, inv_sub, inv_usage
+    cp_id = cp_for_invoice_id(user, invoice_id)
+    sub = inv_sub(user, cp_id)
     if sub.status in ("trial", "active"):
         return True, None
 
-    usage = InvMonthlyUsage.get_current(user)
+    usage = inv_usage(user, cp_id)
     if not usage.can_email(invoice_id):
         return False, {
             "error": "limit_reached",
@@ -13767,17 +13754,17 @@ def check_inv_email_limit(user, invoice_id):
 
 
 def record_inv_email(user, invoice_id):
-    from .models import InvSubscription, InvMonthlyUsage
-    sub = InvSubscription.objects.filter(user=user).first()
-    if sub is None or sub.status != "free":
+    from .inv_plan import cp_for_invoice_id, inv_sub, inv_usage
+    cp_id = cp_for_invoice_id(user, invoice_id)
+    sub = inv_sub(user, cp_id)
+    if sub.status != "free":
         return None
 
-    usage = InvMonthlyUsage.get_current(user)
+    usage = inv_usage(user, cp_id)
     was_new = invoice_id not in usage.emailed_invoice_ids
     usage.record_email(invoice_id)
     usage.refresh_from_db()
     return usage.emails_used, 10, "free", was_new
-
 
 
 
@@ -13793,7 +13780,8 @@ def inv_subscription_status(request):
     data = get_inv_access(request.user)
 
     # Check Stripe cancel_at_period_end
-    sub = InvSubscription.objects.filter(user=request.user).first()
+    from .inv_plan import inv_sub
+    sub = inv_sub(request.user)
     cancel_at_period_end = False
     plan_end_display = ""
 
@@ -13822,11 +13810,10 @@ def inv_start_trial(request):
     POST /api/inv/start-trial/
     Активирует 14-дневный trial Išrašymas.
     """
-    sub = getattr(request.user, "inv_subscription", None)
-    if sub is None:
-        sub, _ = InvSubscription.objects.get_or_create(user=request.user)
+    from .inv_plan import inv_sub, inv_trial_used
+    sub = inv_sub(request.user)
 
-    if sub.trial_used:
+    if inv_trial_used(request.user):
         return Response(
             {"error": "trial_already_used",
              "message": "Bandomasis laikotarpis jau buvo panaudotas."},
@@ -13854,7 +13841,8 @@ def inv_cancel_subscription(request):
     import stripe
     stripe.api_key = django_settings.STRIPE_SECRET_KEY
 
-    sub = InvSubscription.objects.filter(user=request.user).first()
+    from .inv_plan import inv_sub
+    sub = inv_sub(request.user)
     if not sub or sub.status != "active" or not sub.stripe_subscription_id:
         return Response(
             {"error": "Neturite aktyvaus PRO plano."},
@@ -17575,20 +17563,33 @@ class CompanyProfileViewSet(viewsets.ModelViewSet):
         return CompanyProfile.objects.filter(user=self.request.user)
 
     def perform_destroy(self, instance):
-        user = self.request.user
-        count = user.company_profiles.count()
-        if count <= 1:
-            raise ValidationError(
-                {"detail": "Negalima pašalinti paskutinės įmonės."}
-            )
+        from .company_lifecycle import delete_company
+        try:
+            delete_company(instance, self.request.user, self.request.query_params.get("confirm"))
+        except ValueError as e:
+            raise ValidationError({"detail": str(e)})
 
-        was_active = user.active_company_profile_id == instance.id
-        instance.delete()
+    @action(detail=True, methods=["get"], url_path="delete-check")
+    def delete_check(self, request, pk=None):
+        from .company_lifecycle import delete_blockers
+        blockers = delete_blockers(self.get_object())
+        return Response({"can_delete": not blockers, "blockers": blockers})
 
-        if was_active:
-            new_active = user.company_profiles.first()
-            if new_active:
-                new_active.apply_as_active()
+    @action(detail=True, methods=["post"])
+    def archive(self, request, pk=None):
+        from .company_lifecycle import archive_company
+        try:
+            notes = archive_company(self.get_object(), request.user)
+        except ValueError as e:
+            raise ValidationError({"detail": str(e)})
+        request.user.refresh_from_db()
+        return Response({"notes": notes, "active_id": request.user.active_company_profile_id})
+
+    @action(detail=True, methods=["post"])
+    def restore(self, request, pk=None):
+        from .company_lifecycle import restore_company
+        restore_company(self.get_object())
+        return Response({"detail": "OK"})
 
     # @action(detail=True, methods=["post"], url_path="set-active")
     # def set_active(self, request, pk=None):
@@ -17607,6 +17608,8 @@ class CompanyProfileViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=["post"], url_path="set-active")
     def set_active(self, request, pk=None):
         profile = self.get_object()
+        if profile.archived_at:
+            raise ValidationError({"detail": "Įmonė archyvuota – pirmiausia ją atkurkite."})
         profile.user = request.user
         profile.apply_as_active()
         return Response({

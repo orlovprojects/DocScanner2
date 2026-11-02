@@ -162,6 +162,20 @@ class EmployeeViewSet(PayrollCompanyMixin, viewsets.ModelViewSet):
     def perform_create(self, serializer):
         serializer.save(company=self.get_company())
 
+    def perform_destroy(self, instance):
+        from .employee_delete import delete_employee
+        try:
+            delete_employee(instance)
+        except ValueError as e:
+            raise ValidationError(str(e))
+
+    @action(detail=True, methods=["get"], url_path="delete-check")
+    def delete_check(self, request, pk=None):
+        from .employee_delete import delete_blockers, delete_warnings
+        emp = self.get_object()
+        blockers = delete_blockers(emp)
+        return Response({"can_delete": not blockers, "blockers": blockers, "warnings": delete_warnings(emp)})
+
     def list(self, request, *args, **kwargs):
         """Sąrašas + lentelės laukai (sutartis, darbo laikas, atostogos, šiandien, eSavitarna, ko trūksta)."""
         from .employees_table import employees_table

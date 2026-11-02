@@ -3454,7 +3454,8 @@ def process_recurring_invoices():
         for recurring in recurring_qs:
             # --- Inv subscription: check if recurring is allowed ---
             try:
-                sub = InvSubscription.objects.filter(user=recurring.user).first()
+                from .inv_plan import inv_sub
+                sub = inv_sub(recurring.user, recurring.company_profile_id)
                 if sub:
                     sub.check_and_expire()
                     if sub.status == "free":
@@ -3572,11 +3573,12 @@ def send_payment_reminders():
 
     for inv in invoices:
         try:
-            user_id = inv.user_id
+            user_id = inv.company_profile_id or f"u{inv.user_id}"
 
             # --- Inv subscription check (cached per user) ---
             if user_id not in user_sub_cache:
-                sub = InvSubscription.objects.filter(user_id=user_id).first()
+                from .inv_plan import inv_sub_for_invoice
+                sub = inv_sub_for_invoice(inv)
                 if sub:
                     sub.check_and_expire()
                     user_sub_cache[user_id] = sub.status

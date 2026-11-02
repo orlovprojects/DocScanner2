@@ -104,8 +104,8 @@ def _get_invoice_pdf(invoice):
     # Watermark для free
     watermark = False
     try:
-        from ..models import InvSubscription
-        sub = InvSubscription.objects.filter(user=invoice.user).first()
+        from ..inv_plan import inv_sub_for_invoice
+        sub = inv_sub_for_invoice(invoice)
         if sub:
             sub.check_and_expire()
             watermark = sub.status == "free"
@@ -672,10 +672,10 @@ def send_invoice_email(
 
         # --- Record inv email usage ---
         try:
-            sub = getattr(invoice.user, "inv_subscription", None)
+            from ..inv_plan import inv_sub_for_invoice, inv_usage
+            sub = inv_sub_for_invoice(invoice)
             if sub and sub.status == "free":
-                from ..models import InvMonthlyUsage
-                usage = InvMonthlyUsage.get_current(invoice.user)
+                usage = inv_usage(invoice.user, invoice.company_profile_id)
                 usage.record_email(invoice.id)
         except Exception as e:
             logger.warning(f"Failed to record inv email usage: {e}")

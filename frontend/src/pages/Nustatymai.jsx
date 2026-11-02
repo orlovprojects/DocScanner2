@@ -10,6 +10,7 @@ import DeleteIcon from "@mui/icons-material/Delete";
 import AddIcon from "@mui/icons-material/Add";
 import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
 import CheckIcon from "@mui/icons-material/Check";
+import Inventory2OutlinedIcon from "@mui/icons-material/Inventory2Outlined";
 import { alpha } from "@mui/material/styles";
 import EditIcon from '@mui/icons-material/Edit';
 import HelpOutlineIcon from "@mui/icons-material/HelpOutline";
@@ -769,7 +770,20 @@ function DefaultsCards({ rows, onDelete, onEdit }) {
 }
 
 export default function NustatymaiPage() {
-  const { profiles, activeId, switchCompany, refresh } = useCompanyProfiles();
+  const { profiles, activeId, switchCompany, refresh, archivedProfiles } = useCompanyProfiles();
+  const [restoringId, setRestoringId] = useState(null);
+
+  const restoreProfile = async (id) => {
+    setRestoringId(id);
+    try {
+      await api.post(`/company-profiles/${id}/restore/`, {}, { withCredentials: true });
+      await refresh();
+    } catch {
+      alert("Nepavyko atkurti įmonės.");
+    } finally {
+      setRestoringId(null);
+    }
+  };
   const [switchingProfile, setSwitchingProfile] = useState(false);
   const [profileSwitched, setProfileSwitched] = useState(false);
   const [profileMenuAnchor, setProfileMenuAnchor] = useState(null);
@@ -2558,6 +2572,47 @@ export default function NustatymaiPage() {
 
         {profileSwitched && (
           <Alert severity="success" sx={{ mt: 2 }}>Profilis pakeistas!</Alert>
+        )}
+
+        {archivedProfiles?.length > 0 && (
+          <Box sx={{ mt: 2.5, maxWidth: 480 }}>
+            <Box sx={{ display: "flex", alignItems: "center", gap: 0.75, mb: 1 }}>
+              <Inventory2OutlinedIcon fontSize="small" sx={{ color: "text.secondary" }} />
+              <Typography variant="body2" sx={{ fontWeight: 600, color: "text.secondary" }}>
+                Archyvuotos įmonės
+              </Typography>
+            </Box>
+            {archivedProfiles.map((p) => (
+              <Box
+                key={p.id}
+                sx={{
+                  display: "flex", alignItems: "center", gap: 1, px: 1.5, py: 1, mb: 0.75,
+                  borderRadius: 2, border: "1px dashed", borderColor: "divider", backgroundColor: "white",
+                }}
+              >
+                <Box sx={{ minWidth: 0, flexGrow: 1 }}>
+                  <Typography variant="body2" sx={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {p.name}
+                  </Typography>
+                  <Typography variant="caption" sx={{ color: "text.secondary" }}>
+                    Archyvuota {String(p.archived_at).slice(0, 10)}
+                  </Typography>
+                </Box>
+                <Button
+                  size="small"
+                  variant="outlined"
+                  disabled={restoringId === p.id}
+                  onClick={() => restoreProfile(p.id)}
+                  sx={{ textTransform: "none", fontWeight: 600, flexShrink: 0 }}
+                >
+                  {restoringId === p.id ? "Atkuriama…" : "Atkurti"}
+                </Button>
+              </Box>
+            ))}
+            <Typography variant="caption" sx={{ color: "text.secondary" }}>
+              Atkūrus įmonę, mokamus planus ir periodines sąskaitas reikės įjungti iš naujo.
+            </Typography>
+          </Box>
         )}
 
         {/* Sandėlio apskaita */}

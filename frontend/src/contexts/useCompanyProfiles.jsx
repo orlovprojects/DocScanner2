@@ -117,16 +117,21 @@ export const CompanyProfileProvider = ({ children }) => {
     [profiles, activeId]
   );
 
+  const liveProfiles = useMemo(() => profiles.filter((p) => !p.archived_at), [profiles]);
+  const archivedProfiles = useMemo(() => profiles.filter((p) => p.archived_at), [profiles]);
+
   const value = useMemo(
     () => ({
-      profiles,
+      profiles: liveProfiles,
+      allProfiles: profiles,
+      archivedProfiles,
       activeId,
       activeProfile,
       profileEpoch,
       accountingProgram:
         activeProfile?.accounting_program || userProgram || "",
       usesInventory: !!activeProfile?.uses_inventory,
-      hasProfiles: profiles.length > 0,
+      hasProfiles: liveProfiles.length > 0,
       hasWaybillAccess,
       subscriptionStatus,
       loading,
@@ -137,6 +142,8 @@ export const CompanyProfileProvider = ({ children }) => {
     }),
     [
       profiles,
+      liveProfiles,
+      archivedProfiles,
       activeId,
       activeProfile,
       profileEpoch,

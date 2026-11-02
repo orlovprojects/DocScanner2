@@ -564,10 +564,35 @@ export default function SidebarRail({
           },
         }}
       >
-        <Box sx={{ px: 2, py: 1.5, borderBottom: "1px solid #EEF0F3" }}>
+        <Box
+          sx={{
+            px: 2,
+            py: 1,
+            borderBottom: "1px solid #EEF0F3",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+          }}
+        >
           <Typography sx={{ fontSize: 13, fontWeight: 700, color: "#6B7280" }}>
             Įmonės profiliai
           </Typography>
+          <Tooltip title="Įmonių nustatymai" placement="top" arrow>
+            <IconButton
+              size="small"
+              onClick={() => {
+                setSwitcherAnchor(null);
+                nav("/nustatymai");
+              }}
+              sx={{
+                p: 0.5,
+                color: "#9CA3AF",
+                "&:hover": { color: "#7C3AED", bgcolor: "#EDE9FE" },
+              }}
+            >
+              <SettingsOutlinedIcon sx={{ fontSize: 18 }} />
+            </IconButton>
+          </Tooltip>
         </Box>
 
         <Box sx={{ py: 0.5 }}>
@@ -647,7 +672,7 @@ export default function SidebarRail({
                 )}
 
                 {!isActive && companyProfiles.length > 1 && (
-                  <Tooltip title="Pašalinti" placement="top" arrow>
+                  <Tooltip title="Archyvuoti arba ištrinti" placement="top" arrow>
                     <IconButton
                       size="small"
                       onClick={(e) => {

@@ -1036,6 +1036,7 @@ class CompanyProfile(models.Model):
 
     # ── Meta ────────────────────────────────────────────
     is_active = models.BooleanField(default=True)
+    archived_at = models.DateTimeField("Archyvuota", null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -5007,9 +5008,17 @@ class InvSubscription(models.Model):
         (STATUS_ACTIVE, "Active (paid)"),
     ]
 
-    user = models.OneToOneField(
+    user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
+        related_name="inv_subscriptions",
+        help_text="Kas užsakė / moka (Stripe customer)",
+    )
+    company_profile = models.OneToOneField(
+        "CompanyProfile",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
         related_name="inv_subscription",
     )
     status = models.CharField(
@@ -5055,7 +5064,7 @@ class InvSubscription(models.Model):
 
     def start_trial(self):
         """Активирует 14-дневный trial. Можно только один раз."""
-        if self.trial_used:
+        if self.trial_used or InvSubscription.objects.filter(user=self.user, trial_used=True).exists():
             raise ValueError("Trial already used")
         self.status = self.STATUS_TRIAL
         self.trial_used = True
@@ -5104,6 +5113,13 @@ class InvMonthlyUsage(models.Model):
         on_delete=models.CASCADE,
         related_name="inv_monthly_usages",
     )
+    company_profile = models.ForeignKey(
+        "CompanyProfile",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="inv_monthly_usages",
+    )
     month = models.CharField(
         max_length=7,
         help_text="YYYY-MM format, e.g. 2026-03",
@@ -5112,7 +5128,7 @@ class InvMonthlyUsage(models.Model):
     emailed_invoice_ids = models.JSONField(default=list, blank=True)
 
     class Meta:
-        unique_together = ("user", "month")
+        unique_together = ("user", "company_profile", "month")
         verbose_name = "Inv monthly usage"
         verbose_name_plural = "Inv monthly usages"
 
@@ -5120,11 +5136,11 @@ class InvMonthlyUsage(models.Model):
         return f"{self.user.email} — {self.month}"
 
     @classmethod
-    def get_current(cls, user):
-        """Получить или создать запись за текущий месяц."""
+    def get_current(cls, user, company_profile_id=None):
+        """Получить или создать запись за текущий месяц (по фирме)."""
         current_month = timezone.now().strftime("%Y-%m")
         obj, _ = cls.objects.get_or_create(
-            user=user, month=current_month,
+            user=user, company_profile_id=company_profile_id, month=current_month,
         )
         return obj
 

@@ -45,7 +45,8 @@ const DuPlanSection = forwardRef(function DuPlanSection({ showMsg }, ref) {
   const [cancelDialog, setCancelDialog] = useState(false);
 
   const load = useCallback(() => api.get(URL).then((r) => { setA(r.data); return r.data; }).catch(() => null), []);
-  useEffect(() => { if (isErp) load(); }, [isErp, load]);
+  const activeId = activeProfile?.id;
+  useEffect(() => { setA(null); if (isErp) load(); }, [isErp, activeId, load]);
 
   // grįžus iš Stripe - laukiame, kol webhook aktyvuos planą
   useEffect(() => {

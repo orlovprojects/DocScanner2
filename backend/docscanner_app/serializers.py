@@ -1108,9 +1108,10 @@ class CompanyProfileSerializer(serializers.ModelSerializer):
             "uses_inventory",
             "payment_providers",
             "is_active",
+            "archived_at",
             "created_at",
         ]
-        read_only_fields = ["id", "created_at"]
+        read_only_fields = ["id", "created_at", "archived_at"]
 
     def validate(self, data):
         entity_type = data.get(
@@ -1282,9 +1283,9 @@ class CustomUserAdminListSerializer(CustomUserSerializer):
 
     def get_inv_subscription_status(self, obj):
         """Статус подписки Išrašymas"""
-        try:
-            sub = obj.inv_subscription
-        except:
+        from .inv_plan import inv_best_sub
+        sub = inv_best_sub(obj)
+        if sub is None:
             return None
         
         if sub.status == 'trial':

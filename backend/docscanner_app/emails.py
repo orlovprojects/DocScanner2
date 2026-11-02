@@ -565,7 +565,7 @@ def _classify_israsymas(user):
     """Возвращает функцию-шаблон для israsymas юзера."""
     from .models import InvSubscription, Invoice
 
-    has_trial = InvSubscription.objects.filter(user=user).exists()
+    has_trial = InvSubscription.objects.filter(user=user, trial_used=True).exists()
 
     if not has_trial:
         return _israsymas_nothing
@@ -723,7 +723,7 @@ def send_trial_expired_emails():
 
     sent = 0
     for user in users:
-        sub = InvSubscription.objects.filter(user=user).first()
+        sub = InvSubscription.objects.filter(user=user, trial_used=True).order_by("-trial_end").first()
         if not sub:
             continue
 

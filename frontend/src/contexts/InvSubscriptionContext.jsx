@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useCallback, useEffect, useRef } from "react";
 import { getInvSubscription } from "../api/endpoints";
+import { useCompanyProfiles } from "./useCompanyProfiles";
 
 const InvSubscriptionContext = createContext(null);
 
@@ -28,14 +29,15 @@ export const InvSubscriptionProvider = ({ children }) => {
     }
   }, []);
 
-  const initialized = useRef(false);
+  const { activeProfile } = useCompanyProfiles();
+  const activeId = activeProfile?.id;
+  const lastId = useRef("__init__");
 
   useEffect(() => {
-    if (!initialized.current) {
-      initialized.current = true;
-      refresh();
-    }
-  }, [refresh]);
+    if (lastId.current === activeId) return;
+    lastId.current = activeId;
+    refresh();
+  }, [refresh, activeId]);
 
   const isFeatureLocked = useCallback(
     (featureName) => {

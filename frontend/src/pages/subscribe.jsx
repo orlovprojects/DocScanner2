@@ -27,6 +27,7 @@ import LockOpenIcon from "@mui/icons-material/LockOpen";
 import StarIcon from "@mui/icons-material/Star";
 import { api } from "../api/endpoints";
 import DuPlanSection from "./payroll/DuPlanSection";
+import { useCompanyProfiles } from "../contexts/useCompanyProfiles";
 
 const BRAND = {
   bg: "#f3f4f6",
@@ -242,12 +243,16 @@ const Subscribe = () => {
       .catch(() => setCredits(null));
   }, []);
 
+  const { activeProfile } = useCompanyProfiles();
+  const activeId = activeProfile?.id;
+
   useEffect(() => {
+    setInvSub(null);
     api
       .get("/inv/subscription/", { withCredentials: true })
       .then((res) => setInvSub(res.data))
       .catch(() => setInvSub(null));
-  }, []);
+  }, [activeId]);
 
   useEffect(() => {
     if (window.location.hash === "#planai" && plansRef.current) {
@@ -429,7 +434,7 @@ const Subscribe = () => {
         >
           <SectionHeading
             title="Sąskaitų išrašymo planai"
-            subtitle="Įsigykite PRO planą papildomoms funkcijoms bei neribotam naudojimui."
+            subtitle={`Įsigykite PRO planą papildomoms funkcijoms bei neribotam naudojimui${activeProfile?.name ? ` · ${activeProfile.name}` : ""}.`}
           >
             <Box
               sx={{

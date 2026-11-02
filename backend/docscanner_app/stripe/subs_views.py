@@ -82,9 +82,13 @@ def inv_subscribe_checkout(request):
 
     user = request.user
 
-    sub = InvSubscription.objects.filter(user=user).first()
-    if sub and sub.status == "active":
-        return Response({"error": "Jau turite aktyvų PRO planą."}, status=status.HTTP_400_BAD_REQUEST)
+    from ..inv_plan import inv_sub
+    cp_id = getattr(user, "active_company_profile_id", None)
+    if not cp_id:
+        return Response({"error": "Pirmiausia sukurkite įmonės profilį."}, status=status.HTTP_400_BAD_REQUEST)
+    sub = inv_sub(user, cp_id)
+    if sub.status == "active":
+        return Response({"error": "Ši įmonė jau turi aktyvų PRO planą."}, status=status.HTTP_400_BAD_REQUEST)
 
     if not user.stripe_customer_id:
         create_stripe_customer(user)
@@ -112,11 +116,13 @@ def inv_subscribe_checkout(request):
             metadata={
                 "user_id": str(user.id),
                 "type": "inv_subscription",
+                "company_profile_id": str(cp_id),
             },
             subscription_data={
                 "metadata": {
                     "user_id": str(user.id),
                     "type": "inv_subscription",
+                    "company_profile_id": str(cp_id),
                 },
             },
         )

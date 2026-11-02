@@ -387,11 +387,13 @@ def _handle_inv_checkout_completed(session):
     if not subscription_id:
         return False
 
-    sub, _ = InvSubscription.objects.get_or_create(user=user)
+    from docscanner_app.inv_plan import inv_sub
+    cp_id = meta.get("company_profile_id")
+    sub = inv_sub(user, int(cp_id) if cp_id else None)
     sub.status = "active"
     sub.plan = "pro"
     sub.stripe_subscription_id = subscription_id
-    sub.save(update_fields=["status", "plan", "stripe_subscription_id"])
+    sub.save()
 
     logger.info("[InvWebhook] Activated PRO for user %s (sub=%s)", user.email, subscription_id)
     return True
@@ -460,7 +462,8 @@ def _handle_inv_invoice_paid(invoice, inv_sub):
             period_end=period_end,
             stripe_invoice_id=stripe_invoice_id,
             invoice_pdf_url=pdf_url,
-            meta={"interval": interval},
+            meta={"interval": interval, "company_id": inv_sub.company_profile_id,
+                  "company_name": inv_sub.company_profile.name if inv_sub.company_profile_id else ""},
         )
 
     logger.info(

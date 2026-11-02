@@ -1330,8 +1330,8 @@ def save_invoice_pdf(invoice):
     # --- Watermark for free plan ---
     watermark = False
     try:
-        from docscanner_app.models import InvSubscription
-        sub = InvSubscription.objects.filter(user=invoice.user).first()
+        from docscanner_app.inv_plan import inv_sub_for_invoice
+        sub = inv_sub_for_invoice(invoice)
         if sub:
             sub.check_and_expire()
             watermark = sub.status == "free"

@@ -49,6 +49,7 @@ import PayrollSettingsDialog from "./PayrollSettingsDialog";
 import { anchorLabel, cap, norm, periodsFrom, iso } from "./SuminePeriodSection";
 import SavitarnaInvitePanel from "./SavitarnaInvitePanel";
 import EmployeePayItemsPanel from "./EmployeePayItemsPanel";
+import DeleteEmployeeDialog from "./DeleteEmployeeDialog";
 
 const MENU_PROPS = { disableScrollLock: true };
 const today = () => new Date().toISOString().slice(0, 10);
@@ -822,6 +823,7 @@ function EmployeeDialog({ id, row, onClose }) {
   const [error, setError] = useState("");
   const [msg, setMsg] = useState("");
   const [vac, setVac] = useState(null);
+  const [delOpen, setDelOpen] = useState(false);
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -849,6 +851,12 @@ function EmployeeDialog({ id, row, onClose }) {
                   sx={{ minHeight: 50, flex: 1, "& .MuiTab-root": { textTransform: "none", fontSize: 14, fontWeight: 500, minHeight: 50, px: 1.4 } }}>
                   {KTABS.map(([v, l]) => <Tab key={v} value={v} label={l} />)}
                 </Tabs>
+                <Tooltip title="Ištrinti darbuotoją">
+                  <IconButton onClick={() => setDelOpen(true)} aria-label="Ištrinti"
+                    sx={{ color: "#98A2B3", "&:hover": { color: "#B42318", bgcolor: "#FEF3F2" } }}>
+                    <DeleteOutlineIcon />
+                  </IconButton>
+                </Tooltip>
                 <IconButton onClick={onClose} aria-label="Uždaryti"><CloseIcon /></IconButton>
               </Stack>
               <Box sx={{ flex: 1, overflowY: "auto", px: 2.5, pt: 2.5, pb: tab === "person" || tab === "tax" ? 0 : 2.5 }}>
@@ -865,6 +873,8 @@ function EmployeeDialog({ id, row, onClose }) {
           </Box>
         )}
       </LocalizationProvider>
+      <DeleteEmployeeDialog emp={emp} open={delOpen} onClose={() => setDelOpen(false)}
+        onDeleted={() => { setDelOpen(false); onClose(); }} />
     </Dialog>
   );
 }

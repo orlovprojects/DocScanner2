@@ -25,6 +25,7 @@ import { useAuth } from "./contexts/useAuth";
 import { useState } from "react";
 import { api } from "./api/endpoints";
 import AddCompanyProfileDialog from "./components/AddCompanyProfileDialog";
+import CompanyManageDialog from "./components/CompanyManageDialog";
 import ViewAsBanner from "./admin/ViewAsBanner";
 import DuPlanBanner from "./pages/payroll/DuPlanBanner";
 
@@ -130,6 +131,7 @@ function SidebarRailWrapper() {
     refresh,
   } = useCompanyProfiles();
   const [addDialogOpen, setAddDialogOpen] = useState(false);
+  const [manageProfile, setManageProfile] = useState(null);
 
   if (!isAuthenticated || isMobile) return null;
 
@@ -141,11 +143,13 @@ function SidebarRailWrapper() {
         activeCompanyProfileId={activeId}
         onSwitchCompany={(id) => switchCompany(id)}
         onAddCompany={() => setAddDialogOpen(true)}
-        onDeleteCompany={(id) => {
-          if (window.confirm("Ar tikrai norite pašalinti šį profilį?")) {
-            api.delete(`/company-profiles/${id}/`).then(() => refresh());
-          }
-        }}
+        onDeleteCompany={(id) => setManageProfile(profiles.find((p) => p.id === id) || null)}
+      />
+      <CompanyManageDialog
+        open={!!manageProfile}
+        profile={manageProfile}
+        onClose={() => setManageProfile(null)}
+        onDone={() => refresh({ silent: true })}
       />
       <AddCompanyProfileDialog
         open={addDialogOpen}

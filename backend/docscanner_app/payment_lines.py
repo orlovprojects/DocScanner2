@@ -44,7 +44,8 @@ def payment_line(p):
         return {"pavadinimas": name, "kodas": "DU1", "kiekis": 1, "vienetas": "mėn.", "kaina": total, "suma": total}
     if p.payment_type == "inv_subscription":
         y = is_yearly(p)
-        name = f"DokSkenas Išrašymas PRO, {'metinis' if y else 'mėnesinis'} planas{_period(p)}"
+        firm = f" – {meta['company_name']}" if meta.get("company_name") else ""
+        name = f"DokSkenas Išrašymas PRO, {'metinis' if y else 'mėnesinis'} planas{firm}{_period(p)}"
         return {"pavadinimas": name, "kodas": "INV2" if y else "INV1", "kiekis": 1,
                 "vienetas": "metai" if y else "mėn.", "kaina": total, "suma": total}
     n = int(p.credits_purchased or 0)
