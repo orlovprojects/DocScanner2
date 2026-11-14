@@ -81,6 +81,16 @@ def auto_select_pvm_code(
                 return "PVM40" if seller_in_eu else "PVM37"
 
     # --------- Обычные фиксированные ставки (fallback) ---------
+    if vat_percent in (12, 12.0):
+        if (
+            kind == "paslauga"
+            and seller_country_iso == "LT"
+            and buyer_country_iso == "LT"
+            and not doc_96_str
+        ):
+            return "PVM58"
+        return None
+
     if vat_percent in (21, 21.0):
         return "PVM25" if doc_96_str else "PVM1"
     if vat_percent in (9,  9.0):

@@ -394,10 +394,11 @@ def _build_master_supplier(parent: ET.Element, data: dict) -> ET.Element:
                    truncate_str(vat_code, Limits.MIDDLE1_TEXT) if vat_code else "ND")
 
     reg_num = _s(data.get("reg", ""))
-    if reg_num:
-        _create_element(supplier, "RegistrationNumber", truncate_str(reg_num, Limits.MIDDLE1_TEXT))
-    elif not vat_code:
-        _create_element(supplier, "RegistrationNumber", "ND")
+    _create_element(
+        supplier,
+        "RegistrationNumber",
+        truncate_str(reg_num, Limits.MIDDLE1_TEXT) if reg_num else ("" if vat_code else "ND")
+    )
 
     country = validate_country_code(data.get("country", ""))
     _create_element(supplier, "Country", country or "LT")
@@ -419,10 +420,11 @@ def _build_master_customer(parent: ET.Element, data: dict) -> ET.Element:
                    truncate_str(vat_code, Limits.MIDDLE1_TEXT) if vat_code else "ND")
 
     reg_num = _s(data.get("reg", ""))
-    if reg_num:
-        _create_element(customer, "RegistrationNumber", truncate_str(reg_num, Limits.MIDDLE1_TEXT))
-    elif not vat_code:
-        _create_element(customer, "RegistrationNumber", "ND")
+    _create_element(
+        customer,
+        "RegistrationNumber",
+        truncate_str(reg_num, Limits.MIDDLE1_TEXT) if reg_num else ("" if vat_code else "ND")
+    )
 
     country = validate_country_code(data.get("country", ""))
     _create_element(customer, "Country", country or "LT")
